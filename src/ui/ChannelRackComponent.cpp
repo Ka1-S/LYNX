@@ -2334,11 +2334,20 @@ bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& detail
 {
     std::string path;
     int bank = 0, program = 0;
-    return BrowserComponent::isBrowserDrag (details) || parseSoundFontDrag (details.description.toString(), path, bank, program);
+    return BrowserComponent::isBrowserDrag (details) || BrowserComponent::isGeneratorDrag (details)
+           || parseSoundFontDrag (details.description.toString(), path, bank, program);
 }
 
 void ChannelRackComponent::itemDropped (const SourceDetails& details)
 {
+    // a generator dragged from the Browser's Plugin database (round 162): a new channel with it, its window open
+    if (BrowserComponent::isGeneratorDrag (details))
+    {
+        if (auto c = BrowserComponent::draggedGenerator (details))
+            addChannel (std::move (*c), true);
+        return;
+    }
+
     // a preset dragged from a LYNX Soundfont list: onto a LYNX Soundfont channel it loads there, else a new channel
     std::string path;
     int bank = 0, program = 0;

@@ -5,6 +5,12 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "engine/AudioEngine.h"
+#include "ui/Icons.h"
+
+namespace lynx::search
+{
+struct SearchResult;
+}
 
 namespace lynx
 {
@@ -22,10 +28,13 @@ namespace lynx
 //    clip where it is dropped) or a mixer insert (effect presets); drag a pattern onto the Playlist (a clip)
 //  - double-click a .lynx/.flp/.mid: opens it (onOpenProject)
 //  - search box (Ctrl+F): ALL searches the folder of the selection (or every folder) and below
-//    (core/SearchQuery syntax); PROJECT filters the project's items; Esc clears
-//  - keys while the Browser has focus: Up/Down step and preview, Shift+Up/Down step and load each file
-//    into the selected channel, Enter loads the selected file into the selected channel, Left/Right
-//    close / open folders
+//    (core/SearchQuery syntax) through the search index (core/SearchService: a background worker, round 162);
+//    PROJECT filters the project's items; Esc clears and leaves the box, Enter leaves it; a click anywhere else
+//    leaves it too, so Space is the transport again (issue #9)
+//  - keys while the Browser has focus: Up/Down step through the rows and preview each sample, Shift+Up/Down step
+//    and load each file into the selected channel, Enter loads the selected file into the selected channel,
+//    Left/Right close / open folders (Left on a file or a closed folder: to its folder)
+//  - the Plugin database's plugins can be dragged onto the Channel Rack (generators) and the Mixer (effects)
 class BrowserComponent final : public juce::Component,
                                private juce::TextEditor::Listener,
                                private juce::ChangeListener,
@@ -53,6 +62,15 @@ public:
 
     // The sample preview volume knob beside the search box (0..125%, engine.setPreviewVolume): follows the engine.
     void refreshPreviewVolume();
+    void stopPreview(); // the Stop button beside it
+
+    // The search index (round 162): a background pass over every Browser folder (rebuild: from scratch), and its
+    // state in words ("12,345 files in 678 folders, checked 14:03").
+    void refreshSearchIndex (bool rebuild);
+    juce::String searchIndexStatus() const;
+    // The search box has the keyboard: it gives it back to the main window (a click elsewhere, Esc, Enter).
+    void leaveSearchBox();
+    bool isTypingInSearch() const;
 
     // The project's file (.lynx, or the imported .flp): its folder shows as "Project folder".
     void setProjectFile (const juce::File& file);
@@ -91,6 +109,11 @@ public:
     static juce::File draggedFile (const juce::DragAndDropTarget::SourceDetails& details);
     // A pattern dragged from "Current project > Patterns": its index, else -1.
     static int draggedPattern (const juce::DragAndDropTarget::SourceDetails& details);
+    // A plugin dragged from the Plugin database (round 162): a generator (a new channel) or an effect.
+    static bool isGeneratorDrag (const juce::DragAndDropTarget::SourceDetails& details);
+    static bool isEffectDrag (const juce::DragAndDropTarget::SourceDetails& details);
+    static std::optional<ChannelDef> draggedGenerator (const juce::DragAndDropTarget::SourceDetails& details);
+    static std::optional<EffectSlot> draggedEffect (const juce::DragAndDropTarget::SourceDetails& details);
     static bool isAudioFile (const juce::File& file);
 
     void resized() override;
@@ -101,6 +124,8 @@ public:
 
     static constexpr const char* dragDescription = "lynx-arquivo";
     static constexpr const char* patternDragDescription = "lynx-pattern";
+    static constexpr const char* generatorDragDescription = "lynx-plugin-generator";
+    static constexpr const char* effectDragDescription = "lynx-plugin-effect";
     static constexpr int addFolderId = 1000;
 
     class FileTree;     // the folder tree / search results (implementation detail)
@@ -118,7 +143,11 @@ private:
     void textEditorReturnKeyPressed (juce::TextEditor&) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
-    void runSearch();
+    void runSearch (bool quiet = false); // quiet: the index changed, the results are replaced without "Searching..."
+    void searchAnswered (const search::SearchResult& result, const juce::String& query, const juce::Array<juce::File>& scope);
+    void indexStatusChanged();
+    juce::String statusLine; // under the search box: indexing progress / what the search found
+    juce::Rectangle<int> statusArea;
     void rebuildRoots();
     void rebuildTree();
     static juce::File userFoldersFile();
@@ -140,10 +169,14 @@ private:
     std::unique_ptr<PreviewStrip> strip;
     std::unique_ptr<DetailsBox> details;
     std::unique_ptr<TabBar> tabs;
-    class SearchJob;
-    std::unique_ptr<SearchJob> job;
-    std::unique_ptr<juce::Thread> indexJob; // brings the search index up to date in the background after start
+    struct SearchShared; // the process's search worker (core/SearchService), shared by every Browser
+    std::shared_ptr<SearchShared> searcher;
+    std::uint64_t searchId = 0;
+    bool searchPartial = false;
     juce::TextEditor searchBox;
+    class FocusWatcher; // a click outside the search box takes the keyboard back from it
+    std::unique_ptr<FocusWatcher> focusWatcher;
+    IconButton stopButton { "stop preview", Icon::stop };
     juce::Slider previewVolume { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     std::unique_ptr<juce::FileChooser> chooser;
     int tab = allTab;
