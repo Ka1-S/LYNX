@@ -840,7 +840,11 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
     playlist.resized();
 
     if (save && scaleChanged)
+    {
         juce::Desktop::getInstance().setGlobalScaleFactor ((float) toolbarLayout.uiScale / 100.0f);
+        // the windows grow with the zoom: keep their title bars and close buttons on the screen (round 163)
+        juce::Timer::callAfterDelay (200, [] { fitAllWindowsOnScreen(); });
+    }
 
     resized();
     repaint();
@@ -1297,6 +1301,8 @@ void MainComponent::loadUiSettings()
             toolbarLayout.separators = on;
         else if (key == "toolbarVisible")
             toolbarLayout.visible = on;
+        else if (key == "menuDensity")
+            theme::menus::setCompact (line.fromFirstOccurrenceOf ("=", false, false).trim() != "comfortable");
         else if (key == "uiScale")
             toolbarLayout.uiScale = toolbarlayout::clampScale (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "editPatternsIn")
@@ -1369,6 +1375,7 @@ void MainComponent::saveUiSettings()
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
                                       + "\nuiScale=" + juce::String (toolbarLayout.uiScale)
+                                      + "\nmenuDensity=" + juce::String (theme::menus::compact() ? "compact" : "comfortable")
                                       + "\ntoolbarSeparators=" + juce::String (toolbarLayout.separators ? 1 : 0)
                                       + "\ntoolbarVisible=" + juce::String (toolbarLayout.visible ? 1 : 0)
                                       + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
@@ -3464,6 +3471,7 @@ void MainComponent::openSettings (int page)
             return o;
         o.language = i18n::saved();
         o.uiScale = safe->toolbarLayout.uiScale;
+        o.compactMenus = theme::menus::compact();
         o.waveSpectral = ui::WaveformCache::spectral;
         o.waveStereo = ui::WaveformCache::stereo;
         o.reducedEffects = skin::reducedEffects();
@@ -3496,6 +3504,7 @@ void MainComponent::openSettings (int page)
             layout.uiScale = toolbarlayout::clampScale (o.uiScale);
             self.setToolbarLayout (layout, true);
         }
+        theme::menus::setCompact (o.compactMenus);
         if (o.reducedEffects != skin::reducedEffects() || o.pluginStyle != skin::forcedStyle())
         {
             skin::setReducedEffects (o.reducedEffects);

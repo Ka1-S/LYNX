@@ -4425,6 +4425,18 @@ private:
                 offline.dispatchPendingMessages();
             }
             saveSnapshot (ui, prefix + "-mixer.png");
+            // round 163: the Mixer at short heights (UI zoom 150%+): the EQ folds, then the effects panel scrolls
+            {
+                const auto size = ui.getBounds();
+                for (auto h : { 450, 560, 680, 820 })
+                {
+                    ui.setSize (size.getWidth(), h);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-mixer163-" + juce::String (h) + ".png");
+                }
+                ui.setBounds (size);
+                offline.dispatchPendingMessages();
+            }
 
             // standalone windows, with the theme background
             auto saveWindow = [&prefix] (std::unique_ptr<juce::Component> c, const juce::String& name) {
@@ -4481,6 +4493,28 @@ private:
                                                      ui.getPlaylistForSnapshot().getTrackMenuForSnapshot (0),
                                                      ui.getMixerForSnapshot().getStripsForSnapshot().buildMenu (1) };
                 saveMenus (juce::StringArray { "Piano roll tools", "Playlist track", "Mixer track" }, menus, prefix + "-menus143.png");
+                // round 163: menu density, compact (default) and comfortable, on a Browser folder menu
+                {
+                    juce::PopupMenu folder;
+                    folder.addSectionHeader ("Documents");
+                    folder.addItem (1, "Expand all");
+                    folder.addItem (2, "Collapse all");
+                    folder.addSeparator();
+                    folder.addItem (3, "Refresh");
+                    folder.addSectionHeader ("System");
+                    folder.addItem (4, "Open");
+                    folder.addItem (5, "Copy the file path");
+                    folder.addSectionHeader ("Tags");
+                    folder.addItem (6, "Starred", true, true);
+                    folder.addSeparator();
+                    folder.addItem (7, "Add folder...");
+                    const auto wasCompact = lynx::theme::menus::compact();
+                    lynx::theme::menus::setCompact (true);
+                    saveMenus (juce::StringArray { "Compact" }, { folder }, prefix + "-menu163-compact.png");
+                    lynx::theme::menus::setCompact (false);
+                    saveMenus (juce::StringArray { "Comfortable" }, { folder }, prefix + "-menu163-comfortable.png");
+                    lynx::theme::menus::setCompact (wasCompact);
+                }
                 // and the clip menus of the first pattern, audio and automation clips of the project
                 juce::StringArray clipNames;
                 std::vector<juce::PopupMenu> clipMenus;
@@ -5145,8 +5179,6 @@ private:
         };
         std::vector<Laid> menus;
         const auto border = lf.getPopupMenuBorderSize();
-        const auto itemHeight = 26;
-
         for (int m = 0; m < names.size(); ++m)
         {
             Laid laid { source[(std::size_t) m] };
@@ -5156,7 +5188,8 @@ private:
             {
                 const auto& item = it.getItem();
                 int w = 0, h = 0;
-                lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? 22 : itemHeight, w, h);
+                lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? -1 : 0, w, h);
+                if (item.isSectionHeader) h += h / 2; // as JUCE does
                 if (item.shortcutKeyDescription.isNotEmpty() || item.text.containsChar ('\t'))
                     w += 90;
                 width = juce::jmax (width, w + 10);
@@ -5199,7 +5232,8 @@ private:
                     {
                         const auto& item = it.getItem();
                         int w = 0, h = 0;
-                        lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? 22 : itemHeight, w, h);
+                        lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? -1 : 0, w, h);
+                if (item.isSectionHeader) h += h / 2; // as JUCE does
                         const juce::Rectangle<int> r (0, y, l.width, h);
                         auto text = item.text, shortcut = item.shortcutKeyDescription;
                         if (text.containsChar ('\t'))
@@ -5413,6 +5447,7 @@ private:
         {
             setVisible (true);
             lynx::applyWindowChrome (*this);
+            lynx::fitWindowOnScreen (*this); // a size saved at another UI zoom still fits (round 163)
             toFront (true);
             content->grabKeyboardFocus();
         }
