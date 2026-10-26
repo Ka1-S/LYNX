@@ -217,6 +217,8 @@ private:
     juce::ComboBox arrangementBox;
     SnapBox snapBox { true }; // "Main" (the toolbar snap) or this editor's own grid
     ToolStrip tools { true };
+    IconButton followButton { "follow", Icon::follow }; // Follow (auto scrolling) on/off, EditorGlobals (round 162)
+    void quantizeClips (double strength); // the selected clips' starts (all clips without a selection)
     int titleInsetLeft = 0, titleInsetRight = 0; // the window's title and buttons share the toolbar row
 
     double pixelsPerTick = 96.0 / (4 * ppq); // 96 px per 4-beat bar

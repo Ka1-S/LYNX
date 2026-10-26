@@ -49,6 +49,7 @@ constexpr int sendKnobHeight = 26;
 constexpr int wiresHeight = 14;
 constexpr int laneHeight = switchHeight + sendKnobHeight + wiresHeight + 4;
 constexpr int meterWidth = 6;
+constexpr int masterScaleWidth = 17; // the dB numbers beside the master meter (round 162, issue #9)
 
 // Fader 0..1 -> dB, with 0.8 = 0 dB (as in FL).
 juce::String faderToDb (float volume)
@@ -224,6 +225,20 @@ int MixerStrips::stripX (int track) const noexcept
     return track == 0 ? 4 : 4 + masterWidth + 8 + (track - 1) * stripWidth;
 }
 
+bool MixerStrips::isInterestedInDragSource (const SourceDetails& details)
+{
+    return BrowserComponent::isEffectDrag (details);
+}
+
+void MixerStrips::itemDropped (const SourceDetails& details)
+{
+    const auto t = trackAt (details.localPosition.x);
+    if (t < 0 || t >= (int) engine.getSong().mixer.size() || onEffectDropped == nullptr)
+        return;
+    if (auto fx = BrowserComponent::draggedEffect (details))
+        onEffectDropped (t, std::move (*fx));
+}
+
 int MixerStrips::trackAt (int x) const noexcept
 {
     const auto tracks = (int) engine.getSong().mixer.size();
@@ -293,7 +308,7 @@ juce::Rectangle<int> MixerStrips::meterArea (int t) const
 
 juce::Rectangle<int> MixerStrips::faderRail (int t) const
 {
-    return faderArea (t).withTrimmedLeft (meterWidth * 2 + 6);
+    return faderArea (t).withTrimmedLeft (meterWidth * 2 + 6 + (t == 0 ? masterScaleWidth : 0));
 }
 
 juce::Rectangle<int> MixerStrips::routeArea (int t) const
@@ -627,6 +642,25 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.drawRect (meters.expanded (1), 1);
             }
 
+            // the master's dB scale (FL prints it beside the master meter): as many values as fit without overlapping
+            if (t == 0)
+            {
+                const auto scaleFont = font (9.0f);
+                const auto textHeight = 10.0f;
+                const auto left = (float) meters.getRight() + 1.0f;
+                g.setFont (scaleFont);
+
+                for (auto db : lynx::meters::scaleMarks ((float) meters.getHeight(), textHeight + 1.0f))
+                {
+                    const auto y = (float) meters.getBottom() - lynx::meters::scalePosition ((float) db) * (float) meters.getHeight();
+                    g.setColour (db == 0 ? colour::textPrimary : colour::textSecondary);
+                    g.fillRect (juce::Rectangle<float> (left, y - 0.5f, 2.0f, 1.0f));
+                    const auto box = juce::Rectangle<float> (left + 2.0f, y - textHeight * 0.5f, (float) masterScaleWidth - 2.0f, textHeight)
+                                         .withY (juce::jlimit ((float) meters.getY(), (float) meters.getBottom() - textHeight, y - textHeight * 0.5f));
+                    textcache::drawText (g, (db > 0 ? "+" : "") + juce::String (db), box, juce::Justification::centredRight, false);
+                }
+            }
+
             // fader track and 0 dB mark
             const auto railX = (float) fader.getCentreX();
             const auto capY = (float) fader.getBottom() - track.volume * (float) fader.getHeight();
@@ -654,8 +688,8 @@ void MixerStrips::paint (juce::Graphics& g)
             if (mixeroutput::isCustom (engine, t))
             {
                 const auto text = mixeroutput::label (engine, t, true);
-                const auto badge = juce::Rectangle<float> ((float) meterArea (t).getRight() + 3.0f, (float) area.getY(),
-                                                           (float) (x + w - 6) - ((float) meterArea (t).getRight() + 3.0f), 12.0f);
+                const auto badgeLeft = (float) meterArea (t).getRight() + 3.0f + (t == 0 ? (float) masterScaleWidth : 0.0f);
+                const auto badge = juce::Rectangle<float> (badgeLeft, (float) area.getY(), (float) (x + w - 6) - badgeLeft, 12.0f);
                 theme::fillRoundRect (g, badge, 3.0f, colour::bg0.withAlpha (0.85f));
                 g.setColour (text.endsWith ("?") ? colour::textDisabled : colour::info);
                 g.setFont (font (9.0f, true));
@@ -3579,11 +3613,18 @@ void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
 
 bool EffectsPanel::isInterestedInDragSource (const SourceDetails& details)
 {
-    return BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("fst");
+    return (BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("fst"))
+           || BrowserComponent::isEffectDrag (details);
 }
 
 void EffectsPanel::itemDropped (const SourceDetails& details)
 {
+    if (BrowserComponent::isEffectDrag (details))
+    {
+        if (auto fx = BrowserComponent::draggedEffect (details))
+            dropEffect (std::move (*fx), details.localPosition);
+        return;
+    }
     dropPreset (BrowserComponent::draggedFile (details), details.localPosition);
 }
 
@@ -3615,6 +3656,14 @@ bool EffectsPanel::dropPreset (const juce::File& file, juce::Point<int> position
         return false;
     }
 
+    return dropEffect (*fx, position);
+}
+
+bool EffectsPanel::dropEffect (EffectSlot fx, juce::Point<int> position)
+{
+    if (slots() == nullptr)
+        return false;
+
     auto target = -1;
     for (int i = 0; i < (int) slots()->size(); ++i)
         if (slotBounds (i).contains (position))
@@ -3623,7 +3672,7 @@ bool EffectsPanel::dropPreset (const juce::File& file, juce::Point<int> position
     if (target < 0 && (int) slots()->size() >= maxEffectSlots)
         return false;
 
-    engine.editSong ([t = track, target, fx = *fx] (Song& song) {
+    engine.editSong ([t = track, target, fx = std::move (fx)] (Song& song) {
         auto& effects = song.mixer[(std::size_t) t].effects;
         if (target >= 0 && target < (int) effects.size())
             effects[(std::size_t) target] = fx;
@@ -4179,6 +4228,13 @@ MixerComponent::MixerComponent (AudioEngine& e)
     addAndMakeVisible (viewport);
     addAndMakeVisible (effects);
     strips.onSelectionChanged = [this] (int track) { effects.setTrack (track); };
+    strips.onEffectDropped = [this] (int track, EffectSlot fx) {
+        strips.selectTrack (track);
+        effects.setTrack (track);
+        if (! addEffectToSelected (std::move (fx)))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin database"),
+                                                    tr ("The selected insert has no free effect slot."));
+    };
 }
 
 bool MixerComponent::runAction (const std::string& id)

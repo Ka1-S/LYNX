@@ -25,10 +25,11 @@ enum class Icon
     mouseLeft, mouseMiddle, mouseWheel, // hint bar gestures (with rightClick)
     tuningFork, // master pitch
     drumBrush,  // Piano Roll: the drum paint tool
-    graph       // Channel Rack: the step graph editor (velocity, pan... bars)
+    graph,      // Channel Rack: the step graph editor (velocity, pan... bars)
+    follow      // Playlist / Piano Roll: the view follows the playhead (auto scrolling)
 };
 
-constexpr int iconCount = (int) Icon::graph + 1;
+constexpr int iconCount = (int) Icon::follow + 1;
 
 namespace icons
 {
