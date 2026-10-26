@@ -1132,7 +1132,7 @@ private:
         }
 
         for (const auto& f : files)
-            if (isListed (f))
+            if (browser.lists (f))
             {
                 auto c = std::make_unique<Node>();
                 c->file = f;
@@ -1398,6 +1398,11 @@ private:
         {
             menu.addSectionHeader (n.label);
             expandItems();
+            if ((n.kind == Kind::project || n.kind == Kind::plugins) && n.parent == nullptr && browser.tab == allTab) // round 163
+            {
+                menu.addSeparator();
+                browser.addHideItem (menu, n.kind == Kind::project ? browserview::projectRootId : browserview::pluginsRootId, n.label);
+            }
             menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
             return;
         }
@@ -1922,8 +1927,8 @@ private:
     std::vector<std::pair<juce::String, juce::String>> rows;
 };
 
-BrowserComponent::BrowserComponent (AudioEngine& e)
-    : engine (e)
+BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
+    : engine (e), role (r)
 {
     tabs = std::make_unique<TabBar> (*this);
     addAndMakeVisible (*tabs);
@@ -1934,8 +1939,8 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     searcher->statusChanged.addChangeListener (this);
     searcher->indexChanged.addChangeListener (this);
     juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<BrowserComponent> (this)] {
-        if (safe != nullptr && ! safe->roots.isEmpty())
-            safe->searcher->service->refresh (toPaths (safe->roots));
+        if (safe != nullptr && safe->role == Role::main && ! safe->allRoots.isEmpty())
+            safe->searcher->service->refresh (toPaths (safe->allRoots));
     });
     focusWatcher = std::make_unique<FocusWatcher> (*this);
 
@@ -1954,6 +1959,14 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     ui::setHint (stopButton, tr ("Stop the sample preview"), true);
     stopButton.onClick = [this] { stopPreview(); };
     addAndMakeVisible (stopButton);
+
+    // what this Browser shows (round 163): content filter, folders shown, the Sample browser window
+    viewButton.setFlat (true);
+    viewButton.setWantsKeyboardFocus (false);
+    viewButton.setMouseClickGrabsKeyboardFocus (false);
+    viewButton.setClickingTogglesState (false);
+    viewButton.onClick = [this] { showViewMenu(); };
+    addAndMakeVisible (viewButton);
 
     // the sample preview volume (FL's Browser has one too): a small knob at the end of the search row
     previewVolume.setRange (0.0, controls::maxUtilityVolume, 0.01);
@@ -2021,10 +2034,252 @@ void BrowserComponent::setStarred (const juce::File& file, bool on)
         rebuildTree();
 }
 
+// --- what this Browser shows (round 163) ------------------------------------------------------------
+
+juce::File BrowserComponent::viewFile (Role r)
+{
+    return PluginHost::settingsFolder().getChildFile (r == Role::samples ? "sample-browser-view.txt" : "browser-view.txt");
+}
+
+bool BrowserComponent::sampleBrowserWasOpen()
+{
+    return browserview::View::fromText (viewFile (Role::samples).loadFileAsString().toStdString()).open;
+}
+
+juce::Rectangle<int> BrowserComponent::sampleBrowserBounds()
+{
+    const auto v = browserview::View::fromText (viewFile (Role::samples).loadFileAsString().toStdString());
+    return { v.x, v.y, v.width, v.height };
+}
+
+void BrowserComponent::loadView()
+{
+    viewLoaded = true;
+    const auto file = viewFile (role);
+    viewFromFile = file.existsAsFile();
+    if (viewFromFile)
+    {
+        view = browserview::View::fromText (file.loadFileAsString().toStdString());
+        return;
+    }
+    view = {};
+    if (role == Role::samples)
+    {
+        // the Sample browser starts with only the places samples live, listing samples and SoundFonts
+        view.filter = browserview::ContentFilter::samples;
+        view.setShown (browserview::projectRootId, false);
+        view.setShown (browserview::pluginsRootId, false);
+        for (int i = 0; i < allRoots.size(); ++i)
+            if (! browserview::sampleBrowserShowsByDefault (allRootKinds[(std::size_t) i]))
+                view.setShown (allRoots[i].getFullPathName().toStdString(), false);
+    }
+}
+
+void BrowserComponent::saveView() const
+{
+    if (! viewLoaded)
+        return;
+    const auto file = viewFile (role);
+    auto v = view;
+    if (role == Role::samples) // the window's open state and bounds are the window's to write
+    {
+        const auto old = browserview::View::fromText (file.loadFileAsString().toStdString());
+        v.open = old.open;
+        v.x = old.x, v.y = old.y, v.width = old.width, v.height = old.height;
+    }
+    file.getParentDirectory().createDirectory();
+    file.replaceWithText (juce::String::fromUTF8 (v.toText().c_str()));
+}
+
+bool BrowserComponent::lists (const juce::File& file) const
+{
+    return browserview::listed (file.getFileName().toStdString(), view.filter) || file.isDirectory();
+}
+
+void BrowserComponent::setContentFilter (browserview::ContentFilter filter)
+{
+    if (filter == view.filter)
+        return;
+    view.filter = filter;
+    saveView();
+    refreshViewButton();
+    rebuildTree();
+    if (searchBox.getText().trim().isNotEmpty())
+        runSearch();
+}
+
+void BrowserComponent::setRootShown (const juce::String& id, bool shown)
+{
+    if (view.shows (id.toStdString()) == shown)
+        return;
+    view.setShown (id.toStdString(), shown);
+    saveView();
+    rebuildRoots();
+    if (searchBox.getText().trim().isNotEmpty())
+        runSearch();
+}
+
+void BrowserComponent::showAllRoots()
+{
+    view.hidden.clear();
+    saveView();
+    rebuildRoots();
+}
+
+juce::String BrowserComponent::rootId (const juce::File& folder) const
+{
+    return allRoots.contains (folder) ? folder.getFullPathName() : juce::String();
+}
+
+void BrowserComponent::refreshViewButton()
+{
+    const auto filtered = view.filter != browserview::ContentFilter::all;
+    int hidden = 0;
+    for (const auto& id : view.hidden)
+        hidden += id == browserview::projectRootId || id == browserview::pluginsRootId
+                          || allRoots.contains (juce::File (juce::String::fromUTF8 (id.c_str())))
+                      ? 1 : 0;
+    viewButton.setToggleState (filtered || hidden > 0, juce::dontSendNotification);
+    juce::String text = tr ("Browser options: what to list, which folders to show");
+    if (filtered)
+        text << "  (" << tr (browserview::contentFilterLabel (view.filter)) << ")";
+    if (hidden > 0)
+        text << "  (" << (hidden == 1 ? tr ("1 folder hidden") : tr ("{0} folders hidden", { juce::String (hidden) })) << ")";
+    viewButton.setTooltip (text);
+    ui::setHint (viewButton, text, true);
+}
+
+void BrowserComponent::addHideItem (juce::PopupMenu& menu, const juce::String& id, const juce::String& label)
+{
+    menu.addItem (tr ("Hide \"{0}\" from this Browser", { label }), [safe = juce::Component::SafePointer<BrowserComponent> (this), id] {
+        if (safe != nullptr)
+            safe->setRootShown (id, false);
+    });
+}
+
+void BrowserComponent::addViewItems (juce::PopupMenu& menu)
+{
+    juce::Component::SafePointer<BrowserComponent> safe (this);
+    // what is listed (folders are always listed)
+    juce::PopupMenu filters;
+    for (int i = 0; i < browserview::contentFilterCount; ++i)
+    {
+        const auto f = (browserview::ContentFilter) i;
+        filters.addItem (tr (browserview::contentFilterLabel (f)), true, view.filter == f, [safe, f] {
+            if (safe != nullptr)
+                safe->setContentFilter (f);
+        });
+    }
+    menu.addSubMenu (tr ("Show") + ": " + tr (browserview::contentFilterLabel (view.filter)), filters);
+
+    // which top-level entries are shown (a checklist; hidden ones come back from here)
+    juce::PopupMenu folders;
+    auto toggle = [safe] (const juce::String& id) {
+        if (safe != nullptr)
+            safe->setRootShown (id, ! safe->view.shows (id.toStdString()));
+    };
+    folders.addItem (tr ("Current project"), true, view.shows (browserview::projectRootId), [toggle] { toggle (browserview::projectRootId); });
+    folders.addItem (tr ("Plugin database"), true, view.shows (browserview::pluginsRootId), [toggle] { toggle (browserview::pluginsRootId); });
+    for (int i = 0; i < allRoots.size(); ++i)
+    {
+        const auto id = allRoots[i].getFullPathName();
+        juce::PopupMenu::Item item (allRootNames[i]);
+        item.setTicked (view.shows (id.toStdString())).setAction ([toggle, id] { toggle (id); });
+        item.shortcutKeyDescription = allRoots[i].getParentDirectory().getFileName();
+        folders.addItem (std::move (item));
+    }
+    folders.addSeparator();
+    folders.addItem (tr ("Show all folders"), ! view.hidden.empty(), false, [safe] {
+        if (safe != nullptr)
+            safe->showAllRoots();
+    });
+    folders.addItem (tr ("Add folder..."), [safe] {
+        if (safe != nullptr)
+            safe->addUserFolder();
+    });
+    menu.addSubMenu (tr ("Show folders"), folders);
+}
+
+void BrowserComponent::showViewMenu()
+{
+    juce::PopupMenu menu;
+    addViewItems (menu);
+    juce::Component::SafePointer<BrowserComponent> safe (this);
+    menu.addSeparator();
+    menu.addItem (tr ("Refresh"), [safe] { if (safe != nullptr) safe->rebuildRoots(); });
+    menu.addItem (tr ("Refresh search index"), [safe] { if (safe != nullptr) safe->refreshSearchIndex (false); });
+    if (onToggleSampleBrowser != nullptr)
+    {
+        menu.addSeparator();
+        menu.addItem (role == Role::samples ? tr ("Close the Sample browser") : tr ("Sample browser (separate window)"),
+                      [safe] { if (safe != nullptr && safe->onToggleSampleBrowser != nullptr) safe->onToggleSampleBrowser(); });
+    }
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&viewButton));
+}
+
+namespace
+{
+// The Sample browser window's content: a drag container (samples dragged out of this window reach the Channel Rack,
+// the Playlist and the Mixer of the main window) holding the Browser; it keeps the window's bounds and whether the
+// user closed it.
+class SampleBrowserHost final : public juce::Component,
+                                public juce::DragAndDropContainer
+{
+public:
+    SampleBrowserHost (AudioEngine& engine, const std::function<void (BrowserComponent&)>& wire)
+        : browser (engine, BrowserComponent::Role::samples)
+    {
+        if (wire != nullptr)
+            wire (browser);
+        addAndMakeVisible (browser);
+        setSize (340, 620);
+    }
+
+    ~SampleBrowserHost() override
+    {
+        // a window the user closed is hidden first (ToolWindow::closeSoon); one deleted while visible goes with LYNX
+        // and opens again at the next start
+        auto* window = getTopLevelComponent();
+        auto v = browser.getView();
+        v.open = window != this && window->isVisible();
+        if (window != this)
+        {
+            const auto b = window->getBounds();
+            v.x = b.getX();
+            v.y = b.getY();
+            v.width = b.getWidth();
+            v.height = b.getHeight();
+        }
+        file().getParentDirectory().createDirectory();
+        file().replaceWithText (juce::String::fromUTF8 (v.toText().c_str()));
+    }
+
+    void resized() override { browser.setBounds (getLocalBounds()); }
+
+    static juce::File file() { return PluginHost::settingsFolder().getChildFile ("sample-browser-view.txt"); }
+
+    BrowserComponent browser;
+};
+} // namespace
+
+std::unique_ptr<juce::Component> BrowserComponent::makeSampleBrowserContent (AudioEngine& engine, const std::function<void (BrowserComponent&)>& wire)
+{
+    auto host = std::make_unique<SampleBrowserHost> (engine, wire);
+    auto v = host->browser.getView();
+    v.open = true; // (written at once: a crash keeps it open next time too)
+    SampleBrowserHost::file().getParentDirectory().createDirectory();
+    SampleBrowserHost::file().replaceWithText (juce::String::fromUTF8 (v.toText().c_str()));
+    return host;
+}
+
 void BrowserComponent::rebuildRoots()
 {
     roots.clear();
     rootNames.clear();
+    allRoots.clear();
+    allRootNames.clear();
+    allRootKinds.clear();
+    using browserview::RootKind;
 
     // FL folders (if installed) and user folders
     const auto programs = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory);
@@ -2034,30 +2289,41 @@ void BrowserComponent::rebuildRoots()
         if (dir.getChildFile ("Data").isDirectory() && dir.getFileName() > fl.getFileName()) // "FL Studio ASIO" is the driver
             fl = dir;
 
-    auto add = [this] (const juce::String& name, const juce::File& folder) {
-        if (folder.isDirectory() && ! roots.contains (folder))
+    auto add = [this] (const juce::String& name, const juce::File& folder, RootKind kind) {
+        if (folder.isDirectory() && ! allRoots.contains (folder))
         {
-            roots.add (folder);
-            rootNames.add (name);
+            allRoots.add (folder);
+            allRootNames.add (name);
+            allRootKinds.push_back (kind);
         }
     };
 
     const auto data = fl.getChildFile ("Data");
-    add (tr ("FL samples (Packs)"), data.getChildFile ("Patches").getChildFile ("Packs"));
-    add (tr ("FL demo projects"), data.getChildFile ("Demo projects"));
-    add (tr ("FL MIDI"), data.getChildFile ("Patches").getChildFile ("Scores"));
-    add (tr ("3x Osc presets (FL)"), data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
-    add (tr ("Synth presets (FL)"), data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"));
+    add (tr ("FL samples (Packs)"), data.getChildFile ("Patches").getChildFile ("Packs"), RootKind::flSamples);
+    add (tr ("FL demo projects"), data.getChildFile ("Demo projects"), RootKind::flDemos);
+    add (tr ("FL MIDI"), data.getChildFile ("Patches").getChildFile ("Scores"), RootKind::flMidi);
+    add (tr ("3x Osc presets (FL)"), data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"), RootKind::flPresets);
+    add (tr ("Synth presets (FL)"), data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"), RootKind::flPresets);
     pluginpresetui::presetsRoot().createDirectory(); // (the plugin window saves presets there; round 162d)
-    add (tr ("Plugin presets"), pluginpresetui::presetsRoot());
-    add (tr ("Documents"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
-    add (tr ("Music"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
-    add (tr ("Desktop"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
-    add (tr ("Downloads"), juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Downloads"));
+    add (tr ("Plugin presets"), pluginpresetui::presetsRoot(), RootKind::pluginPresets);
+    add (tr ("Documents"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), RootKind::documents);
+    add (tr ("Music"), juce::File::getSpecialLocation (juce::File::userMusicDirectory), RootKind::music);
+    add (tr ("Desktop"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory), RootKind::desktop);
+    add (tr ("Downloads"), juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile ("Downloads"), RootKind::downloads);
 
     for (const auto& line : juce::StringArray::fromLines (userFoldersFile().loadFileAsString()))
         if (line.trim().isNotEmpty())
-            add (juce::File (line.trim()).getFileName(), juce::File (line.trim()));
+            add (juce::File (line.trim()).getFileName(), juce::File (line.trim()), RootKind::user);
+
+    if (! viewLoaded)
+        loadView();
+    for (int i = 0; i < allRoots.size(); ++i)
+        if (view.shows (allRoots[i].getFullPathName().toStdString()))
+        {
+            roots.add (allRoots[i]);
+            rootNames.add (allRootNames[i]);
+        }
+    refreshViewButton();
 
     starred.clear();
     for (const auto& line : juce::StringArray::fromLines (starredFile().loadFileAsString()))
@@ -2094,16 +2360,19 @@ void BrowserComponent::rebuildTree()
         treeView->setViewPosition (0, 0);
         return;
     }
-    top.push_back (FileTree::makeProject (tab == projectTab));
-    if (tab == allTab) // FL's Plugin database, under the project (round 142)
+    if (tab == projectTab || view.shows (browserview::projectRootId))
+        top.push_back (FileTree::makeProject (tab == projectTab));
+    if (tab == allTab && view.shows (browserview::pluginsRootId)) // FL's Plugin database, under the project (round 142)
         top.push_back (FileTree::makePluginDatabase (*this, openPluginFolders));
 
     if (tab == allTab)
-        for (int i = 0; i < roots.size(); ++i)
+        for (int i = 0; i < allRoots.size(); ++i)
         {
+            if (! roots.contains (allRoots[i]))
+                continue; // hidden from this Browser (round 163)
             // the FL folders keep their colour by position; the user's own folders share one
             auto colour = rootColour (i < 9 ? i : 99);
-            top.push_back (FileTree::makeFolder (roots[i], rootNames[i], colour));
+            top.push_back (FileTree::makeFolder (allRoots[i], allRootNames[i], colour));
         }
 
     tree->setTopLevel (std::move (top));
@@ -2192,6 +2461,7 @@ void BrowserComponent::resized()
         auto row = area.removeFromTop (24);
         previewVolume.setBounds (row.removeFromRight (24));
         stopButton.setBounds (row.removeFromRight (22));
+        viewButton.setBounds (row.removeFromRight (22));
         row.removeFromRight (4);
         searchBox.setBounds (row);
     }
@@ -2273,15 +2543,19 @@ void BrowserComponent::fileSelected (const juce::File& file, bool preview)
 // FL's Browser menus (REA round 143b, [EXEC] FL 2026: right-click on a sample, a folder, a plugin): the file's actions
 // first, then a "System" section (open the parent folder, locate the file, delete it) and a "Tags" section (Favorite);
 // a folder: Expand all / Collapse all, then System (Open). LYNX keeps its own "Add folder..." and "Refresh".
+// Round 163 (user feedback: "this sort of UI has a ton of wasted space"): no "System" / "Tags" titles any more; the
+// rarely used system actions sit in one "File" sub-menu, Starred stays one click away.
 void BrowserComponent::addSystemItems (juce::PopupMenu& menu, const juce::File& file)
 {
-    menu.addSectionHeader (tr ("System"));
-    menu.addItem (tr ("Open parent folder"), [file] { file.getParentDirectory().startAsProcess(); });
-    menu.addItem (tr ("Locate file"), [file] { file.revealToUser(); });
-    menu.addItem (tr ("Copy the file path"), [file] { juce::SystemClipboard::copyTextToClipboard (file.getFullPathName()); });
-    menu.addItem (tr ("Delete file..."), file.existsAsFile(), false, [this, file] { confirmDeleteFile (file); });
-    menu.addSectionHeader (tr ("Tags"));
+    menu.addSeparator();
     menu.addItem (tr ("Starred"), true, isStarred (file), [this, file] { setStarred (file, ! isStarred (file)); });
+    juce::PopupMenu system;
+    system.addItem (tr ("Open parent folder"), [file] { file.getParentDirectory().startAsProcess(); });
+    system.addItem (tr ("Locate file"), [file] { file.revealToUser(); });
+    system.addItem (tr ("Copy the file path"), [file] { juce::SystemClipboard::copyTextToClipboard (file.getFullPathName()); });
+    system.addSeparator();
+    system.addItem (tr ("Delete file..."), file.existsAsFile(), false, [this, file] { confirmDeleteFile (file); });
+    menu.addSubMenu (tr ("File"), system);
 }
 
 void BrowserComponent::confirmDeleteFile (const juce::File& file)
@@ -2330,28 +2604,32 @@ void BrowserComponent::showFileMenu (const juce::File& file)
     }
 
     addSystemItems (menu, file);
-    menu.addSeparator();
     menu.addItem (tr ("Collapse all folders"), [this] { tree->collapseAll(); });
-    menu.addItem (tr ("Add folder..."), [this] { addUserFolder(); });
+    juce::PopupMenu browserMenu;
+    addViewItems (browserMenu);
+    menu.addSubMenu (tr ("Browser"), browserMenu);
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
 void BrowserComponent::showFolderMenu (const juce::File& folder, std::function<void()> expandAll)
 {
+    // compact (round 163): the folder's name as the only title, its actions, then the Browser's own options
     juce::PopupMenu menu;
     menu.addSectionHeader (folder.getFileName());
     menu.addItem (tr ("Expand all"), expandAll != nullptr, false, [expandAll] { expandAll(); });
     menu.addItem (tr ("Collapse all"), [this] { tree->collapseAll(); });
-    menu.addSeparator();
-    menu.addItem (tr ("Refresh"), [this] { rebuildRoots(); });
-    menu.addItem (tr ("Refresh search index"), [this] { refreshSearchIndex (false); });
-    menu.addSectionHeader (tr ("System"));
-    menu.addItem (tr ("Open"), [folder] { folder.startAsProcess(); });
-    menu.addItem (tr ("Copy the file path"), [folder] { juce::SystemClipboard::copyTextToClipboard (folder.getFullPathName()); });
-    menu.addSectionHeader (tr ("Tags"));
     menu.addItem (tr ("Starred"), folder.isDirectory(), isStarred (folder), [this, folder] { setStarred (folder, ! isStarred (folder)); });
+    menu.addItem (tr ("Open in the file manager"), [folder] { folder.startAsProcess(); });
+    menu.addItem (tr ("Copy the file path"), [folder] { juce::SystemClipboard::copyTextToClipboard (folder.getFullPathName()); });
     menu.addSeparator();
-    menu.addItem (tr ("Add folder..."), [this] { addUserFolder(); });
+    if (const auto id = rootId (folder); id.isNotEmpty() && tab == allTab)
+        addHideItem (menu, id, allRootNames[allRoots.indexOf (folder)]);
+    juce::PopupMenu browserMenu;
+    addViewItems (browserMenu);
+    browserMenu.addSeparator();
+    browserMenu.addItem (tr ("Refresh"), [this] { rebuildRoots(); });
+    browserMenu.addItem (tr ("Refresh search index"), [this] { refreshSearchIndex (false); });
+    menu.addSubMenu (tr ("Browser"), browserMenu);
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
@@ -2550,7 +2828,8 @@ void BrowserComponent::searchAnswered (const search::SearchResult& r, const juce
 
     juce::Array<juce::File> found;
     for (const auto& path : r.paths)
-        found.add (juce::File (juce::String::fromUTF8 (path.c_str())));
+        if (juce::File f (juce::String::fromUTF8 (path.c_str())); view.filter == browserview::ContentFilter::all || lists (f))
+            found.add (f);
 
     // (partial answers and re-searches keep the selection and the scroll position)
     const auto selected = results->selectedFile();
@@ -2619,8 +2898,9 @@ void BrowserComponent::indexStatusChanged()
 
 void BrowserComponent::refreshSearchIndex (bool rebuild)
 {
-    if (! roots.isEmpty())
-        searcher->service->refresh (toPaths (roots), rebuild);
+    // the index is shared by every Browser: it covers every folder, hidden ones too
+    if (! allRoots.isEmpty())
+        searcher->service->refresh (toPaths (allRoots), rebuild);
     ui::postHint ({ rebuild ? tr ("Rebuilding the Browser's search index in the background...")
                             : tr ("Checking the Browser's search index in the background (only changed folders are read again)..."),
                     {}, false, false },
