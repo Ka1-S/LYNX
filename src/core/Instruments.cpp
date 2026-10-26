@@ -1746,7 +1746,9 @@ public:
         SamplerVoice ahead;                         // reads the source primeLength() frames ahead of the voice
         double factor = 1.0, glideRatio = 1.0;      // the note's transposition and its portamento / slide
         int glideLeft = 0;
-        std::array<float, keyShiftBlock> inL {}, inR {}, outL {}, outR {};
+        std::array<float, keyShiftBlock * 4 + 2> inL {}, inR {}; // the source read `factor` times faster
+        std::array<float, keyShiftBlock> outL {}, outR {};
+        double owed = 0.0; // input frames owed to the shifter (n / factor per block, the fraction carried)
         int pos = 0, count = 0;
     };
     // Stretch keeping pitch (round 162, issue #9): a transposed note reads the stretched sample at its own speed, so it
@@ -1767,13 +1769,11 @@ public:
         // a free shifter: none, or its voice ended or plays unshifted
         for (std::size_t k = 0; k < shifterPool.size() && ks.shifter == nullptr; ++k)
         {
-            if (shifterPool[k] == nullptr || ! shifterPool[k]->ready() || primeL.size() < (std::size_t) shifterPool[k]->primeLength())
+            if (shifterPool[k] == nullptr || ! shifterPool[k]->ready() || primeL.size() < (std::size_t) shifterPool[k]->maxPrimeLength())
                 continue;
             const auto user = shifterUser[k];
             if (user < 0 || (std::size_t) user == index || ! voices[(std::size_t) user].active || shifts[(std::size_t) user].shifter != shifterPool[k].get())
             {
-                if (user >= 0 && (std::size_t) user != index && voices[(std::size_t) user].active)
-                    shifts[(std::size_t) user].on = false;
                 shifterUser[k] = (int) index;
                 ks.shifter = shifterPool[k].get();
             }
@@ -1800,6 +1800,13 @@ public:
         ks.ahead.pitchMul = 1.0;
         ks.primed = false;
         ks.pos = ks.count = 0;
+        ks.owed = 0.0;
+    }
+
+    // the transposition the shifter applies now: the note's (gliding), the pitch envelope / LFO and the pitch wheel
+    double shiftFactor (const SamplerVoice& v, const KeyShift& ks) const noexcept
+    {
+        return std::clamp (ks.factor * v.pitchMul * bendMul, VoicePitchShifter::minFactor, VoicePitchShifter::maxFactor);
     }
 
     // Primes a new shifted voice's shifter with the start of its source (so its output has no latency). A render
@@ -1811,16 +1818,17 @@ public:
         if (budget <= 0)
             return false;
         --budget;
-        const auto prime = ks.shifter->primeLength();
+        const auto factor = shiftFactor (v, ks);
+        const auto prime = std::min (ks.shifter->primeLength (factor), (int) primeL.size());
         for (int i = 0; i < prime; ++i)
-            readAhead (v, ks, primeL[(std::size_t) i], primeR[(std::size_t) i]);
-        ks.shifter->start (primeL.data(), primeR.data(), ks.factor * v.pitchMul * bendMul);
+            readAhead (v, ks, factor, primeL[(std::size_t) i], primeR[(std::size_t) i]);
+        ks.shifter->start (primeL.data(), primeR.data(), prime);
         ks.primed = true;
         return true;
     }
 
     // the shifter's source: the stretched sample read at the voice's (untransposed) speed, ahead of the voice
-    void readAhead (const SamplerVoice& v, KeyShift& ks, float& outL, float& outR) noexcept
+    void readAhead (const SamplerVoice& v, KeyShift& ks, double factor, float& outL, float& outR) noexcept
     {
         auto& a = ks.ahead;
         const auto lastFrame = std::min ((double) (a.data->frames() - 1), a.last);
@@ -1834,8 +1842,8 @@ public:
         if ((double) flrs::wholeFrames (a.position) > lastFrame || a.position < a.first)
             outL = outR = 0.0f;
         else
-            readFrame (a, a.data->leftData(), a.data->rightData(), lastFrame, looping, outL, outR, a.rate);
-        a.position += a.rate;
+            readFrame (a, a.data->leftData(), a.data->rightData(), lastFrame, looping, outL, outR, a.rate * factor);
+        a.position += a.rate * factor;
     }
 
     // the next frame of a shifted voice (blocks of keyShiftBlock through its shifter): the transposition, its glide,
@@ -1844,15 +1852,19 @@ public:
     {
         if (ks.pos >= ks.count)
         {
-            for (int i = 0; i < keyShiftBlock; ++i)
-                readAhead (v, ks, ks.inL[(std::size_t) i], ks.inR[(std::size_t) i]);
             if (ks.glideLeft > 0)
             {
                 const auto k = std::min (keyShiftBlock, ks.glideLeft);
                 ks.factor *= std::pow (ks.glideRatio, (double) k);
                 ks.glideLeft -= k;
             }
-            ks.shifter->process (ks.inL.data(), ks.inR.data(), ks.outL.data(), ks.outR.data(), keyShiftBlock, ks.factor * v.pitchMul * bendMul);
+            const auto factor = shiftFactor (v, ks);
+            ks.owed += keyShiftBlock / factor;
+            const auto frames = std::min ((int) ks.inL.size(), (int) ks.owed);
+            ks.owed -= frames;
+            for (int i = 0; i < frames; ++i)
+                readAhead (v, ks, factor, ks.inL[(std::size_t) i], ks.inR[(std::size_t) i]);
+            ks.shifter->process (ks.inL.data(), ks.inR.data(), frames, ks.outL.data(), ks.outR.data(), keyShiftBlock);
             ks.pos = 0;
             ks.count = keyShiftBlock;
         }
@@ -1872,7 +1884,7 @@ public:
             shifter->allocate (sr, method);
         }
         shifterUser.fill (-1);
-        const auto prime = (std::size_t) shifterPool[0]->primeLength();
+        const auto prime = (std::size_t) shifterPool[0]->maxPrimeLength();
         primeL.assign (prime, 0.0f);
         primeR.assign (prime, 0.0f);
     }

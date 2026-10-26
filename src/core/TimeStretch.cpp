@@ -426,8 +426,6 @@ std::shared_ptr<SampleData> stretchWith (const SampleData& in, double ratio, con
 struct VoicePitchShifter::Impl
 {
     signalsmith::stretch::SignalsmithStretch<float> stretch { 162L }; // fixed seed: renders repeat exactly
-    int prime = 0;
-    double factor = 1.0;
 };
 
 VoicePitchShifter::VoicePitchShifter() = default;
@@ -436,43 +434,41 @@ VoicePitchShifter::~VoicePitchShifter() = default;
 void VoicePitchShifter::allocate (double sampleRate, StretchMethod method)
 {
     impl = std::make_unique<Impl>();
-    // real time: 60 ms blocks, overlap 3 (measured round 162: ~1 ms to prime a voice and ~2 % of a core per voice,
-    // against ~8 ms and ~10 % with the offline presets); drums get shorter blocks for tighter attacks
-    const auto block = method == StretchMethod::transients ? 0.04 : 0.06;
-    impl->stretch.configure (2, (int) std::lround (sampleRate * block), (int) std::lround (sampleRate * block / 3.0));
-    impl->prime = impl->stretch.outputSeekLength (1.0f);
+    // real time (measured round 162): 100 ms blocks, overlap 4 — pitch exact to 0.05 cent down to 55 Hz, about 2 % of a
+    // core per voice and ~1 ms to prime a note (60 ms blocks missed low notes by 40 cents); drums: 80 ms
+    const auto block = method == StretchMethod::transients ? 0.08 : 0.1;
+    impl->stretch.configure (2, (int) std::lround (sampleRate * block), (int) std::lround (sampleRate * block / 4.0));
     // one silent run sizes every internal buffer, so the audio thread's first note does not allocate
-    std::vector<float> silence ((std::size_t) std::max (impl->prime, 256), 0.0f), out (256, 0.0f);
-    start (silence.data(), silence.data(), 1.5);
-    process (silence.data(), silence.data(), out.data(), out.data() + 128, 128, 1.5);
+    std::vector<float> silence ((std::size_t) std::max (maxPrimeLength(), 1024), 0.0f), out (256, 0.0f);
+    start (silence.data(), silence.data(), primeLength (1.5));
+    process (silence.data(), silence.data(), 85, out.data(), out.data() + 128, 128);
 }
 
 bool VoicePitchShifter::ready() const noexcept { return impl != nullptr; }
 
-int VoicePitchShifter::primeLength() const noexcept { return impl != nullptr ? impl->prime : 0; }
-
-void VoicePitchShifter::start (const float* l, const float* r, double factor) noexcept
+int VoicePitchShifter::primeLength (double factor) const noexcept
 {
     if (impl == nullptr)
-        return;
-    impl->factor = factor;
-    impl->stretch.setTransposeFactor ((float) factor);
-    const float* in[2] { l, r };
-    impl->stretch.outputSeek (in, impl->prime);
+        return 0;
+    factor = std::clamp (factor, minFactor, maxFactor);
+    return impl->stretch.outputSeekLength ((float) (1.0 / factor)) + 1;
 }
 
-void VoicePitchShifter::process (const float* inL, const float* inR, float* outL, float* outR, int n, double factor) noexcept
+void VoicePitchShifter::start (const float* l, const float* r, int frames) noexcept
 {
     if (impl == nullptr)
         return;
-    if (factor != impl->factor)
-    {
-        impl->factor = factor;
-        impl->stretch.setTransposeFactor ((float) factor);
-    }
+    const float* in[2] { l, r };
+    impl->stretch.outputSeek (in, frames);
+}
+
+void VoicePitchShifter::process (const float* inL, const float* inR, int inFrames, float* outL, float* outR, int outFrames) noexcept
+{
+    if (impl == nullptr)
+        return;
     const float* in[2] { inL, inR };
     float* out[2] { outL, outR };
-    impl->stretch.process (in, n, out, n);
+    impl->stretch.process (in, inFrames, out, outFrames);
 }
 
 StretchMethod stretchMethodForFlMode (int flMode) noexcept
