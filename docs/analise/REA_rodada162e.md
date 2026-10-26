@@ -74,4 +74,6 @@ Fruity Voltage Controller, VFX plugins, Visual plugins, X-Y / Control Surface as
 
 ## Where I stopped
 
-In progress.
+Batch 1 (Add plugin menu, MIDI port pins + routing + import, MIDI Out / controller nodes, `--patchershot` menu
+shots, tests `tests/Patcher162Tests.inc`) landing; the Envelope Controller sections (§3) come from the 162e fork and
+the Envelope Controller node editor inside a Patcher is switched on (`LYNX_EC_LOCATE`) once that lands.
