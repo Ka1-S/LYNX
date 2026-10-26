@@ -3723,7 +3723,9 @@ juce::PopupMenu MainComponent::makeLastTweakedMenu (int which)
     }
 
     // as FL: the parameter's name, then the items of its own menu (events, automation clip, remote control, value)
-    ui::addItemHeader (menu, tr ("Parameter"), describeAutomationTarget (engine, *target), juce::Colours::transparentBlack);
+    const auto valueNow = describeTargetValue (engine, *target); // (round 162d: with its value, as the read-out shows it)
+    ui::addItemHeader (menu, tr ("Parameter"), describeAutomationTarget (engine, *target) + (valueNow.isNotEmpty() ? ": " + valueNow : juce::String()),
+                       juce::Colours::transparentBlack);
     const auto& song = engine.getSong();
     int clip = -1;
     for (int a = 0; a < (int) song.automations.size(); ++a)
