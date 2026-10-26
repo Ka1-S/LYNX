@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -36,8 +38,10 @@ class Index
 {
 public:
     // Brings the folders under `root` up to date (adds root when new). Returns how many folders were listed again;
-    // stops early (leaving the rest for the next refresh) when shouldStop returns true.
-    int refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop = {});
+    // stops early (leaving the rest for the next refresh) when shouldStop returns true (checked between folders).
+    // With `guard`, the index is only locked while it is read or changed, never while the disk is read, so searches
+    // of what is already indexed are not held up by a long walk (round 162, issue #9).
+    int refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop = {}, std::mutex* guard = nullptr);
 
     // Files whose name matches `query` under the given roots (full paths), in folder order, at most `max`.
     std::vector<std::string> find (const std::string& query, const std::vector<std::string>& roots, std::size_t max, bool& truncated) const;
@@ -45,9 +49,20 @@ public:
     std::size_t folderCount() const noexcept { return folders.size(); }
     std::size_t fileCount() const noexcept;
     bool contains (const std::string& folder) const { return folders.count (folder) > 0; }
-    void clear() { folders.clear(); }
+    void clear()
+    {
+        folders.clear();
+        complete.clear();
+    }
 
-    // Text form for the index file: one "D\t<time>\t<folder>" line per folder followed by "F\t<name>" / "S\t<name>".
+    // A folder tree walked to the end (round 162): searching it needs no walk first. A folder inside one counts too.
+    void markComplete (const std::string& root) { complete.insert (root); }
+    bool isComplete (const std::string& folder) const;
+
+    static bool isUnder (const std::string& path, const std::string& root);
+
+    // Text form for the index file: one "D\t<time>\t<folder>" line per folder followed by "F\t<name>" / "S\t<name>";
+    // "R\t<folder>" lines name the complete trees.
     std::string toText() const;
     bool fromText (const std::string& text);
 
@@ -58,8 +73,8 @@ private:
         std::vector<std::string> files, subfolders;
     };
     std::map<std::string, Folder> folders; // full path -> contents
+    std::set<std::string> complete;
     static std::string join (const std::string& folder, const std::string& name, char separator);
-    static bool isUnder (const std::string& path, const std::string& root);
     void drop (const std::string& folder, char separator);
 };
 } // namespace lynx::search

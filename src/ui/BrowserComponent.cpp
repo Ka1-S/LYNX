@@ -5,6 +5,7 @@
 #include "core/ProjectContents.h"
 #include "core/SearchIndex.h"
 #include "core/SearchQuery.h"
+#include "core/SearchService.h"
 #include "core/ValueMath.h"
 #include "platform/Paths.h"
 
@@ -40,35 +41,6 @@ bool isListed (const juce::File& f)
 
 constexpr int maxResults = 500;
 
-// The search index (core/SearchIndex.h, REA round 134): one per process, shared by every Browser and search, kept in
-// the settings folder between sessions. Before a search only the folders' modification times are read; the folders
-// that changed are listed again ("dirty folders", like FL's browser cache).
-struct SharedIndex
-{
-    std::mutex lock;
-    search::Index index;
-    bool loaded = false;
-
-    static SharedIndex& get()
-    {
-        static SharedIndex shared;
-        return shared;
-    }
-    static juce::File file() { return platform::settingsFile ("browser-index.txt"); }
-
-    // caller holds `lock`
-    void loadOnce()
-    {
-        if (loaded)
-            return;
-        loaded = true;
-        if (const auto f = file(); f.existsAsFile() && f.getSize() < 256 * 1024 * 1024)
-            if (! index.fromText (f.loadFileAsString().toStdString()))
-                index.clear();
-    }
-    void save() { file().replaceWithText (juce::String::fromUTF8 (index.toText().c_str())); }
-};
-
 search::FileSystem diskFileSystem()
 {
     search::FileSystem fs;
@@ -102,46 +74,12 @@ search::FileSystem diskFileSystem()
     return fs;
 }
 
-// Brings the index of these folders up to date; true when something was listed again (and saved).
-bool refreshIndex (const juce::Array<juce::File>& roots, const std::function<bool()>& shouldStop)
+std::vector<std::string> toPaths (const juce::Array<juce::File>& folders)
 {
-    auto& shared = SharedIndex::get();
-    const std::lock_guard<std::mutex> guard (shared.lock);
-    shared.loadOnce();
-    const auto fs = diskFileSystem();
-    int listed = 0;
-    try
-    {
-        for (const auto& root : roots)
-            listed += shared.index.refresh (root.getFullPathName().toStdString(), fs, shouldStop);
-    }
-    catch (const std::exception& e) // never takes the app down: the search falls back to what is indexed
-    {
-        DBG ("browser index: " << e.what());
-        std::fprintf (stderr, "browser index: %s\n", e.what());
-    }
-    if (listed > 0)
-        shared.save();
-    return listed > 0;
-}
-
-juce::Array<juce::File> searchFiles (const juce::Array<juce::File>& roots, const juce::String& query, bool& truncated,
-                                     const std::function<bool()>& shouldStop)
-{
-    refreshIndex (roots, shouldStop);
-    juce::Array<juce::File> found;
-    truncated = false;
-    if (shouldStop())
-        return found;
-
     std::vector<std::string> paths;
-    for (const auto& root : roots)
-        paths.push_back (root.getFullPathName().toStdString());
-    auto& shared = SharedIndex::get();
-    const std::lock_guard<std::mutex> guard (shared.lock);
-    for (const auto& path : shared.index.find (query.toStdString(), paths, (std::size_t) maxResults, truncated))
-        found.add (juce::File (juce::String::fromUTF8 (path.c_str())));
-    return found;
+    for (const auto& f : folders)
+        paths.push_back (f.getFullPathName().toStdString());
+    return paths;
 }
 
 Icon iconFor (const juce::File& f, bool folder)
@@ -254,46 +192,87 @@ juce::Colour rootColour (int index)
 }
 } // namespace
 
-// --- search: a background walk of the folders --------------------------------------------------------
-
-class BrowserComponent::SearchJob final : public juce::Thread
+namespace
 {
-public:
-    SearchJob (juce::Array<juce::File> r, juce::String q, std::function<void (juce::Array<juce::File>, bool)> d)
-        : juce::Thread ("LYNX browser search"), roots (std::move (r)), query (std::move (q)), done (std::move (d))
+// The plugin being dragged from the Plugin database (one drag at a time; message thread).
+struct DraggedPlugin
+{
+    std::function<std::optional<ChannelDef>()> generator;
+    std::function<std::optional<EffectSlot>()> effect;
+};
+DraggedPlugin& draggedPlugin()
+{
+    static DraggedPlugin d;
+    return d;
+}
+} // namespace
+
+// --- search: the process's search worker ------------------------------------------------------------
+
+// The Browser's search index and its worker (core/SearchService.h, round 162): one per process while a Browser exists,
+// the index kept in the settings folder between sessions. Its news reach the Browsers through two broadcasters (they
+// are thread-safe and coalesce); the worker is joined (never killed) before they go.
+struct BrowserComponent::SearchShared
+{
+    juce::ChangeBroadcaster statusChanged, indexChanged;
+    std::unique_ptr<search::Service> service; // (last: goes first)
+
+    ~SearchShared() { service.reset(); }
+
+    static juce::File file() { return platform::settingsFile ("browser-index.txt"); }
+
+    static std::shared_ptr<SearchShared> get()
     {
+        static std::weak_ptr<SearchShared> current; // (message thread)
+        if (auto s = current.lock())
+            return s;
+        auto s = std::make_shared<SearchShared>();
+        search::Service::Callbacks cb;
+        cb.load = [] {
+            const auto f = file();
+            juce::MemoryBlock data;
+            if (! f.existsAsFile() || f.getSize() > 256 * 1024 * 1024 || ! f.loadFileAsData (data))
+                return std::string();
+            return std::string (static_cast<const char*> (data.getData()), data.getSize());
+        };
+        cb.save = [] (const std::string& text) {
+            const auto f = file();
+            const auto temp = f.getSiblingFile (f.getFileName() + ".tmp");
+            if (temp.replaceWithData (text.data(), text.size()))
+                temp.moveFileTo (f);
+        };
+        cb.statusChanged = [raw = s.get()] { raw->statusChanged.sendChangeMessage(); };
+        cb.indexChanged = [raw = s.get()] { raw->indexChanged.sendChangeMessage(); };
+        s->service = std::make_unique<search::Service> (diskFileSystem(), std::move (cb));
+        current = s;
+        return s;
     }
-
-    ~SearchJob() override { stopThread (3000); }
-
-    void run() override
-    {
-        bool truncated = false;
-        const auto found = searchFiles (roots, query, truncated, [this] { return threadShouldExit(); });
-
-        if (threadShouldExit())
-            return;
-
-        juce::MessageManager::callAsync ([done = done, found, truncated] { done (found, truncated); });
-    }
-
-private:
-    juce::Array<juce::File> roots;
-    juce::String query;
-    std::function<void (juce::Array<juce::File>, bool)> done;
 };
 
-// Refreshes the search index of every Browser folder at low priority (FL's automatic indexing), so the first search
-// of a session reads the index instead of the disk.
-class IndexJob final : public juce::Thread
+// A click anywhere outside the search box (another panel, the toolbar, the Browser's own list) takes the keyboard
+// back from it, so Space plays / stops again (issue #9; FL ends typing in its search field the same way).
+class BrowserComponent::FocusWatcher final : public juce::MouseListener
 {
 public:
-    explicit IndexJob (juce::Array<juce::File> r) : juce::Thread ("LYNX browser index"), roots (std::move (r)) {}
-    ~IndexJob() override { stopThread (5000); }
-    void run() override { refreshIndex (roots, [this] { return threadShouldExit(); }); }
+    explicit FocusWatcher (BrowserComponent& b) : browser (b) { juce::Desktop::getInstance().addGlobalMouseListener (this); }
+    ~FocusWatcher() override { juce::Desktop::getInstance().removeGlobalMouseListener (this); }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        auto* clicked = e.eventComponent;
+        if (! browser.isTypingInSearch() || clicked == nullptr)
+            return;
+        if (clicked == &browser.searchBox || browser.searchBox.isParentOf (clicked))
+            return;
+        // a menu (the box's own right-click menu: Paste...) keeps it
+        if (clicked->getTopLevelComponent() != browser.getTopLevelComponent() && clicked->getTopLevelComponent()->isAlwaysOnTop()
+            && dynamic_cast<juce::ResizableWindow*> (clicked->getTopLevelComponent()) == nullptr)
+            return;
+        browser.leaveSearchBox();
+    }
 
 private:
-    juce::Array<juce::File> roots;
+    BrowserComponent& browser;
 };
 
 // --- the tree (and, flat, the search results) ---------------------------------------------------------
@@ -338,6 +317,9 @@ public:
         bool history = false, missing = false, current = false;
         bool initial = false; // an initialized control (item.index = into Song::initialValues)
         std::function<void()> activate; // kind == plugin: adds it
+        // kind == plugin: what it adds (one of them), also when it is dragged (round 162)
+        std::function<std::optional<ChannelDef>()> generator;
+        std::function<std::optional<EffectSlot>()> effect;
     };
 
     // tree mode: the given top-level nodes
@@ -385,7 +367,7 @@ public:
             n->expanded = open.count ((parent != nullptr && parent->kind == Kind::plugins ? parent->label + "/" : juce::String()) + label) > 0;
             return n;
         };
-        auto entry = [] (Node& parent, const juce::String& label, const juce::String& detail, Icon icon, std::function<void()> activate) {
+        auto node = [] (Node& parent, const juce::String& label, const juce::String& detail, Icon icon) -> Node& {
             auto n = std::make_unique<Node>();
             n->kind = Kind::plugin;
             n->label = label;
@@ -393,19 +375,30 @@ public:
             n->icon = icon;
             n->parent = &parent;
             n->depth = parent.depth + 1;
-            n->activate = std::move (activate);
             parent.children.push_back (std::move (n));
+            return *parent.children.back();
         };
         auto root = folder (nullptr, tr ("Plugin database"), Icon::plugin);
         root->colour = theme::colour::info;
         auto safe = juce::Component::SafePointer<BrowserComponent> (&browser);
-        auto addInstrument = [safe] (ChannelDef c) {
-            if (safe != nullptr && safe->onAddInstrument)
-                safe->onAddInstrument (std::move (c));
+        // a generator / an effect: double-click adds it (to the rack / the selected insert), or drag it there
+        auto generatorEntry = [&node, safe] (Node& parent, const juce::String& label, const juce::String& detail, Icon icon,
+                                             std::function<std::optional<ChannelDef>()> make) {
+            auto& n = node (parent, label, detail, icon);
+            n.generator = make;
+            n.activate = [safe, make] {
+                if (auto c = make(); c && safe != nullptr && safe->onAddInstrument)
+                    safe->onAddInstrument (std::move (*c));
+            };
         };
-        auto addEffect = [safe] (EffectSlot fx) {
-            if (safe != nullptr && safe->onAddEffect)
-                safe->onAddEffect (std::move (fx));
+        auto effectEntry = [&node, safe] (Node& parent, const juce::String& label, const juce::String& detail, Icon icon,
+                                          std::function<std::optional<EffectSlot>()> make) {
+            auto& n = node (parent, label, detail, icon);
+            n.effect = make;
+            n.activate = [safe, make] {
+                if (auto fx = make(); fx && safe != nullptr && safe->onAddEffect)
+                    safe->onAddEffect (std::move (*fx));
+            };
         };
         const auto bpm = browser.engine.getSong().bpm;
         const auto& fl = flStudioAccess();
@@ -420,31 +413,29 @@ public:
                                                                        { InstrumentKind::snare, TR_NOOP ("Snare") }, { InstrumentKind::hat, TR_NOOP ("Hat") },
                                                                        { InstrumentKind::clap, TR_NOOP ("Clap") } };
             for (const auto& [kind, name] : builtIn)
-                entry (*lynxGens, tr (name), tr ("built-in"), Icon::keyboard, [addInstrument, kind = kind, english = std::string (name)] {
+                generatorEntry (*lynxGens, tr (name), tr ("built-in"), Icon::keyboard, [kind = kind, english = std::string (name)] {
                     ChannelDef c;
                     c.name = english;
                     c.instrument = kind;
-                    addInstrument (c);
+                    return std::optional<ChannelDef> (c);
                 });
             auto flGens = folder (gens.get(), tr ("FL engines"), Icon::folder);
             for (const auto& e : natives::instrumentEngines())
                 if (natives::available (e, fl))
-                    entry (*flGens, flEngineName (e), tr ("built-in FL engine"), Icon::keyboard, [addInstrument, kind = e.kind] {
-                        if (auto c = natives::makeChannel (kind, flStudioAccess()))
-                            addInstrument (*c);
-                    });
+                    generatorEntry (*flGens, flEngineName (e), tr ("built-in FL engine"), Icon::keyboard,
+                                    [kind = e.kind] { return std::optional<ChannelDef> (natives::makeChannel (kind, flStudioAccess())); });
             auto installed = folder (gens.get(), tr ("Installed"), Icon::folder);
             for (const auto& t : types)
                 if (t.isInstrument)
-                    entry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
-                           [addInstrument, id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
-                               ChannelDef c;
-                               c.name = name;
-                               c.instrument = InstrumentKind::plugin;
-                               c.plugin.id = id;
-                               c.plugin.name = name;
-                               addInstrument (c);
-                           });
+                    generatorEntry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
+                                    [id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
+                                        ChannelDef c;
+                                        c.name = name;
+                                        c.instrument = InstrumentKind::plugin;
+                                        c.plugin.id = id;
+                                        c.plugin.name = name;
+                                        return std::optional<ChannelDef> (c);
+                                    });
             for (auto* f : { &lynxGens, &flGens, &installed })
                 if (! (*f)->children.empty())
                     gens->children.push_back (std::move (*f));
@@ -459,23 +450,20 @@ public:
                 if (addableEffectAvailable (kind))
                 {
                     const auto flEngine = natives::effectEngine (kind) != nullptr;
-                    entry (flEngine ? *flFx : *lynxFx, addableEffectName (kind), flEngine ? tr ("built-in FL engine") : tr ("built-in"), Icon::mixer,
-                           [addEffect, kind, bpm] {
-                               if (auto fx = newAddableEffect (kind, bpm))
-                                   addEffect (*fx);
-                           });
+                    effectEntry (flEngine ? *flFx : *lynxFx, addableEffectName (kind), flEngine ? tr ("built-in FL engine") : tr ("built-in"), Icon::mixer,
+                                 [kind, bpm] { return std::optional<EffectSlot> (newAddableEffect (kind, bpm)); });
                 }
             auto installed = folder (fxs.get(), tr ("Installed"), Icon::folder);
             for (const auto& t : types)
                 if (! t.isInstrument)
-                    entry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
-                           [addEffect, id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
-                               EffectSlot fx;
-                               fx.kind = EffectKind::plugin;
-                               fx.plugin.id = id;
-                               fx.plugin.name = name;
-                               addEffect (fx);
-                           });
+                    effectEntry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
+                                 [id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
+                                     EffectSlot fx;
+                                     fx.kind = EffectKind::plugin;
+                                     fx.plugin.id = id;
+                                     fx.plugin.name = name;
+                                     return std::optional<EffectSlot> (fx);
+                                 });
             for (auto* f : { &lynxFx, &flFx, &installed })
                 if (! (*f)->children.empty())
                     fxs->children.push_back (std::move (*f));
@@ -882,6 +870,15 @@ public:
         if (n.folder || container == nullptr)
             return;
 
+        if (n.kind == Kind::plugin && (n.generator || n.effect)) // a plugin onto the Channel Rack / the Mixer (round 162)
+        {
+            dragStarted = true;
+            draggedPlugin() = { n.generator, n.effect };
+            container->startDragging (juce::String (n.generator ? generatorDragDescription : effectDragDescription) + "|" + n.label, this,
+                                      juce::ScaledImage (dragImage (n)), true);
+            return;
+        }
+
         if (n.kind == Kind::item && n.item.kind == projectcontents::Kind::pattern) // a pattern onto the Playlist
         {
             dragStarted = true;
@@ -982,7 +979,9 @@ public:
                 h.value = n.detail;
                 return h;
             case Kind::plugin:
-                h.text = n.label + " (" + n.detail + ")  " + tr ("[double-click] add it (generators: a new channel; effects: into the selected insert)");
+                h.text = n.label + " (" + n.detail + ")  "
+                         + (n.generator ? tr ("[double-click] add it as a new channel, or drag it onto the Channel Rack")
+                                        : tr ("[double-click] add it to the selected insert, or drag it onto a mixer insert or an effect slot"));
                 h.hasMenu = true;
                 return h;
             case Kind::file:
@@ -1926,19 +1925,32 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     tabs = std::make_unique<TabBar> (*this);
     addAndMakeVisible (*tabs);
 
+    // the search index (round 162): a background pass over every folder a few seconds after start (FL's automatic
+    // indexing: only the folders that changed since the last session are listed again)
+    searcher = SearchShared::get();
+    searcher->statusChanged.addChangeListener (this);
+    searcher->indexChanged.addChangeListener (this);
     juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<BrowserComponent> (this)] {
-        if (safe == nullptr || safe->indexJob != nullptr || safe->roots.isEmpty())
-            return;
-        safe->indexJob = std::make_unique<IndexJob> (safe->roots);
-        safe->indexJob->startThread (juce::Thread::Priority::background);
+        if (safe != nullptr && ! safe->roots.isEmpty())
+            safe->searcher->service->refresh (toPaths (safe->roots));
     });
+    focusWatcher = std::make_unique<FocusWatcher> (*this);
 
     searchBox.setTextToShowWhenEmpty (tr ("Search (Ctrl+F): kick -loop, snare OR clap, hat*.wav"), theme::colour::textDisabled);
     searchBox.addListener (this);
     searchBox.setEscapeAndReturnKeysConsumed (true);
     ui::setHint (searchBox, tr ("Search the selected folder (or every folder) and below; in PROJECT, the project's items: words must all match; "
-                                "OR, -word (not), \"exact phrase\", * and ? wildcards  [Esc] clear"));
+                                "OR, -word (not), \"exact phrase\", * and ? wildcards  [Enter] to the results  [Esc] clear"));
     addAndMakeVisible (searchBox);
+
+    // FL's Browser has a way to silence the preview too: a Stop button beside the preview volume (issue #9)
+    stopButton.setFlat (true);
+    stopButton.setWantsKeyboardFocus (false);
+    stopButton.setMouseClickGrabsKeyboardFocus (false);
+    stopButton.setTooltip (tr ("Stop the sample preview"));
+    ui::setHint (stopButton, tr ("Stop the sample preview"), true);
+    stopButton.onClick = [this] { stopPreview(); };
+    addAndMakeVisible (stopButton);
 
     // the sample preview volume (FL's Browser has one too): a small knob at the end of the search row
     previewVolume.setRange (0.0, controls::maxUtilityVolume, 0.01);
@@ -2113,8 +2125,21 @@ void BrowserComponent::setProjectFile (const juce::File& file)
     rebuildTree(); // the "Project folder" entry follows the project
 }
 
-void BrowserComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+void BrowserComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == &searcher->statusChanged)
+    {
+        indexStatusChanged();
+        return;
+    }
+    if (source == &searcher->indexChanged)
+    {
+        // the background check found changed folders: the results shown are searched again, in place
+        if (resultsView->isVisible() && tab != projectTab && searchBox.getText().trim().isNotEmpty())
+            runSearch (true);
+        return;
+    }
+
     // the project changed: its sections are listed again a moment later (not on every knob step)
     projectDirty = true;
     if (! isTimerRunning())
@@ -2141,8 +2166,10 @@ void BrowserComponent::addUserFolder()
 BrowserComponent::~BrowserComponent()
 {
     engine.removeChangeListener (this);
-    job.reset();
-    indexJob.reset();
+    searcher->statusChanged.removeChangeListener (this);
+    searcher->indexChanged.removeChangeListener (this);
+    searcher->service->cancelSearch();
+    focusWatcher.reset();
     engine.previewFile ({});
 }
 
@@ -2159,9 +2186,12 @@ void BrowserComponent::resized()
     {
         auto row = area.removeFromTop (24);
         previewVolume.setBounds (row.removeFromRight (24));
+        stopButton.setBounds (row.removeFromRight (22));
         row.removeFromRight (4);
         searchBox.setBounds (row);
     }
+    // indexing progress / what the search found (round 162)
+    statusArea = statusLine.isNotEmpty() ? area.removeFromTop (16).withTrimmedLeft (2) : juce::Rectangle<int>();
     area.removeFromTop (4);
     strip->setBounds (getLocalBounds().removeFromBottom (juce::jmin (64, getHeight() / 4)));
     area.setBottom (strip->getY() - 2);
@@ -2191,6 +2221,12 @@ void BrowserComponent::paint (juce::Graphics& g)
 {
     const uitrace::Scope trace ("BrowserComponent paint", true, g.getClipBounds());
     g.fillAll (theme::colour::bg2);
+    if (! statusArea.isEmpty())
+    {
+        g.setFont (theme::font (theme::type::caption));
+        g.setColour (theme::colour::textDisabled);
+        g.drawText (statusLine, statusArea, juce::Justification::centredLeft, true);
+    }
 }
 
 void BrowserComponent::showPreviewForSnapshot (const juce::File& file)
@@ -2303,6 +2339,7 @@ void BrowserComponent::showFolderMenu (const juce::File& folder, std::function<v
     menu.addItem (tr ("Collapse all"), [this] { tree->collapseAll(); });
     menu.addSeparator();
     menu.addItem (tr ("Refresh"), [this] { rebuildRoots(); });
+    menu.addItem (tr ("Refresh search index"), [this] { refreshSearchIndex (false); });
     menu.addSectionHeader (tr ("System"));
     menu.addItem (tr ("Open"), [folder] { folder.startAsProcess(); });
     menu.addItem (tr ("Copy the file path"), [folder] { juce::SystemClipboard::copyTextToClipboard (folder.getFullPathName()); });
@@ -2346,16 +2383,26 @@ void BrowserComponent::setSearchForSnapshot (const juce::String& text)
 {
     // synchronous: the snapshot is drawn before any message is dispatched
     searchBox.setText (text, juce::dontSendNotification);
-    job.reset();
+    searcher->service->cancelSearch();
     resultsView->setVisible (text.isNotEmpty());
     treeView->setVisible (text.isEmpty());
 
     if (text.isEmpty() || roots.isEmpty())
         return;
 
-    bool truncated = false;
     const juce::Array<juce::File> scope { roots[0] }; // the FL samples: the same results on every machine with FL
-    const auto found = searchFiles (scope, text, truncated, [] { return false; });
+    auto answer = std::make_shared<std::pair<std::mutex, search::SearchResult>>();
+    searcher->service->search (text.toStdString(), toPaths (scope), (std::size_t) maxResults, [answer] (const search::SearchResult& r) {
+        const std::lock_guard<std::mutex> guard (answer->first);
+        answer->second = r;
+    });
+    searcher->service->waitIdle (120000);
+    juce::Array<juce::File> found;
+    {
+        const std::lock_guard<std::mutex> guard (answer->first);
+        for (const auto& path : answer->second.paths)
+            found.add (juce::File (juce::String::fromUTF8 (path.c_str())));
+    }
     results->setFiles (found, scope, found.isEmpty() ? tr ("Nothing found for \"{0}\".", { text }) : juce::String());
     if (! found.isEmpty())
         results->select (0, false);
@@ -2398,14 +2445,39 @@ void BrowserComponent::textEditorTextChanged (juce::TextEditor&)
 
 void BrowserComponent::textEditorEscapeKeyPressed (juce::TextEditor&)
 {
+    // Esc: clears the search and gives the keyboard back (Space plays again)
+    searchPending = false;
     searchBox.clear();
     runSearch();
+    leaveSearchBox();
 }
 
 void BrowserComponent::textEditorReturnKeyPressed (juce::TextEditor&)
 {
+    // Enter: searches now and leaves the box, so Up / Down step through the results (and Space plays)
     searchPending = false;
     runSearch();
+    leaveSearchBox();
+}
+
+bool BrowserComponent::isTypingInSearch() const
+{
+    return searchBox.hasKeyboardFocus (true);
+}
+
+void BrowserComponent::leaveSearchBox()
+{
+    if (! isTypingInSearch())
+        return;
+    // the window's first ancestor that takes keys (the main window's content: the shortcuts, the transport) gets them
+    for (auto* p = getParentComponent(); p != nullptr; p = p->getParentComponent())
+        if (p->getWantsKeyboardFocus() && p->isShowing())
+        {
+            p->grabKeyboardFocus();
+            if (! isTypingInSearch())
+                return;
+        }
+    searchBox.giveAwayKeyboardFocus();
 }
 
 void BrowserComponent::timerCallback()
@@ -2423,15 +2495,20 @@ void BrowserComponent::timerCallback()
     }
 }
 
-void BrowserComponent::runSearch()
+void BrowserComponent::runSearch (bool quiet)
 {
-    job.reset();
+    searcher->service->cancelSearch();
+    searchId = 0;
     const auto query = searchBox.getText().trim();
     resultsView->setVisible (query.isNotEmpty());
     treeView->setVisible (query.isEmpty());
 
     if (query.isEmpty())
+    {
+        searchPartial = false;
+        indexStatusChanged();
         return;
+    }
 
     if (tab == projectTab) // the project's own items, at once
     {
@@ -2445,25 +2522,126 @@ void BrowserComponent::runSearch()
     if (scope.isEmpty())
         return;
 
-    results->setFiles ({}, scope, tr ("Searching {0}...", { scope.size() == 1 ? scope[0].getFullPathName() : tr ("every folder") }));
-    resultsView->setViewPosition (0, 0);
+    if (! quiet)
+    {
+        results->setFiles ({}, scope, tr ("Searching {0}...", { scope.size() == 1 ? scope[0].getFullPathName() : tr ("every folder") }));
+        resultsView->setViewPosition (0, 0);
+    }
 
-    job = std::make_unique<SearchJob> (scope, query, [safe = juce::Component::SafePointer<BrowserComponent> (this), query,
-                                                      scope] (juce::Array<juce::File> found, bool truncated) {
-        if (safe == nullptr || safe->searchBox.getText().trim() != query)
-            return;
+    // the worker answers on its thread: the answer comes to the message thread (and is dropped if this Browser went)
+    searchId = searcher->service->search (query.toStdString(), toPaths (scope), (std::size_t) maxResults,
+                                          [safe = juce::Component::SafePointer<BrowserComponent> (this), query, scope] (const search::SearchResult& r) {
+                                              juce::MessageManager::callAsync ([safe, query, scope, r] {
+                                                  if (safe != nullptr)
+                                                      safe->searchAnswered (r, query, scope);
+                                              });
+                                          });
+}
 
-        safe->results->setFiles (found, scope, found.isEmpty() ? tr ("Nothing found for \"{0}\".", { query }) : juce::String());
+void BrowserComponent::searchAnswered (const search::SearchResult& r, const juce::String& query, const juce::Array<juce::File>& scope)
+{
+    if (r.id != searchId || searchBox.getText().trim() != query)
+        return;
+
+    juce::Array<juce::File> found;
+    for (const auto& path : r.paths)
+        found.add (juce::File (juce::String::fromUTF8 (path.c_str())));
+
+    // (partial answers and re-searches keep the selection and the scroll position)
+    const auto selected = results->selectedFile();
+    const auto scroll = resultsView->getViewPosition();
+    results->setFiles (found, scope,
+                       found.isEmpty() ? (r.partial ? tr ("Indexing the folders... nothing found for \"{0}\" yet.", { query })
+                                                    : tr ("Nothing found for \"{0}\".", { query }))
+                                       : juce::String());
+    if (selected != juce::File())
+        if (const auto row = found.indexOf (selected); row >= 0)
+            results->select (row, false);
+    resultsView->setViewPosition (scroll);
+
+    searchPartial = r.partial;
+    if (! r.partial && ! found.isEmpty())
         // FL's hint bar after a search: "Found 51 files" (REA round 134)
-        if (! found.isEmpty())
-            ui::postHint ({ truncated ? tr ("Found more than {0} files", { juce::String (found.size()) })
-                                      : found.size() == 1 ? tr ("Found 1 file") : tr ("Found {0} files", { juce::String (found.size()) }), {}, false, false },
-                          4000);
+        ui::postHint ({ r.truncated ? tr ("Found more than {0} files", { juce::String (found.size()) })
+                                    : found.size() == 1 ? tr ("Found 1 file") : tr ("Found {0} files", { juce::String (found.size()) }),
+                        {}, false, false },
+                      4000);
 
-        if (truncated)
-            safe->results->setStatus (tr ("Showing the first {0} results.", { juce::String (maxResults) }));
-    });
-    job->startThread (juce::Thread::Priority::low);
+    // the line under the search box
+    juce::String line;
+    if (r.partial)
+        line = tr ("Indexing... {0} found so far", { juce::String (found.size()) });
+    else if (r.truncated)
+        line = tr ("Showing the first {0} results.", { juce::String (maxResults) });
+    else
+        line = found.size() == 1 ? tr ("Found 1 file") : tr ("Found {0} files", { juce::String (found.size()) });
+    const auto st = searcher->service->status();
+    if (st.busy && ! r.partial)
+        line << "  ·  " << tr ("checking the index...");
+    if (line != statusLine)
+    {
+        const auto relayout = line.isEmpty() != statusLine.isEmpty();
+        statusLine = line;
+        if (relayout)
+            resized();
+        repaint (statusArea);
+    }
+}
+
+void BrowserComponent::indexStatusChanged()
+{
+    const auto st = searcher->service->status();
+    juce::String line;
+    if (resultsView->isVisible() && tab != projectTab && searchBox.getText().trim().isNotEmpty())
+    {
+        // a search is shown: its line stays; while the folders are indexed, the progress is added
+        line = statusLine.upToFirstOccurrenceOf ("  ·  ", false, false);
+        if (st.busy)
+            line << "  ·  " << (searchPartial ? tr ("{0} folders indexed", { juce::String ((int) st.listed) }) : tr ("checking the index..."));
+    }
+    else if (st.busy && (st.rebuilding || st.listed > 0))
+        line = tr ("Indexing the Browser's folders for search: {0} folders...", { juce::String ((int) st.listed) });
+
+    if (line != statusLine)
+    {
+        const auto relayout = line.isEmpty() != statusLine.isEmpty();
+        statusLine = line;
+        if (relayout)
+            resized();
+        repaint();
+    }
+}
+
+void BrowserComponent::refreshSearchIndex (bool rebuild)
+{
+    if (! roots.isEmpty())
+        searcher->service->refresh (toPaths (roots), rebuild);
+    ui::postHint ({ rebuild ? tr ("Rebuilding the Browser's search index in the background...")
+                            : tr ("Checking the Browser's search index in the background (only changed folders are read again)..."),
+                    {}, false, false },
+                  4000);
+}
+
+juce::String BrowserComponent::searchIndexStatus() const
+{
+    const auto st = searcher->service->status();
+    if (! st.loaded)
+        return tr ("Search index: loading...");
+    auto text = tr ("Search index: {0} files in {1} folders", { juce::String ((juce::int64) st.files), juce::String ((juce::int64) st.folders) });
+    if (st.busy)
+        text << " (" << tr ("updating: {0} folders read", { juce::String ((int) st.listed) }) << ")";
+    else if (st.checkedAt > 0)
+        text << " (" << tr ("checked at {0}", { juce::Time (st.checkedAt).formatted ("%H:%M") }) << ")";
+    return text;
+}
+
+void BrowserComponent::stopPreview()
+{
+    engine.previewFile ({});
+    if (strip != nullptr)
+        strip->stop();
+    tree->repaint();
+    results->repaint();
 }
 
 // --- keys --------------------------------------------------------------------------------------------
@@ -2481,7 +2659,8 @@ void BrowserComponent::step (int delta, bool load)
     if (count == 0)
         return;
 
-    // the next row in that direction (search results: every row; the tree: skipping folders)
+    // the next row in that direction, as in FL: Up / Down walk every row (folders too: Right opens one, Left closes
+    // it), previewing each sample; Shift+Up / Down (loading each file into the channel) skips the folders
     auto row = list.getSelectedRow();
     for (int guard = 0; guard < count; ++guard)
     {
@@ -2489,7 +2668,7 @@ void BrowserComponent::step (int delta, bool load)
         if (row < 0 || row >= count)
             return;
         list.select (row, false);
-        if (! list.selectedIsFolder())
+        if (! load || ! list.selectedIsFolder())
             break;
     }
 
@@ -2545,6 +2724,26 @@ juce::File BrowserComponent::draggedFile (const juce::DragAndDropTarget::SourceD
         return juce::File (text.fromFirstOccurrenceOf ("|", false, false));
 
     return {};
+}
+
+bool BrowserComponent::isGeneratorDrag (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    return details.description.toString().startsWith (juce::String (generatorDragDescription) + "|") && draggedPlugin().generator != nullptr;
+}
+
+bool BrowserComponent::isEffectDrag (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    return details.description.toString().startsWith (juce::String (effectDragDescription) + "|") && draggedPlugin().effect != nullptr;
+}
+
+std::optional<ChannelDef> BrowserComponent::draggedGenerator (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    return isGeneratorDrag (details) ? draggedPlugin().generator() : std::nullopt;
+}
+
+std::optional<EffectSlot> BrowserComponent::draggedEffect (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    return isEffectDrag (details) ? draggedPlugin().effect() : std::nullopt;
 }
 
 int BrowserComponent::draggedPattern (const juce::DragAndDropTarget::SourceDetails& details)
