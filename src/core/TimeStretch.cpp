@@ -423,6 +423,54 @@ std::shared_ptr<SampleData> stretchWith (const SampleData& in, double ratio, con
 }
 } // namespace stretchdetail
 
+struct VoicePitchShifter::Impl
+{
+    signalsmith::stretch::SignalsmithStretch<float> stretch { 162L }; // fixed seed: renders repeat exactly
+};
+
+VoicePitchShifter::VoicePitchShifter() = default;
+VoicePitchShifter::~VoicePitchShifter() = default;
+
+void VoicePitchShifter::allocate (double sampleRate, StretchMethod method)
+{
+    impl = std::make_unique<Impl>();
+    // real time (measured round 162): 100 ms blocks, overlap 4 — pitch exact to 0.05 cent down to 55 Hz, about 2 % of a
+    // core per voice and ~1 ms to prime a note (60 ms blocks missed low notes by 40 cents); drums: 80 ms
+    const auto block = method == StretchMethod::transients ? 0.08 : 0.1;
+    impl->stretch.configure (2, (int) std::lround (sampleRate * block), (int) std::lround (sampleRate * block / 4.0));
+    // one silent run sizes every internal buffer, so the audio thread's first note does not allocate
+    std::vector<float> silence ((std::size_t) std::max (maxPrimeLength(), 1024), 0.0f), out (256, 0.0f);
+    start (silence.data(), silence.data(), primeLength (1.5));
+    process (silence.data(), silence.data(), 85, out.data(), out.data() + 128, 128);
+}
+
+bool VoicePitchShifter::ready() const noexcept { return impl != nullptr; }
+
+int VoicePitchShifter::primeLength (double factor) const noexcept
+{
+    if (impl == nullptr)
+        return 0;
+    factor = std::clamp (factor, minFactor, maxFactor);
+    return impl->stretch.outputSeekLength ((float) (1.0 / factor)) + 1;
+}
+
+void VoicePitchShifter::start (const float* l, const float* r, int frames) noexcept
+{
+    if (impl == nullptr)
+        return;
+    const float* in[2] { l, r };
+    impl->stretch.outputSeek (in, frames);
+}
+
+void VoicePitchShifter::process (const float* inL, const float* inR, int inFrames, float* outL, float* outR, int outFrames) noexcept
+{
+    if (impl == nullptr)
+        return;
+    const float* in[2] { inL, inR };
+    float* out[2] { outL, outR };
+    impl->stretch.process (in, inFrames, out, outFrames);
+}
+
 StretchMethod stretchMethodForFlMode (int flMode) noexcept
 {
     switch (flMode)

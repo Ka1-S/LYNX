@@ -6,7 +6,10 @@
 
 #include "core/AudioCapture.h"
 #include "core/WaveAnalysis.h"
+#include "core/ValueMath.h"
 #include "engine/Text.h"
+#include "ui/HintBar.h"
+#include "ui/ValueControl.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
 #include "ui/Theme.h"
@@ -246,6 +249,21 @@ public:
             if (playing)
                 startPlayback();
         };
+        // the playback volume (round 162, issue #9): how loud the editor plays, without changing the audio (the
+        // Amp... tool changes the audio itself); remembered with the settings
+        volumeKnob.setRange (0.0, controls::maxUtilityVolume, 0.01);
+        volumeKnob.setDoubleClickReturnValue (true, 1.0);
+        volumeKnob.textFromValueFunction = [] (double v) { return ui::utilityVolumeText (v); };
+        volumeKnob.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("0123456789.").getDoubleValue() / 100.0; };
+        volumeKnob.setMouseClickGrabsKeyboardFocus (false);
+        volumeKnob.setWantsKeyboardFocus (false);
+        volumeKnob.setValue (engine.getEditorVolume(), juce::dontSendNotification);
+        volumeKnob.onValueChange = [this] {
+            engine.setEditorVolume (volumeKnob.getValue());
+            refreshVolumeKnob();
+        };
+        addAndMakeVisible (volumeKnob);
+        refreshVolumeKnob();
         setupText (viewButton, tr ("Spectrum"), tr ("Show the waveform or the spectrogram") + " (S)");
         viewButton.setClickingTogglesState (true);
         viewButton.setColour (juce::TextButton::buttonOnColourId, theme::colour::accent);
@@ -387,7 +405,8 @@ public:
         place (recordMenuButton, 18, 6);
         place (playButton, 30);
         place (stopButton, 30, 6);
-        place (loopButton, 54, 12);
+        place (loopButton, 54, 4);
+        place (volumeKnob, 26, 12);
         place (viewButton, 76, 6);
         place (snapButton, 28);
         place (fitButton, 28);
@@ -1601,7 +1620,7 @@ private:
         data->left = audio.channels[0];
         if (audio.numChannels() > 1)
             data->right = audio.channels[1];
-        engine.previewSample (data, loop, 1.0f);
+        engine.previewSample (data, loop, 1.0f, true); // (at the volume knob's level)
         playing = true;
         playFrom = from;
         playStartedMs = juce::Time::getMillisecondCounterHiRes();
@@ -1955,7 +1974,7 @@ private:
             c.name = name;
             c.instrument = InstrumentKind::audioClip;
             c.samplePath = path;
-            c.mixerTrack = s.nextFreeInsert();
+            c.mixerTrack = s.claimFreeInsert();
             s.channels.push_back (c);
             Clip clip;
             clip.kind = ClipKind::audio;
@@ -1986,7 +2005,7 @@ private:
             c.name = name;
             c.instrument = InstrumentKind::sampler;
             c.samplePath = path;
-            c.mixerTrack = s.nextFreeInsert();
+            c.mixerTrack = s.claimFreeInsert();
             s.channels.push_back (c);
             index = (int) s.channels.size() - 1;
         });
@@ -2238,7 +2257,16 @@ private:
         playButton { "play", Icon::play }, stopButton { "stop", Icon::stop }, snapButton { "snap", Icon::magnet }, fitButton { "fit", Icon::zoom },
         saveButton { "save", Icon::save };
     juce::TextButton loopButton, viewButton, sendButton;
+    juce::Slider volumeKnob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     juce::OwnedArray<juce::TextButton> quickButtons;
+
+    void refreshVolumeKnob()
+    {
+        volumeKnob.setValue (engine.getEditorVolume(), juce::dontSendNotification);
+        const auto text = tr ("Playback volume: {0} (the audio is not changed; Tools > Amp... changes it)", { ui::utilityVolumeText (engine.getEditorVolume()) });
+        volumeKnob.setTooltip (text);
+        ui::setHint (volumeKnob, text + "  " + tr ("[LMB] drag  [Wheel] step  [2xLMB] 100%  [RMB] type a value"), true);
+    }
 
 };
 

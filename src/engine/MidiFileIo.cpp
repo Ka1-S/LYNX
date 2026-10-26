@@ -122,7 +122,7 @@ std::optional<Song> loadSong (const juce::File& file, juce::String& error)
         ChannelDef c;
         c.name = parsed->names[t].empty() ? "MIDI " + std::to_string (t + 1) : parsed->names[t];
         c.instrument = InstrumentKind::synth;
-        c.mixerTrack = song.nextFreeInsert();
+        c.mixerTrack = song.claimFreeInsert();
         c.volume = 0.6f;
         song.channels.push_back (c);
 
