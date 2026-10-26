@@ -384,9 +384,16 @@ struct PatchWire
     float gain = 1.0f;        // audio: linear cable gain
     bool enabled = true;      // FL's disabled cable: ignored in the sum
     std::vector<float> curve; // control: value map over 0..1 (≥ 2 points; empty = straight)
+    // MIDI (round 162): "From LYNX" output pins: fromPort 0 = Notes (the channel's notes), patchMidiPortPin (N) = what
+    // reaches the Patcher on MIDI port N; a node's MIDI output (MIDI Out) = fromPort 0; a node's notes input = toPort 0;
+    // "To LYNX": toPort N = MIDI port N.
 
     bool operator== (const PatchWire&) const = default;
 };
+// The "From LYNX" pin of MIDI port N (0…255), and back (−1 = the Notes pin)
+constexpr int patchMidiPortPin (int port) noexcept { return 1 + port; }
+constexpr int patchPinMidiPort (int pin) noexcept { return pin - 1; }
+constexpr int patchMidiPorts = 256;
 
 // A parameter the Patcher publishes (FL's record 1100): automating the Patcher's parameter k moves this node parameter
 // (through `curve`, as a control cable). node −1 = an unused index.
@@ -408,6 +415,10 @@ struct PatcherDoc
     // "To LYNX" extra audio outputs (bus 1…): the mixer insert each one feeds (−1 = the k-th insert after the
     // channel's own); generator Patcher only
     std::vector<int> outputTracks;
+    // The I/O nodes' MIDI pins the user activated (FL's node menu › Events: Notes, MIDI port 0…255; round 162). A pin
+    // with a cable is always shown. fromNotesHidden: "Deactivate" on the Notes pin of "From LYNX".
+    std::vector<int> fromMidiPorts, toMidiPorts; // sorted port numbers
+    bool fromNotesHidden = false;
     // the Surface tab's controls and the Surface node's place on the Map (round 151)
     std::vector<SurfaceControl> surface;
     float surfaceX = 30.0f, surfaceY = 30.0f;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -594,5 +595,20 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
     }
 
     return graph;
+}
+
+int flPatcherMidiPinPort (const PatcherPort& pin)
+{
+    if (pin.kind != 1)
+        return -2;
+    if (pin.name == "Notes")
+        return -1;
+    for (const char* prefix : { "MIDI port ", "MIDI Port " })
+        if (pin.name.rfind (prefix, 0) == 0)
+        {
+            const auto n = std::atoi (pin.name.c_str() + 10);
+            return n >= 0 && n < 256 ? n : -2;
+        }
+    return pin.index >= 0 && pin.index < 256 ? pin.index : -2;
 }
 } // namespace lynx
