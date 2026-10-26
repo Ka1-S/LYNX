@@ -639,7 +639,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 for (auto db : lynx::meters::scaleMarks ((float) meters.getHeight(), textHeight + 1.0f))
                 {
                     const auto y = (float) meters.getBottom() - lynx::meters::scalePosition ((float) db) * (float) meters.getHeight();
-                    g.setColour (db == 0 ? colour::textSecondary : colour::textDisabled);
+                    g.setColour (db == 0 ? colour::textPrimary : colour::textSecondary);
                     g.fillRect (juce::Rectangle<float> (left, y - 0.5f, 2.0f, 1.0f));
                     const auto box = juce::Rectangle<float> (left + 2.0f, y - textHeight * 0.5f, (float) masterScaleWidth - 2.0f, textHeight)
                                          .withY (juce::jlimit ((float) meters.getY(), (float) meters.getBottom() - textHeight, y - textHeight * 0.5f));

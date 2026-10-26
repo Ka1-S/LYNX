@@ -45,5 +45,9 @@ the app), interpreted clean-room.
 
 Tests: tests/Transport162Tests.inc (quantize strength, notes and clips, Song-mode playhead, follow, stop, scale).
 
+Verification: [EXEC] build-local with the FL Data dir: 1752879 checks, 0 failures; Windows build OK; `--snapshot`
+shows the Follow buttons (Playlist, Piano Roll), the rack's pattern selector and the master dB scale (labels at
+textSecondary, 0 dB brighter).
+
 ## Where I stopped
-See the final section (updated when landing).
+Done and landed. Not done: dB numbers on the 60 px insert strips (no room without a narrower fader).
