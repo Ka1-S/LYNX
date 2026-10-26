@@ -2,13 +2,21 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <map>
 
 #include "core/Effects.h"
+#include "core/FlSynths.h"
+#include "core/MidiControls.h"
+#include "core/NativeEngines.h"
+#include "core/SoundFont.h"
 #include "core/Patcher.h"
 #include "engine/PluginHost.h"
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
 #include "ui/ChannelRackComponent.h"
+#include "ui/ControllerEditors.h"
+#include "ui/PluginPicker.h"
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 #include "ui/ToolWindow.h"
@@ -606,6 +614,7 @@ private:
     juce::Point<float> dragPoint, dragStart, dragOrigin;
     std::optional<juce::Point<float>> moved; // the node being dragged (committed on release)
     PatcherDoc shown;                        // what was last painted (to repaint on changes from elsewhere)
+    std::unique_ptr<juce::FileChooser> sampleChooser; // Add plugin › Sampler (choose file)...
 
     const PatcherDoc* currentDoc() const { return target.doc (engine.getSong()); }
 
@@ -735,16 +744,6 @@ private:
         return k;
     }
 
-    static std::vector<int> midiPorts (const PatcherDoc& d)
-    {
-        std::vector<int> ports;
-        for (const auto& w : d.wires)
-            if (w.kind == PatchWire::Kind::midi && w.to == patchToHost && std::find (ports.begin(), ports.end(), w.toPort) == ports.end())
-                ports.push_back (w.toPort);
-        std::sort (ports.begin(), ports.end());
-        return ports;
-    }
-
     std::vector<Pin> hostPins (const PatcherDoc& d, bool input) const
     {
         std::vector<Pin> pins;
@@ -769,8 +768,11 @@ private:
                 add (PatchWire::Kind::audio, 0, tr ("Audio input"));
                 add (PatchWire::Kind::audio, 1, tr ("Side-chain"));
             }
-            else
-                add (PatchWire::Kind::midi, 0, tr ("Notes")); // (a mixer slot has no notes to give)
+            if (patcher::fromNotesShown (d, target.channel)) // (a mixer slot has no notes of its own)
+                add (PatchWire::Kind::midi, 0, tr ("Notes"));
+            // what LYNX sends on MIDI port N (a MIDI Out on that port; FL's "MIDI port N" pins, round 162)
+            for (const auto port : patcher::shownFromMidiPorts (d))
+                add (PatchWire::Kind::midi, patchMidiPortPin (port), tr ("MIDI port {0}", { juce::String (port) }));
         }
         else
         {
@@ -781,13 +783,12 @@ private:
                 add (PatchWire::Kind::audio, k, track > 0 ? tr ("Insert {0}", { juce::String (track) }) : tr ("Output {0}", { juce::String (k + 1) }));
             }
             add (PatchWire::Kind::audio, extraOutputs (d) + 1, tr ("+ output"), true);
-            if (target.channel) // the notes out to the plugins on a MIDI port (FL's "MIDI port N")
-            {
-                const auto ports = midiPorts (d);
-                for (const auto port : ports)
-                    add (PatchWire::Kind::midi, port, tr ("MIDI port {0}", { juce::String (port) }));
+            // the notes out to the plugins on a MIDI port (FL's "MIDI port N")
+            const auto ports = patcher::shownToMidiPorts (d);
+            for (const auto port : ports)
+                add (PatchWire::Kind::midi, port, tr ("MIDI port {0}", { juce::String (port) }));
+            if (ports.empty() || ports.back() + 1 < patchMidiPorts)
                 add (PatchWire::Kind::midi, ports.empty() ? 1 : ports.back() + 1, tr ("+ MIDI port"), true);
-            }
         }
         return pins;
     }
@@ -813,6 +814,8 @@ private:
         };
         if (ports.midiIn)
             add (false, PatchWire::Kind::midi, 0, tr ("Notes"));
+        if (ports.midiOut) // a MIDI Out node's notes (round 162)
+            add (true, PatchWire::Kind::midi, 0, tr ("MIDI out"));
         for (int i = 0; i < ports.audioIns; ++i)
             add (false, PatchWire::Kind::audio, i, i == 0 ? tr ("In") : tr ("Side-chain"));
         const auto splitter = ! node.generator && node.effect.kind == EffectKind::frequencySplitter && node.busHeads.empty();
@@ -868,16 +871,14 @@ private:
     {
         const auto at = nodePosition (d, n);
         int rows = 1;
-        if (n == patchFromHost)
-            rows = target.channel ? 1 : 2;
-        else if (n == patchToHost)
-            rows = extraOutputs (d) + 2 + (target.channel ? (int) midiPorts (d).size() + 1 : 0);
+        if (n == patchFromHost || n == patchToHost)
+            rows = std::max (1, (int) hostPins (d, n == patchFromHost).size());
         else if (n == patchSurface)
             rows = std::max (1, d.surfaceOutputs());
         else
         {
             const auto ports = patcher::nodePorts (d.nodes[(std::size_t) n]);
-            rows = std::max ({ 1, ports.audioIns + (ports.midiIn ? 1 : 0), ports.audioOuts + ports.controlOuts });
+            rows = std::max ({ 1, ports.audioIns + (ports.midiIn ? 1 : 0), ports.audioOuts + ports.controlOuts + (ports.midiOut ? 1 : 0) });
         }
         return { at.x, at.y, nodeWidth, headerHeight + (float) rows * pinSpacing + 4.0f };
     }
@@ -1085,7 +1086,7 @@ private:
         w.to = pin->node;
         w.toPort = pin->port;
         edit ([w] (PatcherDoc& doc) {
-            if (w.to == patchToHost && w.toPort > (int) doc.outputTracks.size())
+            if (w.kind == PatchWire::Kind::audio && w.to == patchToHost && w.toPort > (int) doc.outputTracks.size())
                 doc.outputTracks.resize ((std::size_t) w.toPort, -1);
             patcher::connect (doc, w);
         });
@@ -1155,7 +1156,8 @@ private:
                 notes.kind = PatchWire::Kind::midi;
                 notes.to = n;
                 patcher::connect (d, notes);
-                if (std::none_of (d.wires.begin(), d.wires.end(), [] (const PatchWire& w) { return w.kind == PatchWire::Kind::audio && w.to == patchToHost; }))
+                if (patcher::nodePorts (node).audioOuts > 0
+                    && std::none_of (d.wires.begin(), d.wires.end(), [] (const PatchWire& w) { return w.kind == PatchWire::Kind::audio && w.to == patchToHost; }))
                 {
                     PatchWire out;
                     out.from = n;
@@ -1165,41 +1167,61 @@ private:
         });
     }
 
+    // FL's Patcher › Add plugin (round 162, issue #7): every generator and effect LYNX has, by FL's categories, in
+    // columns; "Open plugin picker..." and "More..." (the installed VST / VST3 / CLAP plugins) on each side.
     void showAddMenu (juce::Point<float> at)
     {
-        juce::PopupMenu effects, instruments, pluginEffects, pluginInstruments;
-        for (const auto kind : addableEffects())
-            if (kind != EffectKind::patcher)
-                effects.addItem (addableEffectName (kind), addableEffectAvailable (kind), false, [this, kind, at] {
-                    const auto fx = newAddableEffect (kind, engine.getSong().bpm);
-                    if (! fx)
-                        return;
-                    PatchNode n;
-                    n.effect = *fx;
-                    addNode (n, at);
-                });
-        for (const auto kind : { InstrumentKind::synth, InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap })
-            instruments.addItem (kind == InstrumentKind::synth ? tr ("Synth") : kind == InstrumentKind::kick ? tr ("Kick")
-                                 : kind == InstrumentKind::snare ? tr ("Snare") : kind == InstrumentKind::hat ? tr ("Hat") : tr ("Clap"),
-                                 [this, kind, at] {
-                                     PatchNode n;
-                                     n.generator = true;
-                                     n.channel.instrument = kind;
-                                     n.channel.name = effectNameOf (kind);
-                                     addNode (n, at);
-                                 });
+        struct Item
         {
-            // FL's own instrument engines (round 142)
-            juce::PopupMenu engines;
-            addFlEngineItems (engines, [this, at] (ChannelDef c) {
-                PatchNode n;
-                n.generator = true;
-                n.channel = c;
-                addNode (n, at);
-            });
-            instruments.addSeparator();
-            instruments.addSubMenu (tr ("FL engines"), engines);
-        }
+            juce::String name;
+            bool enabled = true;
+            std::function<void()> add;
+        };
+        std::map<juce::String, std::vector<Item>> generators, effects;
+        auto addChannel = [this, at] (ChannelDef c) {
+            PatchNode n;
+            n.generator = true;
+            n.channel = std::move (c);
+            addNode (n, at);
+        };
+        auto builtIn = [&] (const char* category, InstrumentKind kind, const juce::String& name, std::function<void (ChannelDef&)> setup = nullptr) {
+            generators[tr (category)].push_back ({ name, true, [addChannel, kind, name, setup] {
+                                                      ChannelDef c;
+                                                      c.instrument = kind;
+                                                      c.name = name.toStdString();
+                                                      if (setup)
+                                                          setup (c);
+                                                      addChannel (c);
+                                                  } });
+        };
+        // generators
+        builtIn ("Controller", InstrumentKind::controller, tr ("Envelope Controller"),
+                 [] (ChannelDef& c) { c.controllerState = writeEnvelopeController (defaultEnvelopeController()); });
+        builtIn ("Controller", InstrumentKind::controller, tr ("Keyboard Controller"), [] (ChannelDef& c) { c.controllerState = defaultKeyboardController(); });
+        for (const auto kind : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap })
+            builtIn ("Drum", kind, juce::String (effectNameOf (kind)));
+        builtIn ("MIDI", InstrumentKind::midiOut, "MIDI Out", [] (ChannelDef& c) { midictl::writeMidiOut (c.pluginState, midictl::MidiOutSettings {}); });
+        builtIn ("Misc", InstrumentKind::soundfont, "LYNX Soundfont", [] (ChannelDef& c) { c = sf::makeChannel(); });
+        builtIn ("Patcher", InstrumentKind::patcher, "Patcher");
+        builtIn ("Synth classic", InstrumentKind::synth, tr ("Synth"));
+        generators[tr ("Sampler")].push_back ({ tr ("Sampler (choose file)..."), true, [this, at] { chooseSampleNode (at); } });
+        for (const auto& e : natives::instrumentEngines())
+            generators[tr (engineCategory (e.kind))].push_back ({ flEngineName (e), natives::available (e, flStudioAccess()), [kind = e.kind, addChannel] {
+                                                                    if (auto c = natives::makeChannel (kind, flStudioAccess()))
+                                                                        addChannel (*c);
+                                                                } });
+        // effects
+        for (const auto kind : addableEffects())
+            effects[tr (effectCategory (kind))].push_back ({ addableEffectName (kind), addableEffectAvailable (kind), [this, kind, at] {
+                                                               const auto fx = newAddableEffect (kind, engine.getSong().bpm);
+                                                               if (! fx)
+                                                                   return;
+                                                               PatchNode n;
+                                                               n.effect = *fx;
+                                                               addNode (n, at);
+                                                           } });
+
+        juce::PopupMenu pluginEffects, pluginInstruments;
         addPluginItems (pluginEffects, engine, false, [this, at] (PluginRef ref) {
             PatchNode n;
             n.effect.kind = EffectKind::plugin;
@@ -1214,17 +1236,177 @@ private:
             n.channel.plugin = ref;
             addNode (n, at);
         }, this);
+
+        juce::PopupMenu add;
+        int rows = 0;
+        auto row = [&] {
+            if (++rows > 40)
+            {
+                add.addColumnBreak();
+                rows = 1;
+            }
+        };
+        auto side = [&] (const juce::String& title, bool instruments, std::map<juce::String, std::vector<Item>>& groups,
+                         const std::vector<const char*>& order, juce::PopupMenu& more) {
+            add.addSectionHeader (title);
+            row();
+            add.addItem (tr ("Open plugin picker..."), [this, at, instruments] { pickPlugin (instruments, at); });
+            row();
+            add.addSubMenu (tr ("More..."), more);
+            row();
+            for (const auto* category : order)
+            {
+                auto& items = groups[tr (category)];
+                if (items.empty())
+                    continue;
+                std::sort (items.begin(), items.end(), [] (const Item& x, const Item& y) { return x.name.compareNatural (y.name) < 0; });
+                if (rows > 36) // (a category starts its own column rather than break after its header)
+                {
+                    add.addColumnBreak();
+                    rows = 0;
+                }
+                add.addSectionHeader (tr (category));
+                row();
+                for (const auto& item : items)
+                {
+                    add.addItem (item.name, item.enabled, false, item.add);
+                    row();
+                }
+            }
+        };
+        side (tr ("Generators"), true, generators, { "Controller", "Drum", "MIDI", "Misc", "Patcher", "Sampler", "Synth classic", "Synth special" },
+              pluginInstruments);
+        add.addColumnBreak();
+        rows = 0;
+        side (tr ("Effects"), false, effects, { "Controller", "Delay reverb", "Distortion", "Dynamics", "Filter", "Flanger", "Misc", "Patcher" },
+              pluginEffects);
+
         juce::PopupMenu menu;
-        menu.addSubMenu (tr ("Add effect"), effects);
-        menu.addSubMenu (tr ("Add plugin effect (VST/VST3/CLAP)"), pluginEffects);
-        menu.addSubMenu (tr ("Add instrument"), instruments);
-        menu.addSubMenu (tr ("Add plugin instrument (VST/VST3/CLAP)"), pluginInstruments);
+        menu.addItem (tr ("Open plugin picker..."), [this, at] { pickPlugin (! target.channel ? false : true, at); });
+        menu.addSubMenu (tr ("Add plugin"), add);
         menu.addSeparator();
         menu.addItem (tr ("Fit to window"), [this] {
             fit();
             repaint();
         });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void pickPlugin (bool instruments, juce::Point<float> at)
+    {
+        juce::Component::SafePointer<PatcherEditor> safe (this);
+        showPluginPicker (engine, instruments, [safe, instruments, at] (PluginRef ref) {
+            if (safe == nullptr)
+                return;
+            PatchNode n;
+            n.generator = instruments;
+            if (instruments)
+            {
+                n.channel.instrument = InstrumentKind::plugin;
+                n.channel.name = ref.name;
+                n.channel.plugin = ref;
+            }
+            else
+            {
+                n.effect.kind = EffectKind::plugin;
+                n.effect.plugin = ref;
+            }
+            safe->addNode (n, at);
+        });
+    }
+
+    void chooseSampleNode (juce::Point<float> at)
+    {
+        sampleChooser = std::make_unique<juce::FileChooser> (tr ("Choose sample"), juce::File(), engine.getSampleLibrary().wildcard());
+        juce::Component::SafePointer<PatcherEditor> safe (this);
+        sampleChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe, at] (const juce::FileChooser& chooser) {
+            const auto file = chooser.getResult();
+            if (safe == nullptr || ! file.existsAsFile())
+                return;
+            if (safe->engine.getSampleLibrary().load (file.getFullPathName()) == nullptr)
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Sample"), tr ("Could not read {0}", { file.getFileName() }));
+                return;
+            }
+            PatchNode n;
+            n.generator = true;
+            n.channel.instrument = InstrumentKind::sampler;
+            n.channel.samplePath = file.getFullPathName().toStdString();
+            n.channel.name = file.getFileNameWithoutExtension().toStdString();
+            safe->addNode (n, at);
+        });
+    }
+
+    // FL's Fruity Keyboard Controller state (REA_rodada16 §1.4, version 3): each key's value rising from 0 to 1 over the
+    // keyboard, note-off value 0 with auto release (LYNX's own default)
+    static std::vector<std::uint8_t> defaultKeyboardController()
+    {
+        std::vector<std::uint8_t> s (553, 0);
+        const std::uint32_t version = 3;
+        std::memcpy (s.data(), &version, 4);
+        for (int k = 0; k < 132; ++k)
+        {
+            const auto v = (float) std::min (1.0, k / 127.0);
+            std::memcpy (s.data() + 12 + k * 4, &v, 4);
+        }
+        s[552] = 1;
+        return s;
+    }
+
+    // The FL Plugin picker's categories (FL Studio 2026, issue #7 screenshot): generators
+    static const char* engineCategory (InstrumentKind kind)
+    {
+        switch (kind)
+        {
+            case InstrumentKind::bassdrum: case InstrumentKind::drumaxx: case InstrumentKind::drumpad: case InstrumentKind::fruitkick:
+            case InstrumentKind::drumsynth:
+                return "Drum";
+            case InstrumentKind::boobass: case InstrumentKind::flkeys: case InstrumentKind::soundfont:
+                return "Misc";
+            case InstrumentKind::granulizer: case InstrumentKind::directwave: case InstrumentKind::sampler:
+                return "Sampler";
+            case InstrumentKind::beepmap: case InstrumentKind::harmor: case InstrumentKind::morphine: case InstrumentKind::ogun:
+            case InstrumentKind::autogun: case InstrumentKind::plucked: case InstrumentKind::sakura: case InstrumentKind::slayer:
+                return "Synth special";
+            default:
+                return "Synth classic";
+        }
+    }
+
+    // ...and effects
+    static const char* effectCategory (EffectKind kind)
+    {
+        switch (kind)
+        {
+            case EffectKind::formulaController: case EffectKind::peakController:
+                return "Controller";
+            case EffectKind::delay: case EffectKind::reverb: case EffectKind::epochVerb: case EffectKind::atrium: case EffectKind::foilPlate:
+            case EffectKind::nebula: case EffectKind::halo: case EffectKind::horizon: case EffectKind::echoform: case EffectKind::spiralEcho:
+            case EffectKind::reeverb2: case EffectKind::reeverb1: case EffectKind::fruityDelay2: case EffectKind::fruityDelay3:
+            case EffectKind::fruityDelayBank: case EffectKind::luxeVerb: case EffectKind::multibandDelay: case EffectKind::convolver:
+                return "Delay reverb";
+            case EffectKind::distortion: case EffectKind::lofi: case EffectKind::fruityWaveShaper: case EffectKind::fruitySoftClipper:
+            case EffectKind::fruityBloodOverdrive: case EffectKind::fruityFastDist: case EffectKind::hardcore: case EffectKind::distructor:
+            case EffectKind::ember:
+                return "Distortion";
+            case EffectKind::compressor: case EffectKind::limiter: case EffectKind::apexLimiter: case EffectKind::volumeGate:
+            case EffectKind::crestCompressor: case EffectKind::prismMultiband: case EffectKind::sentryGate: case EffectKind::fruityLimiter:
+            case EffectKind::fruityCompressor: case EffectKind::transientProcessor: case EffectKind::fruityMultiband: case EffectKind::maximus:
+            case EffectKind::glowLeveler: case EffectKind::hushDeEsser: case EffectKind::emphasizer: case EffectKind::squeeze:
+                return "Dynamics";
+            case EffectKind::eq: case EffectKind::parametricEq: case EffectKind::facetEq: case EffectKind::filter: case EffectKind::fruityFastLP:
+            case EffectKind::fruityFreeFilter: case EffectKind::fruityFilter: case EffectKind::equo: case EffectKind::lovePhilter:
+            case EffectKind::vocoder: case EffectKind::vocodex: case EffectKind::aether: case EffectKind::flLowLifter:
+                return "Filter";
+            case EffectKind::chorus: case EffectKind::fruityChorus: case EffectKind::hyperChorus: case EffectKind::vintageChorus:
+            case EffectKind::fruityFlangus: case EffectKind::fruityFlanger: case EffectKind::fruityPhaser: case EffectKind::vintagePhaser:
+            case EffectKind::orbit: case EffectKind::latticeMod:
+                return "Flanger";
+            case EffectKind::patcher:
+                return "Patcher";
+            default:
+                return "Misc";
+        }
     }
 
     static std::string effectNameOf (InstrumentKind kind)
@@ -1243,6 +1425,11 @@ private:
     {
         selectedNode = n;
         repaint();
+        if (n == patchFromHost || n == patchToHost)
+        {
+            showHostMenu (n == patchFromHost);
+            return;
+        }
         if (n < 0)
             return;
         const auto* d = currentDoc();
@@ -1262,6 +1449,125 @@ private:
             selectedNode = noNode;
             edit ([n] (PatcherDoc& doc) { patcher::removeNode (doc, n); });
         });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    // FL's I/O node menu (round 162, Patcher_x64 FUN_00839ab0 / FUN_0083ce50): Disconnect all, and per kind of pin
+    // (Events, Audio) Activate all / Deactivate all / Deactivate unused and every pin as a check item. A pin with a
+    // cable is always active; deactivating one removes its cables.
+    void showHostMenu (bool input)
+    {
+        const auto* d = currentDoc();
+        if (d == nullptr)
+            return;
+        const auto host = input ? patchFromHost : patchToHost;
+        auto touches = [host] (const PatchWire& w) { return w.from == host || w.to == host; };
+        juce::PopupMenu menu;
+        menu.addSectionHeader (input ? tr ("From LYNX") : tr ("To LYNX"));
+        menu.addItem (tr ("Disconnect all"), std::any_of (d->wires.begin(), d->wires.end(), touches), false, [this, touches] {
+            edit ([touches] (PatcherDoc& doc) { std::erase_if (doc.wires, touches); });
+        });
+
+        // Events: Notes (From LYNX, a generator Patcher), MIDI port 0…255
+        juce::PopupMenu events;
+        const auto shown = input ? patcher::shownFromMidiPorts (*d) : patcher::shownToMidiPorts (*d);
+        auto isMidiPin = [input] (const PatchWire& w, int pin) {
+            return w.kind == PatchWire::Kind::midi && (input ? w.from == patchFromHost && w.fromPort == pin : w.to == patchToHost && w.toPort == pin);
+        };
+        const auto channel = target.channel;
+        events.addItem (tr ("Activate all"), [this, input] {
+            edit ([input] (PatcherDoc& doc) {
+                auto& list = input ? doc.fromMidiPorts : doc.toMidiPorts;
+                list.resize (patchMidiPorts);
+                for (int p = 0; p < patchMidiPorts; ++p)
+                    list[(std::size_t) p] = p;
+                if (input)
+                    doc.fromNotesHidden = false;
+            });
+        });
+        events.addItem (tr ("Deactivate all"), [this, input] {
+            edit ([input] (PatcherDoc& doc) {
+                (input ? doc.fromMidiPorts : doc.toMidiPorts).clear();
+                std::erase_if (doc.wires, [&] (const PatchWire& w) {
+                    return w.kind == PatchWire::Kind::midi && (input ? w.from == patchFromHost : w.to == patchToHost);
+                });
+                if (input)
+                    doc.fromNotesHidden = true;
+            });
+        });
+        events.addItem (tr ("Deactivate unused"), [this, input] { edit ([input] (PatcherDoc& doc) { patcher::deactivateUnusedMidiPins (doc, input); }); });
+        events.addSeparator();
+        int rows = 4;
+        if (input && channel)
+        {
+            const auto notes = patcher::fromNotesShown (*d, true);
+            events.addItem (tr ("Notes"), true, notes, [this, notes, isMidiPin] {
+                edit ([notes, isMidiPin] (PatcherDoc& doc) {
+                    doc.fromNotesHidden = notes;
+                    if (notes)
+                        std::erase_if (doc.wires, [&] (const PatchWire& w) { return isMidiPin (w, 0); });
+                });
+            });
+            ++rows;
+        }
+        for (int port = 0; port < patchMidiPorts; ++port)
+        {
+            if (rows++ % 48 == 47) // FL's long list in columns
+                events.addColumnBreak();
+            const auto on = std::find (shown.begin(), shown.end(), port) != shown.end();
+            events.addItem (tr ("MIDI port {0}", { juce::String (port) }), true, on, [this, port, on, input, isMidiPin] {
+                edit ([port, on, input, isMidiPin] (PatcherDoc& doc) {
+                    auto& list = input ? doc.fromMidiPorts : doc.toMidiPorts;
+                    if (on)
+                    {
+                        std::erase (list, port);
+                        const auto pin = input ? patchMidiPortPin (port) : port;
+                        std::erase_if (doc.wires, [&] (const PatchWire& w) { return isMidiPin (w, pin); });
+                    }
+                    else if (std::find (list.begin(), list.end(), port) == list.end())
+                        list.insert (std::upper_bound (list.begin(), list.end(), port), port);
+                });
+            });
+        }
+        menu.addSubMenu (tr ("Events"), events);
+
+        // Audio: the I/O node's audio pins ("To LYNX": the main output and the extra outputs to other inserts)
+        juce::PopupMenu audio;
+        if (input)
+        {
+            if (! channel)
+            {
+                audio.addItem (tr ("Audio input"), false, true, nullptr);
+                audio.addItem (tr ("Side-chain"), false, true, nullptr);
+            }
+        }
+        else
+        {
+            const auto extras = extraOutputs (*d);
+            audio.addItem (tr ("Add one"), [this, extras] {
+                edit ([extras] (PatcherDoc& doc) { doc.outputTracks.resize ((std::size_t) extras + 1, -1); });
+            });
+            audio.addItem (tr ("Deactivate unused"), [this] {
+                edit ([] (PatcherDoc& doc) {
+                    // the extra outputs past the last one with a cable
+                    int last = 0;
+                    for (const auto& w : doc.wires)
+                        if (w.kind == PatchWire::Kind::audio && w.to == patchToHost)
+                            last = std::max (last, w.toPort);
+                    if ((int) doc.outputTracks.size() > last)
+                        doc.outputTracks.resize ((std::size_t) last);
+                });
+            });
+            audio.addSeparator();
+            audio.addItem (tr ("Audio output"), false, true, nullptr);
+            for (int k = 1; k <= extras; ++k)
+            {
+                const auto track = k <= (int) d->outputTracks.size() ? d->outputTracks[(std::size_t) k - 1] : -1;
+                audio.addItem (track > 0 ? tr ("Insert {0}", { juce::String (track) }) : tr ("Output {0}", { juce::String (k + 1) }), false, true, nullptr);
+            }
+        }
+        if (audio.getNumItems() > 0)
+            menu.addSubMenu (tr ("Audio"), audio);
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
@@ -1366,6 +1672,21 @@ private:
         if (! node.generator && node.effect.kind != EffectKind::plugin && node.effect.kind != EffectKind::patcher)
         {
             openToolWindow (std::make_unique<NodeParams> (engine, target, n), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        // a MIDI Out / Envelope Controller node: its own editor on the node's settings (round 162)
+        auto locate = [t = target, n] (Song& song) -> ChannelDef* {
+            auto* doc = t.doc (song);
+            return doc != nullptr && n < (int) doc->nodes.size() && doc->nodes[(std::size_t) n].generator ? &doc->nodes[(std::size_t) n].channel : nullptr;
+        };
+        if (node.generator && node.channel.instrument == InstrumentKind::midiOut)
+        {
+            openToolWindow (makeMidiOutEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (node.generator && node.channel.instrument == InstrumentKind::controller && ! parseKeyboardController (node.channel.controllerState))
+        {
+            openToolWindow (makeEnvelopeControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Patcher"),

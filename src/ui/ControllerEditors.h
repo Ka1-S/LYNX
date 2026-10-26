@@ -18,4 +18,6 @@ void closeAll();
 std::unique_ptr<juce::Component> makeEnvelopeControllerEditor (AudioEngine& engine, int channel);
 // The editor shown inside the channel settings window of a MIDI Out channel.
 std::unique_ptr<juce::Component> makeMidiOutEditor (AudioEngine& engine, int channel);
+// The same for a MIDI Out that is not a channel (a node inside a Patcher, round 162): `locate` finds it in a song.
+std::unique_ptr<juce::Component> makeMidiOutEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate);
 } // namespace lynx

@@ -80,4 +80,7 @@ struct PatcherGraph
 };
 
 std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state);
+// A MIDI pin's port (round 162, Patcher_x64 FUN_00952560 / FUN_0094fb20): FL names its pins "Notes" (−1) and
+// "MIDI port N" (or the port's own name, with N in the pin's bus field); −2 = not a MIDI port pin.
+int flPatcherMidiPinPort (const PatcherPort& pin);
 } // namespace lynx

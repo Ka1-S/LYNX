@@ -139,6 +139,21 @@ struct RackState
     std::vector<std::vector<int>> midiSources;  // [plugin channel] → MIDI Out channels
     std::vector<int> midiOutChannel;            // [channel] MIDI channel 0…15 of a MIDI Out, −1 = not one
     bool hasMidiRoutes = false;
+    // The same routes with the port and MIDI channel of each (round 162: Patchers take MIDI ports through their "From
+    // LYNX" MIDI port pins, and a generator Patcher sends on several ports / channels through MIDI Out nodes)
+    struct MidiRoute
+    {
+        int other = 0;        // [source] → the target channel; [target] → the source channel
+        int port = 0, midiChannel = 0;
+    };
+    std::vector<std::vector<MidiRoute>> midiRoutesOut; // [source channel] → targets
+    std::vector<std::vector<MidiRoute>> midiRoutesIn;  // [target channel] → sources
+    struct EffectMidiRoute
+    {
+        int track = 0, slot = 0, port = 0, midiChannel = 0;
+    };
+    std::vector<std::vector<EffectMidiRoute>> effectMidiRoutes; // [source channel] → mixer-slot Patchers on its port
+    bool hasEffectMidiRoutes = false;
     // FL's wrapper "Output port" (round 149): [plugin channel] → the plugin channels whose input port is its output port
     std::vector<std::vector<int>> midiOutTargets;
     bool hasMidiOutputs = false;
@@ -290,6 +305,7 @@ private:
     void processTrack (const RackState& state, int track, int n, MeterBank* meters) noexcept;
     void pullInputs (const RackState& state, int track, int n) noexcept;
     static void applyStereo (const MixerTrack& track, float* l, float* r, int n) noexcept;
+    void deliverToEffects (const RackState& state, const NoteEvent& e) noexcept; // (round 162)
     float* channelBuffer (int channel, int side) noexcept;
     float* trackScratch (int track, int side) noexcept;
     void runEffects (const RackState& state, int track, int n) noexcept;
