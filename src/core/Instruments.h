@@ -30,6 +30,10 @@ public:
     // hosted plugins see the channel; the others play it as a plain note.
     virtual void noteOnMidi (int key, float velocity, int /*midiChannel*/) noexcept { noteOn (key, velocity); }
     virtual void noteOffMidi (int key, int /*midiChannel*/) noexcept { noteOff (key); }
+    // what arrives on MIDI port `port` (a MIDI Out on that port): a plugin takes it as noteOnMidi; a Patcher sends it
+    // to the nodes cabled to its "MIDI port N" pin (round 162)
+    virtual void noteOnPort (int /*port*/, int key, float velocity, int midiChannel) noexcept { noteOnMidi (key, velocity, midiChannel); }
+    virtual void noteOffPort (int /*port*/, int key, int midiChannel) noexcept { noteOffMidi (key, midiChannel); }
     // A short MIDI message (program change, bank select…) for the next block. Only hosted plugins take it.
     virtual void midiMessage (const std::uint8_t* /*bytes*/, int /*size*/) noexcept {}
 
