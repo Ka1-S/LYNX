@@ -1,4 +1,6 @@
 #include "ui/PianoRollComponent.h"
+
+#include "core/TransportEdit.h"
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
 
@@ -40,6 +42,12 @@ const Pattern& currentPattern (const Song& s)
 Pattern& currentPattern (Song& s)
 {
     return s.patterns[(std::size_t) s.currentPattern];
+}
+
+// "\t" + the key map's shortcut of `id` for a menu item (empty when unbound or no key map is connected)
+juce::String keyText (const std::string& id)
+{
+    return PianoRollComponent::shortcutText ? PianoRollComponent::shortcutText (id) : juce::String();
 }
 
 struct NamedIntervals
@@ -144,7 +152,17 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     scaleSnapButton.setTooltip (tr ("Snap notes to the scale: new and moved notes, and incoming MIDI, land on the chosen scale"));
     scaleSnapButton.onClick = [this] { setScaleSnap (! scaleSnap); };
 
-    for (auto* b : { &ghostButton, &scaleSnapButton, &moreButton })
+    // Follow (FL: "Auto scrolling"): the view pages along with the playhead while the pattern plays
+    followButton.setOnColour (theme::colour::bg6);
+    followButton.setIconColourWhenOn (theme::colour::accent);
+    followButton.setFlat (true);
+    followButton.setClickingTogglesState (false);
+    followButton.setToggleState (EditorGlobals::get().isFollowing (true), juce::dontSendNotification);
+    followButton.setTooltip (tr ("Follow: the Piano Roll scrolls along with the playhead while this pattern plays; off, you can look around freely"));
+    ui::setQuickTip (followButton, tr ("Follow the playhead"));
+    followButton.onClick = [this] { runAction ("pianoRoll.follow"); };
+
+    for (auto* b : { &ghostButton, &scaleSnapButton, &moreButton, &followButton })
     {
         b->setWantsKeyboardFocus (false);
         b->setMouseClickGrabsKeyboardFocus (false);
@@ -370,6 +388,7 @@ void PianoRollComponent::resized()
     place (tools, tools.getIdealWidth (h));
     place (snapBox, 128);
     place (ghostButton, h);
+    place (followButton, h);
     place (slideButton, 54, true);
     place (colourButton, h, true);
     place (chordBox, 86, true);
@@ -2512,8 +2531,9 @@ void PianoRollComponent::showMoreMenu()
     menu.addItem (tr ("Join touching notes") + "\tCtrl+G", [this] { runOperation ([] (Pattern& p, const std::vector<int>& t) { noteedit::join (p, t); return std::vector<int> {}; }); });
     menu.addItem (tr ("Make legato") + "\tCtrl+L", [this] { runOperation ([] (Pattern& p, const std::vector<int>& t) { noteedit::legato (p, t); return t; }); });
     menu.addItem (tr ("Shrink to grid") + "\tShift+D", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::shrinkToGrid (p, t, grid); return t; }); });
-    menu.addItem (tr ("Quantise starts") + "\tShift+Q", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::quantize (p, t, grid); return t; }); });
-    menu.addItem (tr ("Quantise starts and lengths") + "\tCtrl+Q", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::quantizeFull (p, t, grid); return t; }); });
+    menu.addItem (tr ("Quantise starts") + keyText ("pianoRoll.quantizeStarts"), [this] { quantizeOperation (0); });
+    menu.addItem (tr ("Quantise starts 50% (halfway to the grid)") + keyText ("pianoRoll.quantizeHalf"), [this] { quantizeOperation (2); });
+    menu.addItem (tr ("Quantise starts and lengths") + keyText ("pianoRoll.quickQuantize"), [this] { quantizeOperation (1); });
     menu.addItem (tr ("Rotate left within the bar") + "\tCtrl+Shift+Left", [this, grid, bar] { runOperation ([grid, bar] (Pattern& p, const std::vector<int>& t) { noteedit::rotate (p, t, grid, bar, -1); return t; }); });
     menu.addItem (tr ("Rotate right within the bar") + "\tCtrl+Shift+Right", [this, grid, bar] { runOperation ([grid, bar] (Pattern& p, const std::vector<int>& t) { noteedit::rotate (p, t, grid, bar, 1); return t; }); });
     menu.addSeparator();
@@ -2571,8 +2591,9 @@ juce::PopupMenu PianoRollComponent::toolsMenu()
     menu.addItem (tr ("Quick legato") + "\tCtrl+L", [this] { runOperation ([] (Pattern& p, const std::vector<int>& t) { noteedit::legato (p, t); return t; }); });
     tool (NoteTool::articulate, "Alt+L");
     menu.addSeparator();
-    menu.addItem (tr ("Quick quantize") + "\tCtrl+Q", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::quantizeFull (p, t, grid); return t; }); });
-    menu.addItem (tr ("Quick quantize start times") + "\tShift+Q", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::quantize (p, t, grid); return t; }); });
+    menu.addItem (tr ("Quick quantize") + keyText ("pianoRoll.quickQuantize"), [this] { quantizeOperation (1); });
+    menu.addItem (tr ("Quick quantize start times") + keyText ("pianoRoll.quantizeStarts"), [this] { quantizeOperation (0); });
+    menu.addItem (tr ("Quick quantize 50% (halfway to the grid)") + keyText ("pianoRoll.quantizeHalf"), [this] { quantizeOperation (2); });
     tool (NoteTool::quantize, "Alt+Q");
     menu.addSeparator();
     menu.addItem (tr ("Quick chop") + "\tCtrl+U", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { return noteedit::chop (p, t, grid); }); });
@@ -2695,7 +2716,9 @@ void PianoRollComponent::centreOnPlayhead()
 {
     const auto& song = engine.getSong();
     const auto length = (double) juce::jmax<std::int64_t> (1, currentPattern (song).effectiveLength (song.beatsPerBar));
-    const auto tick = std::fmod (engine.getTransport().positionTicks.load(), length);
+    auto tick = transportedit::patternPlayhead (song, song.currentPattern, engine.getTransport().positionTicks.load());
+    if (tick < 0.0)
+        tick = std::fmod (engine.getTransport().positionTicks.load(), length);
     scrollTicks = juce::jmax (0.0, tick - gridArea().getWidth() / pixelsPerTick / 2.0);
     updateScrollBars();
     repaint();
@@ -2889,6 +2912,10 @@ bool PianoRollComponent::runAction (const std::string& id)
     else if (is ("pianoRoll.zoomAll")) zoomAll();
     else if (is ("pianoRoll.zoomSelection")) zoomToSelection();
     else if (is ("pianoRoll.centrePlayhead")) centreOnPlayhead();
+    else if (is ("pianoRoll.follow")) EditorGlobals::get().setFollowing (true, ! EditorGlobals::get().isFollowing (true));
+    else if (is ("pianoRoll.quantizeStarts")) quantizeOperation (0);
+    else if (is ("pianoRoll.quickQuantize")) quantizeOperation (1);
+    else if (is ("pianoRoll.quantizeHalf")) quantizeOperation (2);
     else if (is ("pianoRoll.colourSelected")) colourSelection (noteColour);
     else if (is ("pianoRoll.selectByColour"))
     {
@@ -3084,16 +3111,16 @@ void PianoRollComponent::duplicateSelection()
     sortNotes();
 }
 
-void PianoRollComponent::quantizeSelection()
+void PianoRollComponent::quantizeOperation (int kind)
 {
-    const auto target = selectionOrAll();
     const auto grid = gridTicks();
-
-    if (! target.empty())
-    {
-        editNotes ([&target, grid] (Pattern& p) { noteedit::quantize (p, target, grid); });
-        sortNotes();
-    }
+    runOperation ([grid, kind] (Pattern& p, const std::vector<int>& t) {
+        if (kind == 1)
+            noteedit::quantizeFull (p, t, grid);
+        else
+            transportedit::quantizeNoteStarts (p, t, grid, kind == 2 ? 0.5 : 1.0);
+        return t;
+    });
 }
 
 void PianoRollComponent::nudge (std::int64_t ticks, int keys)
@@ -3197,19 +3224,8 @@ bool PianoRollComponent::handleKey (const juce::KeyPress& key)
         return true;
     }
 
-    // quick note operations: one undo step each, on the selection (or all notes)
-    if (cmd && letter == 'Q')
-    {
-        runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::quantizeFull (p, t, grid); return t; });
-        return true;
-    }
-
-    if (shift && ! cmd && ! alt && letter == 'Q')
-    {
-        quantizeSelection();
-        return true;
-    }
-
+    // quick note operations: one undo step each, on the selection (or all notes). The quantize ones are key map
+    // actions (pianoRoll.quickQuantize / quantizeStarts / quantizeHalf) so they can be reassigned.
     if (cmd && letter == 'U')
     {
         runOperation ([grid] (Pattern& p, const std::vector<int>& t) { return noteedit::chop (p, t, grid); });
@@ -3389,6 +3405,7 @@ void PianoRollComponent::changeListenerCallback (juce::ChangeBroadcaster*)
             selection.clear();
     }
 
+    followButton.setToggleState (EditorGlobals::get().isFollowing (true), juce::dontSendNotification);
     refreshChannelBox();
     rebuildLaneBox();
     updateScrollBars();
@@ -3475,10 +3492,11 @@ void PianoRollComponent::timerCallback()
     auto& transport = engine.getTransport();
     auto tick = -1.0;
 
-    if (transport.playing.load() && isShowing() && engine.getSong().mode == PlayMode::pattern)
+    // the playhead shows while the edited pattern plays: Pattern mode, or a clip of it in Song mode (round 162)
+    if (transport.playing.load() && isShowing())
     {
         const auto& song = engine.getSong();
-        tick = std::fmod (transport.positionTicks.load(), (double) currentPattern (song).effectiveLength (song.beatsPerBar));
+        tick = transportedit::patternPlayhead (song, song.currentPattern, transport.positionTicks.load());
     }
 
     if (tick != playheadTick)
@@ -3490,7 +3508,20 @@ void PianoRollComponent::timerCallback()
 
         dirty (playheadTick);
         playheadTick = tick;
-        dirty (tick);
+
+        // Follow: a page further when the playhead leaves the view (off: the view stays where it is)
+        const auto grid = gridArea();
+        const auto newStart = transportedit::followViewStart (scrollTicks, grid.getWidth() / pixelsPerTick, tick, 20.0 / pixelsPerTick,
+                                                              20.0 / pixelsPerTick);
+
+        if (EditorGlobals::get().isFollowing (true) && tick >= 0.0 && newStart != scrollTicks && drag == Drag::none)
+        {
+            scrollTicks = newStart;
+            updateScrollBars();
+            repaint();
+        }
+        else
+            dirty (tick);
     }
 }
 } // namespace lynx
