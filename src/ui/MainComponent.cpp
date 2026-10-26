@@ -1,3 +1,4 @@
+#include "ui/ColourPicker.h"
 #include "ui/ProjectLoading.h"
 #include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
@@ -2034,22 +2035,10 @@ juce::PopupMenu MainComponent::makePatternMenu()
     const auto index = song.currentPattern;
     const auto& pattern = song.patterns[(std::size_t) index];
 
-    juce::PopupMenu colours;
-    colours.addItem (tr ("Automatic"), true, pattern.colour == 0,
-                     [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].colour = 0; }); });
-    colours.addSeparator();
-
-    for (auto c : lynxPalette())
-    {
-        juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-        juce::Graphics (swatch).fillAll (juce::Colour (c));
-        juce::PopupMenu::Item item;
-        item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
-        item.image = std::make_unique<juce::DrawableImage> (swatch);
-        item.isTicked = pattern.colour == c;
-        item.action = [this, index, c] { engine.editSong ([index, c] (Song& s) { s.patterns[(std::size_t) index].colour = c; }); };
-        colours.addItem (std::move (item));
-    }
+    auto colours = ui::colourMenu (pattern.colour, [this, index] (std::uint32_t c) {
+        if (index < (int) engine.getSong().patterns.size())
+            engine.editSong ([index, c] (Song& s) { s.patterns[(std::size_t) index].colour = c; });
+    }, juce::Rectangle<int> (juce::Desktop::getMousePosition().x, juce::Desktop::getMousePosition().y, 1, 1));
 
     juce::PopupMenu lengths;
     lengths.addItem (tr ("Automatic (from notes)"), true, pattern.lengthTicks == 0,

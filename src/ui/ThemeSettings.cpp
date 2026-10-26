@@ -359,8 +359,8 @@ public:
         dimSlider.onValueChange = [this] { edit ([v = (float) dimSlider.getValue() / 100.0f] (themes::Spec& s) { s.dim = v; }, false); };
         styleNote (imageName, {});
 
-        select (&accentWell);
         refresh();
+        select (&accentWell);
     }
 
     ~ThemePage() override
@@ -382,11 +382,12 @@ private:
         presetTitle.setBounds (row (24));
         {
             auto r = row (28);
-            presetBox.setBounds (r.removeFromLeft (juce::jmin (220, r.getWidth() / 3)));
+            presetBox.setBounds (r.removeFromLeft (juce::jmin (200, r.getWidth() / 3)));
             r.removeFromLeft (8);
+            const auto w = (r.getWidth() - 12) / 4;
             for (auto* b : { &importButton, &exportButton, &savePreset, &resetButton })
             {
-                b->setBounds (r.removeFromLeft (juce::jmin (100, (r.getWidth() - 12) / 4 + 3)));
+                b->setBounds (r.removeFromLeft (w));
                 r.removeFromLeft (4);
             }
         }

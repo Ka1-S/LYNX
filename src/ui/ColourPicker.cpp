@@ -362,8 +362,9 @@ juce::PopupMenu colourMenu (std::uint32_t current, std::function<void (std::uint
     {
         juce::Image swatch (juce::Image::ARGB, 16, 16, true);
         juce::Graphics (swatch).fillAll (juce::Colour (c));
-        juce::PopupMenu::Item item;
-        item.text = juce::String (themes::toHex (c));
+        // (an Item made with its text gets the ID JUCE's own addItem uses; a default-made one has ID 0 and JUCE never
+        // triggers it: the bug behind "Change color does nothing", issue #9)
+        juce::PopupMenu::Item item (juce::String (themes::toHex (c)));
         item.image = std::make_unique<juce::DrawableImage> (swatch);
         item.isTicked = current == c;
         item.action = [set, c] { set (c); };

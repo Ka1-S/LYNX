@@ -218,6 +218,9 @@ public:
     juce::Font getPopupMenuFont() override;
     void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator, int standardMenuItemHeight, int& idealWidth, int& idealHeight) override;
     int getPopupMenuBorderSize() override { return 4; }
+    // keeps a submenu from opening over its own multi-column parent menu (round 162d: JUCE then misses the click on
+    // the submenu's items — the mixer track menu's "Change color" did nothing, issue #9)
+    void preparePopupMenuWindow (juce::Component& newWindow) override;
     void drawMenuBarBackground (juce::Graphics&, int width, int height, bool isMouseOverBar, juce::MenuBarComponent&) override;
     void drawMenuBarItem (juce::Graphics&, int width, int height, int itemIndex, const juce::String& itemText, bool isMouseOverItem,
                           bool isMenuOpen, bool isMouseOverBar, juce::MenuBarComponent&) override;
