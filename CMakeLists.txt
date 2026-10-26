@@ -169,6 +169,7 @@ target_sources(lynx_core PRIVATE
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp
+    src/core/PluginPresets.cpp
     src/core/ParamHelp.cpp
     src/core/SearchQuery.cpp src/core/SearchIndex.cpp)
 
@@ -290,6 +291,7 @@ if(LYNX_BUILD_APP)
         src/ui/PlaylistComponent.cpp
         src/ui/MixerComponent.cpp
         src/ui/PluginWindow.cpp
+        src/ui/PluginPresetMenu.cpp
         src/ui/ProjectLoading.cpp
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp

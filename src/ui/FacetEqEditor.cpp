@@ -1,3 +1,4 @@
+#include "ui/SlotWatch.h"
 #include "ui/FacetEqEditor.h"
 
 #include <juce_dsp/juce_dsp.h>
@@ -1715,7 +1716,8 @@ class FacetEqWindow final : public juce::DocumentWindow
 {
 public:
     FacetEqWindow (AudioEngine& engine, int track, int slot, const juce::String& title)
-        : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
+        : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
+          gone (engine, track, slot, [this] { closeButtonPressed(); })
     {
         setUsingNativeTitleBar (true);
         setContentOwned (new FacetEqEditor (engine, track, slot, false), true);
@@ -1732,6 +1734,9 @@ public:
     }
 
     void closeButtonPressed() override;
+
+private:
+    ui::SlotGoneWatcher gone;
 };
 
 std::map<std::pair<int, int>, std::unique_ptr<FacetEqWindow>>& windows()

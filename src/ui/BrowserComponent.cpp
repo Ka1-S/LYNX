@@ -1,3 +1,4 @@
+#include "ui/PluginPresetMenu.h"
 #include "ui/BrowserComponent.h"
 #include "ui/UiTrace.h"
 
@@ -154,7 +155,7 @@ Icon iconFor (const juce::File& f, bool folder)
         return Icon::pianoRoll;
     if (f.hasFileExtension ("lynx;flp"))
         return Icon::project;
-    if (f.hasFileExtension ("fst;sf2;sf3"))
+    if (f.hasFileExtension ("fst;sf2;sf3;lynxpreset;fxp;fxb;vstpreset"))
         return Icon::preset;
     return Icon::file;
 }
@@ -173,6 +174,8 @@ juce::String rowHint (const juce::File& f, bool folder, bool expanded)
         return tr ("Project: [2xLMB] open it");
     if (f.hasFileExtension ("fst"))
         return tr ("Preset: [2xLMB] new channel with it (FL synth presets)  drag onto a mixer insert: effect preset");
+    if (f.hasFileExtension ("lynxpreset;fxp;fxb;vstpreset"))
+        return tr ("Plugin preset: [2xLMB] load it into its plugin (an open plugin window, or the selected channel's plugin)");
     if (f.hasFileExtension ("sf2;sf3"))
         return tr ("SoundFont: [LMB] preview its first preset  [2xLMB] new LYNX Soundfont channel (or into the selected one)  drag to the Channel Rack");
     return {};
@@ -2033,6 +2036,8 @@ void BrowserComponent::rebuildRoots()
     add (tr ("FL MIDI"), data.getChildFile ("Patches").getChildFile ("Scores"));
     add (tr ("3x Osc presets (FL)"), data.getChildFile ("Patches").getChildFile ("Channel presets").getChildFile ("3x Osc"));
     add (tr ("Synth presets (FL)"), data.getChildFile ("Patches").getChildFile ("Plugin presets").getChildFile ("Generators"));
+    pluginpresetui::presetsRoot().createDirectory(); // (the plugin window saves presets there; round 162d)
+    add (tr ("Plugin presets"), pluginpresetui::presetsRoot());
     add (tr ("Documents"), juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
     add (tr ("Music"), juce::File::getSpecialLocation (juce::File::userMusicDirectory));
     add (tr ("Desktop"), juce::File::getSpecialLocation (juce::File::userDesktopDirectory));
@@ -2557,6 +2562,14 @@ int BrowserComponent::draggedPattern (const juce::DragAndDropTarget::SourceDetai
 
 void BrowserComponent::openFile (const juce::File& file)
 {
+    // a hosted plugin's preset (round 162d, issue #8): into the plugin it belongs to
+    if (pluginpresetui::isPresetFile (file) && (! file.hasFileExtension ("lynxpreset") || pluginpresetui::readLynxPreset (file).has_value()))
+    {
+        juce::String message;
+        if (! pluginpresetui::applyFromBrowser (engine, file, message) && message.isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin preset"), message);
+        return;
+    }
     if (file.hasFileExtension ("sf2;sf3"))
     {
         if (! openSoundFontFile (engine, file))

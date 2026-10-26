@@ -830,4 +830,41 @@ void Vst2PluginFormat::createPluginInstance (const juce::PluginDescription& d, d
     instance->setRateAndBufferSizeDetails (sampleRate, blockSize);
     callback (std::move (instance), {});
 }
+namespace vst2
+{
+// (round 162d: the wrapper's .fxp / .fxb presets)
+std::optional<Info> info (juce::AudioPluginInstance& plugin)
+{
+    auto* vst = dynamic_cast<Vst2Instance*> (&plugin);
+    if (vst == nullptr)
+        return std::nullopt;
+    const auto* e = vst->effect;
+    return Info { e->uniqueId, e->version, e->numPrograms, e->numParams, (e->flags & abi::programChunks) != 0 };
+}
+
+bool getChunk (juce::AudioPluginInstance& plugin, std::vector<std::uint8_t>& out, bool program)
+{
+    auto* vst = dynamic_cast<Vst2Instance*> (&plugin);
+    if (vst == nullptr || (vst->effect->flags & abi::programChunks) == 0)
+        return false;
+    void* chunk = nullptr;
+    const auto size = vst->effect->dispatcher (vst->effect, abi::getChunk, program ? 1 : 0, 0, &chunk, 0.0f);
+    if (chunk == nullptr || size <= 0)
+        return false;
+    out.assign ((const std::uint8_t*) chunk, (const std::uint8_t*) chunk + size);
+    return true;
+}
+
+bool setChunk (juce::AudioPluginInstance& plugin, const std::vector<std::uint8_t>& data, bool program)
+{
+    auto* vst = dynamic_cast<Vst2Instance*> (&plugin);
+    if (vst == nullptr || (vst->effect->flags & abi::programChunks) == 0 || data.empty())
+        return false;
+    auto copy = data; // (plugins may keep the pointer until the call returns, never const)
+    vst->effect->dispatcher (vst->effect, abi::setChunk, program ? 1 : 0, (std::intptr_t) copy.size(), copy.data(), 0.0f);
+    vst->refreshParameters();
+    vst->updateHostDisplay();
+    return true;
+}
+} // namespace vst2
 } // namespace lynx
