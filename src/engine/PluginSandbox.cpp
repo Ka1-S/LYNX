@@ -541,7 +541,7 @@ private:
 // LYNX's stand-in for a sandboxed plugin's editor (inside LYNX's plugin window). The plugin's own window lives in the
 // child process: it is shown, owned by LYNX's plugin window, while this stand-in is on screen, and hidden when the stand-in
 // is not (the Wrapper settings tab, the window closed or the plugin removed; issues #8 / #9).
-class RemoteEditor final : public juce::AudioProcessorEditor
+class RemoteEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     RemoteEditor (juce::AudioProcessor& p, std::function<void (juce::int64)> show, std::function<void()> hide)
@@ -555,15 +555,18 @@ public:
         addAndMakeVisible (text);
         addAndMakeVisible (button);
         setSize (380, 96);
+        startTimerHz (4); // (a window shown, minimised or restored tells its children nothing: polled)
     }
 
     ~RemoteEditor() override
     {
+        stopTimer();
         if (shown)
             hideWindow();
     }
 
     void visibilityChanged() override { follow(); }
+    void timerCallback() override { follow(); }
     void parentHierarchyChanged() override { follow(); }
 
     void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg1); }
@@ -576,12 +579,9 @@ public:
     }
 
 private:
-    // the native window of LYNX's plugin window (HWND, X11 Window id), for the child's window to be owned by it
-    juce::int64 ownerHandle()
-    {
-        auto* top = getTopLevelComponent();
-        return top != nullptr && top->getPeer() != nullptr ? (juce::int64) (juce::pointer_sized_int) top->getWindowHandle() : 0;
-    }
+    // LYNX's main window (HWND, X11 Window id): the child's window is kept above it, not above every program. (Not the
+    // plugin window holding this stand-in: Windows destroys an owned window with its owner, even in another process.)
+    juce::int64 ownerHandle() { return (juce::int64) (juce::pointer_sized_int) mainWindowHandle(); }
 
     void follow()
     {
@@ -753,17 +753,16 @@ public:
         setIcon (logoImage());
     }
 
-    // Keeps the window above LYNX's plugin window (`owner`: its HWND / X11 Window id, from the other process) instead of
+    // Keeps the window above LYNX's main window (`owner`: its HWND / X11 Window id, from the other process) instead of
     // above every program: it was always on top, covering LYNX's Wrapper settings and other apps (issue #8). False when
-    // the platform can't (then it stays always on top, as before).
+    // the platform can't (then it stays always on top, as before). Windows: not done — an owner in another process
+    // attaches the two processes' input queues, so a plugin that hangs its window would freeze LYNX's too; there the
+    // window stays on top but is hidden whenever LYNX's stand-in is not on screen (Wrapper settings, minimised, closed).
     bool setOwner (juce::int64 owner)
     {
         if (owner == 0 || getWindowHandle() == nullptr)
             return false;
-       #if JUCE_WINDOWS
-        SetWindowLongPtrW ((HWND) getWindowHandle(), GWLP_HWNDPARENT, (LONG_PTR) owner);
-        return true;
-       #elif JUCE_LINUX
+       #if JUCE_LINUX
         // WM_TRANSIENT_FOR across processes (X11 / XWayland), through our own connection to the display
         using OpenDisplay = void* (*) (const char*);
         using SetTransient = int (*) (void*, unsigned long, unsigned long);

@@ -27,6 +27,8 @@
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
 #include "ui/PatcherEditor.h"
+#include "ui/PluginPresetMenu.h"
+#include "ui/PluginWindow.h"
 #include "ui/ClipProperties.h"
 #include "ui/NewProjectDialog.h"
 #include "ui/PluginMonitorWindow.h"
@@ -632,6 +634,22 @@ public:
             const auto i = args.indexOf ("--editortest");
             const auto only = i + 3 < args.size() && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
             runEditorTest (args[i + 1].unquoted(), args[i + 2].unquoted(), only);
+            return;
+        }
+
+        if (args.contains ("--plugwintest"))
+        {
+            // LYNX --plugwintest plugin report.txt ["name"] [seconds]: round 162d. Puts the plugin in a channel (an
+            // instrument) or on insert 1 (an effect) of an offline engine, opens its plugin window (wrapper header,
+            // presets), checks a preset round trip, keeps the window `seconds` on screen (default 15: time for xdotool /
+            // screenshots), then removes the plugin from the song and reports whether its window closed by itself.
+            const auto i = args.indexOf ("--plugwintest");
+            const auto only = i + 3 < args.size() && ! args[i + 3].startsWith ("--") && ! args[i + 3].containsOnly ("0123456789") ? args[i + 3].unquoted() : juce::String();
+            auto seconds = 15;
+            for (int k = i + 3; k < juce::jmin (args.size(), i + 5); ++k)
+                if (args[k].containsOnly ("0123456789"))
+                    seconds = args[k].getIntValue();
+            runPlugWinTest (args[i + 1].unquoted(), args[i + 2].unquoted(), only, seconds);
             return;
         }
 
@@ -1906,6 +1924,175 @@ private:
             }
         }
         test->start();
+    }
+
+    void runPlugWinTest (const juce::String& pluginPath, const juce::String& reportPath, const juce::String& only, int seconds)
+    {
+        struct Test final : juce::Timer
+        {
+            juce::String reportPath, report;
+            std::unique_ptr<lynx::AudioEngine> engine;
+            bool instrument = false;
+            int phase = 0, ticks = 0, seconds = 15;
+            juce::AudioPluginInstance* instance = nullptr;
+            std::function<void (bool)> done;
+
+            void step (const juce::String& line)
+            {
+                report << line << "\n";
+                juce::File (reportPath).replaceWithText (report);
+            }
+
+            juce::AudioPluginInstance* find()
+            {
+                if (instrument)
+                {
+                    if (auto* p = dynamic_cast<lynx::PluginInstrument*> (engine->getChannelInstrument (0).get()))
+                        return &p->getInstance();
+                }
+                else if (auto* p = dynamic_cast<lynx::PluginEffect*> (engine->getEffect (1, 0).get()))
+                    return &p->getInstance();
+                return nullptr;
+            }
+
+            void timerCallback() override
+            {
+                ++ticks;
+                if (phase == 0) // waiting for the engine to host the plugin
+                {
+                    instance = find();
+                    if (instance == nullptr)
+                    {
+                        if (ticks > 200)
+                        {
+                            step ("result=FAILED (not hosted)");
+                            stopTimer();
+                            done (false);
+                        }
+                        return;
+                    }
+                    step ("hosted=" + instance->getName() + " format=" + instance->getPluginDescription().pluginFormatName);
+                    step ("programs=" + juce::String (instance->getNumPrograms()));
+                    for (int p = 0; p < juce::jmin (5, instance->getNumPrograms()); ++p)
+                        step ("program" + juce::String (p) + "=" + instance->getProgramName (p));
+                    step ("save_formats=" + lynx::pluginpresetui::saveWildcard (*instance));
+
+                    // preset round trip: save, change the first parameter, load, compare
+                    if (auto* param = instance->getParameters().isEmpty() ? nullptr : instance->getParameters()[0])
+                    {
+                        const auto file = lynx::pluginpresetui::folderFor (instance->getName()).getChildFile ("plugwintest.lynxpreset");
+                        juce::String error;
+                        const auto before = param->getValue();
+                        const auto saved = lynx::pluginpresetui::save (*instance, file, "plugwintest", error);
+                        param->setValueNotifyingHost (before > 0.5f ? 0.1f : 0.9f);
+                        const auto changed = param->getValue();
+                        const auto loaded = saved && lynx::pluginpresetui::load (*instance, file, error);
+                        step ("preset_roundtrip saved=" + juce::String ((int) saved) + " loaded=" + juce::String ((int) loaded) + " param0 before="
+                              + juce::String (before, 4) + " changed=" + juce::String (changed, 4) + " after=" + juce::String (param->getValue(), 4)
+                              + (error.isNotEmpty() ? " error=" + error : juce::String()));
+                        for (const auto* ext : { "fxp", "fxb", "vstpreset" })
+                        {
+                            juce::String e2;
+                            const auto f2 = file.withFileExtension (ext);
+                            const auto ok2 = lynx::pluginpresetui::save (*instance, f2, "plugwintest", e2) && lynx::pluginpresetui::load (*instance, f2, e2);
+                            step (juce::String ("preset_") + ext + "=" + juce::String ((int) ok2) + (e2.isNotEmpty() ? " (" + e2 + ")" : juce::String()));
+                            f2.deleteFile();
+                        }
+                        step ("browser_lists=" + juce::String (lynx::pluginpresetui::userPresets (instance->getName()).size()));
+                    }
+
+                    std::shared_ptr<void> owner = instrument ? std::shared_ptr<void> (engine->getChannelInstrument (0))
+                                                             : std::shared_ptr<void> (engine->getEffect (1, 0));
+                    lynx::PluginWindows::open (owner, *instance, instance->getName(),
+                                               { engine.get(), [this] (lynx::Song& song) -> lynx::PluginRef* {
+                                                    if (instrument)
+                                                        return song.channels.empty() ? nullptr : &song.channels[0].plugin;
+                                                    return song.mixer.size() < 2 || song.mixer[1].effects.empty() ? nullptr : &song.mixer[1].effects[0].plugin;
+                                                }, instrument });
+                    owner.reset();
+                    step ("window_open=" + juce::String ((int) lynx::PluginWindows::isOpen (*instance)));
+                    phase = 1;
+                    ticks = 0;
+                    return;
+                }
+                if (phase == 1 && ticks >= seconds * 20) // remove the plugin from the song
+                {
+                    engine->editSong ([this] (lynx::Song& song) {
+                        if (instrument)
+                            song.channels.clear();
+                        else
+                            song.mixer[1].effects.clear();
+                    });
+                    step ("removed");
+                    phase = 2;
+                    ticks = 0;
+                    return;
+                }
+                if (phase == 2 && ticks >= 40)
+                {
+                    const auto open = lynx::PluginWindows::isOpen (*instance);
+                    step ("window_open_after_remove=" + juce::String ((int) open));
+                    step (open ? "result=FAILED" : "result=OK");
+                    stopTimer();
+                    lynx::PluginWindows::closeAll();
+                    done (! open);
+                }
+            }
+        };
+
+        auto* test = new Test();
+        test->reportPath = reportPath;
+        test->seconds = seconds;
+        test->done = [this, test] (bool ok) {
+            setApplicationReturnValue (ok ? 0 : 1);
+            juce::MessageManager::callAsync ([this, test] {
+                test->engine = nullptr;
+                delete test;
+                quit();
+            });
+        };
+        test->engine = std::make_unique<lynx::AudioEngine> (false);
+        auto& host = test->engine->getPluginHost();
+        test->step ("plugins_in_file=" + juce::String (host.addPluginFile (juce::File (pluginPath))));
+        std::optional<juce::PluginDescription> chosen;
+        for (const auto& type : host.getKnownPlugins().getTypes())
+            if ((juce::File (type.fileOrIdentifier).getFileName() == juce::File (pluginPath).getFileName() || type.fileOrIdentifier == pluginPath)
+                && (only.isEmpty() || type.name == only))
+            {
+                chosen = type;
+                break;
+            }
+        if (! chosen)
+        {
+            test->step ("result=FAILED (no plugin)");
+            test->done (false);
+            return;
+        }
+        test->instrument = chosen->isInstrument;
+        lynx::PluginRef ref;
+        ref.id = chosen->createIdentifierString().toStdString();
+        ref.name = chosen->name.toStdString();
+        test->engine->editSong ([&] (lynx::Song& song) {
+            if (test->instrument)
+            {
+                lynx::ChannelDef c;
+                c.name = ref.name;
+                c.instrument = lynx::InstrumentKind::plugin;
+                c.plugin = ref;
+                song.channels.push_back (c);
+            }
+            else
+            {
+                while (song.mixer.size() < 2)
+                    song.mixer.emplace_back();
+                lynx::EffectSlot slot;
+                slot.kind = lynx::EffectKind::plugin;
+                slot.plugin = ref;
+                song.mixer[1].effects.push_back (slot);
+            }
+        });
+        test->step ("plugin=" + chosen->name + " instrument=" + juce::String ((int) test->instrument));
+        test->startTimerHz (20);
     }
 
     void runEditorTest (const juce::String& pluginPath, const juce::String& reportPath, const juce::String& only)

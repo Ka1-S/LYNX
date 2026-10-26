@@ -24,6 +24,12 @@ juce::Component::SafePointer<juce::Component>& mainWindow()
 }
 } // namespace
 
+void* mainWindowHandle()
+{
+    auto* main = mainWindow().getComponent();
+    return main != nullptr && main->getPeer() != nullptr ? main->getWindowHandle() : nullptr;
+}
+
 void setMainWindowForOwnership (juce::Component* window)
 {
     mainWindow() = window;
