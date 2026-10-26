@@ -1393,11 +1393,29 @@ private:
             notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
             out.from = 0;
             ch.patcher.wires = { notes, out };
+            // round 162: the I/O nodes' MIDI pins and a MIDI Out node between them
+            lynx::PatchNode midiOutNode;
+            midiOutNode.generator = true;
+            midiOutNode.channel.instrument = lynx::InstrumentKind::midiOut;
+            lynx::midictl::writeMidiOut (midiOutNode.channel.pluginState, { 4, 0, 0, -1, -1 });
+            ch.patcher.nodes.push_back (midiOutNode);
+            lynx::PatchWire portIn, portOut;
+            portIn.kind = portOut.kind = lynx::PatchWire::Kind::midi;
+            portIn.fromPort = lynx::patchMidiPortPin (7), portIn.to = 1;
+            portOut.from = 1, portOut.to = lynx::patchToHost, portOut.toPort = 9;
+            ch.patcher.wires.push_back (portIn);
+            ch.patcher.wires.push_back (portOut);
+            ch.patcher.fromMidiPorts = { 2, 7 };
+            ch.patcher.toMidiPorts = { 9, 11 };
+            ch.patcher.fromNotesHidden = true;
             song.channels.push_back (ch);
             const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
             patcherOk = back && back->mixer.size() >= 2 && back->mixer[1].effects.size() == 1
                         && back->mixer[1].effects[0].kind == lynx::EffectKind::patcher && back->mixer[1].effects[0].patcher == slot.patcher
-                        && back->channels.back().instrument == lynx::InstrumentKind::patcher && back->channels.back().patcher.nodes.size() == 1
+                        && back->channels.back().instrument == lynx::InstrumentKind::patcher && back->channels.back().patcher.nodes.size() == 2
+                        && back->channels.back().patcher.fromMidiPorts == ch.patcher.fromMidiPorts
+                        && back->channels.back().patcher.toMidiPorts == ch.patcher.toMidiPorts && back->channels.back().patcher.fromNotesHidden
+                        && back->channels.back().patcher.nodes[1].channel.pluginState == midiOutNode.channel.pluginState
                         && back->channels.back().patcher.nodes[0].generator
                         && back->channels.back().patcher.nodes[0].channel.instrument == lynx::InstrumentKind::synth
                         && back->channels.back().patcher.wires == ch.patcher.wires;
@@ -3915,12 +3933,30 @@ private:
                 synth.x = 220.0f;
                 chorus.effect = lynx::makeEffectSlot (lynx::EffectKind::chorus);
                 chorus.x = 420.0f;
-                ch.patcher.nodes = { synth, chorus };
-                lynx::PatchWire notes, a, b;
+                // round 162: a MIDI Out node between the "MIDI port 5" pin and "To LYNX" MIDI port 3, an Envelope Controller
+                // on the notes moving the chorus
+                lynx::PatchNode midiOut, envelope;
+                midiOut.generator = envelope.generator = true;
+                midiOut.channel.instrument = lynx::InstrumentKind::midiOut;
+                midiOut.channel.name = "MIDI Out";
+                lynx::midictl::writeMidiOut (midiOut.channel.pluginState, { 3, 0, 0, -1, -1 });
+                midiOut.x = 220.0f, midiOut.y = 160.0f;
+                envelope.channel.instrument = lynx::InstrumentKind::controller;
+                envelope.channel.name = "Envelope Controller";
+                envelope.channel.controllerState = lynx::writeEnvelopeController (lynx::defaultEnvelopeController());
+                envelope.x = 220.0f, envelope.y = 260.0f;
+                ch.patcher.nodes = { synth, chorus, midiOut, envelope };
+                lynx::PatchWire notes, a, b, portIn, portOut, envNotes, envControl;
                 notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
                 a.from = 0, a.to = 1;
                 b.from = 1;
-                ch.patcher.wires = { notes, a, b };
+                portIn.kind = lynx::PatchWire::Kind::midi, portIn.fromPort = lynx::patchMidiPortPin (5), portIn.to = 2;
+                portOut.kind = lynx::PatchWire::Kind::midi, portOut.from = 2, portOut.to = lynx::patchToHost, portOut.toPort = 3;
+                envNotes.kind = lynx::PatchWire::Kind::midi, envNotes.to = 3;
+                envControl.kind = lynx::PatchWire::Kind::control, envControl.from = 3, envControl.to = 1, envControl.toPort = 0;
+                ch.patcher.wires = { notes, a, b, portIn, portOut, envNotes, envControl };
+                ch.patcher.fromMidiPorts = { 1, 5 };
+                ch.patcher.toMidiPorts = { 3 };
                 ch.patcher.outputX = 640.0f;
                 song.channels.push_back (ch);
                 offline.setSong (std::move (song));
@@ -3946,12 +3982,19 @@ private:
                         lynx::PatcherWindows::openSlot (offline, t, s);
                         shootOpen ("-insert" + juce::String (t) + "-slot" + juce::String (s) + ".png");
                         ++shots;
+                        if (shots == 1) // its menus (round 162)
+                            lynx::PatcherWindows::shootMenus (offline, false, t, s, [&] (const juce::Image& image, const juce::String& name) {
+                                savePng (image, prefix + "-menu-" + name + ".png");
+                            });
                     }
             for (int c = 0; c < (int) song.channels.size(); ++c)
                 if (song.channels[(std::size_t) c].instrument == lynx::InstrumentKind::patcher)
                 {
                     lynx::PatcherWindows::openChannel (offline, c);
                     shootOpen ("-channel" + juce::String (c) + ".png");
+                    lynx::PatcherWindows::shootMenus (offline, true, c, 0, [&] (const juce::Image& image, const juce::String& name) {
+                        savePng (image, prefix + "-channel" + juce::String (c) + "-menu-" + name + ".png");
+                    });
                 }
         }
     }

@@ -1171,6 +1171,20 @@ private:
     // columns; "Open plugin picker..." and "More..." (the installed VST / VST3 / CLAP plugins) on each side.
     void showAddMenu (juce::Point<float> at)
     {
+        juce::PopupMenu menu;
+        menu.addItem (tr ("Open plugin picker..."), [this, at] { pickPlugin (target.channel, at); });
+        menu.addSubMenu (tr ("Add plugin"), addPluginMenu (at));
+        menu.addSeparator();
+        menu.addItem (tr ("Fit to window"), [this] {
+            fit();
+            repaint();
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+public:
+    juce::PopupMenu addPluginMenu (juce::Point<float> at)
+    {
         struct Item
         {
             juce::String name;
@@ -1238,18 +1252,19 @@ private:
         }, this);
 
         juce::PopupMenu add;
-        int rows = 0;
-        auto row = [&] {
-            if (++rows > 40)
+        float rows = 0.0f; // (a section header is a bit taller than an item)
+        constexpr float columnRows = 33.0f;
+        auto row = [&] (float h = 1.0f) {
+            if ((rows += h) > columnRows)
             {
                 add.addColumnBreak();
-                rows = 1;
+                rows = h;
             }
         };
         auto side = [&] (const juce::String& title, bool instruments, std::map<juce::String, std::vector<Item>>& groups,
                          const std::vector<const char*>& order, juce::PopupMenu& more) {
             add.addSectionHeader (title);
-            row();
+            row (1.2f);
             add.addItem (tr ("Open plugin picker..."), [this, at, instruments] { pickPlugin (instruments, at); });
             row();
             add.addSubMenu (tr ("More..."), more);
@@ -1260,13 +1275,13 @@ private:
                 if (items.empty())
                     continue;
                 std::sort (items.begin(), items.end(), [] (const Item& x, const Item& y) { return x.name.compareNatural (y.name) < 0; });
-                if (rows > 36) // (a category starts its own column rather than break after its header)
+                if (rows + 1.2f + std::min (4.0f, (float) items.size()) > columnRows) // (a header never ends a column)
                 {
                     add.addColumnBreak();
-                    rows = 0;
+                    rows = 0.0f;
                 }
                 add.addSectionHeader (tr (category));
-                row();
+                row (1.2f);
                 for (const auto& item : items)
                 {
                     add.addItem (item.name, item.enabled, false, item.add);
@@ -1277,20 +1292,12 @@ private:
         side (tr ("Generators"), true, generators, { "Controller", "Drum", "MIDI", "Misc", "Patcher", "Sampler", "Synth classic", "Synth special" },
               pluginInstruments);
         add.addColumnBreak();
-        rows = 0;
+        rows = 0.0f;
         side (tr ("Effects"), false, effects, { "Controller", "Delay reverb", "Distortion", "Dynamics", "Filter", "Flanger", "Misc", "Patcher" },
               pluginEffects);
-
-        juce::PopupMenu menu;
-        menu.addItem (tr ("Open plugin picker..."), [this, at] { pickPlugin (! target.channel ? false : true, at); });
-        menu.addSubMenu (tr ("Add plugin"), add);
-        menu.addSeparator();
-        menu.addItem (tr ("Fit to window"), [this] {
-            fit();
-            repaint();
-        });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        return add;
     }
+private:
 
     void pickPlugin (bool instruments, juce::Point<float> at)
     {
@@ -1457,9 +1464,16 @@ private:
     // cable is always active; deactivating one removes its cables.
     void showHostMenu (bool input)
     {
+        if (currentDoc() != nullptr)
+            hostMenu (input).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+public:
+    juce::PopupMenu hostMenu (bool input, juce::PopupMenu* eventsOut = nullptr)
+    {
         const auto* d = currentDoc();
         if (d == nullptr)
-            return;
+            return {};
         const auto host = input ? patchFromHost : patchToHost;
         auto touches = [host] (const PatchWire& w) { return w.from == host || w.to == host; };
         juce::PopupMenu menu;
@@ -1512,7 +1526,7 @@ private:
         }
         for (int port = 0; port < patchMidiPorts; ++port)
         {
-            if (rows++ % 48 == 47) // FL's long list in columns
+            if (rows++ % 36 == 35) // FL's long list in columns
                 events.addColumnBreak();
             const auto on = std::find (shown.begin(), shown.end(), port) != shown.end();
             events.addItem (tr ("MIDI port {0}", { juce::String (port) }), true, on, [this, port, on, input, isMidiPin] {
@@ -1529,6 +1543,8 @@ private:
                 });
             });
         }
+        if (eventsOut != nullptr)
+            *eventsOut = events;
         menu.addSubMenu (tr ("Events"), events);
 
         // Audio: the I/O node's audio pins ("To LYNX": the main output and the extra outputs to other inserts)
@@ -1568,8 +1584,9 @@ private:
         }
         if (audio.getNumItems() > 0)
             menu.addSubMenu (tr ("Audio"), audio);
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        return menu;
     }
+private:
 
     void showWireMenu (int w)
     {
@@ -1684,11 +1701,13 @@ private:
             openToolWindow (makeMidiOutEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
+#if LYNX_EC_LOCATE
         if (node.generator && node.channel.instrument == InstrumentKind::controller && ! parseKeyboardController (node.channel.controllerState))
         {
             openToolWindow (makeEnvelopeControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
+#endif
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Patcher"),
                                                 node.effect.kind == EffectKind::plugin || node.channel.instrument == InstrumentKind::plugin
                                                     ? tr ("This plugin could not be loaded (it is not installed or has not been scanned).")
@@ -1824,6 +1843,30 @@ void closeChannel (int channel)
 {
     if (auto* w = findToolWindow (Target { true, channel, 0 }.key()))
         delete w;
+}
+
+void shootMenus (AudioEngine& engine, bool channel, int index, int slot, std::function<void (const juce::Image&, const juce::String&)> save)
+{
+    PatcherEditor editor (engine, Target { channel, index, slot });
+    juce::PopupMenu events;
+    std::vector<std::pair<juce::String, juce::PopupMenu>> menus;
+    menus.emplace_back ("add-plugin", editor.addPluginMenu ({ 100.0f, 100.0f }));
+    menus.emplace_back ("from-node", editor.hostMenu (true, &events));
+    menus.emplace_back ("from-events", events);
+    menus.emplace_back ("to-node", editor.hostMenu (false, &events));
+    menus.emplace_back ("to-events", events);
+    for (auto& [name, menu] : menus)
+    {
+        auto& desktop = juce::Desktop::getInstance();
+        std::vector<juce::Component*> before;
+        for (int k = 0; k < desktop.getNumComponents(); ++k)
+            before.push_back (desktop.getComponent (k));
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea ({ 20, 20, 1, 1 }));
+        for (int k = 0; k < desktop.getNumComponents(); ++k)
+            if (auto* c = desktop.getComponent (k); std::find (before.begin(), before.end(), c) == before.end() && c->getWidth() > 0)
+                save (c->createComponentSnapshot (c->getLocalBounds()), name);
+        juce::PopupMenu::dismissAllActiveMenus();
+    }
 }
 } // namespace PatcherWindows
 } // namespace lynx
