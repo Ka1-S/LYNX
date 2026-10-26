@@ -4741,3 +4741,16 @@ countries: br
 "Inside a Patcher: cable its \"MIDI out\" pin to an instrument or to a \"MIDI port\" pin of \"To LYNX\"; its notes go out on this MIDI channel." = "Dentro de um Patcher: ligue o pino \"Saída MIDI\" a um instrumento ou a um pino \"Porta MIDI\" de \"Para o LYNX\"; as notas saem neste canal MIDI."
 "Browse plugin database" = "Procurar no banco de plugins"
 "{0} (LYNX)" = "{0} (LYNX)"
+
+# --- Round 163c: sample pitch (audio clips follow the pitch, keep length, Pitch...)
+"The sample's pitch in semitones (0.5 = 50 cents). The Piano Roll's keys play it chromatically around its root note (Misc › Root note, C5 by default); right-click the channel › Pitch... for semitones + cents" = "O pitch do sample em semitons (0,5 = 50 cents). As teclas do Piano Roll tocam ele cromaticamente em volta da nota raiz (Misc › Nota raiz, C5 por padrão); clique direito no canal › Pitch... para semitons + cents"
+"Keep length (stretch engine)" = "Manter a duração (motor de stretch)"
+"On: the pitch, the fine tune and the keys change the pitch without changing the length, and \"Stretch\" changes the length without changing the pitch (like FL's Stretch modes). Off: resample, pitch and speed change together" = "Ligado: o pitch, o ajuste fino e as teclas mudam a afinação sem mudar a duração, e o \"Stretch\" muda a duração sem mudar a afinação (como os modos Stretch do FL). Desligado: resample, afinação e velocidade mudam juntas"
+"The audio channel's pitch in semitones (0.5 = 50 cents): every clip of this file follows it. With \"Keep length\" the length stays, else the speed changes like a tape" = "O pitch do canal de áudio em semitons (0,5 = 50 cents): todos os clipes deste arquivo seguem. Com \"Manter a duração\" a duração fica igual, senão a velocidade muda como numa fita"
+"On: the stretch and the pitch change separately (the stretch keeps the pitch, the pitch keeps the length). Off: resample, pitch and speed change together" = "Ligado: stretch e pitch mudam separados (o stretch mantém a afinação, o pitch mantém a duração). Desligado: resample, afinação e velocidade mudam juntas"
+"Pitch... (semitones, cents, keep length)" = "Pitch... (semitons, cents, manter duração)"
+"Transposes this audio clip's file (every clip of it follows)." = "Transpõe o arquivo deste clipe de áudio (todos os clipes dele seguem)."
+"Transposes the sample. The Piano Roll's keys still play it chromatically around its root note." = "Transpõe o sample. As teclas do Piano Roll continuam tocando ele cromaticamente em volta da nota raiz."
+"Semitones (-24 to +24)" = "Semitons (-24 a +24)"
+"Cents (-100 to +100)" = "Cents (-100 a +100)"
+"Off: resample, like a tape: higher is shorter, lower is longer." = "Desligado: resample, como uma fita: mais agudo fica mais curto, mais grave fica mais longo."

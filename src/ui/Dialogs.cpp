@@ -4,7 +4,9 @@
 
 #include <set>
 
+#include "core/ClipOps.h"
 #include "core/RackOps.h"
+#include "engine/AudioEngine.h"
 #include "engine/MidiFileIo.h"
 #include "ui/ColourPicker.h"
 #include "ui/I18n.h"
@@ -465,6 +467,83 @@ void showNameAndColourDialog (const juce::String& title, const juce::String& nam
 
                                  if (result == 1 && typed.isNotEmpty())
                                      onDone (typed, window->colour());
+                             }),
+                             true);
+    keepAboveMainWindow (*window);
+}
+
+namespace
+{
+class SamplePitchWindow final : public juce::AlertWindow
+{
+public:
+    SamplePitchWindow (float pitch, bool keepLength, bool audioClip)
+        : juce::AlertWindow (tr ("Pitch"),
+                             audioClip ? tr ("Transposes this audio clip's file (every clip of it follows).")
+                                       : tr ("Transposes the sample. The Piano Roll's keys still play it chromatically around its root note."),
+                             juce::MessageBoxIconType::NoIcon)
+    {
+        const auto semitones = (int) std::lround (pitch);
+        const auto cents = (int) std::lround ((pitch - (float) semitones) * 100.0f);
+        addTextEditor ("semitones", juce::String (semitones), tr ("Semitones (-24 to +24)"));
+        addTextEditor ("cents", juce::String (cents), tr ("Cents (-100 to +100)"));
+        keep.setButtonText (tr ("Keep length (stretch engine)"));
+        keep.setToggleState (keepLength, juce::dontSendNotification);
+        keep.setSize (340, 24);
+        addCustomComponent (&keep);
+        note.setText (tr ("Off: resample, like a tape: higher is shorter, lower is longer."), juce::dontSendNotification);
+        note.setFont (theme::font (theme::type::small));
+        note.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        note.setSize (340, 18);
+        addCustomComponent (&note);
+        addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        addButton (tr ("Reset"), 2);
+        addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        if (auto* editor = getTextEditor ("semitones"))
+            editor->selectAll();
+    }
+
+    // semitones + cents/100, clamped like the pitch knob
+    double pitch()
+    {
+        const auto number = [this] (const char* id) {
+            return getTextEditorContents (id).trim().replaceCharacter (',', '.').retainCharacters ("+-0123456789.").getDoubleValue();
+        };
+        return juce::jlimit (-24.0, 24.0, juce::jlimit (-24.0, 24.0, number ("semitones")) + juce::jlimit (-100.0, 100.0, number ("cents")) / 100.0);
+    }
+
+    bool keepLength() const { return keep.getToggleState(); }
+
+private:
+    juce::ToggleButton keep;
+    juce::Label note;
+};
+} // namespace
+
+std::unique_ptr<juce::AlertWindow> makeSamplePitchDialog (float pitch, bool keepLength, bool audioClip)
+{
+    return std::make_unique<SamplePitchWindow> (pitch, keepLength, audioClip);
+}
+
+void showSamplePitchDialog (AudioEngine& engine, int channel)
+{
+    const auto& channels = engine.getSong().channels;
+    if (channel < 0 || channel >= (int) channels.size())
+        return;
+    const auto& c = channels[(std::size_t) channel];
+    auto* window = new SamplePitchWindow (c.sampler.pitch, c.sampler.keepPitch, c.instrument == InstrumentKind::audioClip);
+    const auto path = juce::String::fromUTF8 (c.samplePath.c_str());
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([window, &engine, channel, path] (int result) {
+                                 if (result == 0)
+                                     return;
+                                 const auto pitch = result == 2 ? 0.0 : window->pitch();
+                                 const auto keep = window->keepLength();
+                                 const auto sample = path.isNotEmpty() ? engine.getSampleLibrary().load (path) : nullptr;
+                                 const auto frames = sample != nullptr ? (double) sample->frames() : 0.0;
+                                 const auto rate = sample != nullptr ? sample->sampleRate : 0.0;
+                                 engine.editSong ([channel, pitch, keep, frames, rate] (Song& s) {
+                                     clipops::setChannelPitch (s, channel, pitch, 0.0, keep, frames, rate);
+                                 });
                              }),
                              true);
     keepAboveMainWindow (*window);

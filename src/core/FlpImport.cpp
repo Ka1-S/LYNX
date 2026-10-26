@@ -841,6 +841,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (c.rootNote >= 0 && c.rootNote <= 127)
             def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - c.rootNote), -24.0f, 24.0f);
 
+        // an FL audio clip channel's header pitch and root note are not its time-stretch pitch: LYNX played its clips
+        // untransposed before round 163 made the channel pitch transpose clips, and keeps them so ([ASSUMPTION], not
+        // measured in FL; FL's stretch pitch is not read yet)
+        if (isAudioClip)
+            def.sampler.pitch = 0.0f;
+
         def.swingMix = std::clamp (c.swingMix / 128.0f, 0.0f, 1.0f);
         def.cutGroup = c.cutGroup;
         def.cutBy = c.cutBy;
