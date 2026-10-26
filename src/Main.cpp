@@ -67,6 +67,7 @@
 #include "core/PluginLayout.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
+#include "ui/ThemeSettings.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
 #include "ui/ToolWindow.h"
@@ -849,6 +850,7 @@ public:
 
         startupTrace.mark ("initialise (normal start)");
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::themeui::loadSaved(); // the user's theme (Options › Theme, round 162d)
         startupOptions = lynx::StartupOptions::load();
         lynx::registerFileTypes();
         startupTrace.mark ("options + file types");
@@ -3959,6 +3961,10 @@ private:
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        // LYNX_SNAPSHOT_THEME=file.lynxtheme: the pictures in that theme (round 162d)
+        if (const auto themeFile = juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_THEME", {}); themeFile.isNotEmpty())
+            if (const auto spec = lynx::themeui::loadFile (juce::File (themeFile)))
+                lynx::themeui::apply (*spec, false);
         {
             lynx::AudioEngine offline (false);
             lynx::MainComponent ui (offline, false); // default layout and keys, nothing saved
@@ -4250,6 +4256,7 @@ private:
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::info), "-settings-info.png");
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::files), "-settings-files.png");
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::general), "-settings-general.png");
+                saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::theme), "-settings-theme.png");
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::audio), "-settings-audio.png");
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::midi), "-settings-midi.png");
                 saveWindow (lynx::makePluginManagerPanel (offline, false), "-plugin-manager.png");

@@ -2,6 +2,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/ThemePalette.h"
+
 // LYNX design tokens: the single source of colours, type sizes, spacing and radii for the whole UI,
 // plus the LookAndFeel that draws every stock JUCE widget with them.
 //
@@ -15,61 +17,66 @@ namespace lynx::theme
 namespace colour
 {
 // backgrounds by elevation (0 = deepest)
-inline const juce::Colour bg0 { 0xff0e0f12 };   // editor canvases, insets, meter wells
-inline const juce::Colour bg1 { 0xff15161a };   // app background, menu bar, status bar
-inline const juce::Colour bg2 { 0xff1b1d22 };   // panels (browser, rack, mixer strips)
-inline const juce::Colour bg3 { 0xff23262c };   // raised surfaces: toolbar, headers, popups
-inline const juce::Colour bg4 { 0xff2c2f37 };   // controls at rest
-inline const juce::Colour bg5 { 0xff363a43 };   // controls hovered
-inline const juce::Colour bg6 { 0xff434852 };   // controls pressed / neutral "on"
+inline juce::Colour bg0 { 0xff0e0f12 };   // editor canvases, insets, meter wells
+inline juce::Colour bg1 { 0xff15161a };   // app background, menu bar, status bar
+inline juce::Colour bg2 { 0xff1b1d22 };   // panels (browser, rack, mixer strips)
+inline juce::Colour bg3 { 0xff23262c };   // raised surfaces: toolbar, headers, popups
+inline juce::Colour bg4 { 0xff2c2f37 };   // controls at rest
+inline juce::Colour bg5 { 0xff363a43 };   // controls hovered
+inline juce::Colour bg6 { 0xff434852 };   // controls pressed / neutral "on"
 
-inline const juce::Colour border { 0xff2a2d34 };       // hairlines between areas
-inline const juce::Colour borderStrong { 0xff3b3f48 }; // control outlines
+inline juce::Colour border { 0xff2a2d34 };       // hairlines between areas
+inline juce::Colour borderStrong { 0xff3b3f48 }; // control outlines
 
-inline const juce::Colour textPrimary { 0xffeceef2 };
-inline const juce::Colour textSecondary { 0xffa1a6b0 };
-inline const juce::Colour textDisabled { 0xff60656f };
+inline juce::Colour textPrimary { 0xffeceef2 };
+inline juce::Colour textSecondary { 0xffa1a6b0 };
+inline juce::Colour textDisabled { 0xff60656f };
 
 // the red accent
-inline const juce::Colour accent { 0xffe5383b };
-inline const juce::Colour accentHover { 0xfff2545a };
-inline const juce::Colour accentPressed { 0xffc12a30 };
-inline const juce::Colour accentMuted { 0xff5c1f24 };  // tinted backgrounds (armed, selected rows)
-inline const juce::Colour onAccent { 0xffffffff };     // text/icons drawn on the accent
+inline juce::Colour accent { 0xffe5383b };
+inline juce::Colour accentHover { 0xfff2545a };
+inline juce::Colour accentPressed { 0xffc12a30 };
+inline juce::Colour accentMuted { 0xff5c1f24 };  // tinted backgrounds (armed, selected rows)
+inline juce::Colour onAccent { 0xffffffff };     // text/icons drawn on the accent
 
 // semantic
-inline const juce::Colour selection { 0xffe5383b }; // = accent: selected notes/clips outline
-inline const juce::Colour selectionFill { 0x2ee5383b };               // selection rectangles
-inline const juce::Colour playhead { 0xffe5383b }; // = accent
-inline const juce::Colour record { 0xffff3b3f };
-inline const juce::Colour automation { 0xff4cc9c0 };                   // automation curves and clips
-inline const juce::Colour info { 0xff6ea8fe };                         // secondary values (pan, links)
-inline const juce::Colour ledOn { 0xff3ddc84 };                        // "active/unmuted" LEDs
-inline const juce::Colour ledOff { 0xff3a3e47 };
-inline const juce::Colour warning { 0xfff5b942 };                      // markers, missing items
-inline const juce::Colour meterLow { 0xff3ddc84 };
-inline const juce::Colour meterMid { 0xfff5c542 };
-inline const juce::Colour meterClip { 0xffff3b3f };
+inline juce::Colour selection { 0xffe5383b }; // = accent: selected notes/clips outline
+inline juce::Colour selectionFill { 0x2ee5383b };               // selection rectangles
+inline juce::Colour playhead { 0xffe5383b }; // = accent
+inline juce::Colour record { 0xffff3b3f };
+inline juce::Colour automation { 0xff4cc9c0 };                   // automation curves and clips
+inline juce::Colour info { 0xff6ea8fe };                         // secondary values (pan, links)
+inline juce::Colour ledOn { 0xff3ddc84 };                        // "active/unmuted" LEDs
+inline juce::Colour ledOff { 0xff3a3e47 };
+inline juce::Colour warning { 0xfff5b942 };                      // markers, missing items
+inline juce::Colour meterLow { 0xff3ddc84 };
+inline juce::Colour meterMid { 0xfff5c542 };
+inline juce::Colour meterClip { 0xffff3b3f };
 
 // step sequencer / editors
-inline const juce::Colour knobArc { 0xffc5c9d1 };     // rotary value arcs at rest (accent while touched)
-inline const juce::Colour knobTrack { 0xff444955 };   // the unlit part of a knob's ring (reads on every panel surface)
-inline const juce::Colour stepOff { 0xff2a2d34 };
-inline const juce::Colour stepOffAlt { 0xff33363f };   // every other group of 4 steps
-inline const juce::Colour stepOn { 0xffe5383b }; // = accent
-inline const juce::Colour stepNote { 0xffe8a3a6 };     // a step that only has a Piano Roll note
-inline const juce::Colour gridBar { 0xff3a3e47 };      // bar lines
-inline const juce::Colour gridBeat { 0xff262930 };     // beat lines
-inline const juce::Colour gridStep { 0xff1d1f24 };     // step lines
-inline const juce::Colour keyWhite { 0xffd9dbe0 };
-inline const juce::Colour keyBlack { 0xff17181c };
-inline const juce::Colour rowWhite { 0xff1c1e23 };     // Piano Roll rows of white keys
-inline const juce::Colour rowBlack { 0xff16171b };     // rows of black keys
-inline const juce::Colour noteSoft { 0xffb3545a };     // note colour at velocity 0
-inline const juce::Colour noteHard { 0xffff6b6e };     // note colour at velocity 1
-inline const juce::Colour noteMuted { 0xff4a4e57 };
-inline const juce::Colour audioClip { 0xff5a87b8 };
+inline juce::Colour knobArc { 0xffc5c9d1 };     // rotary value arcs at rest (accent while touched)
+inline juce::Colour knobTrack { 0xff444955 };   // the unlit part of a knob's ring (reads on every panel surface)
+inline juce::Colour stepOff { 0xff2a2d34 };
+inline juce::Colour stepOffAlt { 0xff33363f };   // every other group of 4 steps
+inline juce::Colour stepOn { 0xffe5383b }; // = accent
+inline juce::Colour stepNote { 0xffe8a3a6 };     // a step that only has a Piano Roll note
+inline juce::Colour gridBar { 0xff3a3e47 };      // bar lines
+inline juce::Colour gridBeat { 0xff262930 };     // beat lines
+inline juce::Colour gridStep { 0xff1d1f24 };     // step lines
+inline juce::Colour keyWhite { 0xffd9dbe0 };
+inline juce::Colour keyBlack { 0xff17181c };
+inline juce::Colour rowWhite { 0xff1c1e23 };     // Piano Roll rows of white keys
+inline juce::Colour rowBlack { 0xff16171b };     // rows of black keys
+inline juce::Colour noteSoft { 0xffb3545a };     // note colour at velocity 0
+inline juce::Colour noteHard { 0xffff6b6e };     // note colour at velocity 1
+inline juce::Colour noteMuted { 0xff4a4e57 };
+inline juce::Colour audioClip { 0xff5a87b8 };
 } // namespace colour
+
+// User themes (round 162d): the tokens above hold LYNX's built-in look until a theme replaces them (ui/ThemeSettings.h
+// applies one live). Code reads the tokens when it paints, so never copy one into a member or a static.
+void setPalette (const themes::Palette& palette); // the tokens only (ThemeSettings also refreshes the windows)
+themes::Palette currentPalette();
 
 // --- typography ----------------------------------------------------------------------------------
 namespace type
@@ -166,25 +173,28 @@ void fillRoundRect (juce::Graphics& g, juce::Rectangle<float> r, float corner, j
 void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, bool bipolar, juce::Colour arc, bool hover = false);
 
 // --- legacy names (kept so code written against the old palette keeps compiling) ---------------
-inline const juce::Colour window { 0xff15161a }; // = colour::bg1
-inline const juce::Colour panel { 0xff1b1d22 }; // = colour::bg2
-inline const juce::Colour toolbar { 0xff23262c }; // = colour::bg3
-inline const juce::Colour channelButton { 0xff2c2f37 }; // = colour::bg4
-inline const juce::Colour channelButtonSelected { 0xff434852 }; // = colour::bg6
-inline const juce::Colour knobBackground { 0xff0e0f12 }; // = colour::bg0
-inline const juce::Colour stepOn { 0xffe5383b }; // = colour::stepOn
-inline const juce::Colour stepOnOffGrid { 0xffe8a3a6 }; // = colour::stepNote
-inline const juce::Colour accentOrange { 0xffe5383b }; // = colour::accent
-inline const juce::Colour accentGreen { 0xff3ddc84 }; // = colour::ledOn
-inline const juce::Colour accentBlue { 0xff6ea8fe }; // = colour::info
-inline const juce::Colour playhead { 0xffe5383b }; // = colour::playhead
-inline const juce::Colour text { 0xffeceef2 }; // = colour::textPrimary
+inline juce::Colour window { 0xff15161a }; // = colour::bg1
+inline juce::Colour panel { 0xff1b1d22 }; // = colour::bg2
+inline juce::Colour toolbar { 0xff23262c }; // = colour::bg3
+inline juce::Colour channelButton { 0xff2c2f37 }; // = colour::bg4
+inline juce::Colour channelButtonSelected { 0xff434852 }; // = colour::bg6
+inline juce::Colour knobBackground { 0xff0e0f12 }; // = colour::bg0
+inline juce::Colour stepOn { 0xffe5383b }; // = colour::stepOn
+inline juce::Colour stepOnOffGrid { 0xffe8a3a6 }; // = colour::stepNote
+inline juce::Colour accentOrange { 0xffe5383b }; // = colour::accent
+inline juce::Colour accentGreen { 0xff3ddc84 }; // = colour::ledOn
+inline juce::Colour accentBlue { 0xff6ea8fe }; // = colour::info
+inline juce::Colour playhead { 0xffe5383b }; // = colour::playhead
+inline juce::Colour text { 0xffeceef2 }; // = colour::textPrimary
 
 // --- LookAndFeel ---------------------------------------------------------------------------------
 class LookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     LookAndFeel();
+
+    // re-reads the colour tokens into the stock widgets' colours (after a theme change)
+    void refreshColours();
 
     // property set on a Button / TabBarButton to draw one of lynx::Icon next to (or instead of) its text
     static constexpr const char* iconProperty = "lynxIcon";

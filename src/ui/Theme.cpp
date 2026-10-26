@@ -319,6 +319,35 @@ void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, float val
 }
 } // namespace
 
+void setPalette (const themes::Palette& p)
+{
+    auto c = [] (std::uint32_t argb) { return juce::Colour (argb); };
+    bg0 = c (p.bg0); bg1 = c (p.bg1); bg2 = c (p.bg2); bg3 = c (p.bg3); bg4 = c (p.bg4); bg5 = c (p.bg5); bg6 = c (p.bg6);
+    border = c (p.border); borderStrong = c (p.borderStrong);
+    textPrimary = c (p.textPrimary); textSecondary = c (p.textSecondary); textDisabled = c (p.textDisabled);
+    accent = c (p.accent); accentHover = c (p.accentHover); accentPressed = c (p.accentPressed); accentMuted = c (p.accentMuted);
+    onAccent = c (p.onAccent); selectionFill = c (p.selectionFill);
+    colour::selection = accent; colour::playhead = accent; colour::stepOn = accent;
+    knobArc = c (p.knobArc); knobTrack = c (p.knobTrack); colour::stepOff = c (p.stepOff); stepOffAlt = c (p.stepOffAlt); stepNote = c (p.stepNote);
+    gridBar = c (p.gridBar); gridBeat = c (p.gridBeat); gridStep = c (p.gridStep); keyBlack = c (p.keyBlack);
+    rowWhite = c (p.rowWhite); rowBlack = c (p.rowBlack);
+    noteSoft = c (p.noteSoft); noteHard = c (p.noteHard); noteMuted = c (p.noteMuted); ledOff = c (p.ledOff);
+
+    // the legacy names
+    theme::window = bg1; theme::panel = bg2; theme::toolbar = bg3; theme::channelButton = bg4; theme::channelButtonSelected = bg6;
+    theme::knobBackground = bg0; theme::stepOn = accent; theme::stepOnOffGrid = stepNote; theme::accentOrange = accent;
+    theme::playhead = accent; theme::text = textPrimary;
+}
+
+themes::Palette currentPalette()
+{
+    auto c = [] (juce::Colour x) { return x.getARGB(); };
+    return { c (bg0), c (bg1), c (bg2), c (bg3), c (bg4), c (bg5), c (bg6), c (border), c (borderStrong), c (textPrimary), c (textSecondary),
+             c (textDisabled), c (accent), c (accentHover), c (accentPressed), c (accentMuted), c (onAccent), c (selectionFill), c (knobArc),
+             c (knobTrack), c (colour::stepOff), c (stepOffAlt), c (stepNote), c (gridBar), c (gridBeat), c (gridStep), c (keyBlack), c (rowWhite),
+             c (rowBlack), c (noteSoft), c (noteHard), c (noteMuted), c (ledOff) };
+}
+
 LookAndFeel::LookAndFeel()
     : juce::LookAndFeel_V4 (juce::LookAndFeel_V4::ColourScheme { bg1, bg2, bg3, borderStrong, textPrimary, bg4, onAccent, accent, textPrimary })
 {
@@ -326,7 +355,12 @@ LookAndFeel::LookAndFeel()
    #if JUCE_WINDOWS
     setDefaultSansSerifTypefaceName ("Segoe UI");
    #endif
+    refreshColours();
+}
 
+void LookAndFeel::refreshColours()
+{
+    setColourScheme (juce::LookAndFeel_V4::ColourScheme { bg1, bg2, bg3, borderStrong, textPrimary, bg4, onAccent, accent, textPrimary });
     setColour (juce::ResizableWindow::backgroundColourId, bg1);
     setColour (juce::DocumentWindow::textColourId, textPrimary);
 

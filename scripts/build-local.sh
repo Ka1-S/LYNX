@@ -36,6 +36,8 @@ CORE="$CORE src/core/ProjectSafety.cpp"
 CORE="$CORE src/core/PluginSubstitutes.cpp"
 # settings pages, plugin manager and shortcut manager logic (round 82)
 CORE="$CORE src/core/Preferences.cpp"
+# user themes: the palette derived from an accent and a background (round 162d)
+CORE="$CORE src/core/ThemePalette.cpp"
 # layouts of the native plugin editors (round 93)
 CORE="$CORE src/core/PluginLayout.cpp src/core/StateParams.cpp"
 # spectral waveforms (band analysis, multi-resolution peak cache)

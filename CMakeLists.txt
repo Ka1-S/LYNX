@@ -50,6 +50,7 @@ add_library(lynx_core STATIC
     src/core/ProjectSafety.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
+    src/core/ThemePalette.cpp
     src/core/PluginLayout.cpp
     src/core/StateParams.cpp
     src/core/FlEffects.cpp
@@ -307,6 +308,8 @@ if(LYNX_BUILD_APP)
         src/ui/SoundFontEditor.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
+        src/ui/ThemeSettings.cpp
+        src/ui/ColourPicker.cpp
         src/ui/Icons.cpp
         src/ui/I18n.cpp
         src/ui/EditorTools.cpp)

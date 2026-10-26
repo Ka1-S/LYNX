@@ -1,3 +1,4 @@
+#include "ui/ColourPicker.h"
 #include "ui/MixerComponent.h"
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
@@ -1471,23 +1472,10 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
                                          });
                                  });
     });
-    {
-        juce::PopupMenu colours;
-        colours.addItem (tr ("Default"), true, song.mixer[(std::size_t) t].colour == 0,
-                         [this, t] { engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].colour = 0; }); });
-        for (auto colour : lynxPalette())
-        {
-            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-            juce::Graphics (swatch).fillAll (juce::Colour (colour));
-            juce::PopupMenu::Item item;
-            item.text = "#" + juce::String::toHexString ((juce::int64) (colour & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
-            item.image = std::make_unique<juce::DrawableImage> (swatch);
-            item.isTicked = song.mixer[(std::size_t) t].colour == colour;
-            item.action = [this, t, colour] { engine.editSong ([t, colour] (Song& s) { s.mixer[(std::size_t) t].colour = colour; }); };
-            colours.addItem (std::move (item));
-        }
-        menu.addSubMenu (tr ("Change color"), colours);
-    }
+    menu.addSubMenu (tr ("Change color"), ui::colourMenu (song.mixer[(std::size_t) t].colour, [this, t] (std::uint32_t colour) {
+                         if (t < (int) engine.getSong().mixer.size())
+                             engine.editSong ([t, colour] (Song& s) { s.mixer[(std::size_t) t].colour = colour; });
+                     }, juce::Rectangle<int> (juce::Desktop::getMousePosition().x, juce::Desktop::getMousePosition().y, 1, 1)));
     menu.addItem (tr ("Random color"), [this, t] {
         const auto& palette = lynxPalette();
         const auto colour = palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())];

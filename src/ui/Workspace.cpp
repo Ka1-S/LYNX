@@ -1,4 +1,5 @@
 #include "ui/Workspace.h"
+#include "ui/ThemeSettings.h"
 
 #include "engine/PluginHost.h"
 #include "ui/EditorTools.h"
@@ -824,7 +825,7 @@ void Workspace::resized()
 void Workspace::paint (juce::Graphics& g)
 {
     using namespace theme;
-    g.fillAll (colour::bg0);
+    themeui::paintWorkspaceBackdrop (g, getLocalBounds()); // the theme's colour and image (Options › Theme, round 162d)
 
     // an empty desktop says how to bring the panels back
     bool any = false;

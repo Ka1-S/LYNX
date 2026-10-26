@@ -1,3 +1,4 @@
+#include "ui/ColourPicker.h"
 #include "ui/ClipProperties.h"
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
@@ -2549,23 +2550,9 @@ juce::PopupMenu PlaylistComponent::buildTrackMenu (int track)
     ui::addItemHeader (menu, tr ("Playlist track"), ! info.name.empty() ? juce::String::fromUTF8 (info.name.c_str()) : tr ("Track {0}", { juce::String (track + 1) }),
                        info.colour != 0 ? juce::Colour (info.colour) : juce::Colour());
     menu.addItem (tr ("Rename and color..."), [this, track] { renameTrack (track); });
-    {
-        juce::PopupMenu colours;
-        colours.addItem (tr ("Default"), true, info.colour == 0, [this, track] { editTrack (track, [] (PlaylistTrack& t) { t.colour = 0; }); });
-        colours.addSeparator();
-        for (auto c : lynxPalette())
-        {
-            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-            juce::Graphics (swatch).fillAll (juce::Colour (c));
-            juce::PopupMenu::Item item;
-            item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
-            item.image = std::make_unique<juce::DrawableImage> (swatch);
-            item.isTicked = info.colour == c;
-            item.action = [this, track, c] { editTrack (track, [c] (PlaylistTrack& t) { t.colour = c; }); };
-            colours.addItem (std::move (item));
-        }
-        menu.addSubMenu (tr ("Change color"), colours);
-    }
+    menu.addSubMenu (tr ("Change color"), ui::colourMenu (info.colour, [this, track] (std::uint32_t colour) {
+                         editTrack (track, [colour] (PlaylistTrack& t) { t.colour = colour; });
+                     }, juce::Rectangle<int> (juce::Desktop::getMousePosition().x, juce::Desktop::getMousePosition().y, 1, 1)));
     menu.addItem (tr ("Random color"), [this, track] {
         const auto& palette = lynxPalette();
         const auto c = palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())];
@@ -2983,21 +2970,7 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
         };
         const auto current = clip.kind == ClipKind::pattern ? (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size() ? song.patterns[(std::size_t) clip.pattern].colour : 0u)
                                                             : (clip.channel >= 0 && clip.channel < (int) song.channels.size() ? song.channels[(std::size_t) clip.channel].colour : 0u);
-        juce::PopupMenu colours;
-        colours.addItem (tr ("Default"), true, current == 0, [setColour] { setColour (0); });
-        colours.addSeparator();
-        for (auto c : lynxPalette())
-        {
-            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-            juce::Graphics (swatch).fillAll (juce::Colour (c));
-            juce::PopupMenu::Item item;
-            item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
-            item.image = std::make_unique<juce::DrawableImage> (swatch);
-            item.isTicked = current == c;
-            item.action = [setColour, c] { setColour (c); };
-            colours.addItem (std::move (item));
-        }
-        menu.addSubMenu (tr ("Change color"), colours);
+        menu.addSubMenu (tr ("Change color"), ui::colourMenu (current, setColour, juce::Rectangle<int> (juce::Desktop::getMousePosition().x, juce::Desktop::getMousePosition().y, 1, 1)));
         menu.addItem (tr ("Random color"), [setColour] {
             const auto& palette = lynxPalette();
             setColour (palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())]);
