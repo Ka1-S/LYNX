@@ -68,6 +68,7 @@ void showMenu (AudioEngine& engine, int track, juce::Component* target, juce::Re
 //    feeds it (blue)
 class MixerStrips final : public juce::Component,
                           public ui::HintSource,
+                          public juce::DragAndDropTarget,
                           private juce::ChangeListener,
                           private juce::Timer
 {
@@ -89,6 +90,11 @@ public:
     int getSelectedTrack() const noexcept { return selected; }
     void selectTrack (int track);
     std::function<void (int)> onSelectionChanged;
+
+    // An effect dragged from the Browser's Plugin database onto a strip (round 162): it goes into that insert.
+    std::function<void (int, EffectSlot)> onEffectDropped;
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
 
     // Multi-selection (docs/WORKFLOW_FL.md P2, M1): Ctrl+click on a strip's header toggles it, Shift+click
     // selects a range; selected faders and pans move together. Always contains the selected track.
@@ -193,13 +199,14 @@ class EffectsPanel final : public juce::Component,
                            private juce::Timer
 {
 public:
-    // Effect presets (.fst) dragged from the Browser or Explorer: dropped on a slot they replace it,
-    // anywhere else they go into the first free slot.
+    // Effect presets (.fst) dragged from the Browser or Explorer, and effects dragged from the Browser's Plugin
+    // database (round 162): dropped on a slot they replace it, anywhere else they go into the first free slot.
     bool isInterestedInDragSource (const SourceDetails& details) override;
     void itemDropped (const SourceDetails& details) override;
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
     bool dropPreset (const juce::File& file, juce::Point<int> position);
+    bool dropEffect (EffectSlot fx, juce::Point<int> position);
 
     explicit EffectsPanel (AudioEngine& engine);
     ~EffectsPanel() override;
