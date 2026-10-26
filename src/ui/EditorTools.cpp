@@ -343,6 +343,19 @@ void EditorGlobals::setDefaultNoteLength (std::int64_t ticks)
     }
 }
 
+void EditorGlobals::setFollowing (bool pianoRoll, bool on, bool save)
+{
+    auto& flag = pianoRoll ? followPianoRoll : followPlaylist;
+
+    if (flag != on)
+    {
+        flag = on;
+        sendChangeMessage();
+        if (save && onOptionsChanged)
+            onOptionsChanged();
+    }
+}
+
 GlobalGridBox::GlobalGridBox() : SnapBox (false)
 {
     grid::fillGlobalBox (*this);

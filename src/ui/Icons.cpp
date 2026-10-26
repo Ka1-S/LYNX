@@ -529,6 +529,17 @@ Shape make (Icon icon)
             fi.addRoundedRectangle (13.0f, 13.5f, 3.0f, 5.5f, 1.0f);
             fi.addRoundedRectangle (17.5f, 9.0f, 3.0f, 10.0f, 1.0f);
             break;
+        case Icon::follow: // a playhead line with an arrow carrying it to the right
+        {
+            line (st, 7.5f, 4.5f, 7.5f, 19.5f);
+            juce::Path head;
+            head.addTriangle (4.5f, 3.5f, 10.5f, 3.5f, 7.5f, 7.0f);
+            fi.addPath (head);
+            line (st, 11.5f, 12.0f, 19.5f, 12.0f);
+            line (st, 16.5f, 9.0f, 19.5f, 12.0f);
+            line (st, 16.5f, 15.0f, 19.5f, 12.0f);
+            break;
+        }
         case Icon::tuningFork: // two prongs on a stem, with a weighted foot
         {
             juce::Path f;
