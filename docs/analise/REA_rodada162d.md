@@ -31,5 +31,20 @@ plugin windows + presets (items 3–5, REA_rodada162d-plugins.md); feature/look1
   the Theme page, embedded in every "Rename and color" dialog (mixer tracks, channels, patterns, playlist tracks) and
   as "Custom color..." in every "Change color" submenu (shared builder ui::colourMenu).
 
+- Root cause of "Change color does nothing" (#9): the swatch entries were juce::PopupMenu::Item built with the
+  default constructor, whose itemID is 0; PopupMenu only triggers items with itemID != 0, so clicking a swatch just
+  closed the menu ("Custom color..." used addItem and worked). Same bug in the channel rack, playlist track/clip and
+  pattern menus. ui::colourMenu now builds items with Item(String) (itemID -1). Verified on Linux (Xvfb): Insert 9 turns
+  green after picking the swatch.
+- Also: LookAndFeel::preparePopupMenuWindow moves a submenu window that would open on top of a visible (multi-column)
+  parent menu to its side, so the submenu no longer hides the parent's items.
+
+## 3-6. Plugin windows, presets, parameter menu / Last tweaked
+- See REA_rodada162d-plugins.md (removed plugin closes its window, Linux wrapper settings not covered, sandbox
+  window hides with the tab, plugin presets) and REA_rodada162d-params.md (Last tweaked readout in the hint bar,
+  gesture-less plugin parameters count as last tweaked).
+
 ## Where I stopped
-- (in progress)
+- All six items implemented; forks look162p / look162m merged into feature/look162 with origin/main.
+- Not done: parameter menu on controls without automation targets (sends, track EQ, stereo separation, master pitch,
+  LYNX instrument pages, Patcher rows); live test with a gesture-less third-party plugin.
