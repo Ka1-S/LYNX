@@ -35,8 +35,21 @@ bool synthFromDX10 (const std::vector<std::uint8_t>& state, SynthSettings& synth
 // becomes the synth's filter. `gain` receives the Master level (linear).
 bool synthFromSytrus (const std::vector<std::uint8_t>& state, double bpm, SynthSettings& synth, float& gain);
 
-// Fruity Envelope Controller (REA_rodada15 §10): 8 articulators; output k is articulator k, which
-// follows the channel's last note within its key range. Up to 64 points per envelope.
+// Fruity Envelope Controller (REA_rodada15 §10, REA_rodada162e-envelope.md): 8 articulators; output k is articulator k, which
+// follows the channel's last note within its key range. Each articulator = base + envelope + LFO, then the keyboard,
+// Mod X and Mod Y maps, then the note's velocity and random maps; bipolar articulators add (centred on 0.5),
+// unipolar ones multiply. Up to 64 points per curve.
+struct ControllerCurve
+{
+    int count = 0; // 0 = neutral (a map that changes nothing; an LFO amplitude of 1)
+    std::array<float, 64> time {}, level {}; // accumulated x (seconds / beats, or 0..1 for a map) and level 0..1
+    std::array<float, 64> tension {};        // curve from each point to the next (-1..1, as automation clips)
+    int sustain = -1;                         // LFO amplitude: point held while the key is down
+    bool operator== (const ControllerCurve&) const = default;
+};
+// Value of a curve at x (straight / bent segments, flat outside); `fallback` when it has no point.
+float controllerCurveAt (const ControllerCurve& c, double x, float fallback) noexcept;
+
 struct ControllerArticulator
 {
     bool bipolar = false, envOn = false, tempo = false; // tempo: beats (quarter notes) instead of seconds
@@ -45,15 +58,53 @@ struct ControllerArticulator
     int count = 0;
     std::array<float, 64> time {}, level {}; // accumulated time of each point and level 0..1
     std::array<float, 64> tension {};        // curve from each point to the next (-1..1, as automation clips; FL's: 0)
+    // envelope knobs (FL's ATT / DEC / SUS / REL, 0..256, 128 = as drawn; SUS 0 = as drawn) and decay point
+    std::array<int, 4> adsr { 128, 128, 0, 128 };
+    int decayPoint = -1;
+    // LFO (FL's TMLFO): a triangle bent by tension, skewed, pulse-width limited, times an amplitude curve
+    bool lfoOn = false, lfoTempo = false, lfoGlobal = false;
+    float lfoLevel = 0.5f;          // −1..1 (FL's LFO knob / 256)
+    int lfoSpeed = 40000;           // 0..65536: period 625 / (10001^(v/65536) − 1) seconds (beats with lfoTempo)
+    int lfoTension = 0, lfoSkew = 0, lfoPulseWidth = 0; // ±128 (pulse width ±112)
+    int lfoPhase = 0;               // start phase offset (2^32 = one cycle)
+    ControllerCurve lfoAmp;         // amplitude over time (empty = 1)
+    // maps: 0 keyboard (x = key / 120), 1 velocity, 2 Mod X, 3 Mod Y, 4 random (empty = neutral)
+    std::array<ControllerCurve, 5> maps {};
+    bool operator== (const ControllerArticulator&) const = default;
 };
-using EnvelopeControllerData = std::array<ControllerArticulator, 8>;
+enum ControllerMap { mapKeyboard = 0, mapVelocity, mapModX, mapModY, mapRandom };
+
+struct EnvelopeControllerData : std::array<ControllerArticulator, 8>
+{
+    float modX = 0.5f, modY = 0.5f; // the global Mod X / Mod Y knobs (0..1), added to each note's own
+    bool continuous = false;        // FL's flag bit 2: with no note the output follows base and the Mod X / Y maps
+};
 // Reads FL's state or the one LYNX writes (below).
 std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector<std::uint8_t>& state);
-// LYNX's own state of an Envelope Controller ("LYEC" + version 1 + the 8 articulators), what its editor saves; an
-// imported FL controller is converted to it on its first edit (FL's LFO and maps, which LYNX doesn't play, are dropped).
+// LYNX's own state of an Envelope Controller ("LYEC" + version 2: the 8 articulators with their LFOs and maps, the
+// global Mod X / Y and flags), what its editor saves; version 1 (envelopes only) still loads.
 std::vector<std::uint8_t> writeEnvelopeController (const EnvelopeControllerData& data);
 // A new controller: each output a simple attack / decay / sustain / release envelope on any key.
 EnvelopeControllerData defaultEnvelopeController();
+
+// The note an articulator follows (what FL's TriggerVoice stores): key, velocity 0..1, the note's own Mod X / Y
+// (0..1, 0.5 = none) and the random value drawn at the trigger (0..1).
+struct ControllerNote
+{
+    float key = 60.0f, velocity = 100.0f / 128.0f, modX = 0.5f, modY = 0.5f, random = 0.5f;
+};
+// FL's velocity-map input for a velocity 0..1 (REA_rodada162e-envelope.md: ln(1 + 10·Init.Vol) / ln(21.551182) · 127/128
+// with Init.Vol = (11^(1.28·v) − 1)/10, i.e. ≈ 0.9918·v).
+float controllerVelocityInput (float velocity) noexcept;
+// LFO: cycles per second (per beat with lfoTempo), the waveform (−1..1) at a phase in cycles, and the voice's
+// start phase (in cycles; the middle of the rising half, plus lfoPhase).
+double controllerLfoRate (const ControllerArticulator& a) noexcept;
+float controllerLfoWave (const ControllerArticulator& a, double phase) noexcept;
+double controllerLfoStartPhase (const ControllerArticulator& a) noexcept;
+// A map's contribution (bipolar: y − 0.5, added; unipolar: y, multiplied); `neutral` when the map is empty.
+float controllerMapValue (const ControllerArticulator& a, int map, float x) noexcept;
+// Combines a contribution into an articulator's value: bipolar adds, unipolar multiplies.
+inline float controllerCombine (const ControllerArticulator& a, float v, float part) noexcept { return a.bipolar ? v + part : v * part; }
 
 // Fruity Keyboard Controller (REA_rodada16 §1.4): value of each key (0..131) and the note-off value
 // (with auto release). Its smoothing (attack/release 0..256) has no known time scale and is left out.
@@ -125,6 +176,19 @@ double lovePhilterMapAt (const LovePhilterMap& map, double x) noexcept;
 // Value (0..1) of the articulator `sinceOn` after the trigger; `sinceRelease` < 0 = key still held.
 // Times in the articulator's unit (seconds, or beats with `tempo`).
 float controllerValue (const ControllerArticulator& a, double sinceOn, double sinceRelease) noexcept;
+// The full output (FL's NewTick, REA_rodada162e-envelope.md): base + envelope + LFO (`lfoPhase` in cycles), the keyboard and
+// Mod X / Y maps (inputs: key / 120, global knob + the note's offset), then the velocity and random maps; 0..1.
+// Times in the articulator's units (seconds, or beats with tempo / lfoTempo).
+float controllerValue (const ControllerArticulator& a, double sinceOn, double sinceRelease, double lfoPhase,
+                       const ControllerNote& note, float globalModX, float globalModY) noexcept;
+// With no note and the controller's continuous flag: base and the Mod X / Y maps at the global knobs.
+float controllerRestingValue (const ControllerArticulator& a, float globalModX, float globalModY) noexcept;
+// The envelope as the ATT / DEC / SUS / REL knobs shape it (FL: segment times up to the decay point × ATT/128, up to
+// the sustain point × DEC/128, after it × REL/128; SUS/128 raises the sustain level, the decay and release segments in
+// proportion); the curve itself stays as drawn in the editor.
+ControllerArticulator controllerWithKnobs (const ControllerArticulator& a) noexcept;
+// Whether an articulator's voice has nothing more to play after the release (envelope and LFO amplitude ended).
+bool controllerVoiceFinished (const ControllerArticulator& a, double sinceOn, double sinceRelease) noexcept;
 
 // Harmor (REA_rodada11 §4), rough approximation: each part (A/B) becomes a saw with the frequency
 // ratio, filter 1 (or 2) with the envelope, volume envelope, unison, mono/porta.

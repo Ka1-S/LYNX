@@ -70,10 +70,27 @@ Fruity Voltage Controller, VFX plugins, Visual plugins, X-Y / Control Surface as
 
 ## 3. Envelope Controller sections
 
-(round fork 162e-EC — see §3 below once merged)
+Done in the 162e fork (commit `16af6c5b`); the full REA write-up is `docs/analise/REA_rodada162e-envelope.md`.
+
+- **FL** [DECOMP `Fruity Envelope Controller`]: note on `FUN_008af660` (key = (cents+6000)/100, one voice per output,
+  last note wins, voice factor = velocity map × random map); tick `FUN_008afec0` (base + envelope × amount; LFO adds in
+  bipolar mode, multiplies by 1+2·lfo·amount in unipolar; keyboard / X / Y maps combined, clipped 0..1; with no voice
+  and *Continuous output*, the output is base with the X/Y maps); LFO class "MLFO": rate (10001^(speed/65536)−1)/625
+  cycles per second or per beat (`FUN_007de390`), shape `FUN_007de1d0`/`FUN_006223f0`/`FUN_00622620`, start phase
+  `FUN_007de6f0`; ADSR knobs `FUN_008ae740` (SUS as a level shift is [HYP]).
+- **LYNX**: `ControllerArticulator` gained the LFO (tempo, global, speed, tension, skew, pulse width, phase, amplitude
+  curve), the 5 maps (keyboard, velocity, Mod X, Mod Y, random), ADSR knobs and the decay point;
+  `EnvelopeControllerData` gained global Mod X/Y and continuous output; the state is version 2 (v1 and FL states still
+  load, all 22 factory presets import). The editor has FL's dropdown (Envelope / LFO / Keyboard / Velocity / Mod X /
+  Mod Y mapping / Random), Base/Env/LFO knobs, Bipolar, Continuous output, X/Y pad, key-range strip, ATT/DEC/SUS/REL
+  + Time in beats, and the LFO page with a wave preview. The same editor opens for Envelope Controller nodes inside a
+  Patcher. Tests: `tests/EnvController162Tests.inc`.
+- Not done: automating Mod X/Y from the rack, LFO flag bits 2–3, per-tick (LYNX: per-block) update.
 
 ## Where I stopped
 
 Batch 1 (Add plugin menu, MIDI port pins + routing + import, MIDI Out / controller nodes, `--patchershot` menu
-shots, tests `tests/Patcher162Tests.inc`) landing; the Envelope Controller sections (§3) come from the 162e fork and
-the Envelope Controller node editor inside a Patcher is switched on (`LYNX_EC_LOCATE`) once that lands.
+shots, tests `tests/Patcher162Tests.inc`) landed. Batch 2 = the Envelope Controller sections (§3) and the Envelope
+Controller node editor inside a Patcher. Open: "Browse plugin database" from the Patcher, FL's Layer / Dashboard /
+VFX / Visual / X-Y nodes, instrument editors of built-in engines inside a Patcher, MIDI output pins on plugin nodes,
+automating the EC's Mod X/Y, sample-accurate MIDI into mixer-slot Patchers.

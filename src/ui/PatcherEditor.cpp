@@ -1701,13 +1701,11 @@ private:
             openToolWindow (makeMidiOutEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
-#if LYNX_EC_LOCATE
         if (node.generator && node.channel.instrument == InstrumentKind::controller && ! parseKeyboardController (node.channel.controllerState))
         {
             openToolWindow (makeEnvelopeControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
-#endif
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Patcher"),
                                                 node.effect.kind == EffectKind::plugin || node.channel.instrument == InstrumentKind::plugin
                                                     ? tr ("This plugin could not be loaded (it is not installed or has not been scanned).")
