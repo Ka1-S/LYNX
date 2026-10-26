@@ -428,4 +428,77 @@ juce::String QuickTipWindow::getTipFor (juce::Component& c)
     return quickTipOf (*owner);
 }
 
+// --- last tweaked read-out (round 162d) -------------------------------------------------------------------------
+
+TweakReadout::TweakReadout()
+{
+    setRepaintsOnMouseActivity (true);
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setTooltip (tr ("Last tweaked parameter: click for its menu (automation clip, link to controller, events, value)"));
+    setHint (*this, tr ("Last tweaked parameter: [LMB] its menu (create automation clip, link to controller, edit events, init song with this position, value)"),
+             true, true);
+}
+
+void TweakReadout::setContent (const juce::String& newName, const juce::String& newValue)
+{
+    if (newName == name && newValue == value)
+        return;
+    if (newName == name && newValue != value)
+    {
+        changedMs = juce::Time::getMillisecondCounterHiRes();
+        startTimer (950);
+    }
+    name = newName;
+    value = newValue;
+    repaint();
+}
+
+void TweakReadout::paint (juce::Graphics& g)
+{
+    using namespace theme;
+    auto r = getLocalBounds().toFloat().reduced (0.0f, 1.0f);
+    const auto hover = isMouseOver();
+    fillRoundRect (g, r, radius::md, hover ? colour::bg4 : colour::bg1);
+    if (hover)
+    {
+        g.setColour (colour::borderStrong);
+        g.drawRoundedRectangle (r.reduced (0.5f), radius::md, 1.0f);
+    }
+    r = r.reduced (6.0f, 0.0f);
+    icons::draw (g, Icon::automate, r.removeFromLeft (16.0f).withSizeKeepingCentre (14.0f, 14.0f),
+                 name.isNotEmpty() ? colour::automation : colour::textDisabled);
+    r.removeFromLeft (5.0f);
+
+    if (name.isEmpty())
+    {
+        g.setFont (font (type::small));
+        g.setColour (colour::textDisabled);
+        g.drawFittedText (tr ("Last tweaked: none"), r.toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+        return;
+    }
+
+    const auto fresh = juce::Time::getMillisecondCounterHiRes() - changedMs < 900.0;
+    if (value.isNotEmpty())
+    {
+        const juce::Font valueFont (font (type::small, true));
+        const auto w = juce::jmin (r.getWidth() * 0.45f, juce::GlyphArrangement::getStringWidth (valueFont, value) + 14.0f);
+        const auto valueArea = r.removeFromRight (juce::jmax (36.0f, w)).reduced (0.0f, 3.0f);
+        g.setColour (fresh ? colour::accentMuted : colour::bg3);
+        g.fillRoundedRectangle (valueArea, radius::sm);
+        g.setColour (colour::textPrimary);
+        g.setFont (valueFont);
+        g.drawFittedText (value, valueArea.toNearestInt(), juce::Justification::centred, 1, 0.75f);
+        r.removeFromRight (6.0f);
+    }
+    g.setFont (font (type::small));
+    g.setColour (hover ? colour::textPrimary : colour::textSecondary);
+    g.drawFittedText (name, r.toNearestInt(), juce::Justification::centredLeft, 1, 0.75f);
+}
+
+void TweakReadout::mouseDown (const juce::MouseEvent&)
+{
+    if (onClick)
+        onClick();
+}
+
 } // namespace lynx::ui

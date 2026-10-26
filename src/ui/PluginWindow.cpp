@@ -6,6 +6,7 @@
 #include <map>
 
 #include "core/FlWrapper.h"
+#include "core/LastTweaked.h"
 #include "engine/PluginSandbox.h"
 #include "engine/Text.h"
 #include "platform/CrashGuard.h"
@@ -405,7 +406,7 @@ private:
     bool settings = false, laying = false;
 };
 
-class PluginWindow final : public juce::DocumentWindow, private juce::AudioProcessorListener
+class PluginWindow final : public juce::DocumentWindow, private juce::AudioProcessorListener, private juce::Timer
 {
 public:
     PluginWindow (std::shared_ptr<void> keepAlive, juce::AudioPluginInstance& p, const juce::String& title, PluginWindows::WrapperContext context)
@@ -433,6 +434,7 @@ public:
         keepAboveMainWindow (*this);
         crashguard::note (("editor shown: " + plugin.getName()).toStdString()); // (its OpenGL / GPU setup runs when shown)
         plugin.addListener (this); // the editor's gestures: Last tweaked, automation recording (REA round 143)
+        startTimerHz (10);         // its moves without gestures (round 162d)
     }
 
     // round 157a: the window that holds a third-party editor draws LYNX's few pixels with GDI, not Direct2D (JUCE 8's
@@ -458,6 +460,7 @@ public:
     ~PluginWindow() override
     {
         crashguard::note (("closing the editor of " + plugin.getName()).toStdString());
+        stopTimer();
         plugin.removeListener (this);
         // the UI must be destroyed before the plugin (which may die together with `owner`)
         clearContentComponent();
@@ -468,12 +471,32 @@ public:
     juce::AudioPluginInstance* key() const noexcept { return &plugin; }
 
 private:
-    void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+    // round 162d (issue #8): many plugins move their parameters without begin/end gestures, so their knobs never
+    // became "Last tweaked". A change made on the UI thread while this window is active or under the mouse, when it
+    // is the only parameter that moved since the last tick, counts as a tweak (core/LastTweaked.h; automation and
+    // links run on the audio thread, preset loads move many parameters at once).
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int index, float) override
+    {
+        if (juce::MessageManager::getInstanceWithoutCreating() != nullptr && juce::MessageManager::getInstance()->isThisTheMessageThread())
+            changes.changed (index);
+    }
+    void timerCallback() override
+    {
+        const auto mouse = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+        const auto active = isActiveWindow() || (isShowing() && getScreenBounds().contains (mouse));
+        if (const auto moved = changes.tick (active); moved >= 0 && PluginWindows::onGesture)
+        {
+            PluginWindows::onGesture (plugin, moved, true);
+            PluginWindows::onGesture (plugin, moved, false);
+        }
+    }
     void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override {}
     void audioProcessorParameterChangeGestureBegin (juce::AudioProcessor*, int index) override { gesture (index, true); }
     void audioProcessorParameterChangeGestureEnd (juce::AudioProcessor*, int index) override { gesture (index, false); }
     void gesture (int index, bool starting)
     {
+        if (juce::MessageManager::getInstanceWithoutCreating() != nullptr && juce::MessageManager::getInstance()->isThisTheMessageThread())
+            changes.gesture (index, starting);
         auto* p = &plugin;
         juce::MessageManager::callAsync ([p, index, starting] {
             if (PluginWindows::onGesture)
@@ -483,6 +506,7 @@ private:
 
     std::shared_ptr<void> owner;
     juce::AudioPluginInstance& plugin;
+    lasttweak::ChangeFilter changes;
 };
 
 } // namespace

@@ -388,7 +388,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &playButton, &stopButton,
                                                              &recordButton, &recordMenuButton, &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
                                                              &tempoDisplay, &patternBox, &newPatternButton, &patternMenuButton, &pluginPickerButton, &timeDisplay,
-                                                             &songPosition, &masterVolume, &masterPitch, &perfMeter, &output, &hintBar, &workspace, &midiLight })
+                                                             &songPosition, &masterVolume, &masterPitch, &perfMeter, &output, &hintBar, &tweakReadout, &workspace, &midiLight })
     {
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
@@ -437,6 +437,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::installSliderContract();
     // FL's Last tweaked and automation recording (REA round 143): every automatable control reports its moves
     ui::onTweak = [this] (const AutomationTarget& t) { engine.noteTweaked (t); };
+    // the toolbar's last-tweaked read-out opens the parameter's own menu (FL's Tools › Last tweaked; round 162d)
+    tweakReadout.onClick = [this] {
+        makeLastTweakedMenu (0).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tweakReadout));
+    };
     // FL's "Edit events in piano roll" (REA round 146): the channel's own parameter selects its channel
     onEditEventsInPianoRoll = [this] (const AutomationTarget& t) {
         const auto onChannel = t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan
@@ -647,7 +651,7 @@ void MainComponent::resized()
         const auto menu = row.withWidth (juce::jmin (menuWidth + 8, row.getWidth()));
         put (menuBar, menu);
         titleArea = {};
-        put (hintBar, row.withTrimmedLeft (menu.getWidth() + 12).withWidth (juce::jmin (900, row.getWidth() - menu.getWidth() - 12)).reduced (0, 1));
+        placeHintBar (row.withTrimmedLeft (menu.getWidth() + 12).withWidth (juce::jmin (900, row.getWidth() - menu.getWidth() - 12)).reduced (0, 1));
         fixedToolbarArea = bar;
     }
     else
@@ -658,7 +662,7 @@ void MainComponent::resized()
         titleArea = column.withY (row1).withHeight (h).withTrimmedLeft (menu.getWidth() + 12).withTrimmedRight (4);
         if (titleArea.getWidth() < 60)
             titleArea = {};
-        put (hintBar, column.withY (row2).withHeight (h).reduced (0, 1));
+        placeHintBar (column.withY (row2).withHeight (h).reduced (0, 1));
         fixedToolbarArea = juce::Rectangle<int> (column.getX() - 4, 0, column.getWidth() + 8, toolbarHeight);
     }
 
@@ -2552,6 +2556,11 @@ void MainComponent::timerCallback()
         }
 
         hintBar.setHint (hint, live && hint.value.isNotEmpty());
+        if (++tweakTicks >= 3) // 10 times a second
+        {
+            tweakTicks = 0;
+            refreshTweakReadout();
+        }
     }
 
     const auto playing = transport.playing.load();
@@ -3670,6 +3679,37 @@ void MainComponent::save (bool askForFile)
                                                       }),
                                                       true);
                               });
+}
+
+void MainComponent::placeHintBar (juce::Rectangle<int> row)
+{
+    // the read-out takes the right part of the hint row once something was tweaked (a third of it, 150..260 px), and
+    // only when the hint keeps at least 240 px
+    const auto readoutWidth = juce::jlimit (150, 260, row.getWidth() / 3);
+    if (tweakReadout.hasContent() && row.getWidth() - readoutWidth - 6 >= 240)
+    {
+        tweakReadout.setBounds (row.removeFromRight (readoutWidth));
+        tweakReadout.setVisible (true);
+        row.removeFromRight (6);
+    }
+    else
+    {
+        tweakReadout.setVisible (false);
+        tweakReadout.setBounds ({});
+    }
+    hintBar.setVisible (true);
+    hintBar.setBounds (row);
+}
+
+void MainComponent::refreshTweakReadout()
+{
+    const auto had = tweakReadout.hasContent();
+    if (const auto t = engine.getLastTweaked (0))
+        tweakReadout.setContent (describeAutomationTarget (engine, *t), describeTargetValue (engine, *t));
+    else
+        tweakReadout.setContent ({}, {});
+    if (had != tweakReadout.hasContent())
+        resized(); // the read-out appears (or goes, with its target)
 }
 
 juce::PopupMenu MainComponent::makeLastTweakedMenu (int which)

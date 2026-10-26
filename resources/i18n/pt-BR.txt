@@ -4582,3 +4582,7 @@ countries: br
 "Output channels ({0}): {1}" = "Canais de saída ({0}): {1}"
 "Real-time priority" = "Prioridade de tempo real"
 "The sound broke up, and Linux runs LYNX's audio thread at normal priority. Real-time priority makes dropouts much rarer:\n\n- install rtkit (package \"rtkit\"; most desktops already have it), or\n- add yourself to the \"audio\" group with an rtprio limit in /etc/security/limits.d (as for JACK),\n\nthen log out and in again. LYNX never needs root. Options > Audio settings shows the current state." = "O som falhou, e o Linux roda a thread de áudio do LYNX com prioridade normal. A prioridade de tempo real deixa as falhas bem mais raras:\n\n- instale o rtkit (pacote \"rtkit\"; a maioria dos desktops já tem), ou\n- entre no grupo \"audio\" com um limite rtprio em /etc/security/limits.d (como para o JACK),\n\ndepois saia e entre de novo na sessão. O LYNX nunca precisa de root. Opções > Configurações de áudio mostra o estado atual."
+# Round 162d: the toolbar's last-tweaked read-out
+"Last tweaked parameter: click for its menu (automation clip, link to controller, events, value)" = "Último parâmetro mexido: clique para o menu dele (clipe de automação, ligar a um controlador, eventos, valor)"
+"Last tweaked parameter: [LMB] its menu (create automation clip, link to controller, edit events, init song with this position, value)" = "Último parâmetro mexido: [LMB] o menu dele (criar clipe de automação, ligar a um controlador, editar eventos, iniciar a música com esta posição, valor)"
+"Last tweaked: none" = "Último mexido: nenhum"
