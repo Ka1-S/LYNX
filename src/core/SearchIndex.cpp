@@ -35,11 +35,12 @@ void Index::drop (const std::string& folder, char separator)
         drop (join (folder, s, separator), separator);
 }
 
-int Index::refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop)
+int Index::refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop, std::mutex* guard)
 {
     if (! fs.folderTime || ! fs.list || root.empty())
         return 0;
 
+    auto hold = [guard] { return guard != nullptr ? std::unique_lock<std::mutex> (*guard) : std::unique_lock<std::mutex>(); };
     int listed = 0;
     std::vector<std::string> pending { root };
 
@@ -52,25 +53,34 @@ int Index::refresh (const std::string& root, const FileSystem& fs, const std::fu
         pending.pop_back();
         if (folder.size() > 1024) // a runaway path (a link loop the file system did not report): not followed
             continue;
-        const auto time = fs.folderTime (folder);
+        const auto time = fs.folderTime (folder); // (the disk: without the lock)
 
-        if (time < 0)
+        std::vector<std::string> subs;
+        bool dirty = false;
         {
-            drop (folder, fs.separator);
-            continue;
+            const auto lock = hold();
+            if (time < 0)
+            {
+                drop (folder, fs.separator);
+                continue;
+            }
+            const auto known = folders.find (folder);
+            dirty = known == folders.end() || known->second.time != time; // new or "dirty": list it again
+            if (! dirty)
+                subs = known->second.subfolders;
         }
 
-        auto known = folders.find (folder);
-        if (known == folders.end() || known->second.time != time) // new or "dirty": list it again
+        if (dirty)
         {
             auto listing = fs.list (folder);
             ++listed;
+            const auto lock = hold();
             if (! listing.exists)
             {
                 drop (folder, fs.separator);
                 continue;
             }
-            if (known != folders.end())
+            if (const auto known = folders.find (folder); known != folders.end())
                 for (const auto& old : known->second.subfolders)
                     if (std::find (listing.subfolders.begin(), listing.subfolders.end(), old) == listing.subfolders.end())
                         drop (join (folder, old, fs.separator), fs.separator);
@@ -78,11 +88,10 @@ int Index::refresh (const std::string& root, const FileSystem& fs, const std::fu
             entry.time = time;
             entry.files = std::move (listing.files);
             entry.subfolders = std::move (listing.subfolders);
-            known = folders.find (folder);
+            subs = entry.subfolders;
         }
 
         // depth-first, in name order (pushed reversed)
-        const auto& subs = known->second.subfolders;
         for (auto s = subs.rbegin(); s != subs.rend(); ++s)
             pending.push_back (join (folder, *s, fs.separator));
     }
@@ -115,6 +124,11 @@ std::vector<std::string> Index::find (const std::string& query, const std::vecto
     return found;
 }
 
+bool Index::isComplete (const std::string& folder) const
+{
+    return std::any_of (complete.begin(), complete.end(), [this, &folder] (const std::string& r) { return isUnder (folder, r) && folders.count (r) > 0; });
+}
+
 std::size_t Index::fileCount() const noexcept
 {
     std::size_t n = 0;
@@ -126,6 +140,8 @@ std::size_t Index::fileCount() const noexcept
 std::string Index::toText() const
 {
     std::string out = "LYNX browser index 1\n";
+    for (const auto& r : complete)
+        out += "R\t" + r + "\n";
     for (const auto& [path, folder] : folders)
     {
         out += "D\t" + std::to_string (folder.time) + "\t" + path + "\n";
@@ -139,7 +155,7 @@ std::string Index::toText() const
 
 bool Index::fromText (const std::string& text)
 {
-    folders.clear();
+    clear();
     std::istringstream in (text);
     std::string line;
     if (! std::getline (in, line) || line != "LYNX browser index 1")
@@ -164,6 +180,8 @@ bool Index::fromText (const std::string& text)
             f.time = std::strtoll (rest.substr (0, tab).c_str(), nullptr, 10);
             current = &f;
         }
+        else if (line[0] == 'R')
+            complete.insert (rest);
         else if (current != nullptr && line[0] == 'F')
             current->files.push_back (rest);
         else if (current != nullptr && line[0] == 'S')

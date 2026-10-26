@@ -226,6 +226,20 @@ int MixerStrips::stripX (int track) const noexcept
     return track == 0 ? 4 : 4 + masterWidth + 8 + (track - 1) * stripWidth;
 }
 
+bool MixerStrips::isInterestedInDragSource (const SourceDetails& details)
+{
+    return BrowserComponent::isEffectDrag (details);
+}
+
+void MixerStrips::itemDropped (const SourceDetails& details)
+{
+    const auto t = trackAt (details.localPosition.x);
+    if (t < 0 || t >= (int) engine.getSong().mixer.size() || onEffectDropped == nullptr)
+        return;
+    if (auto fx = BrowserComponent::draggedEffect (details))
+        onEffectDropped (t, std::move (*fx));
+}
+
 int MixerStrips::trackAt (int x) const noexcept
 {
     const auto tracks = (int) engine.getSong().mixer.size();
@@ -3583,11 +3597,18 @@ void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
 
 bool EffectsPanel::isInterestedInDragSource (const SourceDetails& details)
 {
-    return BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("fst");
+    return (BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("fst"))
+           || BrowserComponent::isEffectDrag (details);
 }
 
 void EffectsPanel::itemDropped (const SourceDetails& details)
 {
+    if (BrowserComponent::isEffectDrag (details))
+    {
+        if (auto fx = BrowserComponent::draggedEffect (details))
+            dropEffect (std::move (*fx), details.localPosition);
+        return;
+    }
     dropPreset (BrowserComponent::draggedFile (details), details.localPosition);
 }
 
@@ -3619,6 +3640,14 @@ bool EffectsPanel::dropPreset (const juce::File& file, juce::Point<int> position
         return false;
     }
 
+    return dropEffect (*fx, position);
+}
+
+bool EffectsPanel::dropEffect (EffectSlot fx, juce::Point<int> position)
+{
+    if (slots() == nullptr)
+        return false;
+
     auto target = -1;
     for (int i = 0; i < (int) slots()->size(); ++i)
         if (slotBounds (i).contains (position))
@@ -3627,7 +3656,7 @@ bool EffectsPanel::dropPreset (const juce::File& file, juce::Point<int> position
     if (target < 0 && (int) slots()->size() >= maxEffectSlots)
         return false;
 
-    engine.editSong ([t = track, target, fx = *fx] (Song& song) {
+    engine.editSong ([t = track, target, fx = std::move (fx)] (Song& song) {
         auto& effects = song.mixer[(std::size_t) t].effects;
         if (target >= 0 && target < (int) effects.size())
             effects[(std::size_t) target] = fx;
@@ -4183,6 +4212,13 @@ MixerComponent::MixerComponent (AudioEngine& e)
     addAndMakeVisible (viewport);
     addAndMakeVisible (effects);
     strips.onSelectionChanged = [this] (int track) { effects.setTrack (track); };
+    strips.onEffectDropped = [this] (int track, EffectSlot fx) {
+        strips.selectTrack (track);
+        effects.setTrack (track);
+        if (! addEffectToSelected (std::move (fx)))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin database"),
+                                                    tr ("The selected insert has no free effect slot."));
+    };
 }
 
 bool MixerComponent::runAction (const std::string& id)

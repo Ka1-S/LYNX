@@ -354,7 +354,12 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     };
     workspace.setTitleAccessory (Panel::channelRack, &rackTitleTools, rackTitleToolsWidth);
     workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) { addPanelMenuItems (panel, menu); };
-    workspace.onFocusChanged = [this] (Panel) { refreshPanelButtons(); };
+    workspace.onFocusChanged = [this] (Panel panel) {
+        refreshPanelButtons();
+        // another panel took over (a click, F5..F9): the Browser's search box gives the keys back (issue #9)
+        if (panel != Panel::browser)
+            browser.leaveSearchBox();
+    };
     workspace.onKeyInDetachedWindow = [this] (const juce::KeyPress& key) { return keyPressed (key); };
     workspace.onTitleWheel = [this] (Panel panel, const juce::MouseEvent& ev, const juce::MouseWheelDetails& wheel) {
         if (panel == Panel::channelRack && ev.mods.isShiftDown())
@@ -1675,6 +1680,11 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
         case Panel::browser:
             action (menu, "browser.search", tr ("Search the Browser"));
             menu.addItem (tr ("Add folder..."), [this] { browser.addUserFolder(); });
+            menu.addSeparator();
+            // the search index (round 162, issue #9): searches read it; it follows changed folders by itself
+            menu.addSectionHeader (browser.searchIndexStatus());
+            menu.addItem (tr ("Refresh search index"), [this] { browser.refreshSearchIndex (false); });
+            menu.addItem (tr ("Rebuild search index"), [this] { browser.refreshSearchIndex (true); });
             break;
         default:
             break;
