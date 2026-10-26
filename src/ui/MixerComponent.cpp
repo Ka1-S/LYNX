@@ -1835,6 +1835,10 @@ bool addableEffectAvailable (EffectKind kind)
 juce::String addableEffectName (EffectKind kind)
 {
     const auto name = juce::String::fromUTF8 (effectInfo (kind).name);
+    // LYNX's own pitch / frequency effects sit next to FL's look-alikes (Pitch Shifter, Frequency Shifter, Pitcher)
+    // in the lists: tell them apart (round 162, issue #7 review)
+    if (kind == EffectKind::pitchShift || kind == EffectKind::freqShift || kind == EffectKind::pitchCorrect)
+        return tr ("{0} (LYNX)", { name });
     if (const auto* e = natives::effectEngine (kind))
     {
         if (! natives::available (*e, flStudioAccess()))

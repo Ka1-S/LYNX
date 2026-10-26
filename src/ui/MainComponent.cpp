@@ -19,6 +19,7 @@
 #include "ui/ShortcutManager.h"
 #include "ui/WaveformView.h"
 #include "ui/QuickAddPalette.h"
+#include "ui/PatcherEditor.h"
 #include "ui/ToolWindow.h"
 #include "ui/WindowOwner.h"
 
@@ -126,10 +127,14 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     browser.onOpenAutomation = [this] (int automation) { openAutomationEditor (engine, automation); };
     // the Browser's Plugin database (round 142): the same targets as the quick-add palette
     browser.onAddInstrument = [this] (ChannelDef c) {
+        if (PatcherWindows::takeInstrumentFromBrowser (c)) // a Patcher's Add plugin › Browse plugin database (round 162)
+            return;
         rack.addChannel (std::move (c), true);
         showPanel (Panel::channelRack);
     };
     browser.onAddEffect = [this] (EffectSlot slot) {
+        if (PatcherWindows::takeEffectFromBrowser (slot))
+            return;
         if (! mixer.addEffectToSelected (std::move (slot)))
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin database"),
                                                     tr ("The selected insert has no free effect slot."));
@@ -291,6 +296,12 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     // the workspace panels
     rack.onOpenPianoRoll = [this] { openPianoRoll(); };
     mixerinput::openAudioSettings = [this] { openSettings ((int) SettingsPage::audio); };
+    PatcherWindows::onBrowsePluginDatabase = [this] (bool) {
+        showPanel (Panel::browser);
+        browser.showPluginDatabaseForSnapshot(); // (its Generators and Effects folders open)
+        if (auto* w = getTopLevelComponent())
+            w->toFront (true);
+    };
     rack.onOpenMixerInsert = [this] (int insert) { // double-click on a channel's route box
         showPanel (Panel::mixer);
         mixer.selectTrack (insert);
@@ -499,6 +510,7 @@ MainComponent::~MainComponent()
     if (sessionLock != nullptr) // a clean exit: no "LYNX did not close properly" next time
         sessionMarker.deleteFile();
     mixerinput::openAudioSettings = nullptr;
+    PatcherWindows::onBrowsePluginDatabase = nullptr;
     saveUiSettings();
     workspace.saveState();
     ui::uninstallSliderContract();

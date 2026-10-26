@@ -1,6 +1,7 @@
 #include "ui/WindowOwner.h"
 #include "ui/ControllerEditors.h"
 
+#include <algorithm>
 #include <array>
 #include <map>
 
@@ -465,6 +466,10 @@ public:
         else
             for (int i = 1; i < 4; ++i)
                 gridLine (g, toX (c, i * 0.25f), juce::String (i * 25) + "%");
+        // the output axis (0 … 1 of the knob's range)
+        g.setColour (theme::colour::textDisabled);
+        for (const auto v : { 1.0f, 0.5f })
+            g.drawText (v == 1.0f ? "1.0" : "0.5", (int) area.getX() + 2, (int) toY (v) + 2, 30, 12, juce::Justification::centredLeft);
         if (neutral >= 0.0f)
         {
             const auto y = toY (neutral);
@@ -490,8 +495,8 @@ public:
                 else
                     wave.lineTo (toX (c, t), y);
             }
-            g.setColour (theme::colour::accent.withAlpha (on ? 0.45f : 0.2f));
-            g.strokePath (wave, juce::PathStrokeType (1.2f));
+            g.setColour (theme::colour::accent.withAlpha (on ? 0.85f : 0.35f));
+            g.strokePath (wave, juce::PathStrokeType (1.6f));
         }
         if (! on && emptyText)
         {
@@ -526,8 +531,15 @@ public:
         }
         if (axis != Axis::time && c.count > 0)
             p.lineTo (area.getRight(), toY (c.level[(std::size_t) c.count - 1]));
-        g.setColour (on ? theme::colour::automation : theme::colour::textDisabled);
+        const auto curveColour = on ? theme::colour::automation : theme::colour::textSecondary.withAlpha (0.7f);
+        g.setColour (curveColour);
         g.strokePath (p, juce::PathStrokeType (2.0f));
+        if (axis == Axis::time && c.count > 0) // the last level holds (a one-point LFO amplitude = a flat line)
+        {
+            const auto last = juce::Point<float> (toX (c, c.time[(std::size_t) c.count - 1]), toY (c.level[(std::size_t) c.count - 1]));
+            g.setColour (curveColour.withMultipliedAlpha (0.55f));
+            g.drawLine (last.x, last.y, area.getRight(), last.y, 2.0f);
+        }
         for (int i = 0; i < c.count; ++i)
         {
             const auto pt = juce::Point<float> (toX (c, c.time[(std::size_t) i]), toY (c.level[(std::size_t) i]));
@@ -628,7 +640,7 @@ private:
         g.drawText (label, (int) x + 2, (int) area.getBottom() - 14, 60, 12, juce::Justification::centredLeft);
     }
 
-    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (10.0f, 8.0f); }
+    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (10.0f, 8.0f).withTrimmedTop (8.0f); }
     float timeSpan (const ControllerCurve& c) const
     {
         if (axis != Axis::time)
@@ -736,46 +748,73 @@ private:
     }
 };
 
-// A one-row keyboard showing an articulator's key range (FL's keyboard strip): click sets the lowest key,
+// A keyboard strip showing an articulator's key range (FL's keyboard strip): a normal light / dark keyboard, the keys
+// outside the range dimmed, the range underlined in the accent, the keys being played lit. Click sets the lowest key,
 // right-click / Shift+click the highest.
 class KeyStrip final : public juce::Component
 {
 public:
     std::function<std::pair<int, int>()> get;
     std::function<void (int low, int high)> set;
+    std::function<std::vector<int>()> played; // the keys held now (lit)
     static constexpr int firstKey = 24, lastKey = 108; // C1 … C8
 
     void paint (juce::Graphics& g) override
     {
         const auto [low, high] = get();
+        const auto lit = played ? played() : std::vector<int> {};
+        auto isLit = [&lit] (int key) { return std::find (lit.begin(), lit.end(), key) != lit.end(); };
+        auto inRange = [low = low, high = high] (int key) { return key >= low && key <= std::min (high, 127); };
         const auto area = getLocalBounds().toFloat();
         g.setColour (theme::colour::bg0);
         g.fillRoundedRectangle (area, 3.0f);
-        const auto w = area.getWidth() / (float) (lastKey - firstKey + 1);
-        for (int key = firstKey; key <= lastKey; ++key)
+        const auto keysArea = area.withTrimmedBottom (4.0f);
+        const auto whiteW = keysArea.getWidth() / (float) whiteCount();
+        // white keys
+        for (int key = firstKey, n = 0; key <= lastKey; ++key)
         {
-            const auto black = juce::MidiMessage::isMidiNoteBlack (key);
-            const auto r = juce::Rectangle<float> (area.getX() + (float) (key - firstKey) * w, area.getY(), w, area.getHeight());
-            const auto inRange = key >= low && key <= std::min (high, 127);
-            auto colour = black ? theme::colour::bg4 : theme::colour::textSecondary;
-            if (inRange)
-                colour = black ? theme::colour::accentMuted : theme::colour::accent.withAlpha (0.75f);
+            if (juce::MidiMessage::isMidiNoteBlack (key))
+                continue;
+            const auto r = juce::Rectangle<float> (keysArea.getX() + (float) n++ * whiteW, keysArea.getY(), whiteW, keysArea.getHeight());
+            auto colour = isLit (key) ? theme::colour::accent : theme::colour::keyWhite;
+            if (! inRange (key) && ! isLit (key))
+                colour = colour.interpolatedWith (theme::colour::bg2, 0.6f);
             g.setColour (colour);
-            g.fillRect (r.reduced (0.5f, black ? 0.0f : 0.0f).withTrimmedBottom (black ? area.getHeight() * 0.35f : 0.0f));
+            g.fillRect (r.reduced (0.5f, 0.0f));
             if (key % 12 == 0)
             {
-                g.setColour (theme::colour::textPrimary);
+                g.setColour (theme::colour::bg3);
                 g.setFont (theme::font (theme::type::caption));
-                g.drawText (juce::MidiMessage::getMidiNoteName (key, true, true, 4), r.withWidth (30.0f).withTrimmedTop (area.getHeight() - 12.0f),
+                g.drawText (juce::MidiMessage::getMidiNoteName (key, true, true, 4), r.withWidth (30.0f).withTrimmedTop (r.getHeight() - 12.0f).translated (1.0f, 0.0f),
                             juce::Justification::centredLeft);
             }
+        }
+        // black keys over them
+        for (int key = firstKey; key <= lastKey; ++key)
+        {
+            if (! juce::MidiMessage::isMidiNoteBlack (key))
+                continue;
+            const auto x = keysArea.getX() + (float) whiteIndex (key) * whiteW; // (the boundary after the white key below)
+            const auto r = juce::Rectangle<float> (x - whiteW * 0.32f, keysArea.getY(), whiteW * 0.64f, keysArea.getHeight() * 0.6f);
+            auto colour = isLit (key) ? theme::colour::accent : theme::colour::keyBlack;
+            if (! inRange (key) && ! isLit (key))
+                colour = colour.interpolatedWith (theme::colour::bg3, 0.5f);
+            g.setColour (colour);
+            g.fillRect (r);
+        }
+        // the range: a bar under the keys
+        const auto from = juce::jmax (firstKey, low), to = juce::jmin (lastKey, juce::jmin (high, 127));
+        if (from <= to)
+        {
+            const auto x0 = keyX (from, keysArea, whiteW), x1 = keyX (to, keysArea, whiteW) + (juce::MidiMessage::isMidiNoteBlack (to) ? whiteW * 0.64f : whiteW);
+            g.setColour (theme::colour::accent);
+            g.fillRect (juce::Rectangle<float> (x0, area.getBottom() - 3.0f, x1 - x0, 3.0f));
         }
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        const auto w = (float) getWidth() / (float) (lastKey - firstKey + 1);
-        const auto key = juce::jlimit (0, 127, firstKey + (int) (e.position.x / w));
+        const auto key = keyAt (e.position);
         auto [low, high] = get();
         if (e.mods.isPopupMenu() || e.mods.isShiftDown())
             high = juce::jmax (key, low);
@@ -786,6 +825,45 @@ public:
         }
         set (low, high);
         repaint();
+    }
+
+private:
+    static int whiteCount()
+    {
+        int n = 0;
+        for (int key = firstKey; key <= lastKey; ++key)
+            n += juce::MidiMessage::isMidiNoteBlack (key) ? 0 : 1;
+        return n;
+    }
+    static int whiteIndex (int key) // white keys below `key`
+    {
+        int n = 0;
+        for (int k = firstKey; k < key; ++k)
+            n += juce::MidiMessage::isMidiNoteBlack (k) ? 0 : 1;
+        return n;
+    }
+    static float keyX (int key, juce::Rectangle<float> keysArea, float whiteW)
+    {
+        const auto x = keysArea.getX() + (float) whiteIndex (key) * whiteW;
+        return juce::MidiMessage::isMidiNoteBlack (key) ? x - whiteW * 0.32f : x;
+    }
+    int keyAt (juce::Point<float> p) const
+    {
+        const auto keysArea = getLocalBounds().toFloat().withTrimmedBottom (4.0f);
+        const auto whiteW = keysArea.getWidth() / (float) whiteCount();
+        if (p.y < keysArea.getY() + keysArea.getHeight() * 0.6f) // a black key first (they lie on top)
+            for (int key = firstKey; key <= lastKey; ++key)
+                if (juce::MidiMessage::isMidiNoteBlack (key))
+                {
+                    const auto x = keyX (key, keysArea, whiteW);
+                    if (p.x >= x && p.x < x + whiteW * 0.64f)
+                        return key;
+                }
+        const auto n = juce::jlimit (0, whiteCount() - 1, (int) ((p.x - keysArea.getX()) / whiteW));
+        for (int key = firstKey, i = 0; key <= lastKey; ++key)
+            if (! juce::MidiMessage::isMidiNoteBlack (key) && i++ == n)
+                return key;
+        return lastKey;
     }
 };
 
@@ -931,6 +1009,7 @@ public:
 
         keys.get = [this] { const auto a = articulator(); return std::pair<int, int> (a.lowKey, a.highKey); };
         keys.set = [this] (int low, int high) { edit ([low, high] (ControllerArticulator& a) { a.lowKey = low; a.highKey = high >= 127 ? 256 : high; }); };
+        keys.played = [this] { return engine.heldInputKeys(); };
         ui::setHint (keys, tr ("The keys this output follows: click sets the lowest, right-click (or Shift+click) the highest"));
         addAndMakeVisible (keys);
         for (auto* s : { &lowKey, &highKey })
@@ -1264,6 +1343,11 @@ private:
             outputs[(std::size_t) k] = outputOf ? outputOf (k) : 0.0f;
         repaint (getLocalBounds().withHeight (130));
         graph.repaint();
+        if (const auto held = engine.heldInputKeys(); held != heldKeys)
+        {
+            heldKeys = held;
+            keys.repaint();
+        }
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
@@ -1271,6 +1355,7 @@ private:
     AudioEngine& engine;
     std::function<ChannelDef* (Song&)> locate;
     int channel, shown = 0, shownPart = 0;
+    std::vector<int> heldKeys;
     std::function<float (int)> outputOf;
     std::array<juce::TextButton, 8> tabs;
     juce::ComboBox part;

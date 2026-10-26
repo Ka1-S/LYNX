@@ -39,9 +39,13 @@ picker, More… = the installed VST/VST3/CLAP instruments, then Controller: Enve
 Drum: LYNX's drums + FL's drum engines; MIDI: MIDI Out; Misc: BooBass, FL Keys, LYNX Soundfont; Patcher: Patcher;
 Sampler: Sampler (choose file)…, Granulizer; Synth classic / special: every FL engine LYNX reproduces + LYNX Synth)
 and Effects (Open plugin picker, More…, then every effect of the mixer's list in FL's categories, the Formula and Peak
-Controllers under Controller, a nested Patcher under Patcher). Not in LYNX (so not listed): FL's Layer, Dashboard,
-Fruity Voltage Controller, VFX plugins, Visual plugins, X-Y / Control Surface as new nodes; "Browse plugin database"
-(LYNX's Browser has the Plugin database, but the Patcher window can't reach it yet).
+Controllers under Controller, a nested Patcher under Patcher). **Browse plugin database** (both sides): the main
+window shows the Browser's Plugin database and the next generator / effect picked there (double-click) becomes a node
+of that Patcher (`PatcherWindows::onBrowsePluginDatabase`, `takeInstrumentFromBrowser / takeEffectFromBrowser`; one
+pick, the wrong side goes to the Channel Rack / mixer as before). LYNX's own Pitch shift, Frequency shifter and Pitch
+correction read "(LYNX)" in every list, next to FL's Pitch Shifter / Frequency Shifter. Not in LYNX, so not listed:
+FL's Instrument and Visual categories (Fruity Dance, Wave Candy, ZGameEditor…), the VFX plugins (Patcher-VFX), Layer,
+Dashboard, Fruity Voltage Controller, X-Y / X-Y-Z Controller and Control Surface — LYNX has no engine for them yet.
 
 ### 2.2 Controllers and MIDI Out inside a Patcher (`core/Patcher.cpp`)
 - Envelope Controller node: notes in, 8 control outputs; Keyboard Controller node: 1 control output; MIDI Out node:
@@ -58,6 +62,9 @@ Fruity Voltage Controller, VFX plugins, Visual plugins, X-Y / Control Surface as
 - Editor: right-click "From LYNX" / "To LYNX": *Disconnect all*, *Events ›* (Activate all, Deactivate all, Deactivate
   unused, Notes, MIDI port 0…255 as check items in columns; deactivating a pin removes its cables) and *Audio ›*
   ("To LYNX": Add one, Deactivate unused and the outputs; a mixer slot's "From LYNX": its audio input and side-chain).
+  Active pins are ticked; a new channel Patcher has Notes ticked and no port (FL img3/img5); Deactivate all / unused
+  are greyed while nothing is active (as FL). A mixer slot's Patcher shows Notes greyed: no channel notes reach a
+  mixer slot, only its MIDI ports ([HYP]: FL's Notes pin is the generator's own notes).
 - Runtime (`RackState::buildMidiRoutes`): a source that sends on port N (a MIDI Out channel; a generator Patcher's
   "To LYNX" MIDI port N) now reaches, besides the plugin channels whose MIDI input port is N, **every Patcher whose
   "From LYNX" MIDI port N pin is cabled** — generator Patchers (at the note's sample) and mixer-slot Patchers (at the
@@ -85,12 +92,24 @@ Done in the 162e fork (commit `16af6c5b`); the full REA write-up is `docs/analis
   Mod Y mapping / Random), Base/Env/LFO knobs, Bipolar, Continuous output, X/Y pad, key-range strip, ATT/DEC/SUS/REL
   + Time in beats, and the LFO page with a wave preview. The same editor opens for Envelope Controller nodes inside a
   Patcher. Tests: `tests/EnvController162Tests.inc`.
+- Review (main session, after batch 2): the keyboard strip is a normal light/dark keyboard with the range dimmed
+  outside, underlined in red, and the held keys lit; every curve page shows its 0.5 / 1.0 levels, a neutral map draws
+  a visible line, a time curve's last level holds to the right edge (the LFO's one-point amplitude is a flat line) and
+  the LFO wave preview is drawn clearly, updated live by Speed / Tension / Skew / PW.
 - Not done: automating Mod X/Y from the rack, LFO flag bits 2–3, per-tick (LYNX: per-block) update.
+
+## Review shots
+
+`/mnt/d/lynx-work/patcher162/review/`: `img1…img8.png` = the reporter's FL screenshots (issue #7), `before/` and
+`after/` = LYNX's `--controllershot` (`c-ec-part0…6` = Envelope, LFO, Keyboard, Velocity, Mod X, Mod Y, Random) and
+`--patchershot` (`p-menu-add-plugin`, `p-menu-from-events` / `to-events` (mixer slot), `p-channel5-menu-*` (channel
+Patcher), `p-channel5` (the map with MIDI Out and Envelope Controller nodes)).
 
 ## Where I stopped
 
 Batch 1 (Add plugin menu, MIDI port pins + routing + import, MIDI Out / controller nodes, `--patchershot` menu
-shots, tests `tests/Patcher162Tests.inc`) landed. Batch 2 = the Envelope Controller sections (§3) and the Envelope
-Controller node editor inside a Patcher. Open: "Browse plugin database" from the Patcher, FL's Layer / Dashboard /
+shots, tests `tests/Patcher162Tests.inc`) landed. Batch 2 = the Envelope Controller sections (§3), the Envelope
+Controller node editor inside a Patcher and the main session's review fixes (Browse plugin database, "(LYNX)" names,
+Events menu ticks / greyed items, EC keyboard strip and curve pages). Open: "Browse plugin database" from the Patcher, FL's Layer / Dashboard /
 VFX / Visual / X-Y nodes, instrument editors of built-in engines inside a Patcher, MIDI output pins on plugin nodes,
 automating the EC's Mod X/Y, sample-accurate MIDI into mixer-slot Patchers.
