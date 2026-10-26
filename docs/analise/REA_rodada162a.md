@@ -19,7 +19,7 @@ Windows ("!! killing thread by force !!"). So every letter typed while "every fo
 3 s and then killed a thread that could be anywhere inside the C++ runtime (allocating `juce::String`s / vectors,
 inside `FindFirstFile`, or half-way through changing the index's `std::map`).
 
-**Repro of the mechanism [EXEC].** `tmp/…/scratchpad/repro/repro.cpp` (built with the same Zig 0.14.1 /
+**Repro of the mechanism [EXEC].** `D:\lynx-work\browser162\repro.cpp` (built with the same Zig 0.14.1 /
 x86_64-windows-gnu toolchain as LYNX, run on this PC, results kept in `D:\lynx-work\browser162`): an "index" thread
 holds a `std::mutex` for a long walk; six "keystroke" threads are killed with `TerminateThread` after their wait time
 runs out.
