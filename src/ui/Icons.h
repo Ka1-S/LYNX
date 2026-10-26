@@ -28,7 +28,7 @@ enum class Icon
     graph       // Channel Rack: the step graph editor (velocity, pan... bars)
 };
 
-constexpr int iconCount = (int) Icon::graph + 1;
+constexpr int iconCount = (int) Icon::follow + 1;
 
 namespace icons
 {
