@@ -4647,3 +4647,7 @@ countries: br
 "Load preset file..." = "Carregar arquivo de preset..."
 "Export preset file..." = "Exportar arquivo de preset..."
 "Export preset" = "Exportar preset"
+# Round 162d: the toolbar's last-tweaked read-out
+"Last tweaked parameter: click for its menu (automation clip, link to controller, events, value)" = "Último parâmetro mexido: clique para o menu dele (clipe de automação, ligar a um controlador, eventos, valor)"
+"Last tweaked parameter: [LMB] its menu (create automation clip, link to controller, edit events, init song with this position, value)" = "Último parâmetro mexido: [LMB] o menu dele (criar clipe de automação, ligar a um controlador, editar eventos, iniciar a música com esta posição, valor)"
+"Last tweaked: none" = "Último mexido: nenhum"
