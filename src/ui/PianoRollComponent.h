@@ -57,6 +57,8 @@ public:
 
     // The key map's pianoRoll.* actions (tool dialogs, zoom presets). Returns false for unknown ids.
     bool runAction (const std::string& id);
+    // The shortcut text of a key map action for menus ("\tCtrl+Q"; empty when unbound), set by the main window.
+    static inline std::function<juce::String (const std::string& id)> shortcutText;
 
     // Note tool dialogs on the selection (or all of the channel's notes).
     void openNoteTool (NoteTool tool);
@@ -164,7 +166,6 @@ private:
     void copySelection();
     void paste();
     void duplicateSelection();
-    void quantizeSelection();
     void nudge (std::int64_t ticks, int keys);
 
     AudioEngine& engine;
@@ -179,6 +180,8 @@ private:
     IconButton ghostButton { "ghosts", Icon::ghost };
     IconButton scaleSnapButton { "scaleSnap", Icon::magnet }; // snap to the scale (next to the scale box)
     IconButton moreButton { "more", Icon::more }; // note operations, left-edge resize, MIDI import/export
+    IconButton followButton { "follow", Icon::follow }; // Follow (auto scrolling) on/off, EditorGlobals (round 162)
+    void quantizeOperation (int kind); // 0 = starts, 1 = starts and lengths (quick quantize), 2 = starts 50% toward the grid
     juce::ComboBox laneBox; // what the bottom lane edits: velocity, pan or fine pitch
     juce::ComboBox chordBox; // chord created on each click (like FL's "stamp")
     juce::TextButton slideButton { "Slide" }; // new notes slide (like FL's slide tool)

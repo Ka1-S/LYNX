@@ -149,10 +149,18 @@ public:
     bool rememberSeek = false;
     std::int64_t seekMark = -1;
 
+    // "Follow" (FL's auto scrolling, round 162 / issue #9): the Playlist (Song mode) and the Piano Roll page along
+    // with the playhead while playing; off, they stay where the user scrolled. Saved with the UI options.
+    bool isFollowing (bool pianoRoll) const noexcept { return pianoRoll ? followPianoRoll : followPlaylist; }
+    void setFollowing (bool pianoRoll, bool on, bool save = true); // save: call onOptionsChanged
+    // Called after an option the main window saves changed here (it writes ui-options.txt).
+    std::function<void()> onOptionsChanged;
+
 private:
     EditorGlobals() = default;
     int gridOption = grid::screenOption, lastGridOption = grid::screenOption;
     std::int64_t defaultNoteLength = 0;
+    bool followPlaylist = true, followPianoRoll = true;
 };
 
 // The global grid selector of the main toolbar: left-click picks the grid, right-click sets the
