@@ -6,8 +6,11 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <tuple>
 
+#include "core/FlSynths.h"
 #include "core/FrequencySplitter.h"
+#include "core/MidiControls.h"
 #include "core/Pdc.h"
 
 namespace lynx::patcher
@@ -85,7 +88,11 @@ NodePorts nodePorts (const PatchNode& node)
     {
         p.audioIns = 0;
         p.midiIn = true;
-        p.controlOuts = node.channel.instrument == InstrumentKind::controller ? 8 : 0;
+        if (node.channel.instrument == InstrumentKind::controller) // Envelope Controller: 8 outputs; Keyboard Controller: 1
+            p.controlOuts = parseKeyboardController (node.channel.controllerState) ? 1 : 8;
+        if (node.channel.instrument == InstrumentKind::controller || node.channel.instrument == InstrumentKind::midiOut)
+            p.audioOuts = 0; // (no sound of their own)
+        p.midiOut = node.channel.instrument == InstrumentKind::midiOut;
         if (node.channel.instrument == InstrumentKind::patcher)
             p.audioOuts = 1 + (int) node.channel.patcher.outputTracks.size();
         return p;
@@ -321,7 +328,7 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
         }
         else if (src.kind == PatchWire::Kind::midi)
         {
-            if (src.from == patchFromHost && validNode (src.to) && src.enabled
+            if (src.from == patchFromHost && src.fromPort == 0 && validNode (src.to) && src.enabled
                 && std::find (noteTargets.begin(), noteTargets.end(), src.to) == noteTargets.end())
                 noteTargets.push_back (src.to);
         }
@@ -342,6 +349,34 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
         }
     }
     highestAux = std::max (highestAux, (int) doc.outputTracks.size());
+
+    // MIDI (round 162): what each "From LYNX" pin reaches, through MIDI Out nodes (they set the MIDI channel)
+    pinTargets.assign ((std::size_t) patchMidiPortPin (patchMidiPorts), {});
+    for (int pin = 0; pin < (int) pinTargets.size(); ++pin)
+    {
+        auto& targets = pinTargets[(std::size_t) pin];
+        std::vector<char> seen ((std::size_t) count, 0);
+        // (source, its pin, the channel set on the way)
+        std::vector<std::tuple<int, int, int>> todo { { patchFromHost, pin, -1 } };
+        while (! todo.empty())
+        {
+            const auto [from, fromPin, channel] = todo.back();
+            todo.pop_back();
+            for (const auto& w : doc.wires)
+            {
+                if (w.kind != PatchWire::Kind::midi || ! w.enabled || w.from != from || w.fromPort != fromPin || w.to < 0 || w.to >= count
+                    || seen[(std::size_t) w.to])
+                    continue;
+                seen[(std::size_t) w.to] = 1;
+                const auto& target = doc.nodes[(std::size_t) w.to];
+                if (target.generator && target.channel.instrument == InstrumentKind::midiOut)
+                    todo.emplace_back (w.to, 0, midictl::parseMidiOut (target.channel.pluginState).channel);
+                else if (target.generator)
+                    targets.push_back ({ w.to, channel });
+            }
+        }
+    }
+
     published = doc.published;
     publishedValues.assign (published.size(), std::numeric_limits<float>::quiet_NaN());
     aux.resize ((std::size_t) highestAux);
@@ -541,34 +576,41 @@ void Graph::setHeldNotes (const NoteMask* channels, int count) noexcept
             n->effect->setHeldNotes (channels, count);
 }
 
-void Graph::noteOn (int key, float velocity) noexcept
+void Graph::noteOn (int key, float velocity) noexcept { deliver (0, true, key, velocity, -1); }
+void Graph::noteOff (int key) noexcept { deliver (0, false, key, 0.0f, -1); }
+void Graph::noteOnMidi (int key, float velocity, int midiChannel) noexcept { deliver (0, true, key, velocity, midiChannel); }
+void Graph::noteOffMidi (int key, int midiChannel) noexcept { deliver (0, false, key, 0.0f, midiChannel); }
+
+void Graph::deliver (int pin, bool on, int key, float velocity, int midiChannel) noexcept
 {
-    for (const auto t : noteTargets)
-    {
-        if (auto& i = nodes[(std::size_t) t]->instrument)
-            i->noteOn (key, velocity);
-    }
+    if (pin < 0 || pin >= (int) pinTargets.size())
+        return;
+    for (const auto& t : pinTargets[(std::size_t) pin])
+        if (auto& i = nodes[(std::size_t) t.node]->instrument)
+        {
+            const auto channel = t.midiChannel >= 0 ? t.midiChannel : midiChannel;
+            if (channel < 0)
+                on ? i->noteOn (key, velocity) : i->noteOff (key);
+            else
+                on ? i->noteOnMidi (key, velocity, channel) : i->noteOffMidi (key, channel);
+        }
 }
 
-void Graph::noteOff (int key) noexcept
+void Graph::noteOnPort (int port, int key, float velocity, int midiChannel) noexcept
 {
-    for (const auto t : noteTargets)
-        if (auto& i = nodes[(std::size_t) t]->instrument)
-            i->noteOff (key);
+    if (port >= 0 && port < patchMidiPorts)
+        deliver (patchMidiPortPin (port), true, key, velocity, midiChannel);
 }
 
-void Graph::noteOnMidi (int key, float velocity, int midiChannel) noexcept
+void Graph::noteOffPort (int port, int key, int midiChannel) noexcept
 {
-    for (const auto t : noteTargets)
-        if (auto& i = nodes[(std::size_t) t]->instrument)
-            i->noteOnMidi (key, velocity, midiChannel);
+    if (port >= 0 && port < patchMidiPorts)
+        deliver (patchMidiPortPin (port), false, key, 0.0f, midiChannel);
 }
 
-void Graph::noteOffMidi (int key, int midiChannel) noexcept
+bool Graph::takesMidiPort (int port) const noexcept
 {
-    for (const auto t : noteTargets)
-        if (auto& i = nodes[(std::size_t) t]->instrument)
-            i->noteOffMidi (key, midiChannel);
+    return port >= 0 && port < patchMidiPorts && ! pinTargets[(std::size_t) patchMidiPortPin (port)].empty();
 }
 
 void Graph::allNotesOff() noexcept
@@ -865,6 +907,8 @@ public:
     void allNotesOff() noexcept override { graph.allNotesOff(); }
     void noteOnMidi (int key, float velocity, int midiChannel) noexcept override { graph.noteOnMidi (key, velocity, midiChannel); }
     void noteOffMidi (int key, int midiChannel) noexcept override { graph.noteOffMidi (key, midiChannel); }
+    void noteOnPort (int port, int key, float velocity, int midiChannel) noexcept override { graph.noteOnPort (port, key, velocity, midiChannel); }
+    void noteOffPort (int port, int key, int midiChannel) noexcept override { graph.noteOffPort (port, key, midiChannel); }
     void slideTo (int key, float cents, float samples) noexcept override { graph.slideTo (key, cents, samples); }
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override { graph.setNextNoteExpression (pan, cents, porta); }
     void setSongPosition (double ticks) noexcept override { graph.setSongPosition (ticks); }
@@ -1070,7 +1114,7 @@ bool connect (PatcherDoc& doc, const PatchWire& wire)
     const auto validFrom = wire.from == patchFromHost || (wire.from >= 0 && wire.from < count)
                            || (wire.from == patchSurface && wire.kind == PatchWire::Kind::control && wire.fromPort >= 0 && wire.fromPort < doc.surfaceOutputs());
     const auto validTo = wire.to == patchToHost || (wire.to >= 0 && wire.to < count);
-    if (! validFrom || ! validTo || (wire.from == wire.to && wire.from >= 0 && wire.kind == PatchWire::Kind::audio))
+    if (! validFrom || ! validTo || (wire.from == wire.to && wire.from >= 0 && wire.kind != PatchWire::Kind::control))
         return false;
     if (wire.kind == PatchWire::Kind::control && ((wire.from < 0 && wire.from != patchSurface) || wire.to < 0))
         return false;
@@ -1093,5 +1137,107 @@ std::string nodeName (const PatchNode& node)
     if (node.effect.kind == EffectKind::plugin)
         return ! blank (node.effect.plugin.name) ? node.effect.plugin.name : "Plugin";
     return effectInfo (node.effect.kind).name;
+}
+// --- MIDI through the I/O nodes (round 162) ---
+
+namespace
+{
+void addSorted (std::vector<int>& v, int x)
+{
+    if (std::find (v.begin(), v.end(), x) == v.end())
+        v.insert (std::upper_bound (v.begin(), v.end(), x), x);
+}
+} // namespace
+
+std::vector<int> shownFromMidiPorts (const PatcherDoc& doc)
+{
+    std::vector<int> ports;
+    for (const auto p : doc.fromMidiPorts)
+        if (p >= 0 && p < patchMidiPorts)
+            addSorted (ports, p);
+    for (const auto& w : doc.wires)
+        if (w.kind == PatchWire::Kind::midi && w.from == patchFromHost && w.fromPort > 0 && patchPinMidiPort (w.fromPort) < patchMidiPorts)
+            addSorted (ports, patchPinMidiPort (w.fromPort));
+    return ports;
+}
+
+std::vector<int> shownToMidiPorts (const PatcherDoc& doc)
+{
+    std::vector<int> ports;
+    for (const auto p : doc.toMidiPorts)
+        if (p >= 0 && p < patchMidiPorts)
+            addSorted (ports, p);
+    for (const auto& w : doc.wires)
+        if (w.kind == PatchWire::Kind::midi && w.to == patchToHost && w.toPort >= 0 && w.toPort < patchMidiPorts)
+            addSorted (ports, w.toPort);
+    return ports;
+}
+
+bool fromNotesShown (const PatcherDoc& doc, bool generator)
+{
+    if (std::any_of (doc.wires.begin(), doc.wires.end(),
+                     [] (const PatchWire& w) { return w.kind == PatchWire::Kind::midi && w.from == patchFromHost && w.fromPort == 0; }))
+        return true;
+    return generator && ! doc.fromNotesHidden; // (a mixer slot has no notes of its own)
+}
+
+std::vector<int> midiInputPorts (const PatcherDoc& doc)
+{
+    std::vector<int> ports;
+    for (const auto& w : doc.wires)
+        if (w.kind == PatchWire::Kind::midi && w.enabled && w.from == patchFromHost && w.fromPort > 0
+            && patchPinMidiPort (w.fromPort) < patchMidiPorts)
+            addSorted (ports, patchPinMidiPort (w.fromPort));
+    return ports;
+}
+
+std::vector<MidiPortRoute> midiOutputsOf (const PatcherDoc& doc, int fromPin)
+{
+    std::vector<MidiPortRoute> out;
+    const auto count = (int) doc.nodes.size();
+    std::vector<char> seen ((std::size_t) count, 0);
+    std::vector<std::tuple<int, int, int>> todo { { patchFromHost, fromPin, -1 } };
+    while (! todo.empty())
+    {
+        const auto [from, pin, channel] = todo.back();
+        todo.pop_back();
+        for (const auto& w : doc.wires)
+        {
+            if (w.kind != PatchWire::Kind::midi || ! w.enabled || w.from != from || w.fromPort != pin)
+                continue;
+            if (w.to == patchToHost)
+            {
+                const MidiPortRoute r { w.toPort, channel };
+                if (w.toPort >= 0 && w.toPort < patchMidiPorts && std::find (out.begin(), out.end(), r) == out.end())
+                    out.push_back (r);
+            }
+            else if (w.to >= 0 && w.to < count && ! seen[(std::size_t) w.to])
+            {
+                const auto& node = doc.nodes[(std::size_t) w.to];
+                if (node.generator && node.channel.instrument == InstrumentKind::midiOut)
+                {
+                    seen[(std::size_t) w.to] = 1;
+                    todo.emplace_back (w.to, 0, midictl::parseMidiOut (node.channel.pluginState).channel);
+                }
+            }
+        }
+    }
+    return out;
+}
+
+void deactivateUnusedMidiPins (PatcherDoc& doc, bool fromNode)
+{
+    auto used = [&] (int pin) {
+        return std::any_of (doc.wires.begin(), doc.wires.end(), [&] (const PatchWire& w) {
+            return w.kind == PatchWire::Kind::midi && (fromNode ? w.from == patchFromHost && w.fromPort == pin : w.to == patchToHost && w.toPort == pin);
+        });
+    };
+    if (fromNode)
+    {
+        std::erase_if (doc.fromMidiPorts, [&] (int p) { return ! used (patchMidiPortPin (p)); });
+        doc.fromNotesHidden = ! used (0);
+    }
+    else
+        std::erase_if (doc.toMidiPorts, [&] (int p) { return ! used (p); });
 }
 } // namespace lynx::patcher

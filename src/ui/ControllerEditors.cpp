@@ -849,7 +849,9 @@ class MidiOutEditor final : public juce::Component,
                             private juce::ChangeListener
 {
 public:
-    MidiOutEditor (AudioEngine& e, int c) : engine (e), channel (c)
+    // `locate` finds the MIDI Out's ChannelDef in a song (a Channel Rack channel, or a node inside a Patcher: round
+    // 162); `c` = its channel index, −1 inside a Patcher (no channel automation there)
+    MidiOutEditor (AudioEngine& e, std::function<ChannelDef* (Song&)> l, int c) : engine (e), locate (std::move (l)), channel (c)
     {
         for (int m = 1; m <= 16; ++m)
             midiChannel.addItem (tr ("Channel {0}", { juce::String (m) }), m);
@@ -888,6 +890,8 @@ public:
         };
         ui::setHint (automate, tr ("CCs, aftertouch and pitch bend this channel sends to the plugins on its port"));
         addAndMakeVisible (automate);
+        automate.setVisible (channel >= 0);
+        connect.setVisible (channel >= 0);
         listeners.setFont (theme::font (theme::type::small));
         listeners.setColour (juce::Label::textColourId, theme::colour::textSecondary);
         listeners.setJustificationType (juce::Justification::topLeft);
@@ -935,17 +939,17 @@ public:
 private:
     midictl::MidiOutSettings settings() const
     {
-        const auto& song = engine.getSong();
-        return channel >= 0 && channel < (int) song.channels.size() ? midictl::parseMidiOut (song.channels[(std::size_t) channel].pluginState)
-                                                                    : midictl::MidiOutSettings {};
+        const auto* c = locate (const_cast<Song&> (engine.getSong()));
+        return c != nullptr ? midictl::parseMidiOut (c->pluginState) : midictl::MidiOutSettings {};
     }
 
     void edit (std::function<void (midictl::MidiOutSettings&)> change)
     {
         engine.editSong ([this, change] (Song& song) {
-            if (channel < 0 || channel >= (int) song.channels.size() || song.channels[(std::size_t) channel].instrument != InstrumentKind::midiOut)
+            auto* c = locate (song);
+            if (c == nullptr || c->instrument != InstrumentKind::midiOut)
                 return;
-            auto& state = song.channels[(std::size_t) channel].pluginState;
+            auto& state = c->pluginState;
             auto s = midictl::parseMidiOut (state);
             change (s);
             midictl::writeMidiOut (state, s);
@@ -976,6 +980,13 @@ private:
         midiChannel.setSelectedId (s.channel + 1, juce::dontSendNotification);
         port.setValue (s.port, juce::dontSendNotification);
         program.setValue (s.program, juce::dontSendNotification);
+        if (channel < 0) // inside a Patcher (round 162)
+        {
+            listeners.setText (tr ("Inside a Patcher: cable its \"MIDI out\" pin to an instrument or to a \"MIDI port\" pin of \"To LYNX\"; "
+                                   "its notes go out on this MIDI channel."),
+                               juce::dontSendNotification);
+            return;
+        }
         juce::StringArray names;
         const auto& song = engine.getSong();
         for (const auto& c : song.channels)
@@ -990,6 +1001,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
 
     AudioEngine& engine;
+    std::function<ChannelDef* (Song&)> locate;
     int channel;
     juce::ComboBox midiChannel;
     juce::Slider port, program;
@@ -1030,6 +1042,13 @@ std::unique_ptr<juce::Component> makeEnvelopeControllerEditor (AudioEngine& engi
 
 std::unique_ptr<juce::Component> makeMidiOutEditor (AudioEngine& engine, int channel)
 {
-    return std::make_unique<MidiOutEditor> (engine, channel);
+    return std::make_unique<MidiOutEditor> (engine, [channel] (Song& song) -> ChannelDef* {
+        return channel >= 0 && channel < (int) song.channels.size() ? &song.channels[(std::size_t) channel] : nullptr;
+    }, channel);
+}
+
+std::unique_ptr<juce::Component> makeMidiOutEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate)
+{
+    return std::make_unique<MidiOutEditor> (engine, std::move (locate), -1);
 }
 } // namespace lynx
