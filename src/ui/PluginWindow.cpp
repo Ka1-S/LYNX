@@ -402,13 +402,27 @@ private:
             // Wrapper settings page and made it unreachable (issue #8). Moving it outside the window clips it away on
             // every platform; resized() puts it back.
             if (settings)
-                editor->setTopLeftPosition (-30000, -30000);
+                editor->setTopLeftPosition (-12000, -12000); // (X11 positions are 16-bit, also when scaled)
         }
         if (settings)
             setSize (juce::jmax (getWidth(), page.getWidth()), juce::jmax (getHeight(), page.preferredHeight() + headerHeight));
         else
             fitEditor();
         resized();
+        if (editor != nullptr)
+            followNativeChildren (*editor);
+    }
+
+    // JUCE's XEmbedComponent only moves its X window when it is itself moved, not when a parent (the editor) is:
+    // tell every one inside the editor (round 162d)
+    static void followNativeChildren (juce::Component& c)
+    {
+       #if JUCE_LINUX || JUCE_BSD
+        if (auto* x = dynamic_cast<juce::XEmbedComponent*> (&c))
+            x->updateEmbeddedBounds();
+       #endif
+        for (auto* child : c.getChildren())
+            followNativeChildren (*child);
     }
 
     std::unique_ptr<juce::AudioProcessorEditor> editor;

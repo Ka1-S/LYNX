@@ -1935,6 +1935,8 @@ private:
             bool instrument = false;
             int phase = 0, ticks = 0, seconds = 15;
             juce::AudioPluginInstance* instance = nullptr;
+            juce::AudioProcessorParameter* checked = nullptr;
+            std::unique_ptr<juce::DocumentWindow> mainWindow; // stands for LYNX's main window (window ownership)
             std::function<void (bool)> done;
 
             void step (const juce::String& line)
@@ -1978,8 +1980,17 @@ private:
                     step ("save_formats=" + lynx::pluginpresetui::saveWildcard (*instance));
 
                     // preset round trip: save, change the first parameter, load, compare
-                    if (auto* param = instance->getParameters().isEmpty() ? nullptr : instance->getParameters()[0])
+                    juce::AudioProcessorParameter* param = nullptr;
+                    for (auto* candidate : instance->getParameters())
+                        if (candidate->isAutomatable() && ! candidate->isMetaParameter() && candidate != instance->getBypassParameter())
+                        {
+                            param = candidate;
+                            break;
+                        }
+                    if (param != nullptr)
                     {
+                        step ("param=" + param->getName (64));
+                        checked = param;
                         const auto file = lynx::pluginpresetui::folderFor (instance->getName()).getChildFile ("plugwintest.lynxpreset");
                         juce::String error;
                         const auto before = param->getValue();
@@ -2015,6 +2026,8 @@ private:
                     ticks = 0;
                     return;
                 }
+                if (phase == 1 && ticks == 20 && checked != nullptr)
+                    step ("param_after_1s=" + juce::String (checked->getValue(), 4));
                 if (phase == 1 && ticks >= seconds * 20) // remove the plugin from the song
                 {
                     engine->editSong ([this] (lynx::Song& song) {
@@ -2046,12 +2059,18 @@ private:
         test->done = [this, test] (bool ok) {
             setApplicationReturnValue (ok ? 0 : 1);
             juce::MessageManager::callAsync ([this, test] {
+                lynx::setMainWindowForOwnership (nullptr);
+                test->mainWindow = nullptr;
                 test->engine = nullptr;
                 delete test;
                 quit();
             });
         };
         test->engine = std::make_unique<lynx::AudioEngine> (false);
+        test->mainWindow = std::make_unique<juce::DocumentWindow> ("LYNX test main window", juce::Colours::darkgrey, 0);
+        test->mainWindow->setBounds (20, 20, 300, 200);
+        test->mainWindow->setVisible (true);
+        lynx::setMainWindowForOwnership (test->mainWindow.get());
         auto& host = test->engine->getPluginHost();
         test->step ("plugins_in_file=" + juce::String (host.addPluginFile (juce::File (pluginPath))));
         std::optional<juce::PluginDescription> chosen;

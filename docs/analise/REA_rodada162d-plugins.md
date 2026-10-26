@@ -22,7 +22,7 @@ Linux build, DPF / LSP / Dragonfly test plugins from ~/opt/r161b).
 |---|---|---|
 | Orphaned plugin windows close | `ui/PluginWindow.cpp` `OrphanReaper` | 4 Hz while a plugin window is open: a window whose adapter is held by nothing but the window (`use_count() == 1`: removed, replaced, channel deleted, project closed) closes. The engine drops a removed adapter when the audio thread has let go of its last snapshot (retired snapshots are collected at 30 Hz), so the window goes within ~0.3 s. `PluginWindows::closeOrphans()` does it at once. |
 | Native effect windows close | `ui/SlotWatch.h` `SlotGoneWatcher`, used by `NativeEffectWindow`, `ProEditorWindow`, `FacetEqWindow`, `NewtoneWindow`, `FormulaWindow` | closes the window when its slot is removed or holds another kind of effect. |
-| Wrapper settings reachable | `ui/PluginWindow.cpp` `WrappedEditor::show` | the editor is also moved outside the window (−30000, −30000) while the settings page shows, which clips a native child window away on every platform; `resized()` puts it back. |
+| Wrapper settings reachable | `ui/PluginWindow.cpp` `WrappedEditor::show` | the editor is also moved outside the window (−12000, −12000; X11 positions are 16-bit even when scaled) and every XEmbedComponent inside it is told to follow (JUCE only moves its X window when the XEmbedComponent itself moves, not its parent) while the settings page shows, which clips a native child window away on every platform; `resized()` puts it back. |
 | Separate-process plugin window | `engine/PluginSandbox.cpp` `RemoteEditor`, `SandboxWindow` | the stand-in inside LYNX's plugin window tells the child to show the plugin's window while the stand-in is on screen and to hide it when it is not (Wrapper settings tab, LYNX window minimised or closed, plugin removed): new `hideEditor` message, polled at 4 Hz plus `visibilityChanged`. Linux: the child's window is made transient for LYNX's main window (`WM_TRANSIENT_FOR` through its own libX11 connection, dlopen) instead of always-on-top, so it stays above LYNX but not above other programs. Windows: still always on top — a cross-process owner would attach both processes' input queues, and a plugin hanging its window would freeze LYNX (the point of the separate process); the hide/show covers the settings page. |
 | Plugin presets | `core/PluginPresets.{h,cpp}` (formats), `ui/PluginPresetMenu.{h,cpp}` (menu, files), wrapper header | ◀ ▶ and the preset name in the plugin window's header (next to Plugin / Wrapper settings). Menu: the plugin's own programs (factory presets; a sub-menu when > 32), "Your presets" (the plugin's folder), Save preset..., Load preset file..., Export preset file..., Delete preset, Show the presets folder. ◀ ▶ step through programs then user presets. A change marks the project modified. |
 | Formats | same | `.lynxpreset` (LYNX's own: the plugin's whole state + its name and id, text with base64; any format — VST2, VST3, CLAP, LV2, separate process). VST2 `.fxp` / `.fxb` read and written by LYNX (big-endian `CcnK` layout: FxCk / FPCh / FxBk / FBCh) through new `vst2::info / getChunk / setChunk` (`engine/Vst2Format.h`); parameter programs also load into any plugin with the same parameter count. VST3 `.vstpreset` through JUCE's VST3 host (`ExtensionsVisitor::VST3Client::getPreset / setPreset`). |
@@ -44,6 +44,19 @@ LYNX's own engines already had presets (round 129: the preset bar of every LYNX 
 - Linux: LYNX's own secondary windows still have no WM_TRANSIENT_FOR to the main window (only the separate-process
   plugin window got it); left out as riskier than this round's scope.
 
+## 4. Verification
+
+| Check | Result |
+|---|---|
+| [TEST] `plugin_preset_text_round_trip_round162`, `plugin_preset_folder_names_round162`, `vst2_fxp_fxb_round_trip_round162` | pass (build-local with FL Data) |
+| [RUN] Linux (Xvfb), `--plugwintest` Dragonfly Room Reverb (VST3) | window with header + presets; Wrapper settings click: the page is fully visible (before the fix the plugin's X window covered its top 340 px); Plugin tab: the editor is back; `.lynxpreset` round trip restores Dry Level 0.8 after setting 0.1; `.vstpreset` save + load OK; plugin removed → window closed (`window_open_after_remove=0`). Screenshots D:\lynx-work\look162p\linux-*.png |
+| [RUN] Linux, MVerb (VST3, 5 programs) | presets menu lists Halves / Dark / Cupboard / Stadium / Subtle + "Your presets"; ▶ steps programs then user presets and wraps |
+| [RUN] Linux, MVerb in a separate process (sandbox.txt = 1) | the child's plugin window: `IsViewable` → Wrapper settings tab: `IsUnMapped` → Plugin tab: `IsViewable` → plugin removed: window gone; `WM_TRANSIENT_FOR` = LYNX's main window, no always-on-top state |
+| [RUN] Windows, ValhallaFreqEcho VST2 (`.dll`) | `.lynxpreset`, `.fxp`, `.fxb` save + load OK, value restored; window closed after removal |
+| [RUN] Windows, ValhallaFreqEcho VST3 | `.lynxpreset`, `.vstpreset` OK; Wrapper settings page shows cleanly (HWND child hidden); window closed after removal. Screenshot D:\lynx-work\look162p\windows-wrapper-settings.png |
+| LYNX's own effect windows closing with their slot | [CODE] only (`SlotGoneWatcher`), not run |
+
 ## Where I stopped
 
-See the end of this file (updated as work progresses).
+All three items done and verified on Linux and Windows (see §4); branch feature/look162p, to be merged into
+feature/look162 by the round's main agent. Open: the limits in §3.
