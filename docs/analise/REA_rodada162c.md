@@ -36,4 +36,9 @@ Scratch benchmarks (g++ -O2, machine loaded by other builds, so times are upper 
 
 ## Where I stopped
 
-- Implementation complete for items 1–6; tests in tests/Sampler162Tests.inc.
+- Items 1–6 done; tests in tests/Sampler162Tests.inc (7 tests, 40 checks). build-local with FL Data: 1752886 checks,
+  0 failures. Windows build (build-win-sampler162): selftest OK, export over the same file twice OK, a target held open
+  reported (rc 1) with the old file kept, `--snapshot` shows the Audio Editor volume knob.
+- Not done: FL black-box comparison of the stretch modes (relied on FL's manual [DOC]); native engines other than the
+  Sampler / Synth ignore the pitch wheel; pitch bend is not recorded into patterns.
+- Landed to main (round 162c).
