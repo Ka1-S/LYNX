@@ -1,3 +1,4 @@
+#include "ui/ColourPicker.h"
 #include "ui/PatcherEditor.h"
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
@@ -1838,24 +1839,10 @@ void ChannelRackComponent::showChannelMenu (int channel)
     menu.addItem (tr ("Graph editor") + "\tCtrl+K", true, graphLanes, [this] { toggleGraphLanes(); });
     menu.addSeparator();
     menu.addItem (tr ("Rename and color...") + "\tF2", [this, channel] { rename (channel); });
-    {
-        juce::PopupMenu colours;
-        colours.addItem (tr ("Default"), [this, channel] { engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].colour = 0; }); });
-
-        for (auto colour : lynxPalette())
-        {
-            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-            juce::Graphics (swatch).fillAll (juce::Colour (colour));
-            juce::PopupMenu::Item item;
-            item.text = "#" + juce::String::toHexString ((juce::int64) (colour & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
-            item.image = std::make_unique<juce::DrawableImage> (swatch);
-            item.isTicked = c.colour == colour;
-            item.action = [this, channel, colour] { engine.editSong ([channel, colour] (Song& s) { s.channels[(std::size_t) channel].colour = colour; }); };
-            colours.addItem (std::move (item));
-        }
-
-        menu.addSubMenu (tr ("Change color"), colours);
-    }
+    menu.addSubMenu (tr ("Change color"), ui::colourMenu (c.colour, [this, channel] (std::uint32_t colour) {
+                         if (channel < (int) engine.getSong().channels.size())
+                             engine.editSong ([channel, colour] (Song& s) { s.channels[(std::size_t) channel].colour = colour; });
+                     }, juce::Rectangle<int> (juce::Desktop::getMousePosition().x, juce::Desktop::getMousePosition().y, 1, 1)));
     menu.addItem (tr ("Random color"), [this, channel] {
         const auto& palette = lynxPalette();
         const auto colour = palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())];

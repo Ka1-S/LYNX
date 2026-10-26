@@ -1,9 +1,12 @@
 #include "ui/Dialogs.h"
 
+#include <functional>
+
 #include <set>
 
 #include "core/RackOps.h"
 #include "engine/MidiFileIo.h"
+#include "ui/ColourPicker.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "ui/WindowOwner.h"
@@ -19,6 +22,7 @@ public:
     explicit Swatches (std::uint32_t c) : colour (c) { setSize (13 * (size + gap), size + 4); }
 
     std::uint32_t colour;
+    std::function<void()> onPick; // a swatch was clicked (or F2)
 
     void paint (juce::Graphics& g) override
     {
@@ -59,6 +63,8 @@ public:
             {
                 colour = i == 0 ? 0u : palette[(std::size_t) i - 1];
                 repaint();
+                if (onPick)
+                    onPick();
             }
     }
 
@@ -66,6 +72,8 @@ public:
     {
         colour = randomPaletteColour (colour, (std::uint32_t) juce::Time::getMillisecondCounter());
         repaint();
+        if (onPick)
+            onPick();
     }
 
 private:
@@ -81,11 +89,25 @@ public:
     {
         addTextEditor ("name", name, tr ("Name"));
         addCustomComponent (&swatches);
-        hint.setText (tr ("Click a color, or press F2 for a random one"), juce::dontSendNotification);
+        hint.setText (tr ("Click a color, pick any color below, or press F2 for a random one"), juce::dontSendNotification);
         hint.setFont (theme::font (theme::type::small));
         hint.setColour (juce::Label::textColourId, theme::colour::textSecondary);
         hint.setSize (swatches.getWidth(), 18);
         addCustomComponent (&hint);
+        // any colour: wheel, H / S / V and hex (round 162d, issue #9)
+        picker.setSize (swatches.getWidth(), picker.preferredHeight());
+        picker.setOriginal (colour != 0 ? juce::Colour (colour) : theme::colour::bg4);
+        if (colour != 0)
+            picker.setColour (juce::Colour (colour), false);
+        picker.onChange = [this] (juce::Colour c) {
+            swatches.colour = c.getARGB();
+            swatches.repaint();
+        };
+        swatches.onPick = [this] {
+            if (swatches.colour != 0)
+                picker.setColour (juce::Colour (swatches.colour), false);
+        };
+        addCustomComponent (&picker);
         addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
         addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
@@ -109,6 +131,7 @@ public:
 private:
     Swatches swatches;
     juce::Label hint;
+    ui::ColourPicker picker { juce::Colours::grey, true };
 };
 
 // One big choice of the record dialog: a title line and a note below it.

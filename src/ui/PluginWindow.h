@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -24,6 +25,11 @@ struct WrapperContext
 // `owner` is the adapter (PluginInstrument/PluginEffect) that holds the plugin.
 void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const juce::String& title, WrapperContext context = {});
 void closeAll();
+// Closes now the windows whose plugin is no longer in the song (removed, replaced, its channel deleted); a timer
+// also does it on its own while a window is open.
+void closeOrphans();
+// The plugins with an open window, the one used last first (the Browser applies a preset to it).
+std::vector<juce::AudioPluginInstance*> openPlugins();
 bool isOpen (const juce::AudioPluginInstance& plugin);
 void close (const juce::AudioPluginInstance& plugin);
 // A parameter gesture in an open plugin editor (`starting` = begin, else end), on the UI thread; the plugin is only

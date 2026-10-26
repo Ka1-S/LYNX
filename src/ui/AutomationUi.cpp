@@ -1,5 +1,6 @@
 #include "ui/WindowOwner.h"
 #include "ui/AutomationUi.h"
+#include "core/LastTweaked.h"
 
 #include <map>
 
@@ -650,6 +651,32 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
     }
 
     return tr ("(no target)");
+}
+
+juce::String describeTargetValue (AudioEngine& engine, const AutomationTarget& target)
+{
+    const auto value = engine.currentTargetValue (target);
+    if (value < 0.0f)
+        return {};
+    if (target.kind == AutomationTargetKind::channelParam || target.kind == AutomationTargetKind::effectParam)
+    {
+        if (midictl::isMidiParam (target.param))
+            return juce::String (juce::roundToInt (value * 127.0f));
+        if (auto* plugin = pluginFor (engine, target))
+        {
+            if (target.param < 0 || target.param >= plugin->getParameters().size())
+                return {};
+            auto* p = plugin->getParameters()[target.param];
+            auto text = p->getCurrentValueAsText().trim();
+            if (text.isEmpty())
+                text = juce::String (value * 100.0f, 1) + "%";
+            else if (const auto label = p->getLabel().trim(); label.isNotEmpty() && ! text.endsWith (label))
+                text << " " << label;
+            return text;
+        }
+    }
+    const auto text = lasttweak::valueText (engine.getSong(), target, value);
+    return text.empty() ? juce::String (juce::roundToInt (value * 100.0f)) + "%" : juce::String::fromUTF8 (text.c_str());
 }
 
 void createAutomationClip (AudioEngine& engine, const AutomationTarget& target)

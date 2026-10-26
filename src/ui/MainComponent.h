@@ -388,6 +388,10 @@ private:
     // hint bar: what the control under the mouse does, its live value, and markers for
     // "can be automated" and "has a right-click menu"
     ui::HintBar hintBar;
+    ui::TweakReadout tweakReadout; // FL's Tools › Last tweaked, at the hint bar's right end (round 162d)
+    void refreshTweakReadout();
+    int tweakTicks = 0;
+    void placeHintBar (juce::Rectangle<int> row); // the hint bar and, at its right end, the last-tweaked read-out
     bool hintsFrozen = false; // --snapshot: keep the hint that was set
     juce::String idleHint() const;
 

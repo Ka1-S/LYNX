@@ -15,7 +15,7 @@ namespace lynx
 // shortcuts), Files (the folders LYNX searches for missing samples, the Browser's folders and the plugin folders),
 // Project (tempo, time signature, swing, master pitch) and Info (title, author, genre, web link, comments).
 // Project and Info edit the song: every change is an undo step. The others edit the app's settings at once.
-enum class SettingsPage { project, info, files, general, audio, midi };
+enum class SettingsPage { project, info, files, general, audio, midi, theme };
 
 void showSettings (AudioEngine& engine, SettingsPage page, SettingsHooks hooks = {});
 

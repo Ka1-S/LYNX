@@ -7,6 +7,10 @@ namespace lynx
 // Readable name of what an automation controls ("Kick - Volume", "Insert 3 - Pan"...).
 juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarget& target);
 
+// The target's current value as its control shows it ("78%", "-3.2 dB", "L50", a plugin parameter's own text);
+// "" when the target is gone (round 162d: the toolbar's last-tweaked read-out).
+juce::String describeTargetValue (AudioEngine& engine, const AutomationTarget& target);
+
 // Creates an automation for the target, starting at the current value, plus a clip of it in the Playlist
 // (from the start of the song to its end, on a free track), like FL's "Create automation clip".
 void createAutomationClip (AudioEngine& engine, const AutomationTarget& target);

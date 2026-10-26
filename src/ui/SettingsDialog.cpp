@@ -1,4 +1,5 @@
 #include "ui/SettingsDialog.h"
+#include "ui/ThemeSettings.h"
 
 #include "core/MissingFiles.h"
 #include "engine/PluginHost.h"
@@ -508,7 +509,8 @@ public:
         tabs.setOutline (0);
         // FL's order: device pages first, then the app, then the project
         const std::pair<SettingsPage, juce::String> order[] = { { SettingsPage::audio, tr ("Audio") },     { SettingsPage::midi, tr ("MIDI") },
-                                                                { SettingsPage::general, tr ("General") }, { SettingsPage::files, tr ("Files") },
+                                                                { SettingsPage::general, tr ("General") }, { SettingsPage::theme, tr ("Theme") },
+                                                                { SettingsPage::files, tr ("Files") },
                                                                 { SettingsPage::project, tr ("Project") }, { SettingsPage::info, tr ("Info") } };
         for (const auto& [p, name] : order)
         {
@@ -518,6 +520,7 @@ public:
                 case SettingsPage::audio: content = makeAudioPage (engine, persistent).release(); break;
                 case SettingsPage::midi: content = makeMidiPage (engine, hooks, persistent).release(); break;
                 case SettingsPage::general: content = makeGeneralPage (engine, hooks, persistent).release(); break;
+                case SettingsPage::theme: content = themeui::makeThemePage().release(); break;
                 case SettingsPage::files: content = new FilesPage (engine, persistent, hooks.browserFoldersChanged, hooks.managePlugins); break;
                 case SettingsPage::project: content = new ProjectPage (engine); break;
                 case SettingsPage::info: content = new InfoPage (engine); break;

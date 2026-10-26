@@ -1,3 +1,4 @@
+#include "ui/ColourPicker.h"
 #include "ui/ProjectLoading.h"
 #include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
@@ -420,7 +421,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &playButton, &stopButton,
                                                              &recordButton, &recordMenuButton, &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
                                                              &tempoDisplay, &patternBox, &newPatternButton, &patternMenuButton, &pluginPickerButton, &timeDisplay,
-                                                             &songPosition, &masterVolume, &masterPitch, &perfMeter, &output, &hintBar, &workspace, &midiLight })
+                                                             &songPosition, &masterVolume, &masterPitch, &perfMeter, &output, &hintBar, &tweakReadout, &workspace, &midiLight })
     {
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
@@ -469,6 +470,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::installSliderContract();
     // FL's Last tweaked and automation recording (REA round 143): every automatable control reports its moves
     ui::onTweak = [this] (const AutomationTarget& t) { engine.noteTweaked (t); };
+    // the toolbar's last-tweaked read-out opens the parameter's own menu (FL's Tools › Last tweaked; round 162d)
+    tweakReadout.onClick = [this] {
+        makeLastTweakedMenu (0).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tweakReadout));
+    };
     // FL's "Edit events in piano roll" (REA round 146): the channel's own parameter selects its channel
     onEditEventsInPianoRoll = [this] (const AutomationTarget& t) {
         const auto onChannel = t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan
@@ -682,7 +687,7 @@ void MainComponent::resized()
         const auto menu = row.withWidth (juce::jmin (menuWidth + 8, row.getWidth()));
         put (menuBar, menu);
         titleArea = {};
-        put (hintBar, row.withTrimmedLeft (menu.getWidth() + 12).withWidth (juce::jmin (900, row.getWidth() - menu.getWidth() - 12)).reduced (0, 1));
+        placeHintBar (row.withTrimmedLeft (menu.getWidth() + 12).withWidth (juce::jmin (900, row.getWidth() - menu.getWidth() - 12)).reduced (0, 1));
         fixedToolbarArea = bar;
     }
     else
@@ -693,7 +698,7 @@ void MainComponent::resized()
         titleArea = column.withY (row1).withHeight (h).withTrimmedLeft (menu.getWidth() + 12).withTrimmedRight (4);
         if (titleArea.getWidth() < 60)
             titleArea = {};
-        put (hintBar, column.withY (row2).withHeight (h).reduced (0, 1));
+        placeHintBar (column.withY (row2).withHeight (h).reduced (0, 1));
         fixedToolbarArea = juce::Rectangle<int> (column.getX() - 4, 0, column.getWidth() + 8, toolbarHeight);
     }
 
@@ -2181,22 +2186,10 @@ juce::PopupMenu MainComponent::makePatternMenu()
     const auto index = song.currentPattern;
     const auto& pattern = song.patterns[(std::size_t) index];
 
-    juce::PopupMenu colours;
-    colours.addItem (tr ("Automatic"), true, pattern.colour == 0,
-                     [this, index] { engine.editSong ([index] (Song& s) { s.patterns[(std::size_t) index].colour = 0; }); });
-    colours.addSeparator();
-
-    for (auto c : lynxPalette())
-    {
-        juce::Image swatch (juce::Image::ARGB, 16, 16, true);
-        juce::Graphics (swatch).fillAll (juce::Colour (c));
-        juce::PopupMenu::Item item;
-        item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
-        item.image = std::make_unique<juce::DrawableImage> (swatch);
-        item.isTicked = pattern.colour == c;
-        item.action = [this, index, c] { engine.editSong ([index, c] (Song& s) { s.patterns[(std::size_t) index].colour = c; }); };
-        colours.addItem (std::move (item));
-    }
+    auto colours = ui::colourMenu (pattern.colour, [this, index] (std::uint32_t c) {
+        if (index < (int) engine.getSong().patterns.size())
+            engine.editSong ([index, c] (Song& s) { s.patterns[(std::size_t) index].colour = c; });
+    }, juce::Rectangle<int> (juce::Desktop::getMousePosition().x, juce::Desktop::getMousePosition().y, 1, 1));
 
     juce::PopupMenu lengths;
     lengths.addItem (tr ("Automatic (from notes)"), true, pattern.lengthTicks == 0,
@@ -2701,6 +2694,11 @@ void MainComponent::timerCallback()
         }
 
         hintBar.setHint (hint, live && hint.value.isNotEmpty());
+        if (++tweakTicks >= 3) // 10 times a second
+        {
+            tweakTicks = 0;
+            refreshTweakReadout();
+        }
     }
 
     const auto playing = transport.playing.load();
@@ -3821,6 +3819,37 @@ void MainComponent::save (bool askForFile)
                               });
 }
 
+void MainComponent::placeHintBar (juce::Rectangle<int> row)
+{
+    // the read-out takes the right part of the hint row once something was tweaked (2/5 of it, 170..280 px), and
+    // only when the hint keeps at least 220 px
+    const auto readoutWidth = juce::jlimit (170, 280, row.getWidth() * 2 / 5);
+    if (tweakReadout.hasContent() && row.getWidth() - readoutWidth - 6 >= 220)
+    {
+        tweakReadout.setBounds (row.removeFromRight (readoutWidth));
+        tweakReadout.setVisible (true);
+        row.removeFromRight (6);
+    }
+    else
+    {
+        tweakReadout.setVisible (false);
+        tweakReadout.setBounds ({});
+    }
+    hintBar.setVisible (true);
+    hintBar.setBounds (row);
+}
+
+void MainComponent::refreshTweakReadout()
+{
+    const auto had = tweakReadout.hasContent();
+    if (const auto t = engine.getLastTweaked (0))
+        tweakReadout.setContent (describeAutomationTarget (engine, *t), describeTargetValue (engine, *t));
+    else
+        tweakReadout.setContent ({}, {});
+    if (had != tweakReadout.hasContent())
+        resized(); // the read-out appears (or goes, with its target)
+}
+
 juce::PopupMenu MainComponent::makeLastTweakedMenu (int which)
 {
     juce::PopupMenu menu;
@@ -3832,7 +3861,9 @@ juce::PopupMenu MainComponent::makeLastTweakedMenu (int which)
     }
 
     // as FL: the parameter's name, then the items of its own menu (events, automation clip, remote control, value)
-    ui::addItemHeader (menu, tr ("Parameter"), describeAutomationTarget (engine, *target), juce::Colours::transparentBlack);
+    const auto valueNow = describeTargetValue (engine, *target); // (round 162d: with its value, as the read-out shows it)
+    ui::addItemHeader (menu, tr ("Parameter"), describeAutomationTarget (engine, *target) + (valueNow.isNotEmpty() ? ": " + valueNow : juce::String()),
+                       juce::Colours::transparentBlack);
     const auto& song = engine.getSong();
     int clip = -1;
     for (int a = 0; a < (int) song.automations.size(); ++a)
@@ -4079,6 +4110,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addItem (tr ("Audio settings..."), [this] { openSettings ((int) SettingsPage::audio); });
         menu.addItem (tr ("MIDI settings..."), [this] { openSettings ((int) SettingsPage::midi); });
         menu.addItem (tr ("General settings..."), [this] { openSettings ((int) SettingsPage::general); });
+        menu.addItem (tr ("Theme (colors, background)..."), [this] { openSettings ((int) SettingsPage::theme); });
         menu.addItem (tr ("File settings (search folders)..."), [this] { openSettings ((int) SettingsPage::files); });
         menu.addItem (tr ("Project settings (tempo, time signature)..."), [this] { openSettings ((int) SettingsPage::project); });
         menu.addItem (tr ("Project info..."), [this] { openSettings ((int) SettingsPage::info); });

@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 namespace lynx
@@ -33,4 +37,19 @@ private:
     void createPluginInstance (const juce::PluginDescription&, double initialSampleRate, int initialBufferSize,
                                PluginCreationCallback) override;
 };
+
+// Direct access to a hosted VST2 for its standard preset files (.fxp / .fxb, core/PluginPresets.h). Every function
+// fails (nullopt / false) for a plugin that is not a VST2 hosted in this process.
+namespace vst2
+{
+struct Info
+{
+    std::int32_t uniqueId = 0, version = 0, numPrograms = 0, numParams = 0;
+    bool chunks = false; // the plugin saves an opaque chunk (else: its parameter values)
+};
+std::optional<Info> info (juce::AudioPluginInstance& plugin);
+// effGetChunk / effSetChunk: `program` = the current program only, else the whole bank
+bool getChunk (juce::AudioPluginInstance& plugin, std::vector<std::uint8_t>& out, bool program);
+bool setChunk (juce::AudioPluginInstance& plugin, const std::vector<std::uint8_t>& data, bool program);
+} // namespace vst2
 } // namespace lynx

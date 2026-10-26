@@ -9,6 +9,9 @@ namespace lynx
 void setMainWindowForOwnership (juce::Component* mainWindow);
 void keepAboveMainWindow (juce::Component& window); // call after the window is visible; sets the LYNX icon
 // (it stays owned when JUCE recreates the native window later, e.g. setResizable after it is shown)
+// The main window's native handle (HWND / X11 Window id; nullptr without one): a plugin's window in a separate
+// process is kept above it (round 162d).
+void* mainWindowHandle();
 
 // True when `window` is currently owned by the main window (Windows; elsewhere: keepAboveMainWindow was called).
 bool isOwnedByMainWindow (juce::Component& window);
