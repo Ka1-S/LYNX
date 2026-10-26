@@ -35,6 +35,12 @@ std::vector<int> linkChannels (Song& song, const std::vector<int>& channels, int
 // Channels whose output goes to `track`.
 std::vector<int> channelsOn (const Song& song, int track);
 
+// Makes sure insert `track` exists, adding default inserts ("Insert n") up to it — like FL, a channel can be routed to
+// any insert, not only to those the mixer shows yet (round 162, issue #9). Returns `track` clamped to 0..maxMixerTracks-1.
+int ensureInsert (Song& song, int track);
+// Routes channel `channel` to insert `track` (0 = Master), adding the inserts up to it when needed.
+void routeChannel (Song& song, int channel, int track);
+
 // Sends each source insert to `to` (0 = Master). `only`: the source stops sending anywhere else. Sources
 // that would make a cycle are skipped. Returns how many were routed.
 int routeTo (Song& song, const std::vector<int>& sources, int to, bool only);

@@ -22,6 +22,31 @@ std::shared_ptr<SampleData> timeStretch (const SampleData& input, double ratio, 
 // pitch-preserving stretch; callers keep resampling for it.
 StretchMethod stretchMethodForFlMode (int flMode) noexcept;
 
+// A voice's real-time pitch shifter (round 162, issue #9: a sampler stretched keeping its pitch follows the keys like
+// FL's Stretch modes — the note transposes the sample and its length stays). Signalsmith Stretch at a 1:1 time ratio
+// with a transposition factor. The voice primes it with primeLength() frames of its source when the note starts, so
+// the output is aligned with the source (no latency); afterwards each process() call takes n source frames and returns
+// n shifted frames. allocate() on the UI thread; start()/process() never allocate.
+class VoicePitchShifter
+{
+public:
+    VoicePitchShifter();
+    ~VoicePitchShifter();
+    VoicePitchShifter (const VoicePitchShifter&) = delete;
+    VoicePitchShifter& operator= (const VoicePitchShifter&) = delete;
+
+    void allocate (double sampleRate, StretchMethod method);
+    bool ready() const noexcept;
+    int primeLength() const noexcept;
+    // `l`/`r`: primeLength() frames of the source from the note's start (r may equal l)
+    void start (const float* l, const float* r, double factor) noexcept;
+    void process (const float* inL, const float* inR, float* outL, float* outR, int n, double factor) noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+};
+
 namespace stretchdetail
 {
 // Exposed for the tests: attack positions (frames) found in a mono signal, strongest-first filtering already applied.

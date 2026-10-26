@@ -423,6 +423,58 @@ std::shared_ptr<SampleData> stretchWith (const SampleData& in, double ratio, con
 }
 } // namespace stretchdetail
 
+struct VoicePitchShifter::Impl
+{
+    signalsmith::stretch::SignalsmithStretch<float> stretch { 162L }; // fixed seed: renders repeat exactly
+    int prime = 0;
+    double factor = 1.0;
+};
+
+VoicePitchShifter::VoicePitchShifter() = default;
+VoicePitchShifter::~VoicePitchShifter() = default;
+
+void VoicePitchShifter::allocate (double sampleRate, StretchMethod method)
+{
+    impl = std::make_unique<Impl>();
+    // real time: 60 ms blocks, overlap 3 (measured round 162: ~1 ms to prime a voice and ~2 % of a core per voice,
+    // against ~8 ms and ~10 % with the offline presets); drums get shorter blocks for tighter attacks
+    const auto block = method == StretchMethod::transients ? 0.04 : 0.06;
+    impl->stretch.configure (2, (int) std::lround (sampleRate * block), (int) std::lround (sampleRate * block / 3.0));
+    impl->prime = impl->stretch.outputSeekLength (1.0f);
+    // one silent run sizes every internal buffer, so the audio thread's first note does not allocate
+    std::vector<float> silence ((std::size_t) std::max (impl->prime, 256), 0.0f), out (256, 0.0f);
+    start (silence.data(), silence.data(), 1.5);
+    process (silence.data(), silence.data(), out.data(), out.data() + 128, 128, 1.5);
+}
+
+bool VoicePitchShifter::ready() const noexcept { return impl != nullptr; }
+
+int VoicePitchShifter::primeLength() const noexcept { return impl != nullptr ? impl->prime : 0; }
+
+void VoicePitchShifter::start (const float* l, const float* r, double factor) noexcept
+{
+    if (impl == nullptr)
+        return;
+    impl->factor = factor;
+    impl->stretch.setTransposeFactor ((float) factor);
+    const float* in[2] { l, r };
+    impl->stretch.outputSeek (in, impl->prime);
+}
+
+void VoicePitchShifter::process (const float* inL, const float* inR, float* outL, float* outR, int n, double factor) noexcept
+{
+    if (impl == nullptr)
+        return;
+    if (factor != impl->factor)
+    {
+        impl->factor = factor;
+        impl->stretch.setTransposeFactor ((float) factor);
+    }
+    const float* in[2] { inL, inR };
+    float* out[2] { outL, outR };
+    impl->stretch.process (in, n, out, n);
+}
+
 StretchMethod stretchMethodForFlMode (int flMode) noexcept
 {
     switch (flMode)

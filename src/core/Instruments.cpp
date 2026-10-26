@@ -4,6 +4,7 @@
 #include "core/DirectWave.h"
 #include "core/FlSynths.h"
 #include "core/FlResampler.h"
+#include "core/TimeStretch.h"
 #include "core/FlVoiceProcessor.h"
 #include "core/DrumSynthLive.h"
 #include "core/Gms.h"
@@ -857,6 +858,11 @@ public:
         nextPorta = false;
     }
 
+    void pitchBend (float semitones) noexcept override
+    {
+        bendMul = std::isfinite (semitones) ? std::exp2 ((double) std::clamp (semitones, -48.0f, 48.0f) / 12.0) : 1.0;
+    }
+
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override
     {
         nextPan = pan;
@@ -1029,7 +1035,7 @@ public:
                     const auto& osc = settings.osc[2];
                     if (osc.level > 0.0f)
                     {
-                        const auto delta = std::min (0.49, v.phaseDelta * ratios[2] * v.pitchMul);
+                        const auto delta = std::min (0.49, v.phaseDelta * ratios[2] * v.pitchMul * bendMul);
                         modulator = osc.level * oscillator (osc.wave, v.phase[2], delta);
                         v.phase[2] += delta;
                         if (v.phase[2] >= 1.0)
@@ -1049,7 +1055,7 @@ public:
                     if (osc.level <= 0.0f)
                         continue;
 
-                    const auto delta = std::min (0.49, v.phaseDelta * ratios[o] * v.pitchMul);
+                    const auto delta = std::min (0.49, v.phaseDelta * ratios[o] * v.pitchMul * bendMul);
                     auto phase = v.phase[o];
                     if (fmShift != 0.0)
                     {
@@ -1350,6 +1356,7 @@ private:
     bool useBands = false;
     float toneCoeff[2] { 0.025f, 0.155f };
     float nextPan = 0.0f, nextCents = 0.0f;
+    double bendMul = 1.0; // the pitch wheel (round 162), audio thread
     bool nextPorta = false;
     Noise noise;
     std::array<SynthVoice, 16> voices {};
@@ -1493,8 +1500,11 @@ public:
         release.store (std::clamp (s.release, 0.0f, 4.0f));
         reverse.store (s.reverse);
         cut.store (s.cut);
-        // with "keep pitch" the sample arrives already stretched (RackState): play at normal speed
+        // with "keep pitch" the sample arrives already stretched (RackState): play at normal speed; the keys then
+        // transpose it through each voice's pitch shifter (round 162), so its length stays
         stretchBeats.store (s.keepPitch ? 0.0f : std::max (0.0f, s.stretchBeats));
+        keyShift.store (! clipMode && s.keepPitch && s.stretchBeats > 0.0f);
+        keyShiftMethod.store ((int) s.stretchMethod);
         regionStart.store (std::clamp (s.regionStart, 0.0f, 1.0f));
         regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
         porta.store (s.porta);
@@ -1585,7 +1595,6 @@ public:
             last = index + 1 < slices.count ? std::max (first, std::floor (total * slices.starts[(std::size_t) index + 1]) - 1.0) : total;
             sliced = true;
         }
-        const auto stretched = stretchBeats.load() > 0.0f;
         const auto base = baseRate (*data);
         auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
         if (clipMode) // FL starts an audio clip on a whole source frame (round 110 §1: ceil or round fit, floor is 1 late)
@@ -1617,10 +1626,12 @@ public:
                     target = &v;
         }
 
-        // with stretch (FL's "resample") the note pitch does not change the speed
+        // with stretch in FL's Resample mode the note still transposes: pitch and length change together, like tape
+        // (FL's manual: "playing a chord plays each note at a different speed"; round 162, issue #9 — LYNX played every
+        // key at the sample's own pitch and ignored the pitch knob and the fine tune)
         const auto root = zone != nullptr ? zone->zone.rootKey : 60;
         const auto tune = zone != nullptr ? (double) zone->zone.tune : 0.0;
-        const auto semitones = clipMode || stretched ? 0.0 : (sliced ? 0 : key - root) + tune + (double) pitch.load() + nextCents / 100.0;
+        const auto semitones = clipMode ? 0.0 : (sliced ? 0 : key - root) + tune + (double) pitch.load() + nextCents / 100.0;
         const auto attackSeconds = clipMode ? 0.0f : attack.load();
 
         *target = {};
@@ -1649,14 +1660,14 @@ public:
         target->fadeOut = nextClip[3];
         nextClip = {};
         // FL's read speed: the rate ratio at the original pitch, else exp(cents·ln2/1200)·ratio
-        target->rate = stretched ? base : flrs::speedFor ((float) (semitones * 100.0), base);
+        target->rate = flrs::speedFor ((float) (semitones * 100.0), base);
         target->reversed = backwards;
         // the render quality is read at each note (round 160): the export engine prepares its instruments before it
         // switches to offline rendering, so a value taken in prepare() kept the playback quality in most exports
         target->kernel.setQuality (offlineRendering() ? flrs::renderQuality : quality);
 
         // portamento (channel porta, inverted by the note): starts from the previous note's pitch
-        if (! clipMode && (porta.load() != nextPorta) && lastRate != 0.0 && ! stretched)
+        if (! clipMode && (porta.load() != nextPorta) && lastRate != 0.0)
         {
             const auto steps = (int) (portaBeats.load() * 60.0 / bpm.load() * sampleRate);
             const auto from = std::abs (lastRate);
@@ -1719,8 +1730,156 @@ public:
         for (std::size_t i = 0; i < lfoTargets; ++i)
             if (lfos[i].active && ! clipMode)
                 lfos[i].start (target->lfo[i], songTicks);
+        startKeyShift (*target, semitones, base);
         nextPan = nextCents = 0.0f;
         nextPorta = false;
+    }
+
+    // stretch keeping pitch (round 162): each voice's pitch shifter and its source cursor
+    static constexpr int keyShiftBlock = 128;
+    static constexpr int keyShiftVoices = 8; // shifters per channel (more transposed voices at once play resampled)
+    struct KeyShift
+    {
+        VoicePitchShifter* shifter = nullptr;       // from the pool (prepareKeyShift), while the voice is shifted
+        bool on = false;
+        bool primed = false;                        // primed in render (a few per block: it costs ~1 ms each)
+        SamplerVoice ahead;                         // reads the source primeLength() frames ahead of the voice
+        double factor = 1.0, glideRatio = 1.0;      // the note's transposition and its portamento / slide
+        int glideLeft = 0;
+        std::array<float, keyShiftBlock> inL {}, inR {}, outL {}, outR {};
+        int pos = 0, count = 0;
+    };
+    // Stretch keeping pitch (round 162, issue #9): a transposed note reads the stretched sample at its own speed, so it
+    // lasts as long as at the root key, and its pitch shifter transposes it (FL's Stretch modes: "pitch changes keep
+    // the original duration", the voices of a chord stay in sync). The root key plays the stretched sample untouched.
+    void startKeyShift (SamplerVoice& v, double semitones, double base) noexcept
+    {
+        const auto index = (std::size_t) (&v - voices.data());
+        auto& ks = shifts[index];
+        ks.on = false;
+        ks.shifter = nullptr;
+        if (! keyShift.load (std::memory_order_relaxed) || std::abs (semitones) < 1.0e-6)
+        {
+            if (keyShift.load (std::memory_order_relaxed))
+                lastFactor = 1.0;
+            return;
+        }
+        // a free shifter: none, or its voice ended or plays unshifted
+        for (std::size_t k = 0; k < shifterPool.size() && ks.shifter == nullptr; ++k)
+        {
+            if (shifterPool[k] == nullptr || ! shifterPool[k]->ready() || primeL.size() < (std::size_t) shifterPool[k]->primeLength())
+                continue;
+            const auto user = shifterUser[k];
+            if (user < 0 || (std::size_t) user == index || ! voices[(std::size_t) user].active || shifts[(std::size_t) user].shifter != shifterPool[k].get())
+            {
+                if (user >= 0 && (std::size_t) user != index && voices[(std::size_t) user].active)
+                    shifts[(std::size_t) user].on = false;
+                shifterUser[k] = (int) index;
+                ks.shifter = shifterPool[k].get();
+            }
+        }
+        if (ks.shifter == nullptr)
+            return; // every shifter busy: this voice plays resampled
+
+        ks.on = true;
+        ks.factor = std::exp2 (semitones / 12.0);
+        ks.glideLeft = 0;
+        // portamento: the transposition glides from the previous note's (its length stays)
+        if (v.glideLeft > 0 && lastFactor > 0.0)
+        {
+            ks.glideRatio = std::pow (ks.factor / lastFactor, 1.0 / v.glideLeft);
+            ks.glideLeft = v.glideLeft;
+            ks.factor = lastFactor;
+        }
+        lastFactor = std::exp2 (semitones / 12.0);
+        v.rate = base;
+        v.glideLeft = 0;
+        lastRate = base;
+
+        ks.ahead = v;
+        ks.ahead.pitchMul = 1.0;
+        ks.primed = false;
+        ks.pos = ks.count = 0;
+    }
+
+    // Primes a new shifted voice's shifter with the start of its source (so its output has no latency). A render
+    // primes at most two (about 1 ms each); a voice waiting for its turn starts one block later. Exports prime all.
+    bool primeKeyShift (const SamplerVoice& v, KeyShift& ks, int& budget) noexcept
+    {
+        if (ks.primed)
+            return true;
+        if (budget <= 0)
+            return false;
+        --budget;
+        const auto prime = ks.shifter->primeLength();
+        for (int i = 0; i < prime; ++i)
+            readAhead (v, ks, primeL[(std::size_t) i], primeR[(std::size_t) i]);
+        ks.shifter->start (primeL.data(), primeR.data(), ks.factor * v.pitchMul * bendMul);
+        ks.primed = true;
+        return true;
+    }
+
+    // the shifter's source: the stretched sample read at the voice's (untransposed) speed, ahead of the voice
+    void readAhead (const SamplerVoice& v, KeyShift& ks, float& outL, float& outR) noexcept
+    {
+        auto& a = ks.ahead;
+        const auto lastFrame = std::min ((double) (a.data->frames() - 1), a.last);
+        const auto looping = a.loopEnd > a.loopStart && (! a.loopWhileHeld || v.stage < 3);
+        if (looping && a.position >= a.loopEnd)
+        {
+            while (a.position >= a.loopEnd)
+                a.position = (a.position - a.loopEnd) + a.loopStart;
+            ++a.loops;
+        }
+        if ((double) flrs::wholeFrames (a.position) > lastFrame || a.position < a.first)
+            outL = outR = 0.0f;
+        else
+            readFrame (a, a.data->leftData(), a.data->rightData(), lastFrame, looping, outL, outR, a.rate);
+        a.position += a.rate;
+    }
+
+    // the next frame of a shifted voice (blocks of keyShiftBlock through its shifter): the transposition, its glide,
+    // the pitch envelope / LFO (pitchMul) and the pitch wheel change the shift, never the speed
+    void readShifted (const SamplerVoice& v, KeyShift& ks, float& outL, float& outR) noexcept
+    {
+        if (ks.pos >= ks.count)
+        {
+            for (int i = 0; i < keyShiftBlock; ++i)
+                readAhead (v, ks, ks.inL[(std::size_t) i], ks.inR[(std::size_t) i]);
+            if (ks.glideLeft > 0)
+            {
+                const auto k = std::min (keyShiftBlock, ks.glideLeft);
+                ks.factor *= std::pow (ks.glideRatio, (double) k);
+                ks.glideLeft -= k;
+            }
+            ks.shifter->process (ks.inL.data(), ks.inR.data(), ks.outL.data(), ks.outR.data(), keyShiftBlock, ks.factor * v.pitchMul * bendMul);
+            ks.pos = 0;
+            ks.count = keyShiftBlock;
+        }
+        outL = ks.outL[(std::size_t) ks.pos];
+        outR = ks.outR[(std::size_t) ks.pos];
+        ++ks.pos;
+    }
+
+    void prepareKeyShift (double sr) override
+    {
+        if (clipMode || ! keyShift.load())
+            return;
+        const auto method = (StretchMethod) keyShiftMethod.load();
+        for (auto& shifter : shifterPool)
+        {
+            shifter = std::make_unique<VoicePitchShifter>();
+            shifter->allocate (sr, method);
+        }
+        shifterUser.fill (-1);
+        const auto prime = (std::size_t) shifterPool[0]->primeLength();
+        primeL.assign (prime, 0.0f);
+        primeR.assign (prime, 0.0f);
+    }
+
+    void pitchBend (float semitones) noexcept override
+    {
+        bendMul = clipMode || ! std::isfinite (semitones) ? 1.0 : std::exp2 ((double) std::clamp (semitones, -48.0f, 48.0f) / 12.0);
     }
 
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override
@@ -1752,7 +1911,15 @@ public:
         for (auto& v : voices)
             if (v.active && ! v.stolen && v.rate != 0.0 && v.data != nullptr)
             {
-                const auto target = flrs::speedFor ((float) (semitones * 100.0), v.data->sampleRate * (1.0 / sampleRate));
+                // a shifted voice (stretch keeping pitch) glides its transposition, not its speed (round 162)
+                if (auto& ks = shifts[(std::size_t) (&v - voices.data())]; ks.on)
+                {
+                    ks.glideRatio = std::pow (std::exp2 (semitones / 12.0) / ks.factor, 1.0 / steps);
+                    ks.glideLeft = steps;
+                    continue;
+                }
+                // (with stretch in Resample mode the speed is relative to the stretched one)
+                const auto target = flrs::speedFor ((float) (semitones * 100.0), baseRate (*v.data));
                 v.glideRatio = std::pow (target / v.rate, 1.0 / steps);
                 v.glideLeft = steps;
             }
@@ -1847,9 +2014,11 @@ public:
             if (std::fabs (chanPan) < 1.0e-6f)
                 chanPan = 0.0f;
             const flvp::X87Extended precision;
+            auto primeBudget = offlineRendering() ? keyShiftVoices : 2;
             for (auto& v : voices)
                 if (v.active && v.data != nullptr && v.flVoice)
-                    renderFl (v, left, right, n, chanVol, chanPan);
+                    if (auto& ks = shifts[(std::size_t) (&v - voices.data())]; ! ks.on || primeKeyShift (v, ks, primeBudget))
+                        renderFl (v, left, right, n, chanVol, chanPan);
         }
 
         // the Gain knob scales the other voices with the channel's gains (FL voices apply it in renderFl)
@@ -1875,10 +2044,13 @@ public:
 
         const flvp::X87Extended precision; // FL's interpolators run the x87 unit at 64-bit precision
 
+        auto primeBudget = offlineRendering() ? keyShiftVoices : 2;
         for (auto& v : voices)
         {
             if (! v.active || v.data == nullptr || v.flVoice)
                 continue;
+            if (auto& ks = shifts[(std::size_t) (&v - voices.data())]; ks.on && ! primeKeyShift (v, ks, primeBudget))
+                continue; // (its shifter primes in the next block)
 
             const auto* l = v.data->leftData();
             const auto* r = v.data->rightData();
@@ -1919,7 +2091,11 @@ public:
                 }
 
                 float sl, sr;
-                readFrame (v, l, r, lastFrame, looping, sl, sr);
+                auto& ks = shifts[(std::size_t) (&v - voices.data())];
+                if (ks.on)
+                    readShifted (v, ks, sl, sr);
+                else
+                    readFrame (v, l, r, lastFrame, looping, sl, sr, v.rate * v.pitchMul * bendMul);
 
                 if (modulated)
                 {
@@ -1986,7 +2162,7 @@ public:
                 left[i] += sl * gain * gl * v.panL;
                 right[i] += sr * gain * gr * v.panR;
 
-                v.position += v.rate * v.pitchMul;
+                v.position += ks.on ? v.rate : v.rate * v.pitchMul * bendMul;
                 ++v.age;
 
                 if (v.glideLeft > 0)
@@ -2170,7 +2346,10 @@ public:
                 }
                 else
                 {
-                    readFrame (v, l, r, lastFrame, looping, sl, sr);
+                    if (auto& ks = shifts[(std::size_t) (&v - voices.data())]; ks.on)
+                        readShifted (v, ks, sl, sr);
+                    else
+                        readFrame (v, l, r, lastFrame, looping, sl, sr, v.rate * v.pitchMul * bendMul);
                     v.holdL = sl, v.holdR = sr;
                 }
                 auto gain = v.fade * v.zoneGain * outGain.load (std::memory_order_relaxed);
@@ -2196,7 +2375,7 @@ public:
                     endGain *= table[(std::size_t) v.offFade++];
                 }
                 flG[(std::size_t) m] = gain * endGain;
-                v.position += v.rate * v.pitchMul;
+                v.position += shifts[(std::size_t) (&v - voices.data())].on ? v.rate : v.rate * v.pitchMul * bendMul;
                 ++v.age;
                 if (v.glideLeft > 0)
                 {
@@ -2252,9 +2431,9 @@ public:
     // FL's sampler read (REA_rodada69 §1): the kernel's taps around the read position, frames outside the region
     // repeating its first/last frame, taps past the loop end wrapping to the loop start (and, once the voice has
     // looped, taps before the loop start wrapping to its end), a reversed voice reading the region backwards
-    void readFrame (SamplerVoice& v, const float* l, const float* r, double lastFrame, bool looping, float& outL, float& outR) noexcept
+    void readFrame (SamplerVoice& v, const float* l, const float* r, double lastFrame, bool looping, float& outL, float& outR, double speed) noexcept
     {
-        v.kernel.setSpeed (v.rate * v.pitchMul);
+        v.kernel.setSpeed (speed);
         const auto half = v.kernel.halfWidth;
         const auto whole = flrs::wholeFrames (v.position);
         const auto frac = v.position - (double) whole;
@@ -2263,7 +2442,7 @@ public:
         const auto loopStart = (std::int64_t) v.loopStart, loopEnd = (std::int64_t) v.loopEnd;
 
         // at the original rate on a whole frame FL copies the sample instead of interpolating
-        if (v.rate * v.pitchMul == 1.0 && frac == 0.0)
+        if (speed == 1.0 && frac == 0.0)
         {
             const auto q = v.reversed ? first + last - whole : whole;
             outL = l[q];
@@ -2307,6 +2486,14 @@ private:
     double sampleRate = 44100.0;
     float fadeStep = 0.01f;
     std::array<SamplerVoice, 16> voices {};
+    std::array<KeyShift, 16> shifts {};
+    std::array<std::unique_ptr<VoicePitchShifter>, keyShiftVoices> shifterPool;
+    std::array<int, keyShiftVoices> shifterUser {}; // the voice using each shifter (-1 = none)
+    std::vector<float> primeL, primeR;
+    std::atomic<bool> keyShift { false };
+    std::atomic<int> keyShiftMethod { 0 };
+    double lastFactor = 1.0; // the last shifted note's transposition (where its portamento starts)
+    double bendMul = 1.0;    // the pitch wheel (pitchBend), audio thread
     int quality = flrs::liveQuality;        // FL's interpolation index (prepare)
     std::array<float, 1024> tapL {}, tapR {}; // kernel taps gathered near the region edges and loops
     static constexpr int flBlock = 512;       // FL voices: longest segment rendered at once

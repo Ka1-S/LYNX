@@ -191,6 +191,8 @@ std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double s
     std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
     instrument->prepare (sampleRate);
     instrument->configure (channel, bpm);
+    if (kind == InstrumentKind::sampler && channel.sampler.keepPitch && channel.sampler.stretchBeats > 0.0f)
+        instrument->prepareKeyShift (sampleRate); // the keys transpose the stretched sample (round 162)
     return instrument;
 }
 
@@ -1793,6 +1795,12 @@ void RackRenderer::process (const RackState* state,
             if (e.channel < 0 || e.channel >= (int) state->instruments.size())
                 continue;
 
+            if (e.type == NoteEvent::Type::control)
+            {
+                applyLiveControl (*state, e);
+                continue;
+            }
+
             auto& instrument = *state->instruments[(std::size_t) e.channel];
 
             auto& held = heldNotes[(std::size_t) std::min (e.channel, maxChannels - 1)];
@@ -1828,6 +1836,15 @@ void RackRenderer::process (const RackState* state,
                     if (const auto limit = voiceLimitFor (def[(std::size_t) e.channel].maxPolyphony, def[(std::size_t) e.channel].synth.mono); limit > 0)
                         if (const auto victim = order.noteOn (e.key, limit); victim >= 0)
                             instrument.noteOff (victim);
+                // a played note is tuned like the song's notes: Misc › Fine tune and the main pitch (round 162, issue
+                // #9: the fine tune did nothing to the keys played live)
+                if ((std::size_t) e.channel < def.size())
+                {
+                    const auto& misc = def[(std::size_t) e.channel].misc;
+                    const auto cents = misc.fineTune + (misc.mainPitch ? state->song.masterPitch : 0.0f);
+                    if (cents != 0.0f)
+                        instrument.setNextNoteExpression (0.0f, cents, false);
+                }
                 instrument.noteOn (e.key, e.velocity);
                 if (inRange)
                     held[(std::size_t) (e.key >> 6)] |= bit;
@@ -1921,6 +1938,52 @@ double RackRenderer::ticksToNextEvent (const RackState& state, double tick) noex
         }
     }
     return best;
+}
+
+void RackRenderer::applyLiveControl (const RackState& state, const NoteEvent& e) noexcept
+{
+    // a controller's pitch wheel, mod wheel (CC 1), other CCs and channel pressure played into a channel (round 162,
+    // issue #9): hosted plugins (and the SoundFont player) get the MIDI message; LYNX's own instruments bend by the
+    // channel's pitch range (FL's Misc › Pitch range, default ±2 semitones) and take the CCs they know
+    auto* instrument = state.instruments[(std::size_t) e.channel].get();
+    if (instrument == nullptr)
+        return;
+
+    std::uint8_t m[3] {};
+    auto size = 3;
+    const auto value = std::isfinite (e.velocity) ? e.velocity : 0.0f;
+    if (e.key == NoteEvent::controlPitchBend)
+    {
+        const auto v = (int) std::clamp (std::lround ((double) (value + 1.0f) * 8192.0), 0L, 16383L);
+        m[0] = 0xE0, m[1] = (std::uint8_t) (v & 127), m[2] = (std::uint8_t) (v >> 7);
+    }
+    else if (e.key == NoteEvent::controlPressure)
+    {
+        m[0] = 0xD0, m[1] = (std::uint8_t) std::clamp (std::lround (value * 127.0f), 0L, 127L);
+        size = 2;
+    }
+    else if (e.key >= 0 && e.key < 128)
+        m[0] = 0xB0, m[1] = (std::uint8_t) e.key, m[2] = (std::uint8_t) std::clamp (std::lround (value * 127.0f), 0L, 127L);
+    else
+        return;
+
+    instrument->midiMessage (m, size);
+    if (e.key == NoteEvent::controlPitchBend)
+    {
+        const auto range = (std::size_t) e.channel < state.song.channels.size() ? state.song.channels[(std::size_t) e.channel].misc.pitchRange : 2;
+        instrument->pitchBend (std::clamp (value, -1.0f, 1.0f) * (float) std::max (0, range));
+    }
+    else if (e.key < 128)
+        instrument->controlChange (e.key, std::clamp (value, 0.0f, 1.0f));
+
+    // a MIDI Out channel: the plugins on its port get it on its MIDI channel
+    if (state.hasMidiRoutes && (std::size_t) e.channel < state.midiTargets.size())
+        for (const auto t : state.midiTargets[(std::size_t) e.channel])
+            if (t >= 0 && t < (int) state.instruments.size() && state.instruments[(std::size_t) t] != nullptr)
+            {
+                std::uint8_t routed[3] { (std::uint8_t) ((m[0] & 0xF0) | (state.midiOutChannel[(std::size_t) e.channel] & 15)), m[1], m[2] };
+                state.instruments[(std::size_t) t]->midiMessage (routed, size);
+            }
 }
 
 bool RackRenderer::routesLiveNotes (const RackState& state, int channel) const noexcept

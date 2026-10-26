@@ -1119,6 +1119,9 @@ struct Song
     static std::vector<MixerTrack> defaultMixer (int inserts = 16);
     // First insert nothing uses (no channel, send, effect, input, Playlist link or custom name); 0 (Master) if none.
     int nextFreeInsert() const;
+    // nextFreeInsert, but when every insert is in use a new one is added (up to maxMixerTracks), like FL where a new
+    // channel takes the next of its 125 inserts (round 162); 0 (Master) only when the mixer is full.
+    int claimFreeInsert();
 
     // End of the last clip, rounded up to a bar (minimum 1 bar; with no clip, the current pattern's length).
     std::int64_t songLength() const noexcept;

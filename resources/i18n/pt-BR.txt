@@ -4582,3 +4582,9 @@ countries: br
 "Output channels ({0}): {1}" = "Canais de saída ({0}): {1}"
 "Real-time priority" = "Prioridade de tempo real"
 "The sound broke up, and Linux runs LYNX's audio thread at normal priority. Real-time priority makes dropouts much rarer:\n\n- install rtkit (package \"rtkit\"; most desktops already have it), or\n- add yourself to the \"audio\" group with an rtprio limit in /etc/security/limits.d (as for JACK),\n\nthen log out and in again. LYNX never needs root. Options > Audio settings shows the current state." = "O som falhou, e o Linux roda a thread de áudio do LYNX com prioridade normal. A prioridade de tempo real deixa as falhas bem mais raras:\n\n- instale o rtkit (pacote \"rtkit\"; a maioria dos desktops já tem), ou\n- entre no grupo \"audio\" com um limite rtprio em /etc/security/limits.d (como para o JACK),\n\ndepois saia e entre de novo na sessão. O LYNX nunca precisa de root. Opções > Configurações de áudio mostra o estado atual."
+
+# --- Round 162 (issue #9): export over an existing file, Audio Editor playback volume
+"\"{0}\" is in use by another program (a media player, or a preview). Close it, or export with another name." = "\"{0}\" está em uso por outro programa (um player de mídia ou uma pré-escuta). Feche-o ou exporte com outro nome."
+"could not replace {0}" = "não foi possível substituir {0}"
+"could not write {0}" = "não foi possível gravar {0}"
+"Playback volume: {0} (the audio is not changed; Tools > Amp... changes it)" = "Volume de reprodução: {0} (o áudio não é alterado; Ferramentas > Amplitude... altera)"

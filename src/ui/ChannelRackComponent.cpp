@@ -3,6 +3,8 @@
 #include "ui/TextCache.h"
 #include "ui/ChannelRackComponent.h"
 
+#include "core/MixerOps.h"
+
 #include "ui/AutomationUi.h"
 #include "core/NoteTools.h"
 #include "core/FlSynths.h"
@@ -659,9 +661,9 @@ ui::ValueSpec ChannelRackComponent::specFor (Area area, int row) const
     // route box: the mixer insert, as a number
     ui::ValueSpec spec;
     spec.name = name + " - " + tr ("Target mixer track");
-    spec.maximum = juce::jmax (0, (int) engine.getSong().mixer.size() - 1);
+    spec.maximum = maxMixerTracks - 1; // every insert, like FL (round 162: the inserts past the mixer's last one are added)
     spec.interval = 1.0;
-    spec.pixelsForRange = 6.0 * juce::jmax (1.0, spec.maximum);
+    spec.pixelsForRange = 3.0 * juce::jmax (1.0, spec.maximum);
     spec.toText = [] (double v) { return v < 0.5 ? tr ("Master") : tr ("Insert {0}", { juce::String (juce::roundToInt (v)) }); };
     spec.fromText = [] (const juce::String& t) -> std::optional<double> {
         if (t.trim().startsWithIgnoreCase ("m"))
@@ -691,7 +693,7 @@ void ChannelRackComponent::setValue (Area area, int row, double value)
     {
         const auto track = juce::roundToInt (value);
         if (track != engine.getSong().channels[(std::size_t) row].mixerTrack)
-            engine.editSong ([row, track] (Song& s) { s.channels[(std::size_t) row].mixerTrack = track; });
+            engine.editSong ([row, track] (Song& s) { mixerops::routeChannel (s, row, track); });
     }
 }
 
@@ -1203,7 +1205,7 @@ int ChannelRackComponent::addChannel (ChannelDef c, bool openEditor)
     if (filterGroup >= 0 && c.group < 0) // a new channel joins the group shown (FL)
         c.group = filterGroup;
     engine.editSong ([&] (Song& s) {
-        c.mixerTrack = s.nextFreeInsert();
+        c.mixerTrack = s.claimFreeInsert();
         s.channels.push_back (c);
         index = (int) s.channels.size() - 1;
     });
@@ -1441,7 +1443,7 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
                 {
                     menu.addSeparator();
                     menu.addItem (tr ("Next free insert"), [this, row] {
-                        engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.nextFreeInsert(); });
+                        engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.claimFreeInsert(); });
                     });
                     menu.addItem (tr ("Send the selected channels to free inserts") + "\tCtrl+L", [this] { sendSelectedToInserts(); });
 
@@ -1666,7 +1668,7 @@ void ChannelRackComponent::mouseDoubleClick (const juce::MouseEvent& e)
         if (onOpenMixerInsert)
             onOpenMixerInsert (engine.getSong().channels[(std::size_t) row].mixerTrack);
         else
-            engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.nextFreeInsert(); });
+            engine.editSong ([row] (Song& s) { s.channels[(std::size_t) row].mixerTrack = s.claimFreeInsert(); });
     }
     else if (area == Area::select && ! e.mods.isPopupMenu())
         selectAll();
@@ -2063,7 +2065,7 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         if (filterGroup >= 0 && c.group < 0)
             c.group = filterGroup;
         engine.editSong ([&] (Song& s) {
-            c.mixerTrack = s.nextFreeInsert();
+            c.mixerTrack = s.claimFreeInsert();
             index = insertAt < 0 ? (s.channels.push_back (c), (int) s.channels.size() - 1) : insertChannel (s, insertAt, c);
         });
         selectionAnchor = index;
@@ -2174,7 +2176,7 @@ void ChannelRackComponent::assignSample (int channel, const juce::File& file)
 
     engine.editSong ([channel, path, name] (Song& s) {
         const auto isNew = channel < 0 || channel >= (int) s.channels.size();
-        const auto freeInsert = s.nextFreeInsert();
+        const auto freeInsert = s.claimFreeInsert();
         auto& c = isNew ? s.channels.emplace_back() : s.channels[(std::size_t) channel];
 
         if (isNew)

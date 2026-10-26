@@ -1,6 +1,8 @@
 #include "ui/WindowOwner.h"
 #include "ui/ChannelSettings.h"
 
+#include "core/MixerOps.h"
+
 #include <cstring>
 #include <functional>
 
@@ -3023,12 +3025,12 @@ public:
                     [] (Song& s, int ch, double v) { s.channels[(std::size_t) ch].misc.pitchRange = juce::jlimit (0, 48, juce::roundToInt (v)); },
                     TR_NOOP ("Range"));
         headerKnob ([this, name] {
-                        return countSpec (name() + " - " + tr ("Target mixer track"), juce::jmax (1, (int) engine.getSong().mixer.size() - 1), 0,
+                        return countSpec (name() + " - " + tr ("Target mixer track"), maxMixerTracks - 1, 0,
                                           [] (int t) { return t == 0 ? tr ("Master") : juce::String (t); });
                     },
                     [] (const ChannelDef& d) { return (double) d.mixerTrack; },
                     [] (Song& s, int ch, double v) {
-                        s.channels[(std::size_t) ch].mixerTrack = juce::jlimit (0, juce::jmax (0, (int) s.mixer.size() - 1), juce::roundToInt (v));
+                        mixerops::routeChannel (s, ch, juce::roundToInt (v)); // any insert (round 162): missing ones are added
                     },
                     TR_NOOP ("Track"));
 

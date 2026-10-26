@@ -331,6 +331,7 @@ private:
     int liveRoutedCount = 0;
     double liveTick = 0.0;
     bool routesLiveNotes (const RackState& state, int channel) const noexcept;
+    void applyLiveControl (const RackState& state, const NoteEvent& e) noexcept;
     WorkerPool* workers = nullptr;
     LiveInput* liveInput = nullptr;
     HardwareOutput* hwOut = nullptr;
