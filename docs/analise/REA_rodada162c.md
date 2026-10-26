@@ -41,4 +41,8 @@ Scratch benchmarks (g++ -O2, machine loaded by other builds, so times are upper 
   reported (rc 1) with the old file kept, `--snapshot` shows the Audio Editor volume knob.
 - Not done: FL black-box comparison of the stretch modes (relied on FL's manual [DOC]); native engines other than the
   Sampler / Synth ignore the pitch wheel; pitch bend is not recorded into patterns.
-- Landed to main (round 162c).
+- First landing attempt failed: the keeping-pitch tests were flaky (pass/fail between runs of the same binary,
+  always failing with ASLR off). Cause: `VoicePitchShifter::maxPrimeLength()` used the shortest prime (factor 4)
+  instead of the longest (factor 0.25), so the warm-up in `allocate()` read past its buffer (ASan, g++ harness) and
+  the shifter could start from heap garbage (NaN output); real notes also got a truncated prime. Fixed; an ASan sweep
+  of factors 0.25…4 is clean.

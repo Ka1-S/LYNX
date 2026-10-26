@@ -42,7 +42,7 @@ public:
     void allocate (double sampleRate, StretchMethod method);
     bool ready() const noexcept;
     int primeLength (double factor) const noexcept;
-    int maxPrimeLength() const noexcept { return primeLength (maxFactor); }
+    int maxPrimeLength() const noexcept { return primeLength (minFactor); } // the longest: the lowest transposition
     // `l`/`r` (r may equal l): primeLength (factor) frames of the transposed source from the note's start
     void start (const float* l, const float* r, int frames) noexcept;
     void process (const float* inL, const float* inR, int inFrames, float* outL, float* outR, int outFrames) noexcept;
