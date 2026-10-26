@@ -3683,10 +3683,10 @@ void MainComponent::save (bool askForFile)
 
 void MainComponent::placeHintBar (juce::Rectangle<int> row)
 {
-    // the read-out takes the right part of the hint row once something was tweaked (a third of it, 150..260 px), and
-    // only when the hint keeps at least 240 px
-    const auto readoutWidth = juce::jlimit (150, 260, row.getWidth() / 3);
-    if (tweakReadout.hasContent() && row.getWidth() - readoutWidth - 6 >= 240)
+    // the read-out takes the right part of the hint row once something was tweaked (2/5 of it, 170..280 px), and
+    // only when the hint keeps at least 220 px
+    const auto readoutWidth = juce::jlimit (170, 280, row.getWidth() * 2 / 5);
+    if (tweakReadout.hasContent() && row.getWidth() - readoutWidth - 6 >= 220)
     {
         tweakReadout.setBounds (row.removeFromRight (readoutWidth));
         tweakReadout.setVisible (true);

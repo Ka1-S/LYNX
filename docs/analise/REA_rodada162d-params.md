@@ -37,7 +37,7 @@ rows, metronome volume).
    control was moved: an automation glyph, the parameter's name ("Kick - Volume") and its value in its own unit
    ("100%", "-3.2 dB", "L50", "128.00 BPM", a LYNX effect's own unit, a plugin parameter's own text + label). The
    value pill flashes in the accent colour for a moment when it changes. Click = the parameter's full menu (the same
-   menu as Tools › Last tweaked; its header now also shows the value). It only appears when the hint keeps 240 px.
+   menu as Tools › Last tweaked; its header now also shows the value). It only appears when the hint keeps 220 px.
    Colours read from theme tokens at paint time (works with r162d's runtime themes).
 2. **Plugin knobs without gestures count as tweaks** **[TEST]**: many plugins move parameters without begin/end
    gestures, so their knobs never became "last tweaked". The plugin window now collects parameter changes made on
