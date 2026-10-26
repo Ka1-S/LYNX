@@ -3836,7 +3836,15 @@ private:
         lynx::ChannelDef env;
         env.name = "Envelope Controller";
         env.instrument = lynx::InstrumentKind::controller;
-        env.controllerState = lynx::writeEnvelopeController (lynx::defaultEnvelopeController());
+        auto ecData = lynx::defaultEnvelopeController();
+        ecData[0].lfoOn = true;
+        ecData[0].lfoTempo = true;
+        ecData[0].lfoSpeed = 40898;
+        ecData[0].maps[lynx::mapKeyboard].count = 2;
+        ecData[0].maps[lynx::mapKeyboard].time = { 0.2f, 0.8f };
+        ecData[0].maps[lynx::mapKeyboard].level = { 0.0f, 1.0f };
+        ecData[0].maps[lynx::mapModX] = ecData[0].maps[lynx::mapKeyboard];
+        env.controllerState = lynx::writeEnvelopeController (ecData);
         song.channels.push_back (env);
         lynx::ChannelDef out;
         out.name = "MIDI Out";
@@ -3855,6 +3863,15 @@ private:
         };
         shoot (lynx::makeChannelSettingsPanel (offline, 0), "-envelope-controller.png");
         shoot (lynx::makeChannelSettingsPanel (offline, 1), "-midi-out.png");
+        // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
+        if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
+            for (int part = 0; part < 7; ++part)
+            {
+                for (auto* child : ec->getChildren())
+                    if (auto* box = dynamic_cast<juce::ComboBox*> (child))
+                        box->setSelectedItemIndex (part, juce::sendNotificationSync);
+                savePng (ec->createComponentSnapshot (ec->getLocalBounds()), prefix + "-ec-part" + juce::String (part) + ".png");
+            }
         lynx::FormulaControllerWindows::open (offline, 1, 0);
         for (int k = 0; k < juce::TopLevelWindow::getNumTopLevelWindows(); ++k)
             if (auto* w = dynamic_cast<juce::DocumentWindow*> (juce::TopLevelWindow::getTopLevelWindow (k)))
