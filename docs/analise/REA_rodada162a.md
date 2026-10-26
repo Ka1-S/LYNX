@@ -90,6 +90,28 @@ The Plugin database rows (round 142) now carry what they add (`Node::generator` 
 Drag descriptions `lynx-plugin-generator|<name>` / `lynx-plugin-effect|<name>`; the payload stays in the Browser
 (`draggedGenerator / draggedEffect`).
 
+## 7. GUI verification [EXEC]
+
+Linux build of this branch under Xvfb (fresh profile, Browser folders = a synthetic tree of 1,641 folders / 8,000
+samples + /usr), driven with xdotool; screenshots in `D:\lynx-work\browser162\linux-gui\` (s1…s14):
+- start: the status line "Indexing the Browser's folders for search: …" under the search box, the Stop button (s1);
+- typing five queries quickly into "every folder" while indexing, then "kick 3": results at once, "Showing the first
+  500 results." line, LYNX responsive (s2);
+- click on the Playlist title, Space: transport plays, the box still reads "kick 3" (s3); click a result, Down Down:
+  the selection moves two rows (s4); the Browser menu shows "Search index: 8000 files in 7412 folders (checked at
+  16:03)" + Refresh / Rebuild (s5); Ctrl+F, Esc, Space: plays (s6);
+- arrows through the Plugin database folders (Down/Right) (s9); drag "Kick" onto the Channel Rack: channel 6 added
+  (s10); drag Delay onto the Insert 3 strip and Reverb onto its slot 2 (s14).
+
+Windows: the branch's LYNX.exe and 0.1.17 were each driven 3 min with typed searches over every folder + D:\ (the
+user's HDD) via SendKeys; both survived, but the runs were not conclusive (a firewall prompt and the "LYNX closed"
+dialog of the forced stop took the keys), so the crash was not reproduced in the GUI; the mechanism is reproduced by
+repro.cpp (section 1). The user's LYNX settings were restored afterwards (browser-index.txt from a backup, no
+browser-folders.txt, stale session markers removed).
+
 ## Where I stopped
 
-(kept current below)
+- Done: items 1–6, tests, pt-BR, notes and the suggested reply (tmp/coord). Landing: build-local with FL Data,
+  Windows build, then `land.sh browser162`.
+- Not done / ideas: a file-system watcher (ReadDirectoryChangesW / inotify) instead of the per-search check; dropping
+  a generator onto an existing channel to replace it (FL does) — today it always adds a new channel.
