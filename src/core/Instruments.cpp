@@ -2594,8 +2594,9 @@ std::unique_ptr<Instrument> makeZonedSampler (std::vector<LoadedZone> zones)
 
 namespace
 {
-// FL's Envelope Controller: no audio; each articulator follows the last note in its key range and
-// the output holds the last value when there is no note.
+// FL's Envelope Controller (REA_rodada15 §10, REA_rodada162e-envelope.md): no audio; each articulator follows the last note in
+// its key range (envelope, LFO and maps restart); with no note the output holds its last value, or with the
+// controller's continuous flag follows base and the Mod X / Y maps.
 class ControllerInstrument final : public Instrument
 {
 public:
@@ -2613,18 +2614,36 @@ public:
         {
             data.articulators = *parsed;
             const auto beat = 60.0 / std::max (1.0, bpm);
-            for (auto& a : data.articulators)
+            data.beat = beat;
+            for (std::size_t k = 0; k < data.articulators.size(); ++k)
+            {
+                auto& a = data.articulators[k];
+                a = controllerWithKnobs (a);
                 if (a.tempo)
                 {
                     for (int i = 0; i < a.count; ++i)
                         a.time[(std::size_t) i] = (float) (a.time[(std::size_t) i] * beat);
                     a.tempo = false;
                 }
+                // LFO: cycles per second; its amplitude curve in seconds
+                data.lfoRate[k] = controllerLfoRate (a) / (a.lfoTempo ? beat : 1.0);
+                if (a.lfoTempo)
+                    for (int i = 0; i < a.lfoAmp.count; ++i)
+                        a.lfoAmp.time[(std::size_t) i] = (float) (a.lfoAmp.time[(std::size_t) i] * beat);
+            }
         }
         mailbox.write (data);
     }
 
-    void noteOn (int key, float) noexcept override
+    void setNextNoteModulation (float modX, float modY) noexcept override
+    {
+        nextModX = modX;
+        nextModY = modY;
+    }
+
+    void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
+
+    void noteOn (int key, float velocity) noexcept override
     {
         mailbox.read (data);
         if (data.keyboard) // Keyboard Controller: output 0 is the key's value
@@ -2634,11 +2653,25 @@ public:
                 values[0] = data.keys.keys[(std::size_t) key];
             return;
         }
+        ControllerNote note;
+        note.key = (float) key;
+        note.velocity = velocity;
+        note.modX = nextModX;
+        note.modY = nextModY;
+        // one random value per note (FL draws it at the trigger)
+        randomState = randomState * 1664525u + 1013904223u;
+        note.random = (float) ((randomState >> 8) * (1.0 / 16777216.0));
+        nextModX = nextModY = 0.5f;
         for (std::size_t k = 0; k < voices.size(); ++k)
         {
             const auto& a = data.articulators[k];
             if (key >= a.lowKey && key <= a.highKey)
-                voices[k] = { true, key, 0.0, -1.0 };
+            {
+                auto& v = voices[k];
+                v = { true, key, 0.0, -1.0, note, 0.0 };
+                v.lfoPhase = a.lfoGlobal ? globalPhase (k) : controllerLfoStartPhase (a);
+                v.used = true;
+            }
         }
     }
 
@@ -2664,22 +2697,35 @@ public:
 
     void render (float*, float*, int n, float, float) noexcept override
     {
-        if (mailbox.read (data) && ! data.keyboard)
-            for (std::size_t k = 0; k < values.size(); ++k)
-                if (! voices[k].active)
-                    values[k] = data.articulators[k].base;
+        const auto changed = mailbox.read (data);
         if (data.keyboard)
             return;
+        if (changed)
+            for (std::size_t k = 0; k < values.size(); ++k)
+                if (! voices[k].active && (! voices[k].used || data.articulators.continuous))
+                    values[k] = data.articulators.continuous
+                                    ? controllerRestingValue (data.articulators[k], data.articulators.modX, data.articulators.modY)
+                                    : data.articulators[k].base;
         const auto seconds = n / sampleRate;
         for (std::size_t k = 0; k < voices.size(); ++k)
         {
             auto& v = voices[k];
+            const auto& a = data.articulators[k];
             if (! v.active)
+            {
+                if (data.articulators.continuous)
+                    values[k] = controllerRestingValue (a, data.articulators.modX, data.articulators.modY);
                 continue;
+            }
             v.sinceOn += seconds;
             if (v.sinceRelease >= 0.0)
                 v.sinceRelease += seconds;
-            values[k] = controllerValue (data.articulators[k], v.sinceOn, v.sinceRelease);
+            v.lfoPhase = a.lfoGlobal ? globalPhase (k) : v.lfoPhase + data.lfoRate[k] * seconds;
+            if (v.lfoPhase > 1.0e6)
+                v.lfoPhase -= std::floor (v.lfoPhase);
+            values[k] = controllerValue (a, v.sinceOn, v.sinceRelease, v.lfoPhase, v.note, data.articulators.modX, data.articulators.modY);
+            if (controllerVoiceFinished (a, v.sinceOn, v.sinceRelease))
+                v.active = false; // the output holds its last value
         }
     }
 
@@ -2692,22 +2738,37 @@ private:
     struct Data
     {
         EnvelopeControllerData articulators {};
+        std::array<double, 8> lfoRate {};
+        double beat = 0.5;
         bool keyboard = false;
         KeyboardControllerData keys {};
     };
+    // a "global" LFO follows the song position instead of restarting on each note
+    double globalPhase (std::size_t k) const noexcept
+    {
+        const auto& a = data.articulators[k];
+        const auto seconds = songTicks / ppq * data.beat;
+        return controllerLfoStartPhase (a) + data.lfoRate[k] * seconds;
+    }
+
     int heldKey = -1;
     struct Voice
     {
         bool active = false;
         int key = 0;
         double sinceOn = 0.0, sinceRelease = -1.0;
+        ControllerNote note {};
+        double lfoPhase = 0.0;
+        bool used = false; // played once: a finished voice holds its last value
     };
 
     SettingsMailbox<Data> mailbox;
     Data data {};
     std::array<Voice, 8> voices {};
     std::array<float, 8> values { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
-    double sampleRate = 44100.0;
+    double sampleRate = 44100.0, songTicks = 0.0;
+    float nextModX = 0.5f, nextModY = 0.5f;
+    std::uint32_t randomState = 0x2545F491u;
 };
 } // namespace
 

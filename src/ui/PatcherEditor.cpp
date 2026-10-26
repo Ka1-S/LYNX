@@ -27,6 +27,9 @@ namespace
 {
 namespace col = theme::colour;
 
+// Add plugin › Browse plugin database: the Patcher editor waiting for the Browser's next pick (round 162)
+std::function<bool (const ChannelDef*, const EffectSlot*)> pendingBrowserPick;
+
 constexpr float nodeWidth = 150.0f;
 constexpr float headerHeight = 24.0f;
 constexpr float pinSpacing = 17.0f;
@@ -1267,6 +1270,9 @@ public:
             row (1.2f);
             add.addItem (tr ("Open plugin picker..."), [this, at, instruments] { pickPlugin (instruments, at); });
             row();
+            add.addItem (tr ("Browse plugin database"), PatcherWindows::onBrowsePluginDatabase != nullptr, false,
+                         [this, at, instruments] { browsePluginDatabase (instruments, at); });
+            row();
             add.addSubMenu (tr ("More..."), more);
             row();
             for (const auto* category : order)
@@ -1298,6 +1304,27 @@ public:
         return add;
     }
 private:
+
+    // FL's Browse plugin database: the Browser opens at its Plugin database; what is picked there next comes here
+    void browsePluginDatabase (bool instruments, juce::Point<float> at)
+    {
+        juce::Component::SafePointer<PatcherEditor> safe (this);
+        pendingBrowserPick = [safe, instruments, at] (const ChannelDef* c, const EffectSlot* fx) {
+            if (safe == nullptr || (c != nullptr) != instruments)
+                return false;
+            PatchNode n;
+            n.generator = instruments;
+            if (c != nullptr)
+                n.channel = *c;
+            else
+                n.effect = *fx;
+            safe->addNode (n, at);
+            if (auto* w = safe->getTopLevelComponent())
+                w->toFront (true);
+            return true;
+        };
+        PatcherWindows::onBrowsePluginDatabase (instruments);
+    }
 
     void pickPlugin (bool instruments, juce::Point<float> at)
     {
@@ -1499,7 +1526,9 @@ public:
                     doc.fromNotesHidden = false;
             });
         });
-        events.addItem (tr ("Deactivate all"), [this, input] {
+        // (FL greys Deactivate all / unused while no pin is active)
+        const auto anyActive = ! shown.empty() || (input && channel && patcher::fromNotesShown (*d, true));
+        events.addItem (tr ("Deactivate all"), anyActive, false, [this, input] {
             edit ([input] (PatcherDoc& doc) {
                 (input ? doc.fromMidiPorts : doc.toMidiPorts).clear();
                 std::erase_if (doc.wires, [&] (const PatchWire& w) {
@@ -1509,7 +1538,7 @@ public:
                     doc.fromNotesHidden = true;
             });
         });
-        events.addItem (tr ("Deactivate unused"), [this, input] { edit ([input] (PatcherDoc& doc) { patcher::deactivateUnusedMidiPins (doc, input); }); });
+        events.addItem (tr ("Deactivate unused"), anyActive, false, [this, input] { edit ([input] (PatcherDoc& doc) { patcher::deactivateUnusedMidiPins (doc, input); }); });
         events.addSeparator();
         int rows = 4;
         if (input && channel)
@@ -1522,6 +1551,11 @@ public:
                         std::erase_if (doc.wires, [&] (const PatchWire& w) { return isMidiPin (w, 0); });
                 });
             });
+            ++rows;
+        }
+        else if (input) // a mixer slot's Patcher: no channel notes reach it, only its MIDI ports (FL: the generator's Notes)
+        {
+            events.addItem (tr ("Notes"), false, false, nullptr);
             ++rows;
         }
         for (int port = 0; port < patchMidiPorts; ++port)
@@ -1701,13 +1735,11 @@ private:
             openToolWindow (makeMidiOutEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
-#if LYNX_EC_LOCATE
         if (node.generator && node.channel.instrument == InstrumentKind::controller && ! parseKeyboardController (node.channel.controllerState))
         {
             openToolWindow (makeEnvelopeControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
-#endif
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Patcher"),
                                                 node.effect.kind == EffectKind::plugin || node.channel.instrument == InstrumentKind::plugin
                                                     ? tr ("This plugin could not be loaded (it is not installed or has not been scanned).")
@@ -1822,6 +1854,24 @@ void open (AudioEngine& engine, Target target, const juce::String& title)
 
 namespace PatcherWindows
 {
+std::function<void (bool generators)> onBrowsePluginDatabase;
+
+bool takeInstrumentFromBrowser (const ChannelDef& c)
+{
+    if (pendingBrowserPick == nullptr || ! pendingBrowserPick (&c, nullptr))
+        return false;
+    pendingBrowserPick = nullptr;
+    return true;
+}
+
+bool takeEffectFromBrowser (const EffectSlot& fx)
+{
+    if (pendingBrowserPick == nullptr || ! pendingBrowserPick (nullptr, &fx))
+        return false;
+    pendingBrowserPick = nullptr;
+    return true;
+}
+
 void openSlot (AudioEngine& engine, int track, int slot)
 {
     const auto& song = engine.getSong();
