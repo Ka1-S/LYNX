@@ -4,6 +4,8 @@
 #include "ui/TextCache.h"
 #include "ui/PlaylistComponent.h"
 
+#include "core/TransportEdit.h"
+
 #include "core/ClipOps.h"
 
 #include "core/EditorPolish.h"
@@ -234,6 +236,19 @@ PlaylistComponent::PlaylistComponent (AudioEngine& e)
     tools.onChange = [this] (EditTool) { updateCursor (juce::ModifierKeys::currentModifiers); };
     setOpaque (true); // paints every pixel: nothing behind it is redrawn while scrolling
     addAndMakeVisible (tools);
+
+    // Follow (FL: "Auto scrolling"): the view pages along with the playhead in Song mode; off, it stays put
+    followButton.setOnColour (theme::colour::bg6);
+    followButton.setIconColourWhenOn (theme::colour::accent);
+    followButton.setFlat (true);
+    followButton.setClickingTogglesState (false);
+    followButton.setToggleState (EditorGlobals::get().isFollowing (false), juce::dontSendNotification);
+    followButton.setTooltip (tr ("Follow: the Playlist scrolls along with the playhead while the song plays; off, you can look around freely"));
+    ui::setQuickTip (followButton, tr ("Follow the playhead"));
+    followButton.onClick = [this] { runAction ("playlist.follow"); };
+    followButton.setWantsKeyboardFocus (false);
+    followButton.setMouseClickGrabsKeyboardFocus (false);
+    addAndMakeVisible (followButton);
 
     arrangementBox.setTooltip (tr ("Arrangement (as in FL, a project can have several)"));
     arrangementBox.setWantsKeyboardFocus (false);
@@ -546,6 +561,7 @@ void PlaylistComponent::resized()
     arrangementBox.setBounds (4 + titleInsetLeft, 3, juce::jmin (150, getWidth() / 5), h);
     tools.setBounds (arrangementBox.getRight() + 8, 3, tools.getIdealWidth (h), h);
     snapBox.setBounds (tools.getRight() + 8, 3, 128, h);
+    followButton.setBounds (snapBox.getRight() + 6, 3, h, h);
     overview.setBounds (headerWidth, toolbarHeight, getWidth() - headerWidth - scrollBarSize, overviewHeight);
     vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize, getHeight() - headerHeight);
     updateScrollBars();
@@ -3459,10 +3475,29 @@ bool PlaylistComponent::runAction (const std::string& id)
     else if (is ("playlist.centrePlayhead")) centreOnPlayhead();
     else if (is ("playlist.rippleDelete")) rippleDeleteSelection();
     else if (is ("playlist.ripple")) setRipple (! ripple);
+    else if (is ("playlist.follow")) EditorGlobals::get().setFollowing (false, ! EditorGlobals::get().isFollowing (false));
+    else if (is ("playlist.quantizeStarts")) quantizeClips (1.0);
+    else if (is ("playlist.quantizeHalf")) quantizeClips (0.5);
     else
         return false;
 
     return true;
+}
+
+void PlaylistComponent::quantizeClips (double strength)
+{
+    std::vector<int> targets = selection;
+
+    if (targets.empty())
+        for (int i = 0; i < (int) engine.getSong().playlist.size(); ++i)
+            targets.push_back (i);
+
+    if (targets.empty())
+        return;
+
+    const auto grid = gridTicks();
+    engine.editSong ([&targets, grid, strength] (Song& s) { transportedit::quantizeClipStarts (s.playlist, targets, grid, strength); });
+    sortClips();
 }
 
 void PlaylistComponent::deleteSelection()
@@ -4142,6 +4177,7 @@ void PlaylistComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
         brush = {};
     }
 
+    followButton.setToggleState (EditorGlobals::get().isFollowing (false), juce::dontSendNotification);
     refreshArrangementBox();
     refreshTrackLayout();
     updateScrollBars();
@@ -4168,13 +4204,14 @@ void PlaylistComponent::timerCallback()
         dirty (playheadTick);
         playheadTick = tick;
 
-        // follows playback: if the cursor leaves the screen, scrolls one page
+        // Follow: if the cursor leaves the screen while playing, scrolls one page (off: the view stays put)
         const auto grid = gridArea();
-        const auto x = tickToX (tick);
+        const auto newStart = transportedit::followViewStart (scrollTicks, grid.getWidth() / pixelsPerTick, tick, 20.0 / pixelsPerTick,
+                                                              20.0 / pixelsPerTick);
 
-        if (tick >= 0.0 && transport.playing.load() && (x > grid.getRight() - 20 || x < grid.getX()))
+        if (EditorGlobals::get().isFollowing (false) && transport.playing.load() && newStart != scrollTicks)
         {
-            scrollTicks = juce::jmax (0.0, tick - 20.0 / pixelsPerTick);
+            scrollTicks = newStart;
             updateScrollBars();
             repaint();
         }

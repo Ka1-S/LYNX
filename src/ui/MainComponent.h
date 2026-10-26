@@ -132,7 +132,7 @@ private:
     // transport
     void playStop();     // Space: play, or stop and go back to where playback started
     void playPause();    // Ctrl+Space: pause / resume where it is
-    void stopAndRewind();
+    void stopAndRewind (bool toStart = false); // toStart: the very start, ignoring "Remember seek time"
     void showStopMenu(); // right-click on Stop: "remember seek time", panic // the Stop button
     double playStartTicks = 0.0;
 
@@ -324,6 +324,27 @@ private:
         void mouseExit (const juce::MouseEvent&) override { hovered = false; repaint(); }
         void mouseDown (const juce::MouseEvent&) override { if (onClick) onClick(); }
     };
+    // The Channel Rack's pattern selector (round 162, issue #9; FL's pattern selector): "<" previous, the current
+    // pattern's name (click: the list of patterns, wheel: step), ">" next.
+    struct PatternSelector final : public juce::Component
+    {
+        juce::String text;
+        juce::Colour colour;
+        int hoveredPart = -1; // 0 = previous, 1 = name, 2 = next
+        std::function<void (int delta)> onStep;
+        std::function<void()> onMenu;
+        static constexpr int arrowWidth = 16;
+        int partAt (int x) const { return x < arrowWidth ? 0 : x >= getWidth() - arrowWidth ? 2 : 1; }
+        void paint (juce::Graphics& g) override;
+        void mouseMove (const juce::MouseEvent& e) override { setHovered (partAt (e.x)); }
+        void mouseExit (const juce::MouseEvent&) override { setHovered (-1); }
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override;
+        void setHovered (int part) { if (part != hoveredPart) { hoveredPart = part; repaint(); } }
+    };
+    PatternSelector rackPatternSelector;
+    void showRackPatternList();
+    void refreshRackPatternSelector();
     struct RackTitleTools final : public juce::Component
     {
         std::function<void()> layout;
@@ -333,7 +354,8 @@ private:
     FilterBox rackFilterBox;
     IconButton rackGraphButton { "rackGraph", Icon::graph };
     IconButton rackPianoRollButton { "rackPianoRoll", Icon::pianoRoll };
-    static constexpr int rackTitleToolsWidth = 96 + 4 + 26 + 4 + 24 + 4 + 24;
+    static constexpr int rackPatternSelectorWidth = 132;
+    static constexpr int rackTitleToolsWidth = rackPatternSelectorWidth + 6 + 96 + 4 + 26 + 4 + 24 + 4 + 24;
     // one icon per workspace panel (F5..F9): click toggles, right-click shows it maximized
     std::array<IconButton, workspace::panelCount> panelButtons { IconButton { "playlistPanel", Icon::playlist },
                                                                  IconButton { "rackPanel", Icon::channelRack },

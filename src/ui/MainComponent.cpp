@@ -3,6 +3,8 @@
 #include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
+
+#include "core/TransportEdit.h"
 #include "ui/CrashReporter.h"
 #include "engine/AudioLogger.h"
 #include "ui/PluginSkin.h"
@@ -150,7 +152,11 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         };
         loadKeyMap();
         startSession();
+        EditorGlobals::get().onOptionsChanged = [safe = juce::Component::SafePointer<MainComponent> (this)] { // Follow on/off
+            if (safe != nullptr) safe->saveUiSettings();
+        };
     }
+    PianoRollComponent::shortcutText = [this] (const std::string& id) { return shortcutText (id.c_str()); };
 
     newButton.setTooltip (tr ("New project") + " (Ctrl+N)");
     newButton.onClick = [this] { newProject(); };
@@ -176,9 +182,12 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     // transport: Play toggles play / stop-and-back; Stop returns to the start; double-click Stop = all notes off
     playButton.setTooltip (tr ("Play; pressed again, stops and goes back to where it started") + " (Space; Ctrl+Space pauses)");
     playButton.onClick = [this] { playStop(); };
-    stopButton.setTooltip (tr ("Stop and return to the start (double-click: all notes off)"));
+    stopButton.setTooltip (tr ("Stop and return to the start (double-click: back to the start and all notes off)"));
     stopButton.onClick = [this] { stopAndRewind(); };
-    stopButton.onDoubleClick = [this] { engine.panic(); };
+    stopButton.onDoubleClick = [this] { // FL-like: a double Stop goes back to the very start (and silences hanging notes)
+        engine.panic();
+        stopAndRewind (true);
+    };
     stopButton.onRightClick = [this] { showStopMenu(); };
     output.onModeChanged = [this] { saveUiSettings(); };
     recordButton.setOnColour (theme::colour::record);
@@ -323,11 +332,18 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::setHint (rackPianoRollButton, tr ("Piano-roll view: every channel shows its notes as a miniature piano roll (click one to edit it) "
                                           "instead of the step buttons; click again for the steps"));
     rackTitleTools.addAndMakeVisible (rackPianoRollButton);
+    // the pattern selector (issue #9): change the pattern the rack edits right from its title bar
+    rackPatternSelector.onStep = [this] (int delta) { selectPattern (stepPattern (engine.getSong(), delta)); };
+    rackPatternSelector.onMenu = [this] { showRackPatternList(); };
+    ui::setHint (rackPatternSelector, tr ("Pattern the Channel Rack edits: [LMB] on the name: the list of patterns, on the arrows: previous / next  [Wheel] step"));
+    rackTitleTools.addAndMakeVisible (rackPatternSelector);
     rackTitleTools.addAndMakeVisible (rackFilterBox);
     rackTitleTools.addAndMakeVisible (swingSlider);
     rackTitleTools.addAndMakeVisible (rackGraphButton);
     rackTitleTools.layout = [this] {
         auto r = rackTitleTools.getLocalBounds();
+        rackPatternSelector.setBounds (r.removeFromLeft (rackPatternSelectorWidth).reduced (0, 3));
+        r.removeFromLeft (6);
         rackFilterBox.setBounds (r.removeFromLeft (96).reduced (0, 3));
         r.removeFromLeft (4);
         swingSlider.setBounds (r.removeFromLeft (26));
@@ -504,6 +520,8 @@ MainComponent::~MainComponent()
     if (sessionLock != nullptr) // a clean exit: no "LYNX did not close properly" next time
         sessionMarker.deleteFile();
     mixerinput::openAudioSettings = nullptr;
+    EditorGlobals::get().onOptionsChanged = nullptr;
+    PianoRollComponent::shortcutText = nullptr;
     saveUiSettings();
     workspace.saveState();
     ui::uninstallSliderContract();
@@ -1249,6 +1267,8 @@ void MainComponent::loadUiSettings()
             ui::WaveformCache::stereo = on;
         else if (key == "rememberSeek")
             EditorGlobals::get().rememberSeek = on;
+        else if (key == "followPlaylist" || key == "followPianoRoll")
+            EditorGlobals::get().setFollowing (key == "followPianoRoll", on, false);
         else if (key == "scopeMode")
             toolbar::OutputMonitor::mode = juce::jlimit (0, toolbar::OutputMonitor::modeCount - 1,
                                                          line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
@@ -1326,6 +1346,8 @@ void MainComponent::saveUiSettings()
                                       + "\npluginStyle=" + juce::String (skin::forcedStyle() < 0 ? "Automatic" : skin::styleName ((skin::Style) skin::forcedStyle()))
                                       + "\npluginStyleOverrides=" + skin::overridesToString()
                                       + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
+                                      + "\nfollowPlaylist=" + juce::String (EditorGlobals::get().isFollowing (false) ? 1 : 0)
+                                      + "\nfollowPianoRoll=" + juce::String (EditorGlobals::get().isFollowing (true) ? 1 : 0)
                                       + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode)
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
@@ -1386,11 +1408,14 @@ void MainComponent::playPause()
     }
 }
 
-void MainComponent::stopAndRewind()
+void MainComponent::stopAndRewind (bool toStart)
 {
+    // Stop while nothing plays (the second press, or a double click) goes back to the very start even when
+    // "Remember seek time" sends the first Stop to the ruler mark (round 162, issue #9)
+    const auto alreadyStopped = toStart || ! (engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn());
     engine.stop();
     const auto& globals = EditorGlobals::get();
-    const auto back = polish::stopReturnTick (globals.rememberSeek && engine.getSong().mode == PlayMode::song, globals.seekMark);
+    const auto back = transportedit::stopTarget (alreadyStopped, globals.rememberSeek && engine.getSong().mode == PlayMode::song, globals.seekMark);
 
     if (back > 0) // "Remember seek time": back to the position clicked on the Playlist ruler
         engine.seek ((double) back);
@@ -1411,6 +1436,7 @@ void MainComponent::showStopMenu()
     });
     menu.addSeparator();
     menu.addItem (tr ("All notes off (panic)") + "\t" + tr ("double-click"), [this] { engine.panic(); });
+    menu.addItem (tr ("Back to the start"), [this] { stopAndRewind (true); });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&stopButton));
 }
 
@@ -1615,6 +1641,9 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
             menu.addSeparator();
             action (menu, "playlist.ripple", tr ("Ripple editing (resizing and deleting move the later clips)"), true, playlist.isRippleOn());
             action (menu, "playlist.rippleDelete", tr ("Delete the selected clips and close the gaps"));
+            action (menu, "playlist.follow", tr ("Follow the playhead (auto scrolling)"), true, EditorGlobals::get().isFollowing (false));
+            action (menu, "playlist.quantizeStarts", tr ("Quantize the clips' starts"));
+            action (menu, "playlist.quantizeHalf", tr ("Quantize the clips' starts 50% (halfway to the grid)"));
             menu.addSubMenu (tr ("Zoom"), zoomMenu ("playlist."));
             break;
         case Panel::pianoRoll:
@@ -1626,6 +1655,10 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
                 if (const auto* a = keys::findAction (id))
                     action (tools, a->id, tr (a->description));
             menu.addSubMenu (tr ("Tools"), tools);
+            action (menu, "pianoRoll.quickQuantize", tr ("Quick quantize (starts and lengths)"));
+            action (menu, "pianoRoll.quantizeStarts", tr ("Quantize starts"));
+            action (menu, "pianoRoll.quantizeHalf", tr ("Quantize starts 50% (halfway to the grid)"));
+            action (menu, "pianoRoll.follow", tr ("Follow the playhead (auto scrolling)"), true, EditorGlobals::get().isFollowing (true));
             menu.addSubMenu (tr ("Zoom"), zoomMenu ("pianoRoll."));
             menu.addItem (tr ("Snap notes to the scale"), pianoRoll.hasScale(), pianoRoll.isScaleSnapOn(),
                           [this] { pianoRoll.setScaleSnap (! pianoRoll.isScaleSnapOn()); });
@@ -2029,8 +2062,97 @@ void MainComponent::refreshToolbar()
     tempoDisplay.repaint();
     refreshModeButton();
 
-    if (! song.patterns.empty())
-        workspace.setTitle (Panel::channelRack, "Channel Rack  -  " + juce::String::fromUTF8 (song.patterns[(std::size_t) song.currentPattern].name.c_str()));
+    refreshRackPatternSelector();
+}
+
+void MainComponent::refreshRackPatternSelector()
+{
+    const auto& song = engine.getSong();
+    const auto valid = song.currentPattern >= 0 && song.currentPattern < (int) song.patterns.size();
+    const auto text = valid ? juce::String::fromUTF8 (song.patterns[(std::size_t) song.currentPattern].name.c_str()) : juce::String();
+    const auto colour = valid ? PlaylistComponent::patternColour (song, song.currentPattern) : juce::Colour();
+
+    if (text != rackPatternSelector.text || colour != rackPatternSelector.colour)
+    {
+        rackPatternSelector.text = text;
+        rackPatternSelector.colour = colour;
+        rackPatternSelector.repaint();
+    }
+}
+
+void MainComponent::showRackPatternList()
+{
+    const auto& song = engine.getSong();
+    juce::PopupMenu menu;
+
+    for (int i = 0; i < (int) song.patterns.size(); ++i)
+        menu.addItem (juce::String::fromUTF8 (song.patterns[(std::size_t) i].name.c_str()), true, i == song.currentPattern, [this, i] { selectPattern (i); });
+
+    menu.addSeparator();
+    menu.addItem (tr ("New pattern"), [this] { newPatternButton.onClick(); });
+    menu.addItem (tr ("Rename and color the pattern") + shortcutText ("pattern.rename"), [this] { runAction ("pattern.rename"); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&rackPatternSelector));
+}
+
+void MainComponent::PatternSelector::paint (juce::Graphics& g)
+{
+    using namespace theme;
+    auto area = getLocalBounds().toFloat();
+    g.setColour (hoveredPart >= 0 ? colour::bg3 : colour::bg1);
+    g.fillRoundedRectangle (area, radius::sm);
+    g.setColour (hoveredPart >= 0 ? colour::borderStrong : colour::border);
+    g.drawRoundedRectangle (area.reduced (0.5f), radius::sm, 1.0f);
+
+    // the pattern's colour as a thin stripe at the left of the name
+    if (! colour.isTransparent())
+    {
+        g.setColour (colour);
+        g.fillRect (juce::Rectangle<float> ((float) arrowWidth + 1.0f, 4.0f, 3.0f, (float) getHeight() - 8.0f));
+    }
+
+    auto arrow = [&g, this] (int part, bool left) {
+        const auto box = juce::Rectangle<float> (left ? 0.0f : (float) (getWidth() - arrowWidth), 0.0f, (float) arrowWidth, (float) getHeight());
+        const auto c = box.getCentre();
+        juce::Path p;
+        if (left)
+            p.addTriangle (c.x + 2.5f, c.y - 4.0f, c.x + 2.5f, c.y + 4.0f, c.x - 2.5f, c.y);
+        else
+            p.addTriangle (c.x - 2.5f, c.y - 4.0f, c.x - 2.5f, c.y + 4.0f, c.x + 2.5f, c.y);
+        g.setColour (hoveredPart == part ? colour::textPrimary : colour::textSecondary);
+        g.fillPath (p);
+    };
+    arrow (0, true);
+    arrow (2, false);
+
+    g.setColour (colour::textPrimary);
+    g.setFont (font (type::small, true));
+    const auto name = getLocalBounds().withTrimmedLeft (arrowWidth + 7).withTrimmedRight (arrowWidth + 14);
+    g.drawText (text, name, juce::Justification::centredLeft, true);
+    icons::draw (g, Icon::chevronDown, juce::Rectangle<float> ((float) (getWidth() - arrowWidth - 14), 0.0f, 12.0f, (float) getHeight()).reduced (1.0f, 4.0f),
+                 hoveredPart == 1 ? colour::textPrimary : colour::textSecondary);
+    g.setColour (colour::border);
+    g.fillRect (arrowWidth, 3, 1, getHeight() - 6);
+    g.fillRect (getWidth() - arrowWidth - 1, 3, 1, getHeight() - 6);
+}
+
+void MainComponent::PatternSelector::mouseDown (const juce::MouseEvent& e)
+{
+    const auto part = partAt (e.x);
+
+    if (part == 1 || e.mods.isPopupMenu())
+    {
+        if (onMenu)
+            onMenu();
+    }
+    else if (onStep)
+        onStep (part == 0 ? -1 : 1);
+}
+
+void MainComponent::PatternSelector::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    const auto delta = wheel.deltaY != 0.0f ? wheel.deltaY : -wheel.deltaX;
+    if (delta != 0.0f && onStep)
+        onStep (delta > 0.0f ? -1 : 1);
 }
 
 juce::PopupMenu MainComponent::makePatternMenu()
@@ -2134,6 +2256,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 
     if (namesChanged || patternBox.getSelectedItemIndex() != song.currentPattern || std::abs (swingSlider.getValue() - song.swing) > 1e-6)
         refreshToolbar();
+    else
+        refreshRackPatternSelector(); // a new pattern colour
 }
 
 // --- tempo display -------------------------------------------------------------------------------
@@ -2338,8 +2462,8 @@ void MainComponent::setControlHints()
 
     ui::setHint (playButton, with (tr ("Play: [LMB] play; again: stop and go back to where it started"), "transport.playStop")
                                  + "  " + keyMarkup ("transport.pause") + " " + tr ("pause"));
-    ui::setHint (stopButton, tr ("Stop: [LMB] stop and go back to the start (or the remembered position)  [2xLMB] all notes off (panic)  "
-                                 "[RMB] remember seek time"),
+    ui::setHint (stopButton, tr ("Stop: [LMB] stop and go back to the start (or the remembered position; again: the start)  "
+                                 "[2xLMB] back to the start and all notes off (panic)  [RMB] remember seek time"),
                  true);
     ui::setHint (recordButton, with (tr ("Record: [LMB] arm, then play to record notes (and audio, when armed)  [RMB] what to record"), "transport.record"),
                  true);
@@ -3944,6 +4068,12 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addSeparator();
         menu.addItem (tr ("Typing keyboard as a piano") + shortcutText ("view.typingPiano"), true, typingPiano, [this] { setTypingPiano (! typingPiano); });
         menu.addItem (tr ("Touch keyboard"), true, isTouchKeyboardOpen(), [this] { toggleTouchKeyboard (engine); });
+        menu.addSeparator();
+        // FL's "Auto scrolling" (round 162, issue #9)
+        menu.addItem (tr ("Playlist follows the playhead (auto scrolling)") + shortcutText ("playlist.follow"), true,
+                      EditorGlobals::get().isFollowing (false), [this] { runAction ("playlist.follow"); });
+        menu.addItem (tr ("Piano Roll follows the playhead (auto scrolling)") + shortcutText ("pianoRoll.follow"), true,
+                      EditorGlobals::get().isFollowing (true), [this] { runAction ("pianoRoll.follow"); });
     }
     else if (index == 3)
     {
