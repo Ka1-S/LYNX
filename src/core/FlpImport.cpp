@@ -2125,6 +2125,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     return &port;
             return nullptr;
         };
+        // the I/O nodes' MIDI pins as FL saved them (activated even without a cable; FL's node menu › Events, round 162)
+        for (const auto& [pid, port] : graph->ports)
+            if (port.node < 0 && port.kind == 1)
+                if (const auto number = flPatcherMidiPinPort (port); number >= 0)
+                {
+                    auto& list = port.input ? doc.toMidiPorts : doc.fromMidiPorts;
+                    if (std::find (list.begin(), list.end(), number) == list.end())
+                        list.insert (std::upper_bound (list.begin(), list.end(), number), number);
+                }
         for (const auto& c : graph->cables)
         {
             const auto* src = portOf (c.source);
@@ -2168,15 +2177,30 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (c.kind == 1)
             {
                 w.kind = PatchWire::Kind::midi;
-                if (w.from != patchFromHost)
-                    continue; // (MIDI out of a node: not passed yet)
+                if (w.from == patchFromHost) // "Notes", or "MIDI port N": what reaches the Patcher on that port (round 162)
+                {
+                    const auto port = flPatcherMidiPinPort (*src);
+                    if (port < -1)
+                        continue;
+                    w.fromPort = port < 0 ? 0 : patchMidiPortPin (port);
+                }
+                else
+                {
+                    // a node's MIDI output: a MIDI Out's (round 162); other plugins' MIDI outputs are not passed yet
+                    const auto& source = doc.nodes[(std::size_t) w.from];
+                    if (! source.generator || source.channel.instrument != InstrumentKind::midiOut)
+                        continue;
+                    w.fromPort = 0;
+                }
                 if (w.to == patchToHost) // "MIDI port N": the notes go to the plugins on that MIDI port
                 {
-                    const auto number = dst->name.rfind ("MIDI port ", 0) == 0 ? std::atoi (dst->name.c_str() + 10) : dst->index;
-                    if (number < 0 || number > 255)
+                    const auto number = flPatcherMidiPinPort (*dst);
+                    if (number < 0)
                         continue;
                     w.toPort = number;
                 }
+                else
+                    w.toPort = 0;
             }
             else
             {

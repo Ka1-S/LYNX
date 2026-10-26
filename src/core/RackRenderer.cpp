@@ -620,36 +620,89 @@ void RackState::buildMidiRoutes()
                     midiOutTargets[c].push_back ((int) t);
                     hasMidiOutputs = true;
                 }
+    midiRoutesOut.assign (count, {});
+    midiRoutesIn.assign (count, {});
+    effectMidiRoutes.assign (count, {});
+    hasEffectMidiRoutes = false;
+
+    // the Patchers that take MIDI ports through their "From LYNX" pins (round 162)
+    std::vector<std::vector<int>> channelPorts (count);
+    for (std::size_t t = 0; t < count; ++t)
+        if (song.channels[t].instrument == InstrumentKind::patcher)
+            channelPorts[t] = patcher::midiInputPorts (song.channels[t].patcher);
+    struct SlotPorts
+    {
+        int track, slot;
+        std::vector<int> ports;
+    };
+    std::vector<SlotPorts> slotPorts;
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t k = 0; k < song.mixer[t].effects.size(); ++k)
+            if (song.mixer[t].effects[k].kind == EffectKind::patcher)
+                if (auto ports = patcher::midiInputPorts (song.mixer[t].effects[k].patcher); ! ports.empty())
+                    slotPorts.push_back ({ (int) t, (int) k, std::move (ports) });
+
+    // source c sends on `port` with MIDI channel `midiChannel`: the plugins whose input port it is, the Patchers that
+    // take that port
+    // (a Patcher that takes the port may pass it on to "To LYNX" MIDI ports: those are sent on too, a few levels deep)
+    std::function<void (std::size_t, int, int, int)> send = [&] (std::size_t c, int port, int midiChannel, int depth) {
+        auto passOn = [&] (const PatcherDoc& doc) {
+            if (depth < 4)
+                for (const auto& r : patcher::midiOutputsOf (doc, patchMidiPortPin (port)))
+                    if (r.port != port)
+                        send (c, r.port, r.midiChannel >= 0 ? r.midiChannel : midiChannel, depth + 1);
+        };
+        if (midiOutChannel[c] < 0)
+            midiOutChannel[c] = midiChannel;
+        for (std::size_t t = 0; t < count; ++t)
+        {
+            if (t == c)
+                continue;
+            const auto plugin = song.channels[t].instrument == InstrumentKind::plugin && song.channels[t].plugin.midiInPort == port;
+            const auto patch = std::find (channelPorts[t].begin(), channelPorts[t].end(), port) != channelPorts[t].end();
+            if (! plugin && ! patch)
+                continue;
+            if (std::any_of (midiRoutesOut[c].begin(), midiRoutesOut[c].end(), [&] (const MidiRoute& r) {
+                    return r.other == (int) t && r.port == port && r.midiChannel == midiChannel;
+                }))
+                continue;
+            midiRoutesOut[c].push_back ({ (int) t, port, midiChannel });
+            midiRoutesIn[t].push_back ({ (int) c, port, midiChannel });
+            if (std::find (midiSources[t].begin(), midiSources[t].end(), (int) c) == midiSources[t].end())
+                midiSources[t].push_back ((int) c);
+            if (plugin && std::find (midiTargets[c].begin(), midiTargets[c].end(), (int) t) == midiTargets[c].end())
+                midiTargets[c].push_back ((int) t); // (controls and program changes: the plugins)
+            hasMidiRoutes = true;
+            if (patch)
+                passOn (song.channels[t].patcher);
+        }
+        for (const auto& s : slotPorts)
+            if (std::find (s.ports.begin(), s.ports.end(), port) != s.ports.end()
+                && std::none_of (effectMidiRoutes[c].begin(), effectMidiRoutes[c].end(), [&] (const EffectMidiRoute& r) {
+                       return r.track == s.track && r.slot == s.slot && r.port == port && r.midiChannel == midiChannel;
+                   }))
+            {
+                effectMidiRoutes[c].push_back ({ s.track, s.slot, port, midiChannel });
+                hasEffectMidiRoutes = true;
+                passOn (song.mixer[(std::size_t) s.track].effects[(std::size_t) s.slot].patcher);
+            }
+    };
+
     for (std::size_t c = 0; c < count; ++c)
     {
         // a generator Patcher's "MIDI port N" outputs (REA_rodada141): its notes reach the plugins on those ports, as a
-        // MIDI Out on MIDI channel 1 would send them
+        // MIDI Out on MIDI channel 1 would send them (or on the channel of a MIDI Out node on the way, round 162)
         if (song.channels[c].instrument == InstrumentKind::patcher)
         {
-            for (const auto& w : song.channels[c].patcher.wires)
-                if (w.kind == PatchWire::Kind::midi && w.enabled && w.from == patchFromHost && w.to == patchToHost)
-                    for (std::size_t t = 0; t < count; ++t)
-                        if (t != c && song.channels[t].instrument == InstrumentKind::plugin && song.channels[t].plugin.midiInPort == w.toPort
-                            && std::find (midiTargets[c].begin(), midiTargets[c].end(), (int) t) == midiTargets[c].end())
-                        {
-                            midiOutChannel[c] = 0;
-                            midiTargets[c].push_back ((int) t);
-                            midiSources[t].push_back ((int) c);
-                            hasMidiRoutes = true;
-                        }
+            for (const auto& r : patcher::midiOutputsOf (song.channels[c].patcher, 0))
+                send (c, r.port, std::max (0, r.midiChannel), 0);
             continue;
         }
         if (song.channels[c].instrument != InstrumentKind::midiOut)
             continue;
         const auto settings = midictl::parseMidiOut (song.channels[c].pluginState);
         midiOutChannel[c] = settings.channel;
-        for (std::size_t t = 0; t < count; ++t)
-            if (t != c && song.channels[t].instrument == InstrumentKind::plugin && song.channels[t].plugin.midiInPort == settings.port)
-            {
-                midiTargets[c].push_back ((int) t);
-                midiSources[t].push_back ((int) c);
-                hasMidiRoutes = true;
-            }
+        send (c, settings.port, settings.channel, 0);
     }
 }
 
@@ -1206,6 +1259,27 @@ void RackRenderer::applyPluginParams (const RackState& state, int firstSlot) noe
     }
 }
 
+void RackRenderer::deliverToEffects (const RackState& state, const NoteEvent& e) noexcept
+{
+    if (e.channel < 0 || (std::size_t) e.channel >= state.effectMidiRoutes.size()
+        || (e.type != NoteEvent::Type::on && e.type != NoteEvent::Type::off))
+        return;
+    if (e.type == NoteEvent::Type::on && state.song.channels[(std::size_t) e.channel].muted)
+        return;
+    for (const auto& route : state.effectMidiRoutes[(std::size_t) e.channel])
+    {
+        if ((std::size_t) route.track >= state.effects.size() || (std::size_t) route.slot >= state.effects[(std::size_t) route.track].size())
+            continue;
+        if (auto* graph = patcher::graphOf (state.effects[(std::size_t) route.track][(std::size_t) route.slot].get()))
+        {
+            if (e.type == NoteEvent::Type::on)
+                graph->noteOnPort (route.port, e.key, e.velocity, route.midiChannel);
+            else
+                graph->noteOffPort (route.port, e.key, route.midiChannel);
+        }
+    }
+}
+
 float* RackRenderer::channelBuffer (int channel, int side) noexcept
 {
     return channelBuffers.data() + ((std::size_t) channel * 2 + (std::size_t) side) * chunkCapacity;
@@ -1320,14 +1394,19 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                 instrument.render (l + position, r + position, e.sampleOffset - position, gl, gr);
                 position = e.sampleOffset;
             }
-            const auto midiChannel = state.midiOutChannel[(std::size_t) e.channel];
-            if (e.type == NoteEvent::Type::on)
+            // (each route from that channel: its port and MIDI channel, round 162)
+            for (const auto& route : state.midiRoutesIn[(std::size_t) i])
             {
-                if (! c.muted && ! state.song.channels[(std::size_t) e.channel].muted)
-                    instrument.noteOnMidi (e.key, e.velocity, midiChannel);
+                if (route.other != e.channel)
+                    continue;
+                if (e.type == NoteEvent::Type::on)
+                {
+                    if (! c.muted && ! state.song.channels[(std::size_t) e.channel].muted)
+                        instrument.noteOnPort (route.port, e.key, e.velocity, route.midiChannel);
+                }
+                else
+                    instrument.noteOffPort (route.port, e.key, route.midiChannel);
             }
-            else
-                instrument.noteOffMidi (e.key, midiChannel);
             continue;
         }
 
@@ -1807,17 +1886,20 @@ void RackRenderer::process (const RackState* state,
             const auto bit = std::uint64_t { 1 } << (e.key & 63);
             const auto inRange = e.key >= 0 && e.key < 128;
             // played on a MIDI Out channel: the plugins on its port get the note with its MIDI channel
-            if (state->hasMidiRoutes && (std::size_t) e.channel < state->midiTargets.size())
-                for (const auto t : state->midiTargets[(std::size_t) e.channel])
-                    if (t < (int) state->instruments.size() && state->instruments[(std::size_t) t] != nullptr)
+            if (state->hasMidiRoutes && (std::size_t) e.channel < state->midiRoutesOut.size())
+                for (const auto& route : state->midiRoutesOut[(std::size_t) e.channel])
+                    if (route.other < (int) state->instruments.size() && state->instruments[(std::size_t) route.other] != nullptr)
                     {
-                        auto& target = *state->instruments[(std::size_t) t];
-                        const auto midiChannel = state->midiOutChannel[(std::size_t) e.channel];
+                        auto& target = *state->instruments[(std::size_t) route.other];
                         if (e.type == NoteEvent::Type::on)
-                            target.noteOnMidi (e.key, e.velocity, midiChannel);
+                            target.noteOnPort (route.port, e.key, e.velocity, route.midiChannel);
                         else if (e.type == NoteEvent::Type::off)
-                            target.noteOffMidi (e.key, midiChannel);
+                            target.noteOffPort (route.port, e.key, route.midiChannel);
                     }
+            // and the mixer-slot Patchers on its port (round 162)
+            // (notes that go through the channel's note path reach them in processChunk)
+            if (state->hasEffectMidiRoutes && ! routesLiveNotes (*state, e.channel))
+                deliverToEffects (*state, e);
             // the channel's arpeggiator / echo delay / tracking play it (in processChunk's first chunk)
             if ((e.type == NoteEvent::Type::on || e.type == NoteEvent::Type::off) && routesLiveNotes (*state, e.channel))
             {
@@ -2104,6 +2186,11 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
         events.sortByOffset();
     }
+
+    // MIDI to the mixer-slot Patchers that take a MIDI port (round 162): at the chunk's start
+    if (state.hasEffectMidiRoutes)
+        for (int k = 0; k < events.size(); ++k)
+            deliverToEffects (state, events[k]);
 
     // 1) channels, each with its own notes at the exact sample (in parallel when worth it)
     const auto channels = std::min<int> ({ (int) state.instruments.size(), (int) song.channels.size(), maxChannels });

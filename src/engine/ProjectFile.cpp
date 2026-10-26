@@ -388,6 +388,19 @@ juce::var patcherToVar (const PatcherDoc& doc)
             tracks.add (t);
         o->setProperty ("outputTracks", tracks);
     }
+    // the I/O nodes' activated MIDI pins (round 162)
+    auto ports = [] (const std::vector<int>& v) {
+        juce::Array<juce::var> a;
+        for (const auto p : v)
+            a.add (p);
+        return a;
+    };
+    if (! doc.fromMidiPorts.empty())
+        o->setProperty ("fromMidiPorts", ports (doc.fromMidiPorts));
+    if (! doc.toMidiPorts.empty())
+        o->setProperty ("toMidiPorts", ports (doc.toMidiPorts));
+    if (doc.fromNotesHidden)
+        o->setProperty ("fromNotesHidden", true);
     if (! doc.surface.empty()) // the Surface tab (round 151): [kind, name, value, value Y, x, y]
     {
         juce::Array<juce::var> controls;
@@ -470,6 +483,16 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
     if (auto* tracks = v["outputTracks"].getArray())
         for (const auto& t : *tracks)
             doc.outputTracks.push_back (juce::jlimit (-1, maxMixerTracks - 1, (int) t));
+    auto readPorts = [] (const juce::var& a, std::vector<int>& out) {
+        if (auto* list = a.getArray())
+            for (const auto& p : *list)
+                if (const auto port = (int) p; port >= 0 && port < patchMidiPorts && std::find (out.begin(), out.end(), port) == out.end())
+                    out.push_back (port);
+        std::sort (out.begin(), out.end());
+    };
+    readPorts (v["fromMidiPorts"], doc.fromMidiPorts);
+    readPorts (v["toMidiPorts"], doc.toMidiPorts);
+    doc.fromNotesHidden = (bool) v.getProperty ("fromNotesHidden", false);
     if (auto* controls = v["surface"].getArray())
         for (const auto& c : *controls)
             if (c.isArray() && c.size() >= 6)

@@ -13,5 +13,7 @@ void openSlot (AudioEngine& engine, int track, int slot);
 void openChannel (AudioEngine& engine, int channel);
 bool isChannelOpen (int channel);
 void closeChannel (int channel);
+// --patchershot: the Add plugin menu and the I/O nodes' menus (Events) of a Patcher, as images (round 162)
+void shootMenus (AudioEngine& engine, bool channel, int index, int slot, std::function<void (const juce::Image&, const juce::String&)> save);
 } // namespace PatcherWindows
 } // namespace lynx

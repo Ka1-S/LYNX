@@ -46,8 +46,27 @@ struct NodePorts
 {
     int audioIns = 1, audioOuts = 1, controlOuts = 0;
     bool midiIn = false;
+    bool midiOut = false; // a MIDI Out node: its notes leave on its MIDI output pin (round 162)
 };
 NodePorts nodePorts (const PatchNode& node);
+
+// MIDI through the I/O nodes (round 162, FL's "MIDI port N" pins).
+// The MIDI ports the "From LYNX" / "To LYNX" nodes show: the activated ones and those with a cable, sorted.
+std::vector<int> shownFromMidiPorts (const PatcherDoc& doc);
+std::vector<int> shownToMidiPorts (const PatcherDoc& doc);
+bool fromNotesShown (const PatcherDoc& doc, bool generator);
+// The MIDI ports whose "From LYNX" pin has an active cable: the Patcher takes what LYNX sends on those ports.
+std::vector<int> midiInputPorts (const PatcherDoc& doc);
+// Where what enters on "From LYNX" pin `fromPin` (0 Notes, patchMidiPortPin (N)) leaves on "To LYNX" MIDI ports,
+// directly or through MIDI Out nodes (which set the MIDI channel; −1 = unchanged).
+struct MidiPortRoute
+{
+    int port = 0, midiChannel = -1;
+    bool operator== (const MidiPortRoute&) const = default;
+};
+std::vector<MidiPortRoute> midiOutputsOf (const PatcherDoc& doc, int fromPin);
+// Pin menu helpers (FL's Events submenu): "Deactivate unused" keeps only the pins with a cable.
+void deactivateUnusedMidiPins (PatcherDoc& doc, bool fromNode);
 
 // Whether two documents have the same structure (nodes, their plugins / states and the cables): a running graph
 // built for `a` can take `b`'s values (parameters, on/off, dry/wet, cable gains) without being built again.
@@ -77,6 +96,10 @@ public:
     void noteOff (int key) noexcept;
     void noteOnMidi (int key, float velocity, int midiChannel) noexcept;
     void noteOffMidi (int key, int midiChannel) noexcept;
+    // what LYNX sends to the Patcher on MIDI port `port` (a MIDI Out on that port…): the nodes cabled to that pin
+    void noteOnPort (int port, int key, float velocity, int midiChannel) noexcept;
+    void noteOffPort (int port, int key, int midiChannel) noexcept;
+    bool takesMidiPort (int port) const noexcept;
     void allNotesOff() noexcept;
     void slideTo (int key, float cents, float samples) noexcept;
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept;
@@ -114,7 +137,13 @@ private:
     std::vector<int> order;
     std::vector<AudioWire> wires;
     std::vector<ControlWire> controls;
-    std::vector<int> noteTargets; // nodes cabled to the host's notes
+    std::vector<int> noteTargets; // nodes cabled to the host's notes (directly)
+    struct MidiTarget
+    {
+        int node = 0, midiChannel = -1; // −1 = the incoming channel (a MIDI Out node on the way sets its own)
+    };
+    std::vector<std::vector<MidiTarget>> pinTargets; // ["From LYNX" pin: 0 Notes, 1 + port] the instruments it reaches
+    void deliver (int pin, bool on, int key, float velocity, int midiChannel) noexcept;
     std::vector<PatchParam> published;
     std::vector<float> publishedValues; // built-in targets: the latest automation value (NaN = none), applied each block
     std::vector<std::vector<int>> outputs; // [bus of "To LYNX"] its cables
