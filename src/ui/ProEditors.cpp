@@ -1,3 +1,4 @@
+#include "ui/SlotWatch.h"
 #include "ui/ProEditors.h"
 
 #include <cmath>
@@ -2898,8 +2899,9 @@ public:
 class ProEditorWindow final : public juce::DocumentWindow
 {
 public:
-    ProEditorWindow (std::unique_ptr<ProEditor> editor, const juce::String& title)
-        : DocumentWindow (title, colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
+    ProEditorWindow (std::unique_ptr<ProEditor> editor, const juce::String& title, AudioEngine& engine, int track, int slot)
+        : DocumentWindow (title, colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
+          gone (engine, track, slot, [this] { closeButtonPressed(); })
     {
         setUsingNativeTitleBar (true);
         content = editor.get();
@@ -2920,6 +2922,9 @@ public:
     }
     void closeButtonPressed() override;
     ProEditor* content = nullptr;
+
+private:
+    ui::SlotGoneWatcher gone;
 };
 
 std::map<std::pair<int, int>, std::unique_ptr<ProEditorWindow>>& windows()
@@ -2967,7 +2972,7 @@ void open (AudioEngine& engine, int track, int slot)
     const auto name = track == 0 ? tr ("Master") : juce::String::fromUTF8 (mixer[(std::size_t) track].name.c_str());
     const auto title = utf8 (effectInfo (mixer[(std::size_t) track].effects[(std::size_t) slot].kind).name) + " - "
                        + (name.isNotEmpty() ? name : tr ("Insert {0}", { juce::String (track) })) + " (" + tr ("slot {0}", { juce::String (slot + 1) }) + ")";
-    open[key] = std::make_unique<ProEditorWindow> (std::move (editor), title);
+    open[key] = std::make_unique<ProEditorWindow> (std::move (editor), title, engine, track, slot);
 }
 
 void closeAll() { windows().clear(); }

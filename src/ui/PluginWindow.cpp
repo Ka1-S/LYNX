@@ -1,11 +1,13 @@
 #include "ui/WindowOwner.h"
 #include "ui/PluginWindow.h"
 #include "ui/PluginPicker.h"
+#include "ui/PluginPresetMenu.h"
 
 #include <algorithm>
 #include <map>
 
 #include "core/FlWrapper.h"
+#include "core/LastTweaked.h"
 #include "engine/PluginSandbox.h"
 #include "engine/Text.h"
 #include "platform/CrashGuard.h"
@@ -321,8 +323,9 @@ class WrappedEditor final : public juce::Component
 public:
     WrappedEditor (juce::AudioProcessorEditor* e, AudioEngine& engine, std::function<PluginRef* (Song&)> find, juce::AudioPluginInstance& plugin,
                    bool channel)
-        : editor (e), page (engine, std::move (find), plugin, channel)
+        : editor (e), page (engine, std::move (find), plugin, channel), presets (plugin, [&engine] { engine.markModified(); })
     {
+        addAndMakeVisible (presets); // FL's wrapper presets: ◀ ▶ and the menu (round 162d, issue #8)
         for (auto* b : { &pluginTab, &settingsTab })
         {
             b->setClickingTogglesState (false); // LYNX's tab look (as the channel window's): the shown one filled
@@ -358,6 +361,8 @@ public:
         pluginTab.setBounds (header.removeFromLeft (80));
         header.removeFromLeft (4);
         settingsTab.setBounds (header.removeFromLeft (130));
+        header.removeFromLeft (8);
+        presets.setBounds (header.removeFromLeft (juce::jmin (presets.preferredWidth(), header.getWidth())));
         page.setBounds (area);
         if (editor != nullptr && ! settings)
         {
@@ -376,12 +381,12 @@ public:
     }
 
 private:
-    static constexpr int headerHeight = 30;
+    static constexpr int headerHeight = 30, minWidth = 4 + 80 + 4 + 130 + 8 + 250 + 4;
 
     void fitEditor()
     {
         if (editor != nullptr)
-            setSize (juce::jmax (220, editor->getWidth()), editor->getHeight() + headerHeight);
+            setSize (juce::jmax (minWidth, editor->getWidth()), editor->getHeight() + headerHeight);
     }
 
     void show (bool showSettings)
@@ -391,21 +396,44 @@ private:
         settingsTab.setToggleState (settings, juce::dontSendNotification);
         page.setVisible (settings);
         if (editor != nullptr)
+        {
             editor->setVisible (! settings);
+            // A plugin editor embedded as a native child window (VST3 / LV2 through JUCE's XEmbedComponent and CLAP /
+            // VST2 through NativeEmbed on Linux) is not unmapped when its component is hidden: it stayed over the
+            // Wrapper settings page and made it unreachable (issue #8). Moving it outside the window clips it away on
+            // every platform; resized() puts it back.
+            if (settings)
+                editor->setTopLeftPosition (-12000, -12000); // (X11 positions are 16-bit, also when scaled)
+        }
         if (settings)
             setSize (juce::jmax (getWidth(), page.getWidth()), juce::jmax (getHeight(), page.preferredHeight() + headerHeight));
         else
             fitEditor();
         resized();
+        if (editor != nullptr)
+            followNativeChildren (*editor);
+    }
+
+    // JUCE's XEmbedComponent only moves its X window when it is itself moved, not when a parent (the editor) is:
+    // tell every one inside the editor (round 162d)
+    static void followNativeChildren (juce::Component& c)
+    {
+       #if JUCE_LINUX || JUCE_BSD
+        if (auto* x = dynamic_cast<juce::XEmbedComponent*> (&c))
+            x->updateEmbeddedBounds();
+       #endif
+        for (auto* child : c.getChildren())
+            followNativeChildren (*child);
     }
 
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     WrapperSettingsPage page;
+    pluginpresetui::PresetBar presets;
     juce::TextButton pluginTab { tr ("Plugin") }, settingsTab { juce::String::fromUTF8 ("\xe2\x9a\x99 ") + tr ("Wrapper settings") };
     bool settings = false, laying = false;
 };
 
-class PluginWindow final : public juce::DocumentWindow, private juce::AudioProcessorListener
+class PluginWindow final : public juce::DocumentWindow, private juce::AudioProcessorListener, private juce::Timer
 {
 public:
     PluginWindow (std::shared_ptr<void> keepAlive, juce::AudioPluginInstance& p, const juce::String& title, PluginWindows::WrapperContext context)
@@ -433,6 +461,7 @@ public:
         keepAboveMainWindow (*this);
         crashguard::note (("editor shown: " + plugin.getName()).toStdString()); // (its OpenGL / GPU setup runs when shown)
         plugin.addListener (this); // the editor's gestures: Last tweaked, automation recording (REA round 143)
+        startTimerHz (10);         // its moves without gestures (round 162d)
     }
 
     // round 157a: the window that holds a third-party editor draws LYNX's few pixels with GDI, not Direct2D (JUCE 8's
@@ -458,6 +487,7 @@ public:
     ~PluginWindow() override
     {
         crashguard::note (("closing the editor of " + plugin.getName()).toStdString());
+        stopTimer();
         plugin.removeListener (this);
         // the UI must be destroyed before the plugin (which may die together with `owner`)
         clearContentComponent();
@@ -467,13 +497,50 @@ public:
 
     juce::AudioPluginInstance* key() const noexcept { return &plugin; }
 
+    void activeWindowStatusChanged() override
+    {
+        DocumentWindow::activeWindowStatusChanged();
+        if (isActiveWindow())
+            lastUsed() = &plugin;
+    }
+
+    static juce::AudioPluginInstance*& lastUsed()
+    {
+        static juce::AudioPluginInstance* last = nullptr;
+        return last;
+    }
+
+    // True when nothing but this window keeps the plugin's adapter alive: the plugin was removed or replaced, its
+    // channel deleted or the project closed (issue #9: the removed plugin's editor stayed on screen).
+    bool orphaned() const noexcept { return owner != nullptr && owner.use_count() == 1; }
+
 private:
-    void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+    // round 162d (issue #8): many plugins move their parameters without begin/end gestures, so their knobs never
+    // became "Last tweaked". A change made on the UI thread while this window is active or under the mouse, when it
+    // is the only parameter that moved since the last tick, counts as a tweak (core/LastTweaked.h; automation and
+    // links run on the audio thread, preset loads move many parameters at once).
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int index, float) override
+    {
+        if (juce::MessageManager::getInstanceWithoutCreating() != nullptr && juce::MessageManager::getInstance()->isThisTheMessageThread())
+            changes.changed (index);
+    }
+    void timerCallback() override
+    {
+        const auto mouse = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+        const auto active = isActiveWindow() || (isShowing() && getScreenBounds().contains (mouse));
+        if (const auto moved = changes.tick (active); moved >= 0 && PluginWindows::onGesture)
+        {
+            PluginWindows::onGesture (plugin, moved, true);
+            PluginWindows::onGesture (plugin, moved, false);
+        }
+    }
     void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override {}
     void audioProcessorParameterChangeGestureBegin (juce::AudioProcessor*, int index) override { gesture (index, true); }
     void audioProcessorParameterChangeGestureEnd (juce::AudioProcessor*, int index) override { gesture (index, false); }
     void gesture (int index, bool starting)
     {
+        if (juce::MessageManager::getInstanceWithoutCreating() != nullptr && juce::MessageManager::getInstance()->isThisTheMessageThread())
+            changes.gesture (index, starting);
         auto* p = &plugin;
         juce::MessageManager::callAsync ([p, index, starting] {
             if (PluginWindows::onGesture)
@@ -483,6 +550,7 @@ private:
 
     std::shared_ptr<void> owner;
     juce::AudioPluginInstance& plugin;
+    lasttweak::ChangeFilter changes;
 };
 
 } // namespace
@@ -495,6 +563,27 @@ std::map<juce::AudioPluginInstance*, std::unique_ptr<PluginWindow>>& windows()
 {
     static std::map<juce::AudioPluginInstance*, std::unique_ptr<PluginWindow>> open;
     return open;
+}
+
+// Closes the windows of plugins the engine no longer hosts (checked 4 times a second while a window is open; a removed
+// adapter is released by the engine within a few frames, when the audio thread has let go of its last snapshot).
+class OrphanReaper final : public juce::Timer
+{
+public:
+    void timerCallback() override
+    {
+        auto& open = windows();
+        for (auto it = open.begin(); it != open.end();)
+            it = it->second->orphaned() ? open.erase (it) : std::next (it);
+        if (open.empty())
+            stopTimer();
+    }
+};
+
+OrphanReaper& reaper()
+{
+    static auto* r = new OrphanReaper(); // (never destroyed: a static Timer must not outlive the message manager)
+    return *r;
 }
 
 void PluginWindow::closeButtonPressed()
@@ -553,11 +642,31 @@ void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const
     }
 
     open[&plugin] = std::make_unique<PluginWindow> (std::move (owner), plugin, title, std::move (context));
+    if (! reaper().isTimerRunning())
+        reaper().startTimerHz (4);
 }
 
 void closeAll()
 {
     windows().clear();
+    reaper().stopTimer();
+}
+
+void closeOrphans()
+{
+    reaper().timerCallback();
+}
+
+std::vector<juce::AudioPluginInstance*> openPlugins()
+{
+    std::vector<juce::AudioPluginInstance*> out;
+    const auto* last = PluginWindow::lastUsed();
+    for (auto& [plugin, window] : windows())
+        if (plugin == last)
+            out.insert (out.begin(), plugin);
+        else
+            out.push_back (plugin);
+    return out;
 }
 
 bool isOpen (const juce::AudioPluginInstance& plugin)

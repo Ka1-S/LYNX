@@ -1,3 +1,4 @@
+#include "ui/SlotWatch.h"
 #include "ui/NewtoneEditor.h"
 
 #include <algorithm>
@@ -834,7 +835,8 @@ class NewtoneWindow final : public juce::DocumentWindow
 {
 public:
     NewtoneWindow (AudioEngine& engine, int track, int slot, const juce::String& title)
-        : DocumentWindow (title, theme::colour::bg2, DocumentWindow::closeButton)
+        : DocumentWindow (title, theme::colour::bg2, DocumentWindow::closeButton),
+          gone (engine, track, slot, [this] { closeButtonPressed(); })
     {
         setUsingNativeTitleBar (true);
         setContentOwned (new NewtoneEditor (engine, track, slot), true);
@@ -846,6 +848,9 @@ public:
     }
 
     void closeButtonPressed() override;
+
+private:
+    ui::SlotGoneWatcher gone;
 };
 
 std::map<std::pair<int, int>, std::unique_ptr<NewtoneWindow>>& newtoneWindows()

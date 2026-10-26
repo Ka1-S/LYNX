@@ -50,6 +50,7 @@ add_library(lynx_core STATIC
     src/core/ProjectSafety.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
+    src/core/ThemePalette.cpp
     src/core/PluginLayout.cpp
     src/core/StateParams.cpp
     src/core/FlEffects.cpp
@@ -168,6 +169,7 @@ target_sources(lynx_core PRIVATE
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp
+    src/core/PluginPresets.cpp
     src/core/ParamHelp.cpp
     src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/SearchService.cpp)
 
@@ -289,6 +291,7 @@ if(LYNX_BUILD_APP)
         src/ui/PlaylistComponent.cpp
         src/ui/MixerComponent.cpp
         src/ui/PluginWindow.cpp
+        src/ui/PluginPresetMenu.cpp
         src/ui/ProjectLoading.cpp
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp
@@ -307,6 +310,8 @@ if(LYNX_BUILD_APP)
         src/ui/SoundFontEditor.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
+        src/ui/ThemeSettings.cpp
+        src/ui/ColourPicker.cpp
         src/ui/Icons.cpp
         src/ui/I18n.cpp
         src/ui/EditorTools.cpp)

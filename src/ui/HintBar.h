@@ -78,4 +78,34 @@ private:
     Hint current;
     bool live = false;
 };
+// FL's Tools › Last tweaked as a toolbar read-out (round 162d, issue #8): the name and value of the last moved
+// automatable control (a LYNX knob or a hosted plugin's own parameter); a click opens that parameter's menu (create
+// automation clip, link to controller, edit events, init song with this position, value). Handy when a plugin's own
+// window has no menu of its own or misbehaves. The owner refreshes it from its timer.
+class TweakReadout final : public juce::Component,
+                           public juce::SettableTooltipClient,
+                           private juce::Timer
+{
+public:
+    TweakReadout();
+    // `name` empty: nothing tweaked yet (draws a dim placeholder)
+    void setContent (const juce::String& name, const juce::String& value);
+    bool hasContent() const noexcept { return name.isNotEmpty(); }
+    std::function<void()> onClick;
+
+    void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+
+private:
+    void timerCallback() override
+    {
+        stopTimer();
+        repaint(); // the fresh-value highlight ends
+    }
+
+    juce::String name, value;
+    double changedMs = 0.0; // the value changed at (drawn in the accent colour for a moment)
+};
 } // namespace lynx::ui
