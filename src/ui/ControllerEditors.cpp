@@ -2,6 +2,7 @@
 #include "ui/WindowOwner.h"
 #include "ui/ControllerEditors.h"
 
+#include <algorithm>
 #include <array>
 #include <map>
 
@@ -425,55 +426,107 @@ void FormulaWindow::closeButtonPressed()
 // Envelope Controller
 // ===================================================================================================
 
-// One articulator's envelope: drag points, double-click to add one, right-click a point for its menu (delete,
-// sustain point, curve), Alt+drag a segment to bend it.
-class EnvelopeGraph final : public juce::Component
+// One curve of an articulator (FL's Envelope Controller editor: the envelope, the LFO's amplitude, or a map): drag
+// points, double-click to add one, right-click a point for its menu (delete, sustain point, curve), Alt+drag a
+// segment to bend it. Time curves run in seconds / beats; maps run over their input 0..1.
+class CurveGraph final : public juce::Component
 {
 public:
-    std::function<ControllerArticulator()> get;
-    std::function<void (const ControllerArticulator&)> set;
-    std::function<float()> live; // the output now
+    enum class Axis { time, keys, unit };
+    std::function<ControllerCurve()> get;
+    std::function<void (const ControllerCurve&)> set;
+    std::function<float()> live;           // the output now
+    std::function<bool()> active;          // drawn in colour (an envelope / LFO that is on, a map that is used)
+    std::function<juce::String()> emptyText; // shown over an inactive curve
+    Axis axis = Axis::time;
+    bool tempo = false;      // time axis in beats
+    bool sustainable = true; // the point menu offers the sustain point
+    float neutral = -1.0f;   // a map's neutral level (dashed line), < 0 = none
+    std::function<float (float)> preview; // a faint wave behind the curve (the LFO page: -1 … 1 at time t)
+    float minSpan = 1.0f;                 // the time axis shows at least this much (one LFO cycle)
+    bool showPreview = false;
 
     void paint (juce::Graphics& g) override
     {
-        const auto a = get();
+        const auto c = get();
         const auto area = plot();
         g.setColour (theme::colour::bg0);
         g.fillRoundedRectangle (getLocalBounds().toFloat(), 4.0f);
         g.setColour (theme::colour::border);
         for (auto y : { 0.25f, 0.5f, 0.75f })
             g.drawHorizontalLine ((int) (area.getY() + area.getHeight() * y), area.getX(), area.getRight());
-        const auto span = timeSpan (a);
-        const auto step = span <= 2.0f ? 0.25f : span <= 8.0f ? 1.0f : 4.0f;
         g.setFont (theme::font (theme::type::caption));
-        for (float t = step; t < span - 1.0e-4f; t += step)
+        if (axis == Axis::time)
         {
-            const auto x = toX (a, t);
-            g.setColour (theme::colour::border);
-            g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
-            g.setColour (theme::colour::textDisabled);
-            g.drawText (juce::String (t, step < 1.0f ? 2 : 0) + (a.tempo ? tr (" beat") : " s"), (int) x + 2, (int) area.getBottom() - 14, 60, 12,
-                        juce::Justification::centredLeft);
+            const auto span = timeSpan (c);
+            const auto step = span <= 2.0f ? 0.25f : span <= 8.0f ? 1.0f : 4.0f;
+            for (float t = step; t < span - 1.0e-4f; t += step)
+                gridLine (g, toX (c, t), juce::String (t, step < 1.0f ? 2 : 0) + (tempo ? tr (" beat") : " s"));
         }
-        if (! a.envOn || a.count == 0)
+        else if (axis == Axis::keys)
+        {
+            for (int key = 12; key < 120; key += 12) // the C of each octave (x = key / 120)
+                gridLine (g, toX (c, key / 120.0f), juce::MidiMessage::getMidiNoteName (key, true, true, 4));
+        }
+        else
+            for (int i = 1; i < 4; ++i)
+                gridLine (g, toX (c, i * 0.25f), juce::String (i * 25) + "%");
+        // the output axis (0 … 1 of the knob's range)
+        g.setColour (theme::colour::textDisabled);
+        for (const auto v : { 1.0f, 0.5f })
+            g.drawText (v == 1.0f ? "1.0" : "0.5", (int) area.getX() + 2, (int) toY (v) + 2, 30, 12, juce::Justification::centredLeft);
+        if (neutral >= 0.0f)
+        {
+            const auto y = toY (neutral);
+            juce::Path dash;
+            dash.startNewSubPath (area.getX(), y);
+            dash.lineTo (area.getRight(), y);
+            const float pattern[] { 4.0f, 4.0f };
+            juce::PathStrokeType (1.0f).createDashedStroke (dash, dash, pattern, 2);
+            g.setColour (theme::colour::textDisabled);
+            g.fillPath (dash);
+        }
+        const auto on = ! active || active();
+        if (preview && showPreview && axis == Axis::time)
+        {
+            const auto span = timeSpan (c);
+            juce::Path wave;
+            for (int i = 0; i <= 400; ++i)
+            {
+                const auto t = span * (float) i / 400.0f;
+                const auto y = toY (0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, preview (t)));
+                if (i == 0)
+                    wave.startNewSubPath (toX (c, t), y);
+                else
+                    wave.lineTo (toX (c, t), y);
+            }
+            g.setColour (theme::colour::accent.withAlpha (on ? 0.85f : 0.35f));
+            g.strokePath (wave, juce::PathStrokeType (1.6f));
+        }
+        if (! on && emptyText)
         {
             g.setColour (theme::colour::textDisabled);
-            g.drawText (tr ("Envelope off: the output rests at its base"), area, juce::Justification::centred);
+            g.drawText (emptyText(), area.reduced (8.0f), juce::Justification::centredTop);
         }
         juce::Path p;
-        for (int i = 0; i < a.count; ++i)
+        for (int i = 0; i < c.count; ++i)
         {
-            const auto x = toX (a, a.time[(std::size_t) i]);
-            const auto y = toY (a.level[(std::size_t) i]);
+            const auto x = toX (c, c.time[(std::size_t) i]);
+            const auto y = toY (c.level[(std::size_t) i]);
             if (i == 0)
             {
-                p.startNewSubPath (x, y);
+                if (axis != Axis::time && x > area.getX())
+                {
+                    p.startNewSubPath (area.getX(), y); // a map is flat before its first point
+                    p.lineTo (x, y);
+                }
+                else
+                    p.startNewSubPath (x, y);
                 continue;
             }
-            // the segment with its curve
-            const auto x0 = toX (a, a.time[(std::size_t) i - 1]);
-            const auto y0 = toY (a.level[(std::size_t) i - 1]);
-            const auto k = a.tension[(std::size_t) i - 1];
+            const auto x0 = toX (c, c.time[(std::size_t) i - 1]);
+            const auto y0 = toY (c.level[(std::size_t) i - 1]);
+            const auto k = c.tension[(std::size_t) i - 1];
             for (int step = 1; step <= 24; ++step)
             {
                 auto f = (float) step / 24.0f;
@@ -481,62 +534,70 @@ public:
                 p.lineTo (x0 + (x - x0) * f, y0 + (y - y0) * shaped);
             }
         }
-        g.setColour (a.envOn ? theme::colour::automation : theme::colour::textDisabled);
+        if (axis != Axis::time && c.count > 0)
+            p.lineTo (area.getRight(), toY (c.level[(std::size_t) c.count - 1]));
+        const auto curveColour = on ? theme::colour::automation : theme::colour::textSecondary.withAlpha (0.7f);
+        g.setColour (curveColour);
         g.strokePath (p, juce::PathStrokeType (2.0f));
-        for (int i = 0; i < a.count; ++i)
+        if (axis == Axis::time && c.count > 0) // the last level holds (a one-point LFO amplitude = a flat line)
         {
-            const auto c = juce::Point<float> (toX (a, a.time[(std::size_t) i]), toY (a.level[(std::size_t) i]));
-            g.setColour (i == a.sustain ? theme::colour::accent : theme::colour::textPrimary);
-            g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre (c));
-            if (i == a.sustain)
+            const auto last = juce::Point<float> (toX (c, c.time[(std::size_t) c.count - 1]), toY (c.level[(std::size_t) c.count - 1]));
+            g.setColour (curveColour.withMultipliedAlpha (0.55f));
+            g.drawLine (last.x, last.y, area.getRight(), last.y, 2.0f);
+        }
+        for (int i = 0; i < c.count; ++i)
+        {
+            const auto pt = juce::Point<float> (toX (c, c.time[(std::size_t) i]), toY (c.level[(std::size_t) i]));
+            g.setColour (i == c.sustain ? theme::colour::accent : theme::colour::textPrimary);
+            g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre (pt));
+            if (i == c.sustain)
             {
                 g.setColour (theme::colour::accent.withAlpha (0.6f));
-                g.drawVerticalLine ((int) c.x, area.getY(), area.getBottom());
+                g.drawVerticalLine ((int) pt.x, area.getY(), area.getBottom());
             }
         }
         if (live)
         {
             g.setColour (theme::colour::accent.withAlpha (0.7f));
-            const auto y = toY (live());
-            g.drawHorizontalLine ((int) y, area.getRight() - 14.0f, area.getRight());
+            g.drawHorizontalLine ((int) toY (live()), area.getRight() - 14.0f, area.getRight());
         }
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        auto a = get();
-        dragged = hit (a, e.position);
+        const auto c = get();
+        dragged = hit (c, e.position);
         if (e.mods.isPopupMenu())
         {
-            pointMenu (dragged, e.position);
+            pointMenu (dragged);
             dragged = -1;
             return;
         }
         if (e.mods.isAltDown() && dragged < 0)
         {
-            bendSegment = segmentAt (a, e.position.x);
+            bendSegment = segmentAt (c, e.position.x);
             bendStartY = e.position.y;
-            bendStart = bendSegment >= 0 ? a.tension[(std::size_t) bendSegment] : 0.0f;
+            bendStart = bendSegment >= 0 ? c.tension[(std::size_t) bendSegment] : 0.0f;
         }
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
-        auto a = get();
-        if (bendSegment >= 0 && bendSegment < a.count - 1)
+        auto c = get();
+        if (bendSegment >= 0 && bendSegment < c.count - 1)
         {
-            a.tension[(std::size_t) bendSegment] = juce::jlimit (-1.0f, 1.0f, bendStart + (e.position.y - bendStartY) / 120.0f);
-            set (a);
+            c.tension[(std::size_t) bendSegment] = juce::jlimit (-1.0f, 1.0f, bendStart + (e.position.y - bendStartY) / 120.0f);
+            set (c);
             return;
         }
-        if (dragged < 0 || dragged >= a.count)
+        if (dragged < 0 || dragged >= c.count)
             return;
-        const auto lo = dragged > 0 ? a.time[(std::size_t) dragged - 1] : 0.0f;
-        const auto hi = dragged + 1 < a.count ? a.time[(std::size_t) dragged + 1] : 1.0e6f;
-        a.time[(std::size_t) dragged] = dragged == 0 ? 0.0f : juce::jlimit (lo, hi, fromX (a, e.position.x));
-        a.level[(std::size_t) dragged] = juce::jlimit (0.0f, 1.0f, fromY (e.position.y));
-        a.envOn = true;
-        set (a);
+        const auto lo = dragged > 0 ? c.time[(std::size_t) dragged - 1] : 0.0f;
+        const auto hi = dragged + 1 < c.count ? c.time[(std::size_t) dragged + 1] : (axis == Axis::time ? 1.0e6f : 1.0f);
+        // the first point of a time curve stays at 0; a map's points move freely within 0..1
+        c.time[(std::size_t) dragged] = dragged == 0 && axis == Axis::time ? 0.0f : juce::jlimit (lo, hi, fromX (c, e.position.x));
+        c.level[(std::size_t) dragged] = juce::jlimit (0.0f, 1.0f, fromY (e.position.y));
+        set (c);
     }
 
     void mouseUp (const juce::MouseEvent&) override
@@ -547,68 +608,79 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        auto a = get();
-        if (hit (a, e.position) >= 0 || a.count >= (int) a.time.size())
+        auto c = get();
+        if (hit (c, e.position) >= 0 || c.count >= (int) c.time.size())
             return;
-        const auto t = juce::jmax (0.0f, fromX (a, e.position.x));
-        int at = a.count;
-        for (int i = 0; i < a.count; ++i)
-            if (t < a.time[(std::size_t) i])
+        const auto limit = axis == Axis::time ? 1.0e6f : 1.0f;
+        const auto t = juce::jlimit (0.0f, limit, fromX (c, e.position.x));
+        int at = c.count;
+        for (int i = 0; i < c.count; ++i)
+            if (t < c.time[(std::size_t) i])
             {
                 at = i;
                 break;
             }
-        for (int i = a.count; i > at; --i)
+        for (int i = c.count; i > at; --i)
         {
-            a.time[(std::size_t) i] = a.time[(std::size_t) i - 1];
-            a.level[(std::size_t) i] = a.level[(std::size_t) i - 1];
-            a.tension[(std::size_t) i] = a.tension[(std::size_t) i - 1];
+            c.time[(std::size_t) i] = c.time[(std::size_t) i - 1];
+            c.level[(std::size_t) i] = c.level[(std::size_t) i - 1];
+            c.tension[(std::size_t) i] = c.tension[(std::size_t) i - 1];
         }
-        a.time[(std::size_t) at] = a.count == 0 ? 0.0f : t;
-        a.level[(std::size_t) at] = juce::jlimit (0.0f, 1.0f, fromY (e.position.y));
-        a.tension[(std::size_t) at] = 0.0f;
-        ++a.count;
-        if (a.sustain >= at)
-            ++a.sustain;
-        a.envOn = true;
-        set (a);
+        c.time[(std::size_t) at] = c.count == 0 && axis == Axis::time ? 0.0f : t;
+        c.level[(std::size_t) at] = juce::jlimit (0.0f, 1.0f, fromY (e.position.y));
+        c.tension[(std::size_t) at] = 0.0f;
+        ++c.count;
+        if (c.sustain >= at)
+            ++c.sustain;
+        set (c);
     }
 
 private:
-    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (10.0f, 8.0f); }
-    static float timeSpan (const ControllerArticulator& a)
+    void gridLine (juce::Graphics& g, float x, const juce::String& label) const
     {
-        const auto last = a.count > 0 ? a.time[(std::size_t) a.count - 1] : 1.0f;
-        return juce::jmax (1.0f, std::ceil (last * 1.25f));
+        const auto area = plot();
+        g.setColour (theme::colour::border);
+        g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
+        g.setColour (theme::colour::textDisabled);
+        g.drawText (label, (int) x + 2, (int) area.getBottom() - 14, 60, 12, juce::Justification::centredLeft);
     }
-    float toX (const ControllerArticulator& a, float t) const { return plot().getX() + plot().getWidth() * t / timeSpan (a); }
-    float fromX (const ControllerArticulator& a, float x) const { return (x - plot().getX()) / plot().getWidth() * timeSpan (a); }
+
+    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (10.0f, 8.0f).withTrimmedTop (8.0f); }
+    float timeSpan (const ControllerCurve& c) const
+    {
+        if (axis != Axis::time)
+            return 1.0f;
+        const auto last = c.count > 0 ? c.time[(std::size_t) c.count - 1] : 1.0f;
+        return juce::jmax (minSpan, std::ceil (last * 1.25f));
+    }
+    float toX (const ControllerCurve& c, float t) const { return plot().getX() + plot().getWidth() * t / timeSpan (c); }
+    float fromX (const ControllerCurve& c, float x) const { return (x - plot().getX()) / plot().getWidth() * timeSpan (c); }
     float toY (float v) const { return plot().getBottom() - plot().getHeight() * v; }
     float fromY (float y) const { return (plot().getBottom() - y) / plot().getHeight(); }
 
-    int hit (const ControllerArticulator& a, juce::Point<float> p) const
+    int hit (const ControllerCurve& c, juce::Point<float> p) const
     {
-        for (int i = 0; i < a.count; ++i)
-            if (p.getDistanceFrom ({ toX (a, a.time[(std::size_t) i]), toY (a.level[(std::size_t) i]) }) < 7.0f)
+        for (int i = 0; i < c.count; ++i)
+            if (p.getDistanceFrom ({ toX (c, c.time[(std::size_t) i]), toY (c.level[(std::size_t) i]) }) < 7.0f)
                 return i;
         return -1;
     }
 
-    int segmentAt (const ControllerArticulator& a, float x) const
+    int segmentAt (const ControllerCurve& c, float x) const
     {
-        for (int i = 0; i + 1 < a.count; ++i)
-            if (x >= toX (a, a.time[(std::size_t) i]) && x < toX (a, a.time[(std::size_t) i + 1]))
+        for (int i = 0; i + 1 < c.count; ++i)
+            if (x >= toX (c, c.time[(std::size_t) i]) && x < toX (c, c.time[(std::size_t) i + 1]))
                 return i;
         return -1;
     }
 
-    void pointMenu (int index, juce::Point<float>)
+    void pointMenu (int index)
     {
         juce::PopupMenu menu;
-        const auto a = get();
+        const auto c = get();
         if (index >= 0)
         {
-            menu.addItem (tr ("Delete point"), a.count > 1, false, [this, index] {
+            menu.addItem (tr ("Delete point"), c.count > 1, false, [this, index] {
                 auto v = get();
                 for (int i = index; i + 1 < v.count; ++i)
                 {
@@ -621,16 +693,17 @@ private:
                     v.sustain = -1;
                 else if (v.sustain > index)
                     --v.sustain;
-                if (v.count > 0)
+                if (v.count > 0 && axis == Axis::time)
                     v.time[0] = 0.0f;
                 set (v);
             });
-            menu.addItem (tr ("Sustain point (holds while the key is down)"), true, a.sustain == index, [this, index] {
-                auto v = get();
-                v.sustain = v.sustain == index ? -1 : index;
-                set (v);
-            });
-            menu.addItem (tr ("Straight line to the next point"), index + 1 < a.count, false, [this, index] {
+            if (sustainable)
+                menu.addItem (tr ("Sustain point (holds while the key is down)"), true, c.sustain == index, [this, index] {
+                    auto v = get();
+                    v.sustain = v.sustain == index ? -1 : index;
+                    set (v);
+                });
+            menu.addItem (tr ("Straight line to the next point"), index + 1 < c.count, false, [this, index] {
                 auto v = get();
                 v.tension[(std::size_t) index] = 0.0f;
                 set (v);
@@ -645,12 +718,169 @@ private:
     float bendStartY = 0.0f, bendStart = 0.0f;
 };
 
+// FL's X/Y modulation pad: drag the dot to set the global Mod X / Mod Y.
+class ModPad final : public juce::Component
+{
+public:
+    std::function<juce::Point<float>()> get;
+    std::function<void (juce::Point<float>)> set;
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds().toFloat();
+        g.setColour (theme::colour::bg0);
+        g.fillRoundedRectangle (area, 4.0f);
+        g.setColour (theme::colour::border);
+        g.drawHorizontalLine ((int) area.getCentreY(), area.getX(), area.getRight());
+        g.drawVerticalLine ((int) area.getCentreX(), area.getY(), area.getBottom());
+        const auto v = get();
+        const auto pt = juce::Point<float> (area.getX() + 6.0f + (area.getWidth() - 12.0f) * v.x, area.getBottom() - 6.0f - (area.getHeight() - 12.0f) * v.y);
+        g.setColour (theme::colour::accent);
+        g.drawEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre (pt), 2.0f);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override { move (e); }
+    void mouseDrag (const juce::MouseEvent& e) override { move (e); }
+    void mouseDoubleClick (const juce::MouseEvent&) override { set ({ 0.5f, 0.5f }); }
+
+private:
+    void move (const juce::MouseEvent& e)
+    {
+        const auto area = getLocalBounds().toFloat().reduced (6.0f);
+        set ({ juce::jlimit (0.0f, 1.0f, (e.position.x - area.getX()) / area.getWidth()),
+               juce::jlimit (0.0f, 1.0f, (area.getBottom() - e.position.y) / area.getHeight()) });
+        repaint();
+    }
+};
+
+// A keyboard strip showing an articulator's key range (FL's keyboard strip): a normal light / dark keyboard, the keys
+// outside the range dimmed, the range underlined in the accent, the keys being played lit. Click sets the lowest key,
+// right-click / Shift+click the highest.
+class KeyStrip final : public juce::Component
+{
+public:
+    std::function<std::pair<int, int>()> get;
+    std::function<void (int low, int high)> set;
+    std::function<std::vector<int>()> played; // the keys held now (lit)
+    static constexpr int firstKey = 24, lastKey = 108; // C1 … C8
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto [low, high] = get();
+        const auto lit = played ? played() : std::vector<int> {};
+        auto isLit = [&lit] (int key) { return std::find (lit.begin(), lit.end(), key) != lit.end(); };
+        auto inRange = [low = low, high = high] (int key) { return key >= low && key <= std::min (high, 127); };
+        const auto area = getLocalBounds().toFloat();
+        g.setColour (theme::colour::bg0);
+        g.fillRoundedRectangle (area, 3.0f);
+        const auto keysArea = area.withTrimmedBottom (4.0f);
+        const auto whiteW = keysArea.getWidth() / (float) whiteCount();
+        // white keys
+        for (int key = firstKey, n = 0; key <= lastKey; ++key)
+        {
+            if (juce::MidiMessage::isMidiNoteBlack (key))
+                continue;
+            const auto r = juce::Rectangle<float> (keysArea.getX() + (float) n++ * whiteW, keysArea.getY(), whiteW, keysArea.getHeight());
+            auto colour = isLit (key) ? theme::colour::accent : theme::colour::keyWhite;
+            if (! inRange (key) && ! isLit (key))
+                colour = colour.interpolatedWith (theme::colour::bg2, 0.6f);
+            g.setColour (colour);
+            g.fillRect (r.reduced (0.5f, 0.0f));
+            if (key % 12 == 0)
+            {
+                g.setColour (theme::colour::bg3);
+                g.setFont (theme::font (theme::type::caption));
+                g.drawText (juce::MidiMessage::getMidiNoteName (key, true, true, 4), r.withWidth (30.0f).withTrimmedTop (r.getHeight() - 12.0f).translated (1.0f, 0.0f),
+                            juce::Justification::centredLeft);
+            }
+        }
+        // black keys over them
+        for (int key = firstKey; key <= lastKey; ++key)
+        {
+            if (! juce::MidiMessage::isMidiNoteBlack (key))
+                continue;
+            const auto x = keysArea.getX() + (float) whiteIndex (key) * whiteW; // (the boundary after the white key below)
+            const auto r = juce::Rectangle<float> (x - whiteW * 0.32f, keysArea.getY(), whiteW * 0.64f, keysArea.getHeight() * 0.6f);
+            auto colour = isLit (key) ? theme::colour::accent : theme::colour::keyBlack;
+            if (! inRange (key) && ! isLit (key))
+                colour = colour.interpolatedWith (theme::colour::bg3, 0.5f);
+            g.setColour (colour);
+            g.fillRect (r);
+        }
+        // the range: a bar under the keys
+        const auto from = juce::jmax (firstKey, low), to = juce::jmin (lastKey, juce::jmin (high, 127));
+        if (from <= to)
+        {
+            const auto x0 = keyX (from, keysArea, whiteW), x1 = keyX (to, keysArea, whiteW) + (juce::MidiMessage::isMidiNoteBlack (to) ? whiteW * 0.64f : whiteW);
+            g.setColour (theme::colour::accent);
+            g.fillRect (juce::Rectangle<float> (x0, area.getBottom() - 3.0f, x1 - x0, 3.0f));
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto key = keyAt (e.position);
+        auto [low, high] = get();
+        if (e.mods.isPopupMenu() || e.mods.isShiftDown())
+            high = juce::jmax (key, low);
+        else
+        {
+            low = key;
+            high = juce::jmax (high, key);
+        }
+        set (low, high);
+        repaint();
+    }
+
+private:
+    static int whiteCount()
+    {
+        int n = 0;
+        for (int key = firstKey; key <= lastKey; ++key)
+            n += juce::MidiMessage::isMidiNoteBlack (key) ? 0 : 1;
+        return n;
+    }
+    static int whiteIndex (int key) // white keys below `key`
+    {
+        int n = 0;
+        for (int k = firstKey; k < key; ++k)
+            n += juce::MidiMessage::isMidiNoteBlack (k) ? 0 : 1;
+        return n;
+    }
+    static float keyX (int key, juce::Rectangle<float> keysArea, float whiteW)
+    {
+        const auto x = keysArea.getX() + (float) whiteIndex (key) * whiteW;
+        return juce::MidiMessage::isMidiNoteBlack (key) ? x - whiteW * 0.32f : x;
+    }
+    int keyAt (juce::Point<float> p) const
+    {
+        const auto keysArea = getLocalBounds().toFloat().withTrimmedBottom (4.0f);
+        const auto whiteW = keysArea.getWidth() / (float) whiteCount();
+        if (p.y < keysArea.getY() + keysArea.getHeight() * 0.6f) // a black key first (they lie on top)
+            for (int key = firstKey; key <= lastKey; ++key)
+                if (juce::MidiMessage::isMidiNoteBlack (key))
+                {
+                    const auto x = keyX (key, keysArea, whiteW);
+                    if (p.x >= x && p.x < x + whiteW * 0.64f)
+                        return key;
+                }
+        const auto n = juce::jlimit (0, whiteCount() - 1, (int) ((p.x - keysArea.getX()) / whiteW));
+        for (int key = firstKey, i = 0; key <= lastKey; ++key)
+            if (! juce::MidiMessage::isMidiNoteBlack (key) && i++ == n)
+                return key;
+        return lastKey;
+    }
+};
+
 class EnvelopeControllerEditor final : public juce::Component,
                                        private juce::Timer,
                                        private juce::ChangeListener
 {
 public:
-    EnvelopeControllerEditor (AudioEngine& e, int c) : engine (e), channel (c)
+    // `locate` finds the controller's channel (a Channel Rack channel or a Patcher node; null = gone); `channel` is
+    // the Channel Rack index when there is one (links listing), `output` reads the running outputs.
+    EnvelopeControllerEditor (AudioEngine& e, std::function<ChannelDef* (Song&)> where, int c, std::function<float (int)> output)
+        : engine (e), locate (std::move (where)), channel (c), outputOf (std::move (output))
     {
         for (int k = 0; k < 8; ++k)
         {
@@ -662,38 +892,131 @@ public:
             addAndMakeVisible (b);
         }
 
-        graph.get = [this] { return articulator(); };
-        graph.set = [this] (const ControllerArticulator& a) { store (a); };
-        graph.live = [this] {
-            const auto instrument = engine.getChannelInstrument (channel);
-            return instrument != nullptr ? instrument->controlOutput (shown) : 0.0f;
+        part.addItemList ({ tr ("Envelope"), tr ("LFO"), tr ("Keyboard mapping"), tr ("Velocity mapping"), tr ("Modulation X mapping"),
+                            tr ("Modulation Y mapping"), tr ("Random") },
+                          1);
+        part.setSelectedItemIndex (0, juce::dontSendNotification);
+        part.onChange = [this] { showPart (part.getSelectedItemIndex()); };
+        ui::setHint (part, tr ("Which part of this output to edit: its envelope, its LFO or how the key, velocity, Mod X / Y and a random value per note shape it"));
+        addAndMakeVisible (part);
+
+        graph.get = [this] { return shownCurve(); };
+        graph.set = [this] (const ControllerCurve& c) { storeCurve (c); };
+        graph.live = [this] { return outputs[(std::size_t) shown]; };
+        graph.active = [this] { return partActive(); };
+        graph.emptyText = [this] { return emptyText(); };
+        graph.preview = [this] (float t) -> float {
+            const auto a = data()[(std::size_t) shown];
+            const auto amp = controllerCurveAt (a.lfoAmp, t, 1.0f);
+            return amp * controllerLfoWave (a, controllerLfoStartPhase (a) + (double) t * controllerLfoRate (a));
         };
         addAndMakeVisible (graph);
 
-        base = std::make_unique<Knob> (&engine, unitSpec (tr ("Base"), 0.0, std::nullopt), [this] { return (double) articulator().base; },
-                                       [this] (double v) { auto a = articulator(); a.base = (float) v; store (a); });
-        base->shortName = tr ("Base");
-        ui::ValueSpec amountSpec;
-        amountSpec.name = tr ("Envelope amount");
-        amountSpec.minimum = -1.0;
-        amountSpec.maximum = 1.0;
-        amountSpec.defaultValue = 1.0;
-        amountSpec.toText = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
-        amount = std::make_unique<Knob> (&engine, amountSpec, [this] { return (double) articulator().envLevel; },
-                                         [this] (double v) { auto a = articulator(); a.envLevel = (float) v; store (a); });
-        amount->shortName = tr ("Amount");
-        addAndMakeVisible (*base);
-        addAndMakeVisible (*amount);
+        pad.get = [this] { const auto d = data(); return juce::Point<float> (d.modX, d.modY); };
+        pad.set = [this] (juce::Point<float> v) { editAll ([v] (EnvelopeControllerData& d) { d.modX = v.x; d.modY = v.y; }); };
+        ui::setHint (pad, tr ("Mod X / Mod Y: the inputs of the Modulation X / Y maps (each note adds its own Mod X / Y)"));
+        addAndMakeVisible (pad);
+        modX = makeKnob (unitSpec (tr ("Mod X"), 0.5, std::nullopt), [this] { return (double) data().modX; },
+                         [this] (double v) { editAll ([v] (EnvelopeControllerData& d) { d.modX = (float) v; }); }, "X");
+        modY = makeKnob (unitSpec (tr ("Mod Y"), 0.5, std::nullopt), [this] { return (double) data().modY; },
+                         [this] (double v) { editAll ([v] (EnvelopeControllerData& d) { d.modY = (float) v; }); }, "Y");
 
-        enabled.setButtonText (tr ("Envelope on"));
-        enabled.onClick = [this] { auto a = articulator(); a.envOn = enabled.getToggleState(); store (a); };
+        base = makeKnob (unitSpec (tr ("Base"), 0.5, std::nullopt), [this] { return (double) articulator().base; },
+                         [this] (double v) { edit ([v] (ControllerArticulator& a) { a.base = (float) v; }); }, tr ("Base"));
+        envAmount = makeKnob (levelSpec (tr ("Envelope amount"), 1.0), [this] { return (double) articulator().envLevel; },
+                              [this] (double v) { edit ([v] (ControllerArticulator& a) { a.envLevel = (float) v; }); }, tr ("Env"));
+        lfoAmount = makeKnob (levelSpec (tr ("LFO amount"), 0.5), [this] { return (double) articulator().lfoLevel; },
+                              [this] (double v) { edit ([v] (ControllerArticulator& a) { a.lfoLevel = (float) v; }); }, tr ("LFO"));
+
+        // envelope page: FL's ATT / DEC / SUS / REL scale the drawn envelope
+        const juce::String adsrNames[] { tr ("Attack"), tr ("Decay"), tr ("Sustain"), tr ("Release") };
+        const juce::String adsrShort[] { tr ("Att"), tr ("Dec"), tr ("Sus"), tr ("Rel") };
+        for (int i = 0; i < 4; ++i)
+        {
+            ui::ValueSpec s;
+            s.name = adsrNames[i];
+            s.minimum = i == 2 ? -128.0 : 0.0;
+            s.maximum = i == 2 ? 128.0 : 256.0;
+            s.defaultValue = i == 2 ? 0.0 : 128.0;
+            s.interval = 1.0;
+            s.toText = [i] (double v) { return i == 2 ? juce::String (juce::roundToInt (v / 1.28)) + "%" : juce::String (v / 128.0, 2) + "x"; };
+            adsr[(std::size_t) i] = makeKnob (s, [this, i] { return (double) articulator().adsr[(std::size_t) i]; },
+                                              [this, i] (double v) { edit ([i, v] (ControllerArticulator& a) { a.adsr[(std::size_t) i] = juce::roundToInt (v); }); },
+                                              adsrShort[i]);
+        }
+        // LFO page
+        {
+            ui::ValueSpec s;
+            s.name = tr ("LFO speed");
+            s.maximum = 65536.0;
+            s.defaultValue = 40000.0;
+            s.interval = 1.0;
+            s.toText = [this] (double v) {
+                auto a = articulator();
+                a.lfoSpeed = (int) v;
+                const auto period = 1.0 / juce::jmax (1.0e-9, controllerLfoRate (a));
+                return juce::String (period, period < 10.0 ? 2 : 0) + (a.lfoTempo ? tr (" beat") : " s");
+            };
+            lfoSpeed = makeKnob (s, [this] { return (double) articulator().lfoSpeed; },
+                                 [this] (double v) { edit ([v] (ControllerArticulator& a) { a.lfoSpeed = juce::roundToInt (v); }); }, tr ("Speed"));
+        }
+        const juce::String lfoNames[] { tr ("LFO tension"), tr ("LFO skew"), tr ("LFO pulse width") };
+        const juce::String lfoShort[] { tr ("Tension"), tr ("Skew"), tr ("PW") };
+        for (int i = 0; i < 3; ++i)
+        {
+            ui::ValueSpec s;
+            s.name = lfoNames[i];
+            s.minimum = -128.0;
+            s.maximum = 128.0;
+            s.interval = 1.0;
+            s.toText = [] (double v) { return juce::String (juce::roundToInt (v / 1.28)) + "%"; };
+            lfoShape[(std::size_t) i] = makeKnob (s,
+                                                  [this, i] {
+                                                      const auto a = articulator();
+                                                      return (double) (i == 0 ? a.lfoTension : i == 1 ? a.lfoSkew : a.lfoPulseWidth);
+                                                  },
+                                                  [this, i] (double v) {
+                                                      edit ([i, v] (ControllerArticulator& a) {
+                                                          (i == 0 ? a.lfoTension : i == 1 ? a.lfoSkew : a.lfoPulseWidth) = juce::roundToInt (v);
+                                                      });
+                                                  },
+                                                  lfoShort[i]);
+        }
+
+        enabled.onClick = [this] {
+            const auto on = enabled.getToggleState();
+            edit ([this, on] (ControllerArticulator& a) { (shownPart == 1 ? a.lfoOn : a.envOn) = on; });
+        };
         bipolar.setButtonText (tr ("Bipolar (centred on base)"));
-        bipolar.onClick = [this] { auto a = articulator(); a.bipolar = bipolar.getToggleState(); store (a); };
+        bipolar.onClick = [this] {
+            const auto on = bipolar.getToggleState();
+            edit ([on] (ControllerArticulator& a) { a.bipolar = on; }); // (empty maps stay neutral in either mode)
+        };
+        ui::setHint (bipolar, tr ("FL's MODE: bipolar adds the envelope, LFO and maps around the base; unipolar multiplies them"));
         tempo.setButtonText (tr ("Time in beats"));
-        tempo.onClick = [this] { auto a = articulator(); a.tempo = tempo.getToggleState(); store (a); };
-        for (auto* b : { &enabled, &bipolar, &tempo })
+        tempo.onClick = [this] {
+            const auto on = tempo.getToggleState();
+            edit ([this, on] (ControllerArticulator& a) { (shownPart == 1 ? a.lfoTempo : a.tempo) = on; });
+        };
+        global.setButtonText (tr ("Global (follows the song, not each note)"));
+        global.onClick = [this] { const auto on = global.getToggleState(); edit ([on] (ControllerArticulator& a) { a.lfoGlobal = on; }); };
+        continuous.setButtonText (tr ("Continuous output"));
+        continuous.onClick = [this] { const auto on = continuous.getToggleState(); editAll ([on] (EnvelopeControllerData& d) { d.continuous = on; }); };
+        ui::setHint (continuous, tr ("With no note playing, the outputs keep following the base and the Mod X / Y maps (FL's \"Smart\" presets)"));
+        resetMap.setButtonText (tr ("Reset map"));
+        resetMap.onClick = [this] {
+            const auto m = shownPart - 2;
+            edit ([m] (ControllerArticulator& a) { a.maps[(std::size_t) m] = {}; });
+        };
+        for (juce::Component* b : { (juce::Component*) &enabled, (juce::Component*) &bipolar, (juce::Component*) &tempo, (juce::Component*) &global,
+                                    (juce::Component*) &continuous, (juce::Component*) &resetMap })
             addAndMakeVisible (*b);
 
+        keys.get = [this] { const auto a = articulator(); return std::pair<int, int> (a.lowKey, a.highKey); };
+        keys.set = [this] (int low, int high) { edit ([low, high] (ControllerArticulator& a) { a.lowKey = low; a.highKey = high >= 127 ? 256 : high; }); };
+        keys.played = [this] { return engine.heldInputKeys(); };
+        ui::setHint (keys, tr ("The keys this output follows: click sets the lowest, right-click (or Shift+click) the highest"));
+        addAndMakeVisible (keys);
         for (auto* s : { &lowKey, &highKey })
         {
             s->setSliderStyle (juce::Slider::IncDecButtons);
@@ -707,21 +1030,24 @@ public:
             return v >= 127.0 ? tr ("all above") : juce::MidiMessage::getMidiNoteName ((int) v, true, true, 4);
         };
         highKey.updateText();
-        lowKey.onValueChange = [this] { auto a = articulator(); a.lowKey = (int) lowKey.getValue(); store (a); };
+        lowKey.onValueChange = [this] { const auto v = (int) lowKey.getValue(); edit ([v] (ControllerArticulator& a) { a.lowKey = v; }); };
         // the top of the range means every key (FL saves 256)
-        highKey.onValueChange = [this] { auto a = articulator(); a.highKey = highKey.getValue() >= 127.0 ? 256 : (int) highKey.getValue(); store (a); };
+        highKey.onValueChange = [this] { const auto v = highKey.getValue(); edit ([v] (ControllerArticulator& a) { a.highKey = v >= 127.0 ? 256 : (int) v; }); };
         keysLabel.setText (tr ("Keys"), juce::dontSendNotification);
         keysLabel.setFont (theme::font (theme::type::small));
         addAndMakeVisible (keysLabel);
-        links.setFont (theme::font (theme::type::caption));
-        links.setColour (juce::Label::textColourId, theme::colour::textSecondary);
-        links.setJustificationType (juce::Justification::topLeft);
-        addAndMakeVisible (links);
+        for (auto* l : { &links, &partInfo })
+        {
+            l->setFont (theme::font (theme::type::caption));
+            l->setColour (juce::Label::textColourId, theme::colour::textSecondary);
+            l->setJustificationType (juce::Justification::topLeft);
+            addAndMakeVisible (*l);
+        }
 
         engine.addChangeListener (this);
         refresh();
         startTimerHz (30);
-        setSize (720, 420);
+        setSize (760, 520);
     }
 
     ~EnvelopeControllerEditor() override { engine.removeChangeListener (this); }
@@ -751,48 +1077,202 @@ public:
     void resized() override
     {
         auto area = getLocalBounds().reduced (14).withTrimmedTop (26);
-        auto tabRow = area.removeFromTop (26);
-        for (auto& b : tabs)
-            b.setBounds (tabRow.removeFromLeft (44).reduced (2, 0));
-        area.removeFromTop (10);
-        auto side = area.removeFromRight (190);
+        auto top = area.removeFromTop (96);
+        // X/Y pad with its knobs (FL: left of the outputs)
+        auto padArea = top.removeFromLeft (96);
+        pad.setBounds (padArea.reduced (2));
+        auto xy = top.removeFromLeft (52);
+        modX->setBounds (xy.removeFromTop (48));
+        modY->setBounds (xy);
+        top.removeFromLeft (8);
+        // outputs 1–8 in two rows of four (as FL)
+        auto outs = top.removeFromLeft (4 * 34).withTrimmedBottom (14);
+        for (int k = 0; k < 8; ++k)
+            tabs[(std::size_t) k].setBounds (outs.getX() + (k % 4) * 34, outs.getY() + (k / 4) * 42, 32, 30);
+        top.removeFromLeft (10);
+        auto knobs = top.removeFromLeft (3 * 58);
+        base->setBounds (knobs.removeFromLeft (58));
+        envAmount->setBounds (knobs.removeFromLeft (58));
+        lfoAmount->setBounds (knobs.removeFromLeft (58));
+        top.removeFromLeft (10);
+        auto right = top;
+        bipolar.setBounds (right.removeFromTop (24));
+        continuous.setBounds (right.removeFromTop (24));
+        right.removeFromTop (6);
+        part.setBounds (right.removeFromTop (26).withWidth (juce::jmin (right.getWidth(), 220)));
+
+        area.removeFromTop (6);
+        keys.setBounds (area.removeFromTop (30));
+        area.removeFromTop (6);
+
+        auto bottom = area.removeFromBottom (78);
+        auto side = area.removeFromRight (170);
         graph.setBounds (area);
         side.removeFromLeft (12);
-        auto knobsRow = side.removeFromTop (88);
-        base->setBounds (knobsRow.removeFromLeft (88));
-        amount->setBounds (knobsRow.removeFromLeft (88));
-        side.removeFromTop (6);
-        enabled.setBounds (side.removeFromTop (24));
-        bipolar.setBounds (side.removeFromTop (24));
-        tempo.setBounds (side.removeFromTop (24));
-        side.removeFromTop (8);
         keysLabel.setBounds (side.removeFromTop (18));
         lowKey.setBounds (side.removeFromTop (26));
         highKey.setBounds (side.removeFromTop (26));
         side.removeFromTop (8);
         links.setBounds (side);
+
+        bottom.removeFromTop (6);
+        auto toggles = bottom.removeFromLeft (190);
+        enabled.setBounds (toggles.removeFromTop (24));
+        tempo.setBounds (toggles.removeFromTop (24));
+        global.setBounds (toggles.removeFromTop (24));
+        resetMap.setBounds (juce::Rectangle<int> (toggles.getX(), enabled.getY(), 120, 26));
+        auto pageKnobs = bottom.removeFromLeft (4 * 64);
+        for (auto& k : adsr)
+            k->setBounds (pageKnobs.removeFromLeft (64));
+        pageKnobs = adsr[0]->getBounds().getUnion (adsr[3]->getBounds());
+        lfoSpeed->setBounds (pageKnobs.removeFromLeft (64));
+        for (auto& k : lfoShape)
+            k->setBounds (pageKnobs.removeFromLeft (64));
+        bottom.removeFromLeft (10);
+        partInfo.setBounds (bottom);
     }
 
 private:
+    std::unique_ptr<Knob> makeKnob (ui::ValueSpec spec, std::function<double()> get, std::function<void (double)> set, const juce::String& label)
+    {
+        auto k = std::make_unique<Knob> (&engine, std::move (spec), std::move (get), std::move (set));
+        k->shortName = label;
+        addAndMakeVisible (*k);
+        return k;
+    }
+
+    static ui::ValueSpec levelSpec (const juce::String& name, double def)
+    {
+        ui::ValueSpec s;
+        s.name = name;
+        s.minimum = -1.0;
+        s.maximum = 1.0;
+        s.defaultValue = def;
+        s.toText = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
+        return s;
+    }
+
     EnvelopeControllerData data() const
     {
-        const auto& song = engine.getSong();
-        if (channel < 0 || channel >= (int) song.channels.size())
+        auto& song = const_cast<Song&> (engine.getSong());
+        const auto* c = locate ? locate (song) : nullptr;
+        if (c == nullptr)
             return defaultEnvelopeController();
-        return parseEnvelopeController (song.channels[(std::size_t) channel].controllerState).value_or (defaultEnvelopeController());
+        return parseEnvelopeController (c->controllerState).value_or (defaultEnvelopeController());
     }
 
     ControllerArticulator articulator() const { return data()[(std::size_t) shown]; }
 
-    void store (const ControllerArticulator& a)
+    void editAll (std::function<void (EnvelopeControllerData&)> change)
     {
         auto d = data();
-        d[(std::size_t) shown] = a;
+        change (d);
         const auto bytes = writeEnvelopeController (d);
         engine.editSong ([this, bytes] (Song& song) {
-            if (channel >= 0 && channel < (int) song.channels.size() && song.channels[(std::size_t) channel].instrument == InstrumentKind::controller)
-                song.channels[(std::size_t) channel].controllerState = bytes;
+            if (auto* c = locate ? locate (song) : nullptr; c != nullptr && c->instrument == InstrumentKind::controller)
+                c->controllerState = bytes;
         });
+    }
+
+    void edit (std::function<void (ControllerArticulator&)> change)
+    {
+        const auto k = (std::size_t) shown;
+        editAll ([k, change] (EnvelopeControllerData& d) { change (d[k]); });
+    }
+
+    // the curve the graph shows: the envelope, the LFO's amplitude or a map (an empty map as its neutral line)
+    ControllerCurve shownCurve() const
+    {
+        const auto a = articulator();
+        if (shownPart == 0)
+        {
+            ControllerCurve c;
+            c.count = a.count;
+            c.time = a.time;
+            c.level = a.level;
+            c.tension = a.tension;
+            c.sustain = a.sustain;
+            return c;
+        }
+        if (shownPart == 1)
+        {
+            if (a.lfoAmp.count > 0)
+                return a.lfoAmp;
+            ControllerCurve c;
+            c.count = 1;
+            c.level[0] = 1.0f;
+            return c;
+        }
+        const auto& m = a.maps[(std::size_t) shownPart - 2];
+        if (m.count > 0)
+            return m;
+        ControllerCurve c;
+        c.count = 2;
+        c.time = { 0.0f, 1.0f };
+        c.level = { neutralOf (a), neutralOf (a) };
+        return c;
+    }
+
+    static float neutralOf (const ControllerArticulator& a) { return a.bipolar ? 0.5f : 1.0f; }
+
+    void storeCurve (const ControllerCurve& c)
+    {
+        const auto partShown = shownPart;
+        edit ([partShown, c] (ControllerArticulator& a) {
+            if (partShown == 0)
+            {
+                a.count = c.count;
+                a.time = c.time;
+                a.level = c.level;
+                a.tension = c.tension;
+                a.sustain = c.sustain;
+                a.envOn = true;
+                if (a.decayPoint >= a.count)
+                    a.decayPoint = -1;
+            }
+            else if (partShown == 1)
+            {
+                a.lfoAmp = c;
+                a.lfoOn = true;
+            }
+            else
+            {
+                auto m = c;
+                m.sustain = -1;
+                bool flat = true;
+                for (int i = 0; i < m.count; ++i)
+                    flat = flat && std::abs (m.level[(std::size_t) i] - neutralOf (a)) < 1.0e-4f;
+                a.maps[(std::size_t) partShown - 2] = flat ? ControllerCurve {} : m;
+            }
+        });
+    }
+
+    bool partActive() const
+    {
+        const auto a = articulator();
+        if (shownPart == 0)
+            return a.envOn && a.count > 0;
+        if (shownPart == 1)
+            return a.lfoOn;
+        return a.maps[(std::size_t) shownPart - 2].count > 0;
+    }
+
+    juce::String emptyText() const
+    {
+        if (shownPart == 0)
+            return tr ("Envelope off: the output rests at its base");
+        if (shownPart == 1)
+            return tr ("LFO off: turn it on below");
+        return tr ("Neutral: drag the line or double-click to shape this map");
+    }
+
+    void showPart (int index)
+    {
+        shownPart = juce::jlimit (0, 6, index);
+        graph.axis = shownPart == 2 ? CurveGraph::Axis::keys : shownPart >= 3 ? CurveGraph::Axis::unit : CurveGraph::Axis::time;
+        graph.sustainable = shownPart <= 1;
+        refresh();
+        resized();
     }
 
     void select (int k)
@@ -803,46 +1283,97 @@ private:
 
     void refresh()
     {
-        const auto a = articulator();
+        const auto d = data();
+        const auto& a = d[(std::size_t) shown];
         for (int k = 0; k < 8; ++k)
             tabs[(std::size_t) k].setColour (juce::TextButton::buttonColourId, k == shown ? theme::colour::accentMuted : theme::colour::bg4);
-        enabled.setToggleState (a.envOn, juce::dontSendNotification);
+        const auto envelopePage = shownPart == 0, lfoPage = shownPart == 1, mapPage = shownPart >= 2;
+        enabled.setButtonText (lfoPage ? tr ("LFO on") : tr ("Envelope on"));
+        enabled.setToggleState (lfoPage ? a.lfoOn : a.envOn, juce::dontSendNotification);
+        enabled.setVisible (! mapPage);
+        tempo.setToggleState (lfoPage ? a.lfoTempo : a.tempo, juce::dontSendNotification);
+        tempo.setVisible (! mapPage);
+        global.setToggleState (a.lfoGlobal, juce::dontSendNotification);
+        global.setVisible (lfoPage);
+        resetMap.setVisible (mapPage);
+        for (auto& k : adsr)
+            k->setVisible (envelopePage);
+        lfoSpeed->setVisible (lfoPage);
+        for (auto& k : lfoShape)
+            k->setVisible (lfoPage);
         bipolar.setToggleState (a.bipolar, juce::dontSendNotification);
-        tempo.setToggleState (a.tempo, juce::dontSendNotification);
+        continuous.setToggleState (d.continuous, juce::dontSendNotification);
         lowKey.setValue (juce::jlimit (0, 127, a.lowKey), juce::dontSendNotification);
         highKey.setValue (juce::jlimit (0, 127, a.highKey), juce::dontSendNotification);
+        graph.tempo = lfoPage ? a.lfoTempo : a.tempo;
+        graph.neutral = mapPage ? neutralOf (a) : -1.0f;
+        graph.showPreview = lfoPage;
+        graph.minSpan = lfoPage ? (float) juce::jlimit (1.0, 16.0, std::ceil (1.0 / juce::jmax (1.0e-3, controllerLfoRate (a)))) : 1.0f;
+
+        const juce::String info[] {
+            tr ("The envelope starts on each note in the key range; ATT / DEC / REL stretch its parts, SUS moves the sustain level."),
+            tr ("The LFO restarts on each note (unless Global); the curve sets its amplitude over time. Speed, Tension, Skew and PW shape the wave."),
+            tr ("x = the note's key (C0 to B9): how each key moves the output."),
+            tr ("x = the note's velocity: how hard notes move the output."),
+            tr ("x = the Mod X knob plus the note's own Mod X."),
+            tr ("x = the Mod Y knob plus the note's own Mod Y."),
+            tr ("x = a random value drawn on each note."),
+        };
+        partInfo.setText (info[shownPart], juce::dontSendNotification);
 
         juce::StringArray targets;
-        for (const auto& automation : engine.getSong().automations)
-            if (automation.source.channel == channel && automation.source.output == shown && automation.target.kind != AutomationTargetKind::none)
-                targets.add (describeAutomationTarget (engine, automation.target));
-        links.setText (targets.isEmpty() ? tr ("Not linked yet. Right-click a knob > Link to internal controller > this output.")
-                                         : tr ("Drives:") + "\n" + targets.joinIntoString ("\n"),
+        if (channel >= 0)
+            for (const auto& automation : engine.getSong().automations)
+                if (automation.source.channel == channel && automation.source.output == shown && automation.target.kind != AutomationTargetKind::none)
+                    targets.add (describeAutomationTarget (engine, automation.target));
+        links.setText (channel < 0          ? tr ("Cable this output to a parameter in the Patcher.")
+                       : targets.isEmpty() ? tr ("Not linked yet. Right-click a knob > Link to internal controller > this output.")
+                                           : tr ("Drives:") + "\n" + targets.joinIntoString ("\n"),
                        juce::dontSendNotification);
+        repaint();
         graph.repaint();
-        base->repaint();
-        amount->repaint();
+        pad.repaint();
+        keys.repaint();
+        for (auto* k : { base.get(), envAmount.get(), lfoAmount.get(), modX.get(), modY.get(), lfoSpeed.get() })
+            k->repaint();
+        for (auto& k : adsr)
+            k->repaint();
+        for (auto& k : lfoShape)
+            k->repaint();
     }
 
     void timerCallback() override
     {
-        const auto instrument = engine.getChannelInstrument (channel);
         for (int k = 0; k < 8; ++k)
-            outputs[(std::size_t) k] = instrument != nullptr ? instrument->controlOutput (k) : 0.0f;
-        repaint (getLocalBounds().withHeight (70));
+            outputs[(std::size_t) k] = outputOf ? outputOf (k) : 0.0f;
+        repaint (getLocalBounds().withHeight (130));
         graph.repaint();
+        if (const auto held = engine.heldInputKeys(); held != heldKeys)
+        {
+            heldKeys = held;
+            keys.repaint();
+        }
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
 
     AudioEngine& engine;
-    int channel, shown = 0;
+    std::function<ChannelDef* (Song&)> locate;
+    int channel, shown = 0, shownPart = 0;
+    std::vector<int> heldKeys;
+    std::function<float (int)> outputOf;
     std::array<juce::TextButton, 8> tabs;
-    EnvelopeGraph graph;
-    std::unique_ptr<Knob> base, amount;
-    juce::ToggleButton enabled, bipolar, tempo;
+    juce::ComboBox part;
+    CurveGraph graph;
+    ModPad pad;
+    KeyStrip keys;
+    std::unique_ptr<Knob> base, envAmount, lfoAmount, modX, modY, lfoSpeed;
+    std::array<std::unique_ptr<Knob>, 4> adsr;
+    std::array<std::unique_ptr<Knob>, 3> lfoShape;
+    juce::ToggleButton enabled, bipolar, tempo, global, continuous;
+    juce::TextButton resetMap;
     juce::Slider lowKey, highKey;
-    juce::Label keysLabel, links;
+    juce::Label keysLabel, links, partInfo;
     std::array<float, 8> outputs {};
 };
 
@@ -1040,9 +1571,24 @@ void closeAll()
 }
 } // namespace FormulaControllerWindows
 
+std::unique_ptr<juce::Component> makeEnvelopeControllerEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, int channel,
+                                                               std::function<float (int)> output)
+{
+    return std::make_unique<EnvelopeControllerEditor> (engine, std::move (locate), channel, std::move (output));
+}
+
 std::unique_ptr<juce::Component> makeEnvelopeControllerEditor (AudioEngine& engine, int channel)
 {
-    return std::make_unique<EnvelopeControllerEditor> (engine, channel);
+    return makeEnvelopeControllerEditor (
+        engine,
+        [channel] (Song& song) -> ChannelDef* {
+            return channel >= 0 && channel < (int) song.channels.size() ? &song.channels[(std::size_t) channel] : nullptr;
+        },
+        channel,
+        [&engine, channel] (int k) {
+            const auto instrument = engine.getChannelInstrument (channel);
+            return instrument != nullptr ? instrument->controlOutput (k) : 0.0f;
+        });
 }
 
 std::unique_ptr<juce::Component> makeMidiOutEditor (AudioEngine& engine, int channel)

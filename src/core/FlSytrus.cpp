@@ -53,6 +53,7 @@ struct Envelope
     int flags = 0;
     bool on = false;
     int sustain = -1;
+    int decay = -1; // decay point (Envelope Controller ADSR knobs)
 };
 
 struct Articulator
@@ -129,7 +130,7 @@ bool readEnvelope (Reader& r, Envelope& e)
 
     e.flags = r.i32();
     e.on = r.i32() != 0;
-    r.i32(); // decay point
+    e.decay = r.i32();
     r.i32(); // loop start
     e.sustain = r.i32();
     return ! r.failed;
@@ -1411,24 +1412,102 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
     synth = out;
     return true;
 }
-// --- Fruity Envelope Controller (REA_rodada15 §10) ---
+// --- Fruity Envelope Controller (REA_rodada15 §10, REA_rodada162e-envelope.md) ---
 
 namespace
 {
 constexpr std::uint32_t lynxEnvelopeMagic = 0x4345594Cu; // "LYEC"
 
+// an FL point curve (Δx per point) as accumulated points: FL's tension belongs to the segment ending at a point,
+// LYNX's to the segment starting at it (as the automation clips' import); a "hold" segment becomes a step
+ControllerCurve curveFromFl (const Envelope& e, int* decayOut = nullptr)
+{
+    ControllerCurve c;
+    double t = 0.0;
+    if (decayOut != nullptr)
+        *decayOut = -1;
+    for (std::size_t i = 0; i < e.points.size() && c.count < (int) c.time.size(); ++i)
+    {
+        const auto [dx, y] = e.points[i];
+        t += dx;
+        if (i > 0)
+        {
+            const auto curve = i < e.curves.size() ? e.curves[i] : 0;
+            if (curve == 2 && dx > 0.0 && c.count + 1 < (int) c.time.size()) // hold: the previous level, then a step
+            {
+                c.time[(std::size_t) c.count] = (float) t;
+                c.level[(std::size_t) c.count] = c.level[(std::size_t) c.count - 1];
+                ++c.count;
+            }
+            else if (curve <= 1 && i < e.tensions.size())
+                c.tension[(std::size_t) c.count - 1] = std::clamp (-e.tensions[i], -1.0f, 1.0f);
+        }
+        if ((int) i == e.sustain)
+            c.sustain = c.count;
+        if (decayOut != nullptr && (int) i == e.decay)
+            *decayOut = c.count;
+        c.time[(std::size_t) c.count] = (float) t;
+        c.level[(std::size_t) c.count] = (float) y;
+        ++c.count;
+    }
+    return c;
+}
+
+// a map at its mode's neutral (flat 0.5 bipolar, flat 1 unipolar) is left empty
+ControllerCurve mapFromFl (const Envelope& e, bool bipolar)
+{
+    auto c = curveFromFl (e);
+    const auto neutral = bipolar ? 0.5f : 1.0f;
+    bool flat = true;
+    for (int i = 0; i < c.count; ++i)
+        flat = flat && std::abs (c.level[(std::size_t) i] - neutral) < 1.0e-6f;
+    if (flat)
+        c = {};
+    return c;
+}
+
+bool readCurve (Reader& r, ControllerCurve& c, int maxX)
+{
+    c = {};
+    c.count = std::clamp (r.i32(), 0, (int) c.time.size());
+    c.sustain = r.i32();
+    for (int i = 0; i < c.count; ++i)
+    {
+        c.time[(std::size_t) i] = std::clamp (r.get<float>(), 0.0f, (float) maxX);
+        c.level[(std::size_t) i] = std::clamp (r.get<float>(), 0.0f, 1.0f);
+        c.tension[(std::size_t) i] = std::clamp (r.get<float>(), -1.0f, 1.0f);
+        if (i > 0)
+            c.time[(std::size_t) i] = std::max (c.time[(std::size_t) i], c.time[(std::size_t) i - 1]);
+    }
+    if (c.sustain >= c.count)
+        c.sustain = -1;
+    return ! r.failed;
+}
+
 std::optional<EnvelopeControllerData> parseLynxEnvelopeController (const std::vector<std::uint8_t>& state)
 {
     Reader r { state.data(), state.size() };
-    if ((std::uint32_t) r.i32() != lynxEnvelopeMagic || r.i32() != 1)
+    if ((std::uint32_t) r.i32() != lynxEnvelopeMagic)
+        return std::nullopt;
+    const auto version = r.i32();
+    if (version < 1 || version > 2)
         return std::nullopt;
     EnvelopeControllerData out {};
+    if (version >= 2)
+    {
+        out.modX = std::clamp (r.get<float>(), 0.0f, 1.0f);
+        out.modY = std::clamp (r.get<float>(), 0.0f, 1.0f);
+        out.continuous = (r.i32() & 1) != 0;
+    }
     for (auto& a : out)
     {
         const auto flags = r.i32();
         a.bipolar = (flags & 1) != 0;
         a.envOn = (flags & 2) != 0;
         a.tempo = (flags & 4) != 0;
+        a.lfoOn = (flags & 8) != 0;
+        a.lfoTempo = (flags & 16) != 0;
+        a.lfoGlobal = (flags & 32) != 0;
         a.base = std::clamp (r.get<float>(), 0.0f, 1.0f);
         a.envLevel = std::clamp (r.get<float>(), -1.0f, 1.0f);
         a.sustain = r.i32();
@@ -1445,12 +1524,121 @@ std::optional<EnvelopeControllerData> parseLynxEnvelopeController (const std::ve
         }
         if (a.sustain >= a.count)
             a.sustain = -1;
+        if (version >= 2)
+        {
+            for (std::size_t k = 0; k < a.adsr.size(); ++k) // ATT, DEC, REL: 0..256 (128 = as drawn); SUS: -128..128
+                a.adsr[k] = k == 2 ? std::clamp (r.i32(), -128, 128) : std::clamp (r.i32(), 0, 256);
+            a.decayPoint = r.i32();
+            a.lfoLevel = std::clamp (r.get<float>(), -1.0f, 1.0f);
+            a.lfoSpeed = std::clamp (r.i32(), 0, 65536);
+            a.lfoTension = std::clamp (r.i32(), -128, 128);
+            a.lfoSkew = std::clamp (r.i32(), -128, 128);
+            a.lfoPulseWidth = std::clamp (r.i32(), -128, 128);
+            a.lfoPhase = r.i32();
+            if (! readCurve (r, a.lfoAmp, 100000))
+                return std::nullopt;
+            for (auto& m : a.maps)
+                if (! readCurve (r, m, 1))
+                    return std::nullopt;
+            if (a.decayPoint >= a.count)
+                a.decayPoint = -1;
+        }
         if (r.failed)
             return std::nullopt;
     }
     return out;
 }
+
+void writeCurve (std::vector<std::uint8_t>& out, const ControllerCurve& c)
+{
+    auto put = [&] (const void* p, std::size_t n) { out.insert (out.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+    const auto count = std::clamp (c.count, 0, (int) c.time.size());
+    const std::int32_t header[2] { count, c.sustain };
+    put (header, 8);
+    for (int i = 0; i < count; ++i)
+    {
+        const float v[3] { c.time[(std::size_t) i], c.level[(std::size_t) i], c.tension[(std::size_t) i] };
+        put (v, 12);
+    }
+}
+
+// FL's LFO wave shaper (REA_rodada162e-envelope.md, phase shaper of TMLFO): bounds of the falling and rising halves
+struct LfoShape
+{
+    double end = 1.0, mid = 0.5, fall = 0.5; // u > end: 1; u < fall: 1 → −1; u < mid: −1; then −1 → 1 until end
+    double t = 0.0;                          // bend (0 = straight triangle)
+};
+
+LfoShape lfoShape (const ControllerArticulator& a)
+{
+    LfoShape s;
+    const auto pw = std::clamp (a.lfoPulseWidth, -128, 128) / 128.0;
+    const auto skew = std::clamp (a.lfoSkew, -128, 128) / 256.0;
+    constexpr double tiny = 1.0 / 4294967296.0;
+    s.end = pw > 0.0 ? 1.0 - pw : 1.0;
+    s.mid = std::clamp ((1.0 - pw) / 2.0 - skew * (1.0 - std::abs (pw)), tiny, s.end - tiny);
+    s.fall = pw < 0.0 ? std::max (tiny, s.mid + pw) : s.mid;
+    const auto k = std::abs (std::clamp (a.lfoTension, -128, 128)) / 128.0;
+    const auto x = (std::pow (21.0, k) - 1.0) * 0.05;
+    s.t = (a.lfoTension < 0 ? -1.0 : 1.0) * (std::pow (1.0e18, x) - 1.0);
+    if (a.lfoTension == 0)
+        s.t = 0.0;
+    return s;
+}
+
+// a curve with a sustain point, `sinceOn` after the trigger (`sinceRelease` < 0 = key held)
+double sustainedCurveAt (const ControllerCurve& c, double sinceOn, double sinceRelease, float fallback) noexcept
+{
+    if (c.count == 0)
+        return fallback;
+    if (c.sustain >= 0)
+    {
+        const auto sustainTime = (double) c.time[(std::size_t) c.sustain];
+        return sinceRelease < 0.0 ? controllerCurveAt (c, std::min (sinceOn, sustainTime), fallback)
+                                  : controllerCurveAt (c, sustainTime + sinceRelease, fallback);
+    }
+    return controllerCurveAt (c, sinceOn, fallback); // no sustain: runs to the end even with the key held
+}
+
+ControllerCurve envelopeCurve (const ControllerArticulator& a) noexcept
+{
+    ControllerCurve c;
+    c.count = a.count;
+    c.time = a.time;
+    c.level = a.level;
+    c.tension = a.tension;
+    c.sustain = a.sustain;
+    return c;
+}
+
+bool curveFinished (const ControllerCurve& c, double sinceOn, double sinceRelease) noexcept
+{
+    if (c.count == 0)
+        return true;
+    const auto last = (double) c.time[(std::size_t) c.count - 1];
+    if (c.sustain >= 0)
+        return sinceRelease >= 0.0 && sinceRelease >= last - c.time[(std::size_t) c.sustain];
+    return sinceOn >= last;
+}
 } // namespace
+
+float controllerCurveAt (const ControllerCurve& c, double x, float fallback) noexcept
+{
+    if (c.count <= 0)
+        return fallback;
+    if (x <= c.time[0])
+        return c.level[0];
+    for (int i = 1; i < c.count; ++i)
+        if (x < c.time[(std::size_t) i])
+        {
+            const auto t0 = c.time[(std::size_t) i - 1], t1 = c.time[(std::size_t) i];
+            auto f = t1 > t0 ? (x - t0) / (t1 - t0) : 1.0;
+            if (const auto k = c.tension[(std::size_t) i - 1]; k != 0.0f) // the automation clips' curve
+                f = std::pow (f, std::pow (2.0, k * 3.0));
+            return (float) (c.level[(std::size_t) i - 1] + (c.level[(std::size_t) i] - c.level[(std::size_t) i - 1]) * f);
+        }
+    return c.level[(std::size_t) c.count - 1];
+}
 
 std::vector<std::uint8_t> writeEnvelopeController (const EnvelopeControllerData& data)
 {
@@ -1459,10 +1647,13 @@ std::vector<std::uint8_t> writeEnvelopeController (const EnvelopeControllerData&
     auto i32 = [&] (std::int32_t v) { put (&v, 4); };
     auto f32 = [&] (float v) { put (&v, 4); };
     i32 ((std::int32_t) lynxEnvelopeMagic);
-    i32 (1);
+    i32 (2);
+    f32 (data.modX);
+    f32 (data.modY);
+    i32 (data.continuous ? 1 : 0);
     for (const auto& a : data)
     {
-        i32 ((a.bipolar ? 1 : 0) | (a.envOn ? 2 : 0) | (a.tempo ? 4 : 0));
+        i32 ((a.bipolar ? 1 : 0) | (a.envOn ? 2 : 0) | (a.tempo ? 4 : 0) | (a.lfoOn ? 8 : 0) | (a.lfoTempo ? 16 : 0) | (a.lfoGlobal ? 32 : 0));
         f32 (a.base);
         f32 (a.envLevel);
         i32 (a.sustain);
@@ -1476,6 +1667,18 @@ std::vector<std::uint8_t> writeEnvelopeController (const EnvelopeControllerData&
             f32 (a.level[(std::size_t) i]);
             f32 (a.tension[(std::size_t) i]);
         }
+        for (const auto k : a.adsr)
+            i32 (k);
+        i32 (a.decayPoint);
+        f32 (a.lfoLevel);
+        i32 (a.lfoSpeed);
+        i32 (a.lfoTension);
+        i32 (a.lfoSkew);
+        i32 (a.lfoPulseWidth);
+        i32 (a.lfoPhase);
+        writeCurve (out, a.lfoAmp);
+        for (const auto& m : a.maps)
+            writeCurve (out, m);
     }
     return out;
 }
@@ -1492,6 +1695,7 @@ EnvelopeControllerData defaultEnvelopeController()
         a.time = { 0.0f, 0.02f, 0.3f, 0.8f };
         a.level = { 0.0f, 1.0f, 0.6f, 0.0f };
         a.sustain = 2;
+        a.decayPoint = 1;
     }
     return out;
 }
@@ -1508,10 +1712,18 @@ std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector
         return std::nullopt;
     const auto articulators = version >= 6 ? 8 : 4;
     const auto maps = version >= 6 ? 5 : 2;
-    r.raw ((std::size_t) (articulators * 11 + 2) * 4); // parameters (the same values come in the articulators)
-    r.raw (4 * 4);                                       // UI state and global flags
+    std::vector<std::int32_t> params ((std::size_t) (articulators * 11 + 2));
+    for (auto& p : params)
+        p = r.i32(); // (the same values come in the articulators; the last two are Mod X / Mod Y)
+    r.i32(); // articulator shown
+    r.i32(); // part shown
+    const auto globalFlags = r.i32();
+    r.i32(); // ModeSelect combo
 
     EnvelopeControllerData out {};
+    out.modX = std::clamp ((float) params[params.size() - 2] / 65536.0f, 0.0f, 1.0f);
+    out.modY = std::clamp ((float) params[params.size() - 1] / 65536.0f, 0.0f, 1.0f);
+    out.continuous = (globalFlags & 4) != 0;
     for (int k = 0; k < articulators && ! r.failed; ++k)
     {
         auto& a = out[(std::size_t) k];
@@ -1520,41 +1732,50 @@ std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector
         r.i32(); // articulator version
         a.base = std::clamp (r.get<float>(), 0.0f, 1.0f);
         a.envLevel = std::clamp (r.get<float>(), -1.0f, 1.0f);
-        r.get<float>(); // LFO level (the LFO is left out)
+        a.lfoLevel = std::clamp (r.get<float>(), -1.0f, 1.0f);
 
-        Envelope env, lfo, map;
+        Envelope env, lfo;
         if (! readEnvelope (r, env))
             return std::nullopt;
-        r.raw (16);
+        for (auto& knob : a.adsr)
+            knob = std::clamp (r.i32(), 0, 256);
         const auto lfoVersionAt = r.pos + 4;
         if (! readEnvelope (r, lfo))
             return std::nullopt;
         std::int32_t lfoVersion = 0;
         std::memcpy (&lfoVersion, r.data + lfoVersionAt, 4);
-        r.raw (16);
+        a.lfoSpeed = std::clamp (r.i32(), 0, 65536);
+        a.lfoTension = std::clamp (r.i32(), -128, 128);
+        a.lfoSkew = std::clamp (r.i32(), -128, 128);
+        a.lfoPulseWidth = std::clamp (r.i32(), -128, 128);
         if (lfoVersion >= 3)
-            r.i32();
+            a.lfoPhase = r.i32();
         for (int m = 0; m < maps; ++m)
+        {
+            Envelope map;
             if (! readEnvelope (r, map))
                 return std::nullopt;
+            a.maps[(std::size_t) m] = mapFromFl (map, a.bipolar);
+        }
         a.lowKey = r.i32();
         a.highKey = r.i32();
 
         a.envOn = env.on && ! env.points.empty();
         a.tempo = (env.flags & 1) != 0;
-        a.sustain = env.sustain;
-        double t = 0.0;
-        for (const auto& [dx, y] : env.points)
-        {
-            if (a.count >= (int) a.time.size())
-                break;
-            t += dx;
-            a.time[(std::size_t) a.count] = (float) t;
-            a.level[(std::size_t) a.count] = (float) y;
-            ++a.count;
-        }
-        if (a.sustain >= a.count)
-            a.sustain = -1;
+        const auto curve = curveFromFl (env, &a.decayPoint);
+        a.count = curve.count;
+        a.time = curve.time;
+        a.level = curve.level;
+        a.tension = curve.tension;
+        a.sustain = curve.sustain;
+
+        a.lfoOn = lfo.on;
+        a.lfoTempo = (lfo.flags & 1) != 0;
+        a.lfoGlobal = (lfo.flags & 2) != 0;
+        a.lfoAmp = curveFromFl (lfo);
+        // a constant full amplitude is FL's default: keep it empty (= 1)
+        if (a.lfoAmp.count == 1 && a.lfoAmp.level[0] >= 1.0f)
+            a.lfoAmp = {};
     }
     if (r.failed)
         return std::nullopt;
@@ -1565,33 +1786,127 @@ float controllerValue (const ControllerArticulator& a, double sinceOn, double si
 {
     if (! a.envOn || a.count == 0)
         return a.base;
-
-    auto at = [&] (double t) {
-        if (t <= a.time[0])
-            return (double) a.level[0];
-        for (int i = 1; i < a.count; ++i)
-            if (t < a.time[(std::size_t) i])
-            {
-                const auto t0 = a.time[(std::size_t) i - 1], t1 = a.time[(std::size_t) i];
-                auto f = t1 > t0 ? (t - t0) / (t1 - t0) : 1.0;
-                if (const auto k = a.tension[(std::size_t) i - 1]; k != 0.0f) // the automation clips' curve
-                    f = std::pow (f, std::pow (2.0, k * 3.0));
-                return a.level[(std::size_t) i - 1] + (a.level[(std::size_t) i] - a.level[(std::size_t) i - 1]) * f;
-            }
-        return (double) a.level[(std::size_t) a.count - 1];
-    };
-
-    double env = 0.0;
-    if (a.sustain >= 0)
-    {
-        const auto sustainTime = (double) a.time[(std::size_t) a.sustain];
-        env = sinceRelease < 0.0 ? at (std::min (sinceOn, sustainTime)) : at (sustainTime + sinceRelease);
-    }
-    else
-        env = at (sinceOn); // no sustain: runs to the end even with the key held
-
+    const auto env = sustainedCurveAt (envelopeCurve (a), sinceOn, sinceRelease, 0.0f);
     const auto v = a.bipolar ? a.base + (env - 0.5) * a.envLevel : a.base + env * a.envLevel;
     return (float) std::clamp (v, 0.0, 1.0);
+}
+
+float controllerVelocityInput (float velocity) noexcept
+{
+    const auto v = std::clamp ((double) velocity, 0.0, 1.0);
+    const auto initVol = (std::pow (11.0, 1.28 * v) - 1.0) / 10.0;
+    return (float) (std::log (1.0 + 10.0 * initVol) / std::log (21.551182) * 127.0 / 128.0);
+}
+
+double controllerLfoRate (const ControllerArticulator& a) noexcept
+{
+    return (std::pow (10001.0, std::clamp (a.lfoSpeed, 0, 65536) / 65536.0) - 1.0) / 625.0;
+}
+
+float controllerLfoWave (const ControllerArticulator& a, double phase) noexcept
+{
+    const auto s = lfoShape (a);
+    const auto u = phase - std::floor (phase);
+    double c = 0.0;
+    if (u > s.end)
+        return 1.0f;
+    if (u < s.fall)
+        c = 1.0 - 2.0 * u / s.fall;
+    else if (u < s.mid)
+        return -1.0f;
+    else
+        c = 2.0 * (u - s.mid) / std::max (1.0e-12, s.end - s.mid) - 1.0;
+    if (s.t == 0.0)
+        return (float) c;
+    const auto m = std::abs (c);
+    const auto t = std::abs (s.t);
+    const auto y = s.t > 0.0 ? 1.0 - (std::pow (t + 1.0, 1.0 - m) - 1.0) / t : (std::pow (t + 1.0, m) - 1.0) / t;
+    return (float) std::copysign (y, c);
+}
+
+double controllerLfoStartPhase (const ControllerArticulator& a) noexcept
+{
+    const auto s = lfoShape (a);
+    return s.mid + (s.end - s.mid) * 0.5 + a.lfoPhase / 4294967296.0;
+}
+
+float controllerMapValue (const ControllerArticulator& a, int map, float x) noexcept
+{
+    if (map < 0 || map >= (int) a.maps.size() || a.maps[(std::size_t) map].count == 0)
+        return a.bipolar ? 0.0f : 1.0f;
+    const auto y = controllerCurveAt (a.maps[(std::size_t) map], std::clamp ((double) x, 0.0, 1.0), 0.5f);
+    return a.bipolar ? y - 0.5f : y;
+}
+
+float controllerValue (const ControllerArticulator& a, double sinceOn, double sinceRelease, double lfoPhase,
+                       const ControllerNote& note, float globalModX, float globalModY) noexcept
+{
+    double v = a.base;
+    if (a.envOn && a.count > 0)
+    {
+        const auto env = sustainedCurveAt (envelopeCurve (a), sinceOn, sinceRelease, 0.0f);
+        v += (a.bipolar ? env - 0.5 : env) * a.envLevel;
+    }
+    if (a.lfoOn)
+    {
+        const auto out = sustainedCurveAt (a.lfoAmp, sinceOn, sinceRelease, 1.0f) * controllerLfoWave (a, lfoPhase);
+        v = a.bipolar ? v + out * a.lfoLevel : v * (out * a.lfoLevel * 2.0 + 1.0);
+    }
+    v = controllerCombine (a, (float) v, controllerMapValue (a, mapKeyboard, note.key / 120.0f));
+    v = controllerCombine (a, (float) v, controllerMapValue (a, mapModX, globalModX + note.modX - 0.5f));
+    v = controllerCombine (a, (float) v, controllerMapValue (a, mapModY, globalModY + note.modY - 0.5f));
+    // the note's velocity and random maps (FL computes them once at the trigger)
+    const auto noteFactor = controllerCombine (a, controllerMapValue (a, mapVelocity, controllerVelocityInput (note.velocity)),
+                                               controllerMapValue (a, mapRandom, note.random));
+    v = controllerCombine (a, (float) v, noteFactor);
+    return (float) std::clamp (v, 0.0, 1.0);
+}
+
+float controllerRestingValue (const ControllerArticulator& a, float globalModX, float globalModY) noexcept
+{
+    auto v = controllerCombine (a, a.base, controllerMapValue (a, mapModX, globalModX));
+    v = controllerCombine (a, v, controllerMapValue (a, mapModY, globalModY));
+    return std::clamp (v, 0.0f, 1.0f);
+}
+
+ControllerArticulator controllerWithKnobs (const ControllerArticulator& a) noexcept
+{
+    auto out = a;
+    if (a.adsr == std::array<int, 4> { 128, 128, 0, 128 } || a.count < 2)
+        return out;
+    const auto decayPoint = std::max (0, a.decayPoint);
+    const auto sustain = a.sustain >= 0 ? a.sustain : a.count - 1;
+    const auto scale = [&] (int knob) { return std::clamp (knob, 0, 256) / 128.0f; };
+    float t = 0.0f;
+    for (int i = 1; i < a.count; ++i)
+    {
+        const auto dt = a.time[(std::size_t) i] - a.time[(std::size_t) i - 1];
+        t += dt * (i <= decayPoint ? scale (a.adsr[0]) : i <= sustain ? scale (a.adsr[1]) : scale (a.adsr[3]));
+        out.time[(std::size_t) i] = t;
+    }
+    if (a.adsr[2] != 0 && a.sustain >= 0)
+    {
+        const auto shift = std::clamp (a.adsr[2], -256, 256) / 128.0f;
+        const auto decayStart = a.time[(std::size_t) std::min (decayPoint, sustain)];
+        const auto decayLength = a.time[(std::size_t) sustain] - decayStart;
+        const auto releaseLength = a.time[(std::size_t) a.count - 1] - a.time[(std::size_t) sustain];
+        for (int i = std::min (decayPoint, sustain) + 1; i < a.count; ++i)
+        {
+            const auto w = i <= sustain ? (decayLength > 0.0f ? (a.time[(std::size_t) i] - decayStart) / decayLength : 1.0f)
+                                        : (releaseLength > 0.0f ? (a.time[(std::size_t) a.count - 1] - a.time[(std::size_t) i]) / releaseLength : 0.0f);
+            out.level[(std::size_t) i] = std::clamp (a.level[(std::size_t) i] + w * shift, 0.0f, 1.0f);
+        }
+    }
+    return out;
+}
+
+bool controllerVoiceFinished (const ControllerArticulator& a, double sinceOn, double sinceRelease) noexcept
+{
+    if (sinceRelease < 0.0)
+        return false;
+    const auto envDone = ! a.envOn || curveFinished (envelopeCurve (a), sinceOn, sinceRelease);
+    const auto lfoDone = ! a.lfoOn || curveFinished (a.lfoAmp, sinceOn, sinceRelease);
+    return envDone && lfoDone;
 }
 double lovePhilterMapAt (const LovePhilterMap& map, double x) noexcept
 {

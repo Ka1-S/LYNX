@@ -16027,5 +16027,6 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Theme162Tests.inc"
 #include "PluginPresets162Tests.inc"
 #include "Look162Tests.inc"
+#include "EnvController162Tests.inc"
 #include "Browser162Tests.inc"
 #include "Transport162Tests.inc"
