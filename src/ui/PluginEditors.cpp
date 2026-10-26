@@ -1,3 +1,4 @@
+#include "ui/SlotWatch.h"
 #include "ui/PatcherEditor.h"
 #include "ui/ControllerEditors.h"
 #include "ui/NewtoneEditor.h"
@@ -3848,7 +3849,8 @@ class NativeEffectWindow final : public juce::DocumentWindow
 {
 public:
     NativeEffectWindow (AudioEngine& engine, int track, int slot, const juce::String& title)
-        : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
+        : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
+          gone (engine, track, slot, [this] { closeButtonPressed(); })
     {
         setUsingNativeTitleBar (true);
         auto* editor = new NativeEffectEditor (engine, track, slot, 1.25f, 0);
@@ -3868,6 +3870,9 @@ public:
     }
 
     void closeButtonPressed() override;
+
+private:
+    ui::SlotGoneWatcher gone;
 };
 
 std::map<std::pair<int, int>, std::unique_ptr<NativeEffectWindow>>& windows()

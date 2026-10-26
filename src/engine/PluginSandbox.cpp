@@ -27,6 +27,7 @@
   #include <sys/eventfd.h>
   #include <sys/syscall.h>
   #include <thread>
+  #include <dlfcn.h>
  #endif
  #define LYNX_POSIX_SANDBOX 1
 #endif
@@ -537,22 +538,33 @@ private:
     std::atomic<float> value;
 };
 
+// LYNX's stand-in for a sandboxed plugin's editor (inside LYNX's plugin window). The plugin's own window lives in the
+// child process: it is shown, owned by LYNX's plugin window, while this stand-in is on screen, and hidden when the stand-in
+// is not (the Wrapper settings tab, the window closed or the plugin removed; issues #8 / #9).
 class RemoteEditor final : public juce::AudioProcessorEditor
 {
 public:
-    RemoteEditor (juce::AudioProcessor& p, std::function<void()> show)
-        : AudioProcessorEditor (p), showWindow (std::move (show))
+    RemoteEditor (juce::AudioProcessor& p, std::function<void (juce::int64)> show, std::function<void()> hide)
+        : AudioProcessorEditor (p), showWindow (std::move (show)), hideWindow (std::move (hide))
     {
         text.setText (tr ("This plugin runs in a separate process: its interface opens in its own window."),
                       juce::dontSendNotification);
         text.setJustificationType (juce::Justification::centred);
         button.setButtonText (tr ("Show the plugin window"));
-        button.onClick = [this] { showWindow(); };
+        button.onClick = [this] { showWindow (ownerHandle()); };
         addAndMakeVisible (text);
         addAndMakeVisible (button);
         setSize (380, 96);
-        showWindow();
     }
+
+    ~RemoteEditor() override
+    {
+        if (shown)
+            hideWindow();
+    }
+
+    void visibilityChanged() override { follow(); }
+    void parentHierarchyChanged() override { follow(); }
 
     void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg1); }
 
@@ -564,7 +576,28 @@ public:
     }
 
 private:
-    std::function<void()> showWindow;
+    // the native window of LYNX's plugin window (HWND, X11 Window id), for the child's window to be owned by it
+    juce::int64 ownerHandle()
+    {
+        auto* top = getTopLevelComponent();
+        return top != nullptr && top->getPeer() != nullptr ? (juce::int64) (juce::pointer_sized_int) top->getWindowHandle() : 0;
+    }
+
+    void follow()
+    {
+        const auto showing = isShowing() && getPeer() != nullptr;
+        if (showing == shown)
+            return;
+        shown = showing;
+        if (shown)
+            showWindow (ownerHandle());
+        else
+            hideWindow();
+    }
+
+    std::function<void (juce::int64)> showWindow;
+    std::function<void()> hideWindow;
+    bool shown = false;
     juce::Label text;
     juce::TextButton button;
 };
@@ -607,7 +640,9 @@ public:
     bool hasEditor() const override { return editor; }
     juce::AudioProcessorEditor* createEditor() override
     {
-        return new RemoteEditor (*this, [this] { session->tell (juce::ValueTree ("showEditor")); });
+        return new RemoteEditor (
+            *this, [this] (juce::int64 owner) { session->tell (juce::ValueTree ("showEditor").setProperty ("owner", owner, nullptr)); },
+            [this] { session->tell (juce::ValueTree ("hideEditor")); });
     }
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -715,8 +750,39 @@ public:
         : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
     {
         setUsingNativeTitleBar (true);
-        setAlwaysOnTop (true);
         setIcon (logoImage());
+    }
+
+    // Keeps the window above LYNX's plugin window (`owner`: its HWND / X11 Window id, from the other process) instead of
+    // above every program: it was always on top, covering LYNX's Wrapper settings and other apps (issue #8). False when
+    // the platform can't (then it stays always on top, as before).
+    bool setOwner (juce::int64 owner)
+    {
+        if (owner == 0 || getWindowHandle() == nullptr)
+            return false;
+       #if JUCE_WINDOWS
+        SetWindowLongPtrW ((HWND) getWindowHandle(), GWLP_HWNDPARENT, (LONG_PTR) owner);
+        return true;
+       #elif JUCE_LINUX
+        // WM_TRANSIENT_FOR across processes (X11 / XWayland), through our own connection to the display
+        using OpenDisplay = void* (*) (const char*);
+        using SetTransient = int (*) (void*, unsigned long, unsigned long);
+        using Flush = int (*) (void*);
+        static void* lib = dlopen ("libX11.so.6", RTLD_NOW | RTLD_LOCAL);
+        if (lib == nullptr)
+            return false;
+        static auto* openDisplay = (OpenDisplay) dlsym (lib, "XOpenDisplay");
+        static auto* setTransient = (SetTransient) dlsym (lib, "XSetTransientForHint");
+        static auto* flush = (Flush) dlsym (lib, "XFlush");
+        static void* display = openDisplay != nullptr ? openDisplay (nullptr) : nullptr;
+        if (display == nullptr || setTransient == nullptr || flush == nullptr)
+            return false;
+        setTransient (display, (unsigned long) (juce::pointer_sized_int) getWindowHandle(), (unsigned long) owner);
+        flush (display);
+        return true;
+       #else
+        return false;
+       #endif
     }
 
     void closeButtonPressed() override { setVisible (false); }
@@ -789,9 +855,14 @@ private:
                     window->setContentOwned (ed, true);
                 window->centreWithSize (window->getWidth(), window->getHeight());
             }
+            if (! window->isOnDesktop())
+                window->addToDesktop(); // (the native window exists before it is shown: its owner is set first)
+            window->setAlwaysOnTop (! window->setOwner ((juce::int64) message["owner"]));
             window->setVisible (true);
             window->toFront (true);
         }
+        else if (message.hasType ("hideEditor") && window != nullptr)
+            window->setVisible (false);
     }
 
     juce::ValueTree open (const juce::ValueTree& message)
