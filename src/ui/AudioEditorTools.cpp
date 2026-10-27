@@ -701,13 +701,29 @@ private:
                 c.centreLine = true;
                 c.envelope = ae::Envelope::flat (0.5);
                 c.background = spectrumBackground (doc.audio, range, 1.0);
-                c.describe = [this, &c] (double x, double y) {
+                // "Phases" switches the curve between the magnitudes and the phases (both kept)
+                auto other = std::make_shared<ae::Envelope> (ae::Envelope::flat (0.5));
+                auto phasesShown = std::make_shared<bool> (false);
+                c.describe = [this, &c, phasesShown] (double x, double y) {
                     const auto hz = ae::curveFrequency (x, c.freqScale, c.sampleRate);
                     const auto g = ae::eqGain (y);
-                    return juce::String (hz < 1000 ? juce::String ((int) hz) + " Hz" : juce::String (hz / 1000.0, 2) + " kHz") + "  " + (g <= 1e-6 ? juce::String ("-inf") : juce::String (20.0 * std::log10 (g), 1)) + " dB";
+                    const auto f = juce::String (hz < 1000 ? juce::String ((int) hz) + " Hz" : juce::String (hz / 1000.0, 2) + " kHz") + "  ";
+                    if (*phasesShown)
+                        return f + juce::String (juce::roundToInt ((y - 0.5) * 360.0)) + juce::String (juce::CharPointer_UTF8 ("\xc2\xb0"));
+                    return f + (g <= 1e-6 ? juce::String ("-inf") : juce::String (20.0 * std::log10 (g), 1)) + " dB";
                 };
                 const auto scale = slider (tr ("Freq scale"), 0, 100, 1, 100, percent, 1);
                 const auto smooth = toggle (tr ("Smooth"), true, 1);
+                const auto phases = toggle (tr ("Phases"), false, 1);
+                static_cast<juce::Button*> (editors[phases].get())->onClick = [this, &c, phases, other, phasesShown] {
+                    const auto now = on (phases);
+                    if (now == *phasesShown)
+                        return;
+                    std::swap (*other, c.envelope);
+                    *phasesShown = now;
+                    c.repaint();
+                    controlChanged();
+                };
                 const auto mix = slider (tr ("Mix"), 0, 100, 1, 100, percent);
                 auto setScale = [this, &c, scale, doc = &doc, range] {
                     c.freqScale = value (scale) / 100.0;
@@ -748,7 +764,10 @@ private:
                     describe = [where] { return where + "\n" + tr ("Draw the gain over frequency (centre line = unchanged). Right-click adds a point, right-click or Alt+click on a point deletes it, the hollow handles bend."); };
                 makeProcess = [=, this, &c] {
                     ae::EqSettings s;
-                    s.gain = c.envelope;
+                    s.gain = *phasesShown ? *other : c.envelope;
+                    const auto& ph = *phasesShown ? c.envelope : *other;
+                    if (std::any_of (ph.points.begin(), ph.points.end(), [] (const ae::EnvPoint& p) { return std::abs (p.y - 0.5) > 1.0e-4; }))
+                        s.phase = ph;
                     s.freqScale = value (scale) / 100.0;
                     s.smooth = on (smooth);
                     s.mix = value (mix) / 100.0;

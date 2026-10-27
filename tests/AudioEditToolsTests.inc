@@ -526,3 +526,19 @@ TEST (audioedittools_stretch_tool_formants_round165l)
     const auto keptRatio = band (kept, 1300, 1700) / std::max (1e-12, band (kept, shifted - 200, shifted + 200));
     CHECK (keptRatio > 2.0 * plainRatio);
 }
+
+TEST (audioedittools_eq_phases_round165l)
+{
+    // a flat +180° phase curve inverts the audio (magnitudes unchanged)
+    auto d = sineDoc (1000.0, 0.5, 44100.0, 0.5f);
+    const auto orig = d.audio.channels[0];
+    ae::EqSettings s;
+    s.gain = ae::Envelope::flat (0.5);
+    s.smooth = false;
+    s.phase = ae::Envelope::flat (1.0);
+    ae::equalize (d, {}, s);
+    double err = 0.0;
+    for (std::size_t i = 4410; i + 4410 < orig.size(); ++i)
+        err = std::max (err, (double) std::abs (d.audio.channels[0][i] + orig[i]));
+    CHECK (err < 0.01);
+}

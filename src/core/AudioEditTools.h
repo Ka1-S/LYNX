@@ -132,6 +132,7 @@ struct EqSettings
     double freqScale = 1.0; // 0..1
     bool smooth = true;     // smooths the final response (less ringing)
     double mix = 1.0;       // 0..1
+    Envelope phase;         // FL's "Phases" curve: y 0.5 = unchanged, 0 / 1 = -/+180 degrees (empty: none)
 };
 // gain y -> linear gain of the EQ curve.
 double eqGain (double y) noexcept;

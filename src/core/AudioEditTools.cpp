@@ -928,7 +928,8 @@ std::vector<double> curveGains (const Envelope& curve, double freqScale, double 
     return g;
 }
 
-void applyGains (Document& doc, Range r, const std::vector<double>& gains, int size, double mix, Progress* progress)
+void applyGains (Document& doc, Range r, const std::vector<double>& gains, int size, double mix, Progress* progress,
+                 const std::vector<double>* phases = nullptr)
 {
     // a little context on both sides so the edges are processed like the middle
     const auto from = r.start - size, to = r.end + size;
@@ -941,6 +942,14 @@ void applyGains (Document& doc, Range r, const std::vector<double>& gains, int s
             {
                 re[(std::size_t) b] *= gains[(std::size_t) b];
                 im[(std::size_t) b] *= gains[(std::size_t) b];
+                if (phases != nullptr && b > 0 && b < size / 2)
+                {
+                    const auto ph = (*phases)[(std::size_t) b];
+                    const auto cr = std::cos (ph), ci = std::sin (ph);
+                    const auto x = re[(std::size_t) b], y = im[(std::size_t) b];
+                    re[(std::size_t) b] = x * cr - y * ci;
+                    im[(std::size_t) b] = x * ci + y * cr;
+                }
             }
         }, progress, (double) c / channels, 1.0 / channels);
         if (stop (progress))
@@ -962,7 +971,15 @@ void equalize (Document& doc, Range r, const EqSettings& s, Progress* progress)
         return;
     constexpr int size = 8192;
     const auto gains = curveGains (s.gain, s.freqScale, doc.audio.sampleRate, size, s.smooth);
-    applyGains (doc, r, gains, size, clamp01 (s.mix), progress);
+    std::vector<double> phases;
+    if (! s.phase.empty())
+    {
+        // FL's "Phases": a second curve over frequency that turns each frequency's phase (y 0.5 = none, 0 / 1 = -/+180°)
+        phases.resize ((std::size_t) size / 2 + 1);
+        for (int b = 0; b <= size / 2; ++b)
+            phases[(std::size_t) b] = (clamp01 (s.phase.at (curvePosition ((double) b * doc.audio.sampleRate / size, s.freqScale, doc.audio.sampleRate))) - 0.5) * 2.0 * pi;
+    }
+    applyGains (doc, r, gains, size, clamp01 (s.mix), progress, phases.empty() ? nullptr : &phases);
     report (progress, 1.0);
 }
 

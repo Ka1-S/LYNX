@@ -5376,3 +5376,4 @@ countries: br
 "Copy from pitch" = "Copiar do tom"
 "Time stretcher / pitch shifter" = "Esticar tempo / mudar tom"
 "New length: {0} s. With formant preservation a voice keeps its character when the pitch moves." = "Novo comprimento: {0} s. Com a preservação de formantes uma voz mantém o caráter quando o tom muda."
+"Phases" = "Fases"
