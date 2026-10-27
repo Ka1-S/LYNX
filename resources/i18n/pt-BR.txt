@@ -5369,3 +5369,4 @@ countries: br
 "Scratch (envelope)" = "Scratch (envelope)"
 "Scratch (envelope): apply" = "Scratch (envelope): aplicar"
 "Draw the play position over time (rising = forwards, falling = backwards, flat = held), then choose Tools > Scratch (envelope): apply." = "Desenhe a posição de reprodução ao longo do tempo (subindo = para frente, descendo = para trás, plano = parado) e escolha Ferramentas > Scratch (envelope): aplicar."
+"Safe mode" = "Modo seguro"

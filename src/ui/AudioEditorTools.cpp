@@ -869,6 +869,8 @@ private:
                 header (tr ("Declipper"));
                 const auto clip = toggle (tr ("Enable declipper"), false, 3);
                 const auto clipThr = slider (tr ("Threshold"), 0, 100, 0.1, 90, percent, 3);
+                const auto clipModel = choice (tr ("Model"), { tr ("General"), tr ("Vocal") }, 0, 3);
+                const auto clipSafe = toggle (tr ("Safe mode"), false, 3);
                 header (tr ("Declicker"));
                 const auto click = toggle (tr ("Enable declicker"), false, 4);
                 const auto clickSens = slider (tr ("Sensitivity"), 0, 100, 0.1, 25, percent, 4);
@@ -897,6 +899,8 @@ private:
                     s.thresholdCurve = c.envelope;
                     s.declip = on (clip);
                     s.clipThreshold = value (clipThr) / 100.0;
+                    s.vocalModel = chosen (clipModel) == 1;
+                    s.safeMode = on (clipSafe);
                     s.declick = on (click);
                     s.clickSensitivity = value (clickSens) / 100.0;
                     const auto profile = host.toolNoiseProfile();

@@ -1408,7 +1408,7 @@ void repairSpan (std::vector<float>& x, std::int64_t a, std::int64_t b)
 }
 } // namespace
 
-int declip (Audio& audio, Range r, double threshold)
+int declip (Audio& audio, Range r, double threshold, bool vocalModel, bool safeMode)
 {
     int repaired = 0;
     r.start = std::clamp<std::int64_t> (r.start, 0, audio.frames());
@@ -1434,10 +1434,23 @@ int declip (Audio& audio, Range r, double threshold)
             {
                 std::vector<float> before (ch.begin() + (std::ptrdiff_t) i, ch.begin() + (std::ptrdiff_t) j);
                 repairSpan (ch, i, j);
-                // the rebuilt peak must keep going past the clip level (never fold back inside it)
+                // the rebuilt peak must keep going past the clip level (never fold back inside it), and stays under
+                // the model's ceiling (vocal: a gentle half-sine bump at most +3 dB; general: +12 dB)
+                const auto ceiling = std::min (safeMode ? 1.0f : 1.0e9f, limit * (vocalModel ? 1.4125f : 3.981f));
                 for (auto k = i; k < j; ++k)
-                    if (std::abs (ch[(std::size_t) k]) < std::abs (before[(std::size_t) (k - i)]) || (ch[(std::size_t) k] > 0.0f) != sign)
-                        ch[(std::size_t) k] = before[(std::size_t) (k - i)];
+                {
+                    auto& v = ch[(std::size_t) k];
+                    const auto old = before[(std::size_t) (k - i)];
+                    if (vocalModel)
+                    {
+                        const auto bump = (float) std::sin (pi * ((double) (k - i) + 0.5) / (double) (j - i));
+                        v = std::copysign (std::min (std::abs (v), std::abs (old) + (ceiling - limit) * bump), old);
+                    }
+                    if (std::abs (v) < std::abs (old) || (v > 0.0f) != sign)
+                        v = old;
+                    if (std::abs (v) > ceiling)
+                        v = std::copysign (std::max (ceiling, std::abs (old)), old);
+                }
                 ++repaired;
             }
             i = j;
@@ -1496,7 +1509,7 @@ void denoise (Document& doc, Range r, const NoiseProfile& profile, const Denoise
     if (r.empty())
         return;
     if (s.declip)
-        declip (doc.audio, r, s.clipThreshold);
+        declip (doc.audio, r, s.clipThreshold, s.vocalModel, s.safeMode);
     if (s.declick)
         declick (doc.audio, r, s.clickSensitivity);
     if (! s.denoise && ! s.noiseOnly)

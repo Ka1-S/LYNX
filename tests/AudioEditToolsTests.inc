@@ -279,6 +279,16 @@ TEST (audioedittools_denoise_round165l)
             v = std::clamp (v, -0.7f, 0.7f);
     CHECK (ae::declip (c.audio, {}, 0.99) > 0);
     CHECK (ae::peak (c.audio, {}) > 0.85f);
+    // safe mode: a sine clipped near full scale is rebuilt without going over it; vocal: at most +3 dB
+    auto loud = sineDoc (100.0, 0.1, sr, 1.5f);
+    for (auto& ch : loud.audio.channels)
+        for (auto& v : ch)
+            v = std::clamp (v, -0.95f, 0.95f);
+    auto vocal = loud;
+    CHECK (ae::declip (loud.audio, {}, 0.99, false, true) > 0);
+    CHECK (ae::peak (loud.audio, {}) <= 1.0f && ae::peak (loud.audio, {}) > 0.96f);
+    CHECK (ae::declip (vocal.audio, {}, 0.99, true, false) > 0);
+    CHECK (ae::peak (vocal.audio, {}) <= 0.95f * 0.99f * 1.42f);
 
     // declicker: a single spike in a sine is removed
     auto k = sineDoc (200.0, 0.2, sr, 0.3f);

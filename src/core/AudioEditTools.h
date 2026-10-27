@@ -193,13 +193,17 @@ struct DenoiseSettings
     Envelope thresholdCurve;  // per frequency, y 0.5 = no change (empty: flat)
     bool declip = false;
     double clipThreshold = 0.9; // 0..1 of full scale: samples above it are rebuilt
+    bool vocalModel = false;    // FL's declipper models: General, or Vocal (rounder, lower rebuilt peaks)
+    bool safeMode = false;      // the rebuilt peaks never go over full scale
     bool declick = false;
     double clickSensitivity = 0.25; // 0..1
 };
 // Without a valid profile the noise floor is estimated from the quietest frames of the range.
 void denoise (Document& doc, Range r, const NoiseProfile& profile, const DenoiseSettings& s, Progress* progress = nullptr);
 // Declipper / declicker on their own (also used by denoise).
-int declip (Audio& audio, Range r, double threshold);
+// general: a rebuilt peak may rise up to +12 dB over the clip level; vocal: +3 dB and a rounder shape.
+// safe: never over full scale. Returns how many clipped runs were rebuilt.
+int declip (Audio& audio, Range r, double threshold, bool vocalModel = false, bool safeMode = false);
 int declick (Audio& audio, Range r, double sensitivity);
 
 // Vocal denoise / isolator: mix -1 (only the noise) .. 0 .. 1 (only the voice).
