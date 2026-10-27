@@ -31,7 +31,9 @@
 extern "C"
 {
 #include "pocketpy.h"
-extern volatile int py_lynx_interrupt; // (third_party/pocketpy/pocketpy.c, LYNX's addition)
+extern volatile int py_lynx_interrupt; // (third_party/pocketpy/pocketpy.c, LYNX's additions)
+extern volatile int py_lynx_out_of_memory;
+extern size_t py_lynx_heap_limit;
 }
 
 namespace lynx::python
@@ -782,16 +784,20 @@ void setTimeLimit (double milliseconds) noexcept
     {
         h.deadline = 0;
         py_lynx_interrupt = 0;
+        py_lynx_out_of_memory = 0;
         return;
     }
     h.deadline = (Clock::now() + std::chrono::microseconds ((std::int64_t) (milliseconds * 1000.0))).time_since_epoch().count();
     py_lynx_interrupt = 0;
+    py_lynx_out_of_memory = 0;
 }
 
 std::string takeError()
 {
     char* text = py_formatexc();
     std::string out = text != nullptr ? text : "error";
+    if (py_lynx_out_of_memory != 0) // (stopped by the heap limit, not by the clock)
+        out = "MemoryError: the script used more than " + std::to_string (py_lynx_heap_limit >> 20) + " MB of memory";
     if (text != nullptr)
         py_free (text);
     py_clearexc (nullptr);

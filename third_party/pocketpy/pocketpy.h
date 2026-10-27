@@ -91,6 +91,22 @@
 #endif
 
 // Memory allocation functions
+// LYNX: every allocation is counted (third_party/pocketpy/pocketpy.c, "LYNX heap"): past the host's limit the running
+// script is stopped (like a script that runs too long), so a runaway script cannot take the machine's memory
+#ifndef PK_MALLOC
+    #ifdef __cplusplus
+    extern "C" {
+    #endif
+    void* py_lynx_malloc(size_t size);
+    void* py_lynx_realloc(void* ptr, size_t size);
+    void py_lynx_free(void* ptr);
+    #ifdef __cplusplus
+    }
+    #endif
+    #define PK_MALLOC(size)             py_lynx_malloc(size)
+    #define PK_REALLOC(ptr, size)       py_lynx_realloc(ptr, size)
+    #define PK_FREE(ptr)                py_lynx_free(ptr)
+#endif
 #ifndef PK_MALLOC
     #if PK_ENABLE_MIMALLOC
         #include "mimalloc.h"

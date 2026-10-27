@@ -1142,6 +1142,14 @@ bool Runtime::call (const char* callback, int argc, py_TValue* argv)
 
 void Runtime::callFailed (const std::string& error)
 {
+    if (error.rfind ("MemoryError: the script used more than", 0) == 0)
+    {
+        stopped = true;
+        const auto why = "Stopped: " + error.substr (13) + " (Restart runs it again).";
+        setStatus (why);
+        appendLog (why + "\n");
+        return;
+    }
     if (error.find ("TimeoutError") != std::string::npos)
     {
         stopped = true;

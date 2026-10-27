@@ -265,6 +265,24 @@ vfx.addOutputController('n', 0)
     CHECK (worst < 50.0);
 }
 
+TEST (vfx_script_memory_runaway_is_stopped)
+{
+    using namespace lynx::vfx;
+    // a script that keeps allocating is stopped at LYNX's heap limit (768 MB), with a message; the memory comes back
+    auto p = makeProcessor (Kind::script, vfxs165::state ("import flvfx as vfx\nkeep = []\ndef onTick():\n    while True:\n        try:\n            keep.append([0] * 4000000)\n        except:\n            pass\n"));
+    p->setTag (0x165d0005);
+    vfxs165::play (*p, {}, 1024);
+    auto m = script::monitorOf (0x165d0005);
+    CHECK (m != nullptr && m->status().find ("more than 768 MB") != std::string::npos);
+    if (m != nullptr)
+        std::printf ("  %s\n", m->status().c_str());
+    m.reset();
+    p.reset(); // (its VM is released: the next script starts with a small heap)
+    auto q = makeProcessor (Kind::script, vfxs165::state ("import flvfx as vfx\nbig = [0] * 1000000\ndef onTick():\n    vfx.setOutputController('ok', 1)\nvfx.addOutputController('ok', 0)\n"));
+    vfxs165::play (*q, {}, 512);
+    CHECK (q->controlOutput (0) == 1.0f);
+}
+
 TEST (vfx_script_voice_changes_reach_the_sounding_note)
 {
     using namespace lynx::vfx;

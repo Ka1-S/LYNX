@@ -28,6 +28,7 @@
 #include "platform/LinuxRealtime.h"
 #include "engine/Metronome.h"
 #include "core/NoteTools.h"
+#include "core/VfxScript.h"
 #include "engine/PreviewPlayer.h"
 #include "flp/Flp.h"
 
@@ -216,6 +217,8 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 {
     inputSlot.fill (-1);
     outputSlot.fill (-1);
+    // VFX Script (round 165d): the audio thread waits a bounded time for the Python thread (exports wait for it)
+    vfx::script::setRealtime (openAudioDevice);
     publishSong();
     buildInitialGraph();
 
@@ -3101,6 +3104,7 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::setPluginsRenderMode (bool offline)
 {
+    vfx::script::setRealtime (! offline); // (an export waits for every VFX Script answer: exact and repeatable)
     // FL's "Notify about rendering mode" off: that plugin is not told (round 149); "Reset plugin when FL Studio
     // resets": reset as the export starts (round 151)
     for (std::size_t i = 0; i < song.channels.size(); ++i)
