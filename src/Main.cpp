@@ -4873,6 +4873,44 @@ private:
         lynx::FormulaControllerWindows::closeAll();
     }
 
+    static juce::TextButton* findButton (juce::Component& root, const juce::String& text)
+    {
+        if (auto* b = dynamic_cast<juce::TextButton*> (&root); b != nullptr && b->getButtonText() == text)
+            return b;
+        for (auto* child : root.getChildren())
+            if (auto* b = findButton (*child, text))
+                return b;
+        return nullptr;
+    }
+
+    // a VFX Script editor's Script / Log / API reference tabs, then the Script tab of a script with an error
+    void shootScriptTabs (juce::Component& panel, lynx::AudioEngine& engine, int index, const juce::String& name)
+    {
+        const std::pair<const char*, const char*> tabs[] = { { "Script", "script" }, { "Log", "log" }, { "API reference", "api" } };
+        for (const auto& [tab, file] : tabs)
+            if (auto* b = findButton (panel, lynx::tr (tab)); b != nullptr && b->onClick)
+            {
+                b->onClick();
+                savePng (panel.createComponentSnapshot (panel.getLocalBounds()), name + "-tab-" + file + ".png");
+            }
+        engine.editSong ([&] (lynx::Song& s) {
+            auto st = *lynx::vfx::readState (s.channels[(std::size_t) index].pluginState);
+            auto settings = lynx::vfx::parseScript (st.fl).value_or (lynx::vfx::defaultScript());
+            settings.setSource ("import flvfx as vfx\n\ndef onTriggerVoice(incomingVoice):\n    v = vfx.Voice(incomingVoice)\n"
+                                "    v.note += 7\n    v.trigger(\n\ndef onReleaseVoice(incomingVoice):\n    pass\n");
+            st.fl = lynx::vfx::writeScript (settings);
+            s.channels[(std::size_t) index].pluginState = lynx::vfx::writeState (st);
+        });
+        engine.dispatchPendingMessages();
+        if (auto broken = lynx::makeChannelSettingsPanel (engine, index))
+        {
+            engine.dispatchPendingMessages();
+            if (auto* b = findButton (*broken, lynx::tr ("Script")); b != nullptr && b->onClick)
+                b->onClick();
+            savePng (broken->createComponentSnapshot (broken->getLocalBounds()), name + "-error.png");
+        }
+    }
+
     void runVfxShot (const juce::String& prefix)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -4963,8 +5001,10 @@ private:
                 if (auto panel = lynx::makeChannelSettingsPanel (offline, index))
                 {
                     offline.dispatchPendingMessages();
-                    savePng (panel->createComponentSnapshot (panel->getLocalBounds()),
-                             prefix + "-" + juce::String (lynx::vfx::flName (kind)).replaceCharacter (' ', '-').toLowerCase() + "-fl.png");
+                    const auto name = prefix + "-" + juce::String (lynx::vfx::flName (kind)).replaceCharacter (' ', '-').toLowerCase();
+                    savePng (panel->createComponentSnapshot (panel->getLocalBounds()), name + "-fl.png");
+                    if (kind == lynx::vfx::Kind::script) // the editor's other tabs (round 165d)
+                        shootScriptTabs (*panel, offline, index, name);
                 }
             }
         }

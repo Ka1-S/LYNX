@@ -2353,7 +2353,7 @@ private:
             group = g;
             Row row;
             row.control = k;
-            row.label = std::make_unique<juce::Label> ({}, juce::String::fromUTF8 (c.label.c_str()));
+            row.label = std::make_unique<juce::Label> (juce::String(), juce::String::fromUTF8 (c.label.c_str()));
             row.label->setFont (theme::font (theme::type::small));
             row.label->setJustificationType (juce::Justification::centredRight);
             row.label->setColour (juce::Label::textColourId, theme::colour::textSecondary);
