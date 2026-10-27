@@ -17,7 +17,7 @@ const KeyName keyNames[] = {
     { space, "Space" },        { enter, "Enter" },     { escape, "Esc" },      { tab, "Tab" },           { backspace, "Backspace" },
     { del, "Delete" },         { insert, "Insert" },   { up, "Up" },           { down, "Down" },         { left, "Left" },
     { right, "Right" },        { pageUp, "PageUp" },   { pageDown, "PageDown" }, { home, "Home" },       { end, "End" },
-    { numpadPlus, "Numpad +" }, { numpadMinus, "Numpad -" },
+    { numpadPlus, "Numpad +" }, { numpadMinus, "Numpad -" }, { numpadMultiply, "Numpad *" }, { numpadDivide, "Numpad /" },
     { numpad0, "Numpad 0" }, { numpad1, "Numpad 1" }, { numpad2, "Numpad 2" }, { numpad3, "Numpad 3" }, { numpad4, "Numpad 4" },
     { numpad5, "Numpad 5" }, { numpad6, "Numpad 6" }, { numpad7, "Numpad 7" }, { numpad8, "Numpad 8" }, { numpad9, "Numpad 9" },
 };
@@ -48,6 +48,8 @@ std::vector<Action> makeActions()
         { "transport.playStop", TR_NOOP ("Play / stop (back to where playback started)"), Context::global, { chord (space) } },
         { "transport.pause", TR_NOOP ("Play / pause"), Context::global, { chord (space, ctrl) } },
         { "transport.toggleMode", TR_NOOP ("Pattern / song mode"), Context::global, { chord ('L') }, true },
+        { "transport.nextMarker", TR_NOOP ("Jump to the next song marker (Quantize song jumps while playing)"), Context::global, { chord (numpadMultiply, alt) } },
+        { "transport.previousMarker", TR_NOOP ("Jump to the previous song marker"), Context::global, { chord (numpadDivide, alt) } },
         { "view.typingPiano", TR_NOOP ("Typing keyboard as a piano on/off"), Context::global, { chord ('T', ctrl) } },
         { "view.toolbar", TR_NOOP ("Show or hide the toolbar panels"), Context::global, { chord (f11, ctrl) } },
         { "view.audioEditor", TR_NOOP ("Open the audio editor"), Context::global, {} },

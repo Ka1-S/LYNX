@@ -183,6 +183,8 @@ private:
     void sortClips(); // sorts while keeping the selection (no undo step)
     void showClipMenu (int clip);
     void showRulerMenu (int x);                           // markers, time signature and loop
+    static juce::String markerLabel (const Marker& m);   // the text of a marker's tag on the ruler
+    int markerTagAt (int x, int y) const;                 // the marker whose tag is under (x, y), or -1
     void editMarkerName (std::int64_t tick, int existing); // existing = index, or -1 to create
     void deleteSelection();
     void copySelection();

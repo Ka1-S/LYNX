@@ -4,6 +4,7 @@
 #include "ui/TextCache.h"
 #include "ui/PlaylistComponent.h"
 
+#include "core/MarkerPlan.h"
 #include "core/Templates.h"
 
 #include "core/TransportEdit.h"
@@ -922,17 +923,13 @@ void PlaylistComponent::paint (juce::Graphics& g)
             if (x < (float) ruler.getX() - 200.0f || x > (float) ruler.getRight())
                 continue;
 
-            auto label = juce::String::fromUTF8 (m.name.c_str());
-            if (const auto fraction = juce::String (m.numerator) + "/" + juce::String (m.denominator); m.isSignature() && label != fraction)
-                label = fraction + (label.isEmpty() ? "" : " " + label);
-            if (label.isEmpty())
-                label = "*";
-
+            const auto label = markerLabel (m);
             const auto width = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label) + 8.0f;
             const auto tag = juce::Rectangle<float> (x, (float) timelineHeight - 11.0f, width, 11.0f);
             // recording markers (Start / Stop recording) in the accent colour, as the record button
             const auto punch = m.action == Marker::punchIn || m.action == Marker::punchOut;
-            g.setColour (m.isSignature() ? colour::info : punch ? colour::accent : colour::warning);
+            const auto acts = ! m.isSignature() && m.action != 0 && ! punch;
+            g.setColour (m.isSignature() ? colour::info : punch ? colour::accent : acts ? colour::automation : colour::warning);
             g.fillRoundedRectangle (tag, 2.0f);
             g.drawVerticalLine ((int) x, 0.0f, (float) timelineHeight);
             g.setColour (colour::bg0);
@@ -1443,8 +1440,11 @@ void PlaylistComponent::seekTo (int x, bool snapOn)
     if (engine.getSong().mode != PlayMode::song)
         engine.editSong ([] (Song& s) { s.mode = PlayMode::song; }, false);
 
-    engine.seek (tick);
-    playheadTick = tick;
+    // while playing, FL's "Quantize song jumps" makes the jump wait for the next beat / bar
+    const auto waits = engine.getTransport().playing.load() && engine.quantizeSongJumps.load() > 0;
+    engine.jumpTo (tick);
+    if (! waits)
+        playheadTick = tick;
     repaint();
 }
 
@@ -1643,6 +1643,18 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         if (e.mods.isCtrlDown())
         {
             drag = Drag::loop;
+            return;
+        }
+
+        // a click on a marker's tag goes to the marker (FL), quantized while playing like any song jump
+        if (const auto hit = markerTagAt (e.x, e.y); hit >= 0)
+        {
+            const auto tick = engine.getSong().markers()[(std::size_t) hit].tick;
+            const auto waits = engine.getTransport().playing.load() && engine.quantizeSongJumps.load() > 0;
+            engine.jumpToMarker (hit);
+            if (! waits)
+                playheadTick = (double) tick;
+            repaint();
             return;
         }
 
@@ -2785,6 +2797,40 @@ void PlaylistComponent::renameTrack (int track)
                              });
 }
 
+juce::String PlaylistComponent::markerLabel (const Marker& m)
+{
+    auto label = juce::String::fromUTF8 (m.name.c_str());
+    if (const auto fraction = juce::String (m.numerator) + "/" + juce::String (m.denominator); m.isSignature() && label != fraction)
+        label = fraction + (label.isEmpty() ? "" : " " + label);
+    // FL's marker actions: a symbol before the name (unnamed: the action's name)
+    if (! m.isSignature() && m.action != 0 && m.action != Marker::punchIn && m.action != Marker::punchOut)
+    {
+        if (label.isEmpty())
+            label = tr (markers::actionName (m.action));
+        label = juce::String::fromUTF8 (markers::actionTag (m.action)) + " " + label;
+    }
+    if (label.isEmpty())
+        label = "*";
+    return label;
+}
+
+int PlaylistComponent::markerTagAt (int x, int y) const
+{
+    // the tags hang at the bottom of the ruler (see paint)
+    if (y < rulerTop + timelineHeight - 12 || y >= headerHeight)
+        return -1;
+    const auto& list = engine.getSong().markers();
+    const auto f = font (type::caption, true);
+    for (int i = (int) list.size(); --i >= 0;) // the later tag is drawn on top
+    {
+        const auto mx = tickToX ((double) list[(std::size_t) i].tick);
+        const auto width = (double) juce::GlyphArrangement::getStringWidthInt (f, markerLabel (list[(std::size_t) i])) + 8.0;
+        if (x >= mx - 2.0 && x <= mx + width)
+            return i;
+    }
+    return -1;
+}
+
 void PlaylistComponent::showRulerMenu (int x)
 {
     const auto& song = engine.getSong();
@@ -2825,20 +2871,70 @@ void PlaylistComponent::showRulerMenu (int x)
         });
     });
 
+    // FL's Playlist menu › Time markers (REA_rodada165f-markers §1.4)
+    {
+        juce::PopupMenu timeMarkers;
+        juce::PopupMenu every;
+        for (auto [bars, text] : { std::pair { 1, TR_NOOP ("Bar") }, { 2, TR_NOOP ("2 bars") }, { 4, TR_NOOP ("4 bars") }, { 8, TR_NOOP ("8 bars") } })
+            every.addItem (tr (text), [this, bars = bars] {
+                engine.editSong ([bars] (Song& s) { markers::addEvery (s, bars); });
+            });
+        timeMarkers.addSubMenu (tr ("Add one every"), every);
+        timeMarkers.addItem (tr ("Add jump to next bar"), [this, tick] {
+            engine.editSong ([tick] (Song& s) { markers::addJumpToNextBar (s, tick); });
+        });
+        timeMarkers.addItem (tr ("Change to marker loop"), song.hasLoop(), false, [this] {
+            engine.editSong ([] (Song& s) { markers::changeToMarkerLoop (s); });
+        });
+        menu.addSubMenu (tr ("Time markers"), timeMarkers);
+
+        juce::PopupMenu quantize;
+        const auto current = engine.quantizeSongJumps.load();
+        for (auto [value, text] : { std::pair { 0, TR_NOOP ("Off") }, { 1, TR_NOOP ("Beats") }, { 2, TR_NOOP ("Bars") }, { 3, TR_NOOP ("2 bars") },
+                                    { 4, TR_NOOP ("4 bars") }, { 5, TR_NOOP ("8 bars") } })
+            quantize.addItem (tr (text), true, current == value, [this, value = value] { engine.quantizeSongJumps.store (value); });
+        menu.addSubMenu (tr ("Quantize song jumps"), quantize);
+    }
+
     if (near >= 0)
     {
         menu.addSeparator();
+        menu.addSectionHeader (markerLabel (song.markers()[(std::size_t) near]));
         menu.addItem (tr ("Rename marker..."), [this, near] { editMarkerName (0, near); });
-        if (! song.markers()[(std::size_t) near].isSignature())
+        menu.addItem (tr ("Place loop (from this marker to the next)"), [this, near] {
+            engine.editSong ([near] (Song& s) {
+                if (near >= (int) s.markers().size())
+                    return;
+                const auto from = s.markers()[(std::size_t) near].tick;
+                std::int64_t to = s.songLength();
+                for (const auto& m : s.markers())
+                    if (m.tick > from)
+                    {
+                        to = m.tick;
+                        break;
+                    }
+                if (to > from)
+                {
+                    s.loopStart = from;
+                    s.loopEnd = to;
+                }
+            }, false);
+        });
         {
+            // FL's marker "Action" list, in FL's order (the values are FL's .flp marker types)
             juce::PopupMenu action;
-            const auto current = song.markers()[(std::size_t) near].action;
-            for (auto [value, text] : { std::pair { 0, TR_NOOP ("None (plain marker)") }, { Marker::punchIn, TR_NOOP ("Start recording") },
+            const auto& marker = song.markers()[(std::size_t) near];
+            const auto current = marker.isSignature() ? Marker::timeSignature : marker.action;
+            // (FL's Playlist shows these 9; Pattern length, Bar override and Key/Scale are its Piano Roll markers' actions)
+            for (auto [value, text] : { std::pair { Marker::none, TR_NOOP ("None (plain marker)") }, { Marker::start, TR_NOOP ("Start") },
+                                        { Marker::songLoop, TR_NOOP ("Loop") }, { Marker::markerLoop, TR_NOOP ("Marker loop") },
+                                        { Marker::markerSkip, TR_NOOP ("Marker skip") }, { Marker::markerPause, TR_NOOP ("Marker pause") },
+                                        { Marker::timeSignature, TR_NOOP ("Time signature") }, { Marker::punchIn, TR_NOOP ("Start recording") },
                                         { Marker::punchOut, TR_NOOP ("Stop recording") } })
                 action.addItem (tr (text), true, current == value, [this, near, value = value] {
                     engine.editSong ([near, value] (Song& s) {
                         if (near < (int) s.markers().size())
-                            s.markers()[(std::size_t) near].action = value;
+                            markers::setAction (s, s.markers()[(std::size_t) near], value);
                     });
                 });
             menu.addSubMenu (tr ("Marker action"), action);

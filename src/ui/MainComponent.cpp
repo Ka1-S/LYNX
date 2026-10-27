@@ -1068,6 +1068,8 @@ bool MainComponent::runAction (const std::string& id)
     if (is ("transport.playStop")) playStop();
     else if (is ("transport.pause")) playPause();
     else if (is ("transport.toggleMode")) toggleMode();
+    else if (is ("transport.nextMarker")) engine.jumpToNextMarker (true);
+    else if (is ("transport.previousMarker")) engine.jumpToNextMarker (false);
     else if (is ("view.typingPiano")) setTypingPiano (! typingPiano);
     else if (is ("view.toolbar"))
     {
@@ -1419,6 +1421,8 @@ void MainComponent::loadUiSettings()
             newProjectDefaults().readKey (key.toStdString(), line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
         else if (key == "mixerUsedOnly")
             MixerStrips::showUsedOnly = on;
+        else if (key == "quantizeSongJumps")
+            engine.quantizeSongJumps.store (juce::jlimit (0, 5, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
     }
 
     startup = StartupOptions::load();
@@ -1469,7 +1473,8 @@ void MainComponent::saveUiSettings()
                                       + "\nrecordQuantiseAutomation=" + juce::String (engine.getRecordOptions().quantiseAutomation ? 1 : 0)
                                       + "\nrecordPunchLoop=" + juce::String (engine.getRecordOptions().punchLoopRegion ? 1 : 0)
                                       + "\nrecordPreRoll=" + juce::String (engine.getRecordOptions().preRollBars)
-                                      + "\nrecordPostRoll=" + juce::String (engine.getRecordOptions().postRollBars) + "\nmixerUsedOnly=" + juce::String (MixerStrips::showUsedOnly ? 1 : 0) + "\n"
+                                      + "\nrecordPostRoll=" + juce::String (engine.getRecordOptions().postRollBars) + "\nmixerUsedOnly=" + juce::String (MixerStrips::showUsedOnly ? 1 : 0)
+                                      + "\nquantizeSongJumps=" + juce::String (engine.quantizeSongJumps.load()) + "\n"
                                       + juce::String (newProjectDefaults().toText()));
 }
 

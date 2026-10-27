@@ -572,6 +572,7 @@ private:
     bool learningGlobal = false;
     bool saveGlobalLinks = false; // only the engine with an audio device (the app) writes the settings file
     void applyControllers();
+    std::atomic<int> pendingMarkerNote { -1 }; // MIDI thread -> timer: a "Song marker jump" note
     std::vector<RecordedEvent> uiRecorded;           // PC keyboard -> recording
     NoteRecorder recorder;
     // last tweaked parameters and automation recording (REA round 143)
@@ -663,6 +664,19 @@ private:
     void routeOutputs (float* const* outputs, int numOutputs, int n) noexcept; // audio thread
     std::array<float, maxMixerTracks * 2> lastInputPeaks {};
     std::array<int, LiveInput::maxChannels> inputSlot {}; // device input channel -> callback input index (-1: closed)
+    // audio thread: its copy of the markers' actions (Transport::readMarkers) and how many marker jumps it made
+    MarkerPlan rtMarkers;
+    std::uint32_t rtMarkerVersion = 0;
+public:
+    // marker jumps / pauses the audio thread made since start (tests, the hint bar); +1 each
+    std::atomic<int> markerEvents { 0 };
+    // Clicking the ruler / a marker while playing, FL's "Song marker jump": jump to `tick`, while playing at the next
+    // "Quantize song jumps" step (FL's Playlist menu: 0 Off, 1 Beats, 2 Bars, 3 2 bars, 4 4 bars, 5 8 bars)
+    void jumpTo (double tick) noexcept;
+    void jumpToMarker (int index) noexcept;   // the index-th marker of the arrangement (by position)
+    void jumpToNextMarker (bool forward) noexcept;
+    std::atomic<int> quantizeSongJumps { 0 };
+private:
     std::atomic<double> takeStartTick { -1.0 };    // position of the first recorded sample
     std::atomic<juce::int64> takeFrames { 0 };
     std::atomic<double> takeTicks { 0.0 };         // ticks the transport moved while recording (not wrapped)

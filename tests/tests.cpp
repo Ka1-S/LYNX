@@ -117,6 +117,7 @@
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/Scheduler.h"
+#include "core/MarkerPlan.h"
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
 #include "core/Slicer.h"
@@ -16058,3 +16059,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Misc164Tests.inc"
 #include "Visual164Tests.inc"
 #include "Patcher164fTests.inc"
+#include "Markers165Tests.inc"

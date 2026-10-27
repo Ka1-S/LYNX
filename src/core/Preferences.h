@@ -134,6 +134,9 @@ struct MidiPrefs
     std::vector<GlobalLink> globalLinks;
     VelocityCurve velocity = VelocityCurve::linear;
     bool pickup = false;                // a controller takes over a parameter only once it reaches its value
+    // FL's Options › MIDI "Song marker jump (MIDI channel)": a note on this channel (1..16; 0 = off) jumps the song to
+    // a marker (note 0 = the first marker...) instead of playing
+    int songMarkerJumpChannel = 0;
 
     // The settings of a device (the defaults when it was never changed).
     MidiInputPrefs input (const std::string& name) const;

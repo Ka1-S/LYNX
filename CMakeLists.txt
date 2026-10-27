@@ -28,6 +28,7 @@ add_library(lynx_core STATIC
     src/flp/Flp.cpp
     src/core/Song.cpp
     src/core/Scheduler.cpp
+    src/core/MarkerPlan.cpp
     src/core/Instruments.cpp
     src/core/RackRenderer.cpp
     src/core/LoadTrace.cpp

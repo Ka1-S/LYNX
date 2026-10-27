@@ -946,7 +946,8 @@ public:
     {
         for (auto* c : std::initializer_list<juce::Component*> { &inputsTitle, &notesTitle, &controllersTitle, &inputsNote, &refresh, &noDevices,
                                                                  &velocityLabel, &velocityBox, &velocityNote, &typeLabel, &typeValue, &pickup,
-                                                                 &pickupNote, &linksLabel, &links, &removeLink, &removeAll })
+                                                                 &pickupNote, &linksLabel, &links, &removeLink, &removeAll, &jumpLabel, &jumpBox,
+                                                                 &jumpNote })
             add (*c);
         styleNote (inputsNote, tr ("Each input device can be turned off, listen to one MIDI channel only and play a fixed channel of the "
                                    "Channel Rack instead of the selected ones."));
@@ -969,6 +970,20 @@ public:
         };
         styleCombo (velocityBox);
         styleNote (velocityNote, tr ("For notes from MIDI devices (the typing keyboard always plays at the Piano Roll's velocity)."));
+
+        // FL's Options › MIDI "Song marker jump (MIDI channel)"
+        styleLabel (jumpLabel, tr ("Song marker jump"));
+        jumpBox.addItem (tr ("Off"), 1);
+        for (int c = 1; c <= 16; ++c)
+            jumpBox.addItem (tr ("MIDI channel {0}", { juce::String (c) }), c + 1);
+        jumpBox.onChange = [this] {
+            auto p = engine.getMidiPrefs();
+            p.songMarkerJumpChannel = juce::jlimit (0, 16, jumpBox.getSelectedId() - 1);
+            set (p);
+        };
+        styleCombo (jumpBox);
+        styleNote (jumpNote, tr ("Notes on this channel move the song to a marker instead of playing: note 0 goes to the first "
+                                 "marker, the next one to the second... (Playlist › Quantize song jumps applies while playing)."));
 
         styleLabel (typeLabel, tr ("Controller type"));
         typeLabel.setJustificationType (juce::Justification::topLeft);
@@ -1037,6 +1052,8 @@ private:
         r.section (notesTitle);
         velocityBox.setBounds (r.row (velocityLabel, 300));
         velocityNote.setBounds (r.indented (16).translated (0, -3));
+        jumpBox.setBounds (r.row (jumpLabel, 300));
+        jumpNote.setBounds (r.indented (32).translated (0, -3));
 
         r.section (controllersTitle);
         {
@@ -1074,6 +1091,7 @@ private:
         const auto& p = engine.getMidiPrefs();
         velocityBox.setSelectedId ((int) p.velocity + 1, juce::dontSendNotification);
         pickup.setToggleState (p.pickup, juce::dontSendNotification);
+        jumpBox.setSelectedId (p.songMarkerJumpChannel + 1, juce::dontSendNotification);
         links.updateContent();
         links.repaint();
         removeLink.setEnabled (links.getSelectedRow() >= 0);
@@ -1163,9 +1181,9 @@ private:
     juce::StringArray sampleDevices;
     std::vector<std::unique_ptr<MidiInputRow>> rows;
     SectionTitle inputsTitle { tr ("Input devices") }, notesTitle { tr ("Notes") }, controllersTitle { tr ("Controllers") };
-    juce::Label inputsNote, noDevices, velocityLabel, velocityNote, typeLabel, typeValue, pickupNote, linksLabel;
+    juce::Label inputsNote, noDevices, velocityLabel, velocityNote, typeLabel, typeValue, pickupNote, linksLabel, jumpLabel, jumpNote;
     juce::TextButton refresh { tr ("Refresh device list") }, removeLink { tr ("Remove link") }, removeAll { tr ("Remove all") };
-    juce::ComboBox velocityBox;
+    juce::ComboBox velocityBox, jumpBox;
     juce::ToggleButton pickup;
     juce::ListBox links;
 };
