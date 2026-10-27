@@ -3361,6 +3361,8 @@ private:
         }
         if (const auto r = engine->openAudioInput (inputName.isNotEmpty() ? inputName : deviceName); r.issue != lynx::AudioEngine::InputIssue::none)
             step ("input_error=" + juce::String ((int) r.issue) + " " + r.detail);
+        // takes go next to the report, not into the user's recordings folder
+        engine->setRecordingTarget (report.getSiblingFile (report.getFileNameWithoutExtension() + "-takes"), {});
         auto* device = devices.getCurrentAudioDevice();
         if (device == nullptr || engine->getInputChannelNames().empty())
         {
