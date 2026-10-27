@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/Vfx.h"
 #include "core/FacetEq.h"
 #include "core/MidiControls.h"
 #include "core/Patcher.h"
@@ -608,6 +609,8 @@ void RackState::buildMidiRoutes()
     midiTargets.assign (count, {});
     midiSources.assign (count, {});
     midiOutChannel.assign (count, -1);
+    vfxChannels.clear();
+    vfxPort.assign (count, -1);
     hasMidiRoutes = false;
     midiOutTargets.assign (count, {});
     hasMidiOutputs = false;
@@ -696,6 +699,17 @@ void RackState::buildMidiRoutes()
         {
             for (const auto& r : patcher::midiOutputsOf (song.channels[c].patcher, 0))
                 send (c, r.port, std::max (0, r.midiChannel), 0);
+            continue;
+        }
+        if (song.channels[c].instrument == InstrumentKind::vfx) // a VFX channel: output k on port + k (round 164b)
+        {
+            if (const auto vs = vfx::readState (song.channels[c].pluginState))
+            {
+                vfxChannels.push_back ((int) c);
+                vfxPort[c] = vs->port;
+                for (int k = 0; k < vfx::outputCount (vs->kind) && vs->port + k < patchMidiPorts; ++k)
+                    send (c, vs->port + k, 0, 0);
+            }
             continue;
         }
         if (song.channels[c].instrument != InstrumentKind::midiOut)
@@ -1262,13 +1276,15 @@ void RackRenderer::applyPluginParams (const RackState& state, int firstSlot) noe
 void RackRenderer::deliverToEffects (const RackState& state, const NoteEvent& e) noexcept
 {
     if (e.channel < 0 || (std::size_t) e.channel >= state.effectMidiRoutes.size()
-        || (e.type != NoteEvent::Type::on && e.type != NoteEvent::Type::off))
+        || (e.type != NoteEvent::Type::on && e.type != NoteEvent::Type::off) || e.port == -2)
         return;
     if (e.type == NoteEvent::Type::on && state.song.channels[(std::size_t) e.channel].muted)
         return;
     for (const auto& route : state.effectMidiRoutes[(std::size_t) e.channel])
     {
         if ((std::size_t) route.track >= state.effects.size() || (std::size_t) route.slot >= state.effects[(std::size_t) route.track].size())
+            continue;
+        if (e.port >= 0 && route.port != e.port)
             continue;
         if (auto* graph = patcher::graphOf (state.effects[(std::size_t) route.track][(std::size_t) route.slot].get()))
         {
@@ -1389,6 +1405,8 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
             // a note of a MIDI Out channel on this plugin's MIDI input port, with that MIDI Out's MIDI channel
             if (sources == nullptr || ! routed (e.channel) || (e.type != NoteEvent::Type::on && e.type != NoteEvent::Type::off))
                 continue;
+            if (e.port == -2) // (a VFX channel's own note: its processor's output goes out instead)
+                continue;
             if (e.sampleOffset > position)
             {
                 instrument.render (l + position, r + position, e.sampleOffset - position, gl, gr);
@@ -1397,15 +1415,29 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
             // (each route from that channel: its port and MIDI channel, round 162)
             for (const auto& route : state.midiRoutesIn[(std::size_t) i])
             {
-                if (route.other != e.channel)
+                if (route.other != e.channel || (e.port >= 0 && route.port != e.port))
                     continue;
+                // (a VFX channel's voice keeps its colour as the MIDI channel)
+                const auto midiChannel = e.port >= 0 ? (int) e.colour : route.midiChannel;
                 if (e.type == NoteEvent::Type::on)
                 {
                     if (! c.muted && ! state.song.channels[(std::size_t) e.channel].muted)
-                        instrument.noteOnPort (route.port, e.key, e.velocity, route.midiChannel);
+                    {
+                        if (e.port >= 0)
+                        {
+                            instrument.setNextNoteExpression (e.pan, e.cents, e.porta);
+                            instrument.setNextNoteModulation (e.modX, e.modY);
+                            instrument.setNextNoteColour (e.colour);
+                        }
+                        instrument.noteOnPort (route.port, e.key, e.velocity, midiChannel);
+                    }
                 }
                 else
-                    instrument.noteOffPort (route.port, e.key, route.midiChannel);
+                {
+                    if (e.port >= 0)
+                        instrument.setNextNoteRelease (e.release);
+                    instrument.noteOffPort (route.port, e.key, midiChannel);
+                }
             }
             continue;
         }
@@ -1438,6 +1470,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                                                           : std::pair<float, float> { e.modX, e.modY };
                     instrument.setNextNoteModulation (modX, modY);
                 }
+                instrument.setNextNoteColour (e.colour);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
                     instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut);
@@ -1891,7 +1924,8 @@ void RackRenderer::process (const RackState* state,
             const auto bit = std::uint64_t { 1 } << (e.key & 63);
             const auto inRange = e.key >= 0 && e.key < 128;
             // played on a MIDI Out channel: the plugins on its port get the note with its MIDI channel
-            if (state->hasMidiRoutes && (std::size_t) e.channel < state->midiRoutesOut.size())
+            if (state->hasMidiRoutes && (std::size_t) e.channel < state->midiRoutesOut.size()
+                && ((std::size_t) e.channel >= state->vfxPort.size() || state->vfxPort[(std::size_t) e.channel] < 0))
                 for (const auto& route : state->midiRoutesOut[(std::size_t) e.channel])
                     if (route.other < (int) state->instruments.size() && state->instruments[(std::size_t) route.other] != nullptr)
                     {
@@ -2081,7 +2115,76 @@ bool RackRenderer::routesLiveNotes (const RackState& state, int channel) const n
     const auto& misc = state.song.channels[c].misc;
     return (c < state.arpeggiators.size() && state.arpeggiators[c] != nullptr) || (c < state.echoes.size() && state.echoes[c] != nullptr)
            || misc.key.pan != 0.0f || misc.velocity.pan != 0.0f
-           || (misc.addToKey && misc.rootNote != 60 && state.song.channels[c].instrument != InstrumentKind::sampler);
+           || (misc.addToKey && misc.rootNote != 60 && state.song.channels[c].instrument != InstrumentKind::sampler)
+           || (c < state.vfxPort.size() && state.vfxPort[c] >= 0); // (a VFX channel's processor takes them in the chunk)
+}
+
+void RackRenderer::runVfxChannels (const RackState& state, bool playing, int numSamples) noexcept
+{
+    vfx::Transport transport;
+    transport.sampleRate = sampleRate;
+    transport.bpm = chunkTps * sampleRate * 60.0 / (double) ppq; // (the tempo at this chunk)
+    transport.ticks = chunkStartTick; // (stopped: the live clock, as the arpeggiator)
+    transport.playing = playing;
+    for (const auto c : state.vfxChannels)
+    {
+        if ((std::size_t) c >= state.instruments.size() || state.instruments[(std::size_t) c] == nullptr)
+            continue;
+        auto* processor = state.instruments[(std::size_t) c]->noteProcessor();
+        if (processor == nullptr)
+            continue;
+        vfxIn->clear();
+        vfxOut->clear();
+        const auto count = events.size();
+        for (int k = 0; k < count; ++k)
+        {
+            auto& e = events.at (k);
+            if (e.channel != c || e.port != -1)
+                continue;
+            if (e.type == NoteEvent::Type::on || e.type == NoteEvent::Type::off)
+            {
+                vfx::Event in;
+                in.type = e.type == NoteEvent::Type::on ? vfx::Event::Type::on : vfx::Event::Type::off;
+                in.offset = e.sampleOffset;
+                in.voice.key = e.key;
+                in.voice.velocity = e.velocity;
+                in.voice.pan = e.pan;
+                in.voice.cents = e.cents;
+                in.voice.modX = e.modX;
+                in.voice.modY = e.modY;
+                in.voice.release = e.release;
+                in.voice.colour = e.colour & 15;
+                in.voice.porta = e.porta;
+                in.id = vfx::inputId (e.key, in.voice.colour);
+                vfxIn->add (in);
+            }
+            e.port = -2; // (taken by the processor)
+        }
+        processor->process (vfxIn->size() > 0 ? &(*vfxIn)[0] : nullptr, vfxIn->size(), numSamples, transport, *vfxOut);
+        const auto port = state.vfxPort[(std::size_t) c];
+        for (int k = 0; k < vfxOut->size(); ++k)
+        {
+            const auto& o = (*vfxOut)[k];
+            if (o.type == vfx::Event::Type::prop || port + o.output >= patchMidiPorts)
+                continue; // (voice properties over time reach the instruments inside a Patcher only)
+            NoteEvent e;
+            e.type = o.type == vfx::Event::Type::on ? NoteEvent::Type::on : NoteEvent::Type::off;
+            e.channel = c;
+            e.sampleOffset = std::clamp (o.offset, 0, std::max (0, numSamples - 1));
+            e.key = o.voice.key;
+            e.velocity = o.voice.velocity;
+            e.pan = o.voice.pan;
+            e.cents = o.voice.cents;
+            e.modX = o.voice.modX;
+            e.modY = o.voice.modY;
+            e.release = o.voice.release;
+            e.colour = (std::int8_t) (o.voice.colour & 15);
+            e.porta = o.voice.porta;
+            e.port = (std::int16_t) (port + o.output);
+            events.add (e);
+        }
+    }
+    events.sortByOffset();
 }
 
 void RackRenderer::processChunk (const RackState& state, bool playing, double startTick, int numSamples,
@@ -2167,6 +2270,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         liveRoutedCount = 0;
         events.sortByOffset();
     }
+
+    // VFX channels (round 164b): their processors turn their notes into what they send on their ports
+    if (! state.vfxChannels.empty())
+        runVfxChannels (state, playing, numSamples);
 
     // cut groups: each note of a channel "cuts" the channels linked to it, at the same sample
     if (state.hasCutGroups)

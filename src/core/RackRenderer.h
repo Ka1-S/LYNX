@@ -24,6 +24,7 @@
 #include "core/Meters.h"
 #include "core/Pdc.h"
 #include "core/Scheduler.h"
+#include "core/Vfx.h"
 #include "core/Song.h"
 
 namespace lynx
@@ -157,6 +158,9 @@ struct RackState
     // FL's wrapper "Output port" (round 149): [plugin channel] → the plugin channels whose input port is its output port
     std::vector<std::vector<int>> midiOutTargets;
     bool hasMidiOutputs = false;
+    // VFX channels (round 164b): their notes go through their processor; output k goes out on MIDI port vfxPort + k
+    std::vector<int> vfxChannels;
+    std::vector<int> vfxPort; // [channel] (−1 = not a VFX channel)
     void buildMidiRoutes();
 
     // Loads (or fetches from cache) a file's audio; nullptr on failure.
@@ -344,6 +348,9 @@ private:
     // live-played notes of channels with an arpeggiator, echo delay or key / velocity tracking go through the
     // channel's note path like the scheduled ones (FL, round 149); while stopped the arpeggiator runs on its own clock
     std::array<NoteEvent, 256> liveRouted {};
+    // the VFX channels' processors run on the chunk's events before the channels render (round 164b)
+    void runVfxChannels (const RackState& state, bool playing, int numSamples) noexcept;
+    std::unique_ptr<vfx::EventList> vfxIn = std::make_unique<vfx::EventList>(), vfxOut = std::make_unique<vfx::EventList>();
     int liveRoutedCount = 0;
     double liveTick = 0.0;
     bool routesLiveNotes (const RackState& state, int channel) const noexcept;

@@ -68,6 +68,7 @@
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginEditors.h"
 #include "core/PluginLayout.h"
+#include "core/Vfx.h"
 #include "ui/Splash.h"
 #include "ui/Theme.h"
 #include "ui/ThemeSettings.h"
@@ -819,6 +820,15 @@ public:
             // LYNX.exe --controllershot prefix: the built-in controllers' editors (round 133) as PNGs
             const auto i = args.indexOf ("--controllershot");
             runControllerShot (args[i + 1].unquoted());
+            quit();
+            return;
+        }
+
+        if (args.contains ("--vfxshot"))
+        {
+            // LYNX.exe --vfxshot prefix: the VFX note effects' editors (round 164b), on channels and in a Patcher, as PNGs
+            const auto i = args.indexOf ("--vfxshot");
+            runVfxShot (args[i + 1].unquoted());
             quit();
             return;
         }
@@ -2266,11 +2276,20 @@ private:
                 if (auto* peer = w.getPeer())
                     if (const auto f = peer->getFrameSizeIfPresent())
                         frame = *f;
-                const auto outer = frame.addedTo (w.getBounds());
+                auto outer = frame.addedTo (w.getBounds());
                 const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (outer);
                 const auto area = display != nullptr ? display->userArea : outer;
-                const auto passed = outer.getY() >= area.getY() && outer.getRight() <= area.getRight() && outer.getX() >= area.getX()
-                                    && (! whole || outer.getBottom() <= area.getBottom() + 1);
+               #if JUCE_LINUX
+                // round 164: a compositor that draws the frame itself (WSLg's Weston) reports its invisible shadow in
+                // the frame (59 px on top, 38 around at 100%): only what is visible is checked, give or take 4 px
+                const auto shadow = frame.getLeft() >= 16 ? frame.getLeft() : 0;
+                outer = outer.reduced (shadow);
+                const auto slack = shadow > 0 ? 4 : 0;
+               #else
+                const auto slack = 0;
+               #endif
+                const auto passed = outer.getY() >= area.getY() - slack && outer.getRight() <= area.getRight() + slack && outer.getX() >= area.getX() - slack
+                                    && (! whole || outer.getBottom() <= area.getBottom() + 1 + slack);
                 report << (passed ? "ok   " : "FAIL ") << what << " window=" << outer.toString() << " (frame " << frame.getTop() << ","
                        << frame.getLeft() << ") screen=" << area.toString() << "\n";
                 ok = ok && passed;
@@ -2290,7 +2309,8 @@ private:
                 tall->setCentrePosition (area.getCentre());
                 tall->setVisible (true);
                 lynx::keepAboveMainWindow (*tall);
-                startTimer (700);
+                // LYNX_FITTEST_MS: how long each window stays (default 700 ms; longer to take screenshots of them)
+                startTimer (juce::jlimit (300, 60000, juce::SystemStats::getEnvironmentVariable ("LYNX_FITTEST_MS", "700").getIntValue()));
             }
 
             void timerCallback() override
@@ -2300,6 +2320,29 @@ private:
                 {
                     check ("tall tool window: title bar and close button on the screen", *tall, false);
                     tall.reset();
+                    // round 164: a fixed-size LYNX tool window whose content is taller than the screen: it scrolls
+                    auto content = std::make_unique<juce::Component>();
+                    const auto screen = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+                    content->setSize (520, screen.getHeight() + 300);
+                    lynx::openToolWindow (std::move (content), "LYNX fit test - fixed size", "fittest-fixed");
+                    return;
+                }
+                if (step == 2)
+                {
+                    if (auto* w = lynx::findToolWindow ("fittest-fixed"))
+                    {
+                        check ("fixed-size tool window taller than the screen: fits (its content scrolls)", *w, true);
+                        const auto scrolls = w->getContentComponent() != nullptr && w->getContentComponent()->getNumChildComponents() > 0
+                                             && dynamic_cast<juce::Viewport*> (w->getContentComponent()->getChildComponent (0)) != nullptr;
+                        report << (scrolls ? "ok   " : "FAIL ") << "its content is in a scrolling viewport\n";
+                        ok = ok && scrolls;
+                    }
+                    else
+                    {
+                        report << "FAIL fixed-size tool window not found\n";
+                        ok = false;
+                    }
+                    lynx::closeAllToolWindows();
                     // a resizable window that fits at 100%, then the zoom goes up (the main window's case)
                     juce::Desktop::getInstance().setGlobalScaleFactor (1.0f);
                     big = std::make_unique<juce::DocumentWindow> ("LYNX fit test - zoom", lynx::theme::colour::bg2, juce::DocumentWindow::allButtons);
@@ -2311,13 +2354,13 @@ private:
                     big->setVisible (true);
                     return;
                 }
-                if (step == 2)
+                if (step == 3)
                 {
                     juce::Desktop::getInstance().setGlobalScaleFactor ((float) percent / 100.0f);
                     juce::Timer::callAfterDelay (200, [] { lynx::fitAllWindowsOnScreen(); });
                     return;
                 }
-                if (step == 3)
+                if (step == 4)
                 {
                     check ("resizable window after the zoom change: fits the screen", *big, true);
                     big.reset();
@@ -4459,6 +4502,116 @@ private:
         lynx::FormulaControllerWindows::closeAll();
     }
 
+    void runVfxShot (const juce::String& prefix)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        lynx::MainComponent ui (offline, false);
+        ui.setSize (1280, 720);
+        auto song = lynx::Song::makeDefault();
+        song.channels.clear();
+        for (const auto kind : lynx::vfx::allKinds)
+        {
+            lynx::ChannelDef c;
+            lynx::vfx::makeChannel (c, kind);
+            if (kind == lynx::vfx::Kind::keyMapper) // a chord on every key: something to see in the grid
+                for (const auto& p : lynx::vfx::builtInPresets (kind))
+                    if (p.name == "Major triad")
+                    {
+                        auto st = *lynx::vfx::readState (c.pluginState);
+                        st.fl = p.fl;
+                        c.pluginState = lynx::vfx::writeState (st);
+                    }
+            song.channels.push_back (c);
+        }
+        // a Patcher: its notes through a Color Mapper to three synths
+        lynx::ChannelDef patcher;
+        patcher.name = "Patcher";
+        patcher.instrument = lynx::InstrumentKind::patcher;
+        lynx::PatchNode mapper;
+        mapper.generator = true;
+        lynx::vfx::makeChannel (mapper.channel, lynx::vfx::Kind::colorMapper);
+        mapper.x = 260.0f;
+        patcher.patcher.nodes.push_back (mapper);
+        lynx::PatchWire notes;
+        notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
+        patcher.patcher.wires.push_back (notes);
+        for (int k = 0; k < 3; ++k)
+        {
+            lynx::PatchNode synth;
+            synth.generator = true;
+            synth.channel.instrument = lynx::InstrumentKind::synth;
+            synth.channel.name = "Synth " + std::to_string (k + 1);
+            synth.x = 520.0f, synth.y = (float) k * 90.0f;
+            patcher.patcher.nodes.push_back (synth);
+            lynx::PatchWire in, out;
+            in.kind = lynx::PatchWire::Kind::midi, in.from = 0, in.fromPort = k, in.to = 1 + k;
+            out.from = 1 + k, out.to = lynx::patchToHost;
+            patcher.patcher.wires.push_back (in);
+            patcher.patcher.wires.push_back (out);
+        }
+        patcher.patcher.outputX = 760.0f;
+        song.channels.push_back (patcher);
+        offline.setSong (std::move (song));
+        offline.dispatchPendingMessages();
+        for (int c = 0; c < lynx::vfx::kindCount; ++c)
+            if (auto panel = lynx::makeChannelSettingsPanel (offline, c))
+            {
+                offline.dispatchPendingMessages();
+                savePng (panel->createComponentSnapshot (panel->getLocalBounds()),
+                         prefix + "-" + juce::String (lynx::vfx::flName (*lynx::vfx::kindOf (offline.getSong().channels[(std::size_t) c]))).replaceCharacter (' ', '-').toLowerCase() + ".png");
+            }
+        // with FL Studio installed: the Sequencer with FL's factory bank (to compare with FL's own editor) and
+        // a Script with FL's "Snap To Scale"
+        if (const auto roots = lynx::findFlStudioRoots(); ! roots.data.empty())
+        {
+            const auto data = juce::File (juce::String::fromUTF8 (roots.data.c_str()));
+            const std::pair<lynx::vfx::Kind, juce::String> extra[] = {
+                { lynx::vfx::Kind::sequencer, "Patches/Plugin database/Effects/Patcher/VFX Sequencer.fst" },
+                { lynx::vfx::Kind::script, "Patches/Plugin presets/Effects/VFX Script/Snap To Scale.fst" },
+            };
+            for (const auto& [kind, path] : extra)
+            {
+                juce::MemoryBlock bytes;
+                if (! data.getChildFile (path).loadFileAsData (bytes))
+                    continue;
+                const auto* b = static_cast<const std::uint8_t*> (bytes.getData());
+                const auto fl = lynx::vfx::stateFromFlPreset (std::vector<std::uint8_t> (b, b + bytes.getSize()), kind);
+                int index = -1;
+                for (int c = 0; c < lynx::vfx::kindCount; ++c)
+                    if (lynx::vfx::kindOf (offline.getSong().channels[(std::size_t) c]) == kind)
+                        index = c;
+                if (! fl || index < 0)
+                    continue;
+                offline.editSong ([&] (lynx::Song& s) {
+                    auto st = *lynx::vfx::readState (s.channels[(std::size_t) index].pluginState);
+                    st.fl = *fl;
+                    s.channels[(std::size_t) index].pluginState = lynx::vfx::writeState (st);
+                });
+                offline.dispatchPendingMessages();
+                if (auto panel = lynx::makeChannelSettingsPanel (offline, index))
+                {
+                    offline.dispatchPendingMessages();
+                    savePng (panel->createComponentSnapshot (panel->getLocalBounds()),
+                             prefix + "-" + juce::String (lynx::vfx::flName (kind)).replaceCharacter (' ', '-').toLowerCase() + "-fl.png");
+                }
+            }
+        }
+        lynx::PatcherWindows::openChannel (offline, lynx::vfx::kindCount);
+        for (int k = 0; k < juce::TopLevelWindow::getNumTopLevelWindows(); ++k)
+            if (auto* w = dynamic_cast<juce::DocumentWindow*> (juce::TopLevelWindow::getTopLevelWindow (k)))
+                if (w->getName().startsWith (lynx::tr ("Patcher")) && w->getContentComponent() != nullptr)
+                {
+                    auto* content = w->getContentComponent();
+                    savePng (content->createComponentSnapshot (content->getLocalBounds()), prefix + "-patcher.png");
+                    delete w;
+                    break;
+                }
+        lynx::PatcherWindows::shootMenus (offline, true, lynx::vfx::kindCount, 0, [&] (const juce::Image& image, const juce::String& name) {
+            savePng (image, prefix + "-patcher-menu-" + name + ".png");
+        });
+    }
+
     void runPatcherShot (const juce::String& prefix, const juce::String& projectPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -5222,6 +5375,27 @@ private:
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-browser-plugins.png");
             ui.getBrowserForSnapshot().setTab (lynx::BrowserComponent::allTab);
+            saveWindow (ui.getBrowserForSnapshot().makeFoldersPanelForSnapshot(), "-browser-folders.png"); // round 164
+            {
+                // round 164: the content filter leaves out the folders with nothing to list (a small library)
+                const auto lib = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("lynx-snapshot-library");
+                lib.deleteRecursively();
+                for (const auto* path : { "Drums/Kicks/kick 1.wav", "Drums/Kicks/kick 2.wav", "Drums/snare.wav", "Keys/pad.sf2", "Presets/Synth/lead.fst",
+                                          "Projects/beat.flp", "Projects/MIDI/chords.mid", "Notes/readme.txt", "Empty/Nothing/.keep" })
+                    lib.getChildFile (path).create();
+                ui.showDesktopForSnapshot (false);
+                ui.getBrowserForSnapshot().showFilterForSnapshot (lib, lynx::browserview::ContentFilter::all);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-browser164-all.png");
+                ui.getBrowserForSnapshot().showFilterForSnapshot (lib, lynx::browserview::ContentFilter::samples);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-browser164-samples.png");
+                ui.getBrowserForSnapshot().showFilterForSnapshot (lib, lynx::browserview::ContentFilter::projects);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-browser164-projects.png");
+                lib.deleteRecursively();
+                ui.getBrowserForSnapshot().resetViewForSnapshot();
+            }
 
             // the undo history after a few edits
             offline.editSong ([] (lynx::Song& s) { s.bpm += 1.0; });

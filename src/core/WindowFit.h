@@ -28,4 +28,28 @@ inline Box place (Box outer, Box area)
     y = std::max (y, area.y);
     return { x, y, outer.w, outer.h };
 }
+// Round 164: the size of a fixed-size window's content when it must fit the usable screen (`areaW` x `areaH`,
+// minus the window frame): a content that is too tall (or too wide) scrolls in a viewport of this size, the scroll
+// bar taking `scrollBar` px beside it. A content that fits keeps its size (`scrolls` false).
+struct ScrollFit
+{
+    int w = 0, h = 0;
+    bool scrollsV = false, scrollsH = false;
+    bool scrolls() const { return scrollsV || scrollsH; }
+};
+
+inline ScrollFit scrollFit (int contentW, int contentH, int areaW, int areaH, int frameW, int frameH, int scrollBar)
+{
+    const auto maxW = std::max (100, areaW - frameW), maxH = std::max (100, areaH - frameH);
+    ScrollFit fit;
+    fit.scrollsV = contentH > maxH;
+    // a vertical scroll bar needs room beside the content; without the room, the content scrolls sideways too
+    const auto wantW = contentW + (fit.scrollsV ? scrollBar : 0);
+    fit.scrollsH = wantW > maxW;
+    fit.w = std::min (wantW, maxW);
+    fit.h = std::min (contentH + (fit.scrollsH ? scrollBar : 0), maxH);
+    if (fit.scrollsH && ! fit.scrollsV && contentH + scrollBar > maxH)
+        fit.scrollsV = true;
+    return fit;
+}
 } // namespace lynx::windowfit

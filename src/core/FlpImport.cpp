@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/Vfx.h"
 #include "core/Patcher.h"
 #include <filesystem>
 #include "core/EditorPolish.h"
@@ -443,6 +444,19 @@ std::vector<std::uint8_t> dx10Snapshot (const flp::Channel& c)
     return s;
 }
 
+void applyFlStretchPanel (SamplerSettings& s, int mode, int pitchCents, int mul, float timeTicks, double sampleSeconds, double bpm)
+{
+    if (mode != 0)
+    {
+        s.keepPitch = true;
+        s.stretchMethod = stretchMethodForFlMode (mode);
+        s.pitch = std::clamp (s.pitch + std::clamp (pitchCents, -4800, 4800) / 100.0f, -24.0f, 24.0f);
+    }
+
+    if (timeTicks <= 0.0f && mul != 0 && sampleSeconds > 0.0 && bpm > 0.0)
+        s.stretchBeats = std::clamp ((float) (sampleSeconds * std::pow (2.0, mul / 10000.0) * bpm / 60.0), 0.0f, 4096.0f);
+}
+
 void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads)
 {
     if (channel < 0 || channel >= (int) song.channels.size() || pads.empty())
@@ -842,11 +856,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (c.rootNote >= 0 && c.rootNote <= 127)
             def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - c.rootNote), -24.0f, 24.0f);
 
-        // an FL audio clip channel's header pitch and root note are not its time-stretch pitch: LYNX played its clips
-        // untransposed before round 163 made the channel pitch transpose clips, and keeps them so ([ASSUMPTION], not
-        // measured in FL; FL's stretch pitch is not read yet)
-        if (isAudioClip)
-            def.sampler.pitch = 0.0f;
+        // an FL audio clip plays like a C5 note of its channel: the header pitch, the root note and the fine tune
+        // transpose it too [FL: measured, REA_rodada164e-clippitch §2 — round 163 had dropped them on an assumption]
 
         def.swingMix = std::clamp (c.swingMix / 128.0f, 0.0f, 1.0f);
         def.cutGroup = c.cutGroup;
@@ -1236,6 +1247,16 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         {
             def.instrument = InstrumentKind::midiOut;
             def.pluginState = c.pluginState;
+        }
+
+        // FL's VFX plugins (round 164b): note processors, with FL's state as it is
+        if (const auto kind = vfx::kindOfFlName (c.pluginName))
+        {
+            def.instrument = InstrumentKind::vfx;
+            vfx::State vs;
+            vs.kind = *kind;
+            vs.fl = c.pluginState.empty() ? vfx::defaultState (*kind) : c.pluginState;
+            def.pluginState = vfx::writeState (vs);
         }
 
         // Fruit Kick, MiniSynth, ... (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
@@ -1798,6 +1819,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.keepPitch = c.stretchMode != 0; // only FL's "Resample" changes the pitch
             def.sampler.stretchMethod = stretchMethodForFlMode (c.stretchMode);
         }
+
+        // FL's time-stretching panel on a sample channel or an audio clip [FL: measured, REA_rodada164e-clippitch §2]:
+        // every mode but Resample keeps the length (also without a TIME: the keys, the pitch knob and the root note
+        // transpose keeping the length) and adds its PITCH knob; Resample ignores that knob. MUL without a TIME
+        // stretches the sample by 2^(MUL/10000) (Resample: slower and lower), at the project's tempo here.
+        if ((c.type == flp::ChannelType::sampler || isAudioClip)
+            && (def.instrument == InstrumentKind::sampler || def.instrument == InstrumentKind::audioClip))
+        {
+            const auto needsLength = c.stretchTime <= 0.0f && c.stretchMul != 0 && ! def.samplePath.empty() && options.sampleSeconds;
+            applyFlStretchPanel (def.sampler, c.stretchMode, c.stretchPitch, c.stretchMul, c.stretchTime,
+                                 needsLength ? options.sampleSeconds (def.samplePath) : 0.0, song.bpm);
+        }
         // report: what happened to this channel's generator/sample
         if (options.report != nullptr)
         {
@@ -1841,6 +1874,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (plugin == "fruity wrapper" && def.plugin.foreign.format == ForeignPlugin::Format::none)
                 ++r.unsupported["Fruity Wrapper (plugin state not readable)"]; // e.g. a wrapper version newer than 12
             else if (plugin == "midi out" && def.instrument == InstrumentKind::midiOut)
+                ++r.converted[c.pluginName];
+            else if (def.instrument == InstrumentKind::vfx)
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
@@ -2025,7 +2060,23 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             constexpr float spreadX = 2.0f, spreadY = 1.6f;
             node.x = fl.x * spreadX;
             node.y = fl.y * spreadY;
-            if (fl.generator)
+            if (const auto kind = vfx::kindOfFlName (fl.plugin)) // a VFX node (an effect in FL's graph): voices in, voices out
+            {
+                node.generator = true;
+                vfx::makeChannel (node.channel, *kind);
+                vfx::State vs;
+                vs.kind = *kind;
+                vs.fl = fl.state.empty() ? vfx::defaultState (*kind) : fl.state;
+                node.channel.pluginState = vfx::writeState (vs);
+                if (! fl.label.empty())
+                    node.channel.name = fl.label;
+                node.channel.mixerTrack = 0;
+                node.channel.volume = 1.0f;
+                node.channel.pan = 0.0f;
+                if ((options.report != nullptr))
+                    ++options.report->converted["Patcher: " + fl.plugin];
+            }
+            else if (fl.generator)
             {
                 node.generator = true;
                 flp::Project mini;
@@ -2195,11 +2246,17 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
                 else
                 {
-                    // a node's MIDI output: a MIDI Out's (round 162); other plugins' MIDI outputs are not passed yet
+                    // a node's MIDI output: a MIDI Out's (round 162), a VFX node's voice output N (FL's pin N, 1…;
+                    // round 164b); other plugins' MIDI outputs are not passed yet
                     const auto& source = doc.nodes[(std::size_t) w.from];
-                    if (! source.generator || source.channel.instrument != InstrumentKind::midiOut)
+                    if (! source.generator)
                         continue;
-                    w.fromPort = 0;
+                    if (source.channel.instrument == InstrumentKind::vfx)
+                        w.fromPort = std::max (0, src->index - 1);
+                    else if (source.channel.instrument == InstrumentKind::midiOut)
+                        w.fromPort = 0;
+                    else
+                        continue;
                 }
                 if (w.to == patchToHost) // "MIDI port N": the notes go to the plugins on that MIDI port
                 {
