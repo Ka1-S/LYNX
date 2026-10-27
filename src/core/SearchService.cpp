@@ -265,15 +265,21 @@ void Service::runSearch (SearchJob& job)
         const auto disk = counting (fs, listed);
         auto lastShown = now(), lastSaved = now();
         std::size_t savedAt = 0;
+        bool shown = false;
         auto stop = [&] {
             if (superseded (job.id))
                 return true;
             const auto t = now();
-            if (t - lastShown >= 500)
+            // what is already indexed is shown at once (round 164), then partial results every 500 ms
+            if (! shown || t - lastShown >= 500)
             {
+                const bool first = ! shown;
+                shown = true;
                 lastShown = t;
                 setStatus ([&] (IndexStatus& s) { s.listed = listed; });
                 const auto partial = find (job, true);
+                if (first && partial.paths.empty())
+                    return false;
                 const std::lock_guard<std::mutex> guard (lock);
                 if (! stopping && latestSearch == job.id && job.done)
                     job.done (partial);
@@ -346,9 +352,11 @@ bool Service::runPass (Pass& pass)
 {
     if (pass.rebuild)
     {
+        // the index is not forgotten first (searches meanwhile still read it, round 164): every folder is listed again
+        // and the ones no walk reached are dropped at the end
         {
             const std::lock_guard<std::mutex> guard (indexLock);
-            index.clear();
+            pass.rebuildMark = index.beginRebuild();
         }
         {
             const std::lock_guard<std::mutex> guard (lock);
@@ -392,7 +400,7 @@ bool Service::runPass (Pass& pass)
             s.current = root;
             s.listed = listed;
         });
-        index.refresh (root, disk, stop, &indexLock);
+        index.refresh (root, disk, stop, &indexLock, pass.rebuildMark);
         if (interrupted())
         {
             if (listed > savedAt)
@@ -412,7 +420,12 @@ bool Service::runPass (Pass& pass)
         pass.roots.erase (pass.roots.begin());
     }
 
-    if (listed > savedAt)
+    if (pass.rebuildMark != 0)
+    {
+        const std::lock_guard<std::mutex> guard (indexLock);
+        index.sweep (pass.rebuildMark);
+    }
+    if (listed > savedAt || pass.rebuildMark != 0)
         saveIndex();
     const auto changed = listed + pass.listedBefore > 0;
     setStatus ([&] (IndexStatus& s) {

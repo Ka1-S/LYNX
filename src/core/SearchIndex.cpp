@@ -36,7 +36,32 @@ void Index::drop (const std::string& folder, char separator)
         drop (join (folder, s, separator), separator);
 }
 
-int Index::refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop, std::mutex* guard)
+void Index::sweep (std::uint64_t since)
+{
+    for (auto f = folders.begin(); f != folders.end();)
+    {
+        if (f->second.seenIn < since)
+        {
+            f = folders.erase (f);
+            ++gen;
+        }
+        else
+            ++f;
+    }
+    for (auto r = complete.begin(); r != complete.end();)
+    {
+        if (folders.count (*r) == 0)
+        {
+            r = complete.erase (r);
+            ++gen;
+        }
+        else
+            ++r;
+    }
+}
+
+int Index::refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop, std::mutex* guard,
+                    std::uint64_t relistBefore)
 {
     if (! fs.folderTime || ! fs.list || root.empty())
         return 0;
@@ -66,9 +91,13 @@ int Index::refresh (const std::string& root, const FileSystem& fs, const std::fu
                 continue;
             }
             const auto known = folders.find (folder);
-            dirty = known == folders.end() || known->second.time != time; // new or "dirty": list it again
+            // new, "dirty" or not listed since a rebuild began: list it again
+            dirty = known == folders.end() || known->second.time != time || known->second.listedIn < relistBefore;
             if (! dirty)
+            {
+                known->second.seenIn = mark;
                 subs = known->second.subfolders;
+            }
         }
 
         if (dirty)
@@ -88,6 +117,7 @@ int Index::refresh (const std::string& root, const FileSystem& fs, const std::fu
             auto& entry = folders[folder];
             ++gen;
             entry.time = time;
+            entry.listedIn = entry.seenIn = mark;
             entry.files = std::move (listing.files);
             entry.subfolders = std::move (listing.subfolders);
             subs = entry.subfolders;
