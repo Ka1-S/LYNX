@@ -55,6 +55,28 @@ int vibratoShapeIndex (float v) noexcept { return stepped (v, vibratoShapes); }
 double vibratoRateHz (float v) noexcept { return 0.1 + 9.9 * (double) std::clamp (v, 0.0f, 1.0f); }
 double vibratoDepthCents (float v) noexcept { return 100.0 * (double) std::clamp (v, 0.0f, 1.0f); }
 double vibratoOnsetMs (float v) noexcept { return 1500.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+
+// round 165hb: Throat length — 50 … 100 % on the knob's lower half, 100 … 180 % on the upper half (exponential halves)
+double throatPercent (float v) noexcept
+{
+    const auto x = (double) std::clamp (v, 0.0f, 1.0f);
+    return x < 0.5 ? 50.0 * std::exp2 (x / 0.5) : 100.0 * std::pow (1.8, (x - 0.5) / 0.5);
+}
+float throatValue (double percent) noexcept
+{
+    percent = std::clamp (percent, 50.0, 180.0);
+    return (float) (percent < 100.0 ? 0.5 * std::log2 (percent / 50.0) : 0.5 + 0.5 * std::log (percent / 100.0) / std::log (1.8));
+}
+// [EXEC] Auto-Tune Pro 11.6 black-box (REA_rodada165hb §2): a single +24 dB resonance (400 … 4000 Hz) under a 147 Hz
+// harmonic voice moves by −12·log2 (L / 100) semitones within ±1 st at 50 … 180 % — a little more below 100 % (+13.0 st
+// at 50 %, +6.1 at 72 %) and a little less above it (−5.0 at 135 %, −9.4 at 180 %); with Formant Correction off the
+// throat does nothing. (Round 138's half-size law came from a synthetic vowel whose formants were too flat to follow.)
+double throatSemitones (double percent) noexcept
+{
+    percent = std::clamp (percent, 50.0, 180.0);
+    const auto st = -12.0 * std::log2 (percent / 100.0);
+    return st * (percent < 100.0 ? 1.08 : 0.93);
+}
 // [EXEC] the trial's taper (round 120, docs/specs/waves-tune-real-time.md): 0 … 0.5 → 0.1 … 50 ms, 0.5 … 2/3 → 50 …
 // 120 ms, 2/3 … 1 → 120 … 800 ms
 double speedMs (float v) noexcept
