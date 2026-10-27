@@ -1352,6 +1352,8 @@ void MainComponent::loadUiSettings()
             engine.getTransport().metronomeVolume.store ((float) controls::clampUtilityVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue()));
         else if (key == "previewVolume")
             engine.setPreviewVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue());
+        else if (key == "editorVolume")
+            engine.setEditorVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue());
         else if (key == "rackPianoRollView")
             rack.setPianoRollView (on);
         else if (key == "undoLevels")
@@ -1417,6 +1419,7 @@ void MainComponent::saveUiSettings()
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\nmetronomeVolume=" + juce::String (engine.getTransport().metronomeVolume.load(), 2)
                                       + "\npreviewVolume=" + juce::String (engine.getPreviewVolume(), 2)
+                                      + "\neditorVolume=" + juce::String (engine.getEditorVolume(), 2)
                                       + "\nrackPianoRollView=" + juce::String (rack.isPianoRollView() ? 1 : 0)
                                       + "\naskWhatToRecord=" + juce::String (engine.getRecordOptions().askWhatToRecord ? 1 : 0)
                                       + "\nrecordNotes=" + juce::String (engine.getRecordOptions().recordNotes ? 1 : 0)

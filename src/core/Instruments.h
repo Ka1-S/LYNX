@@ -36,6 +36,16 @@ public:
     virtual void noteOffPort (int /*port*/, int key, int midiChannel) noexcept { noteOffMidi (key, midiChannel); }
     // A short MIDI message (program change, bank select…) for the next block. Only hosted plugins take it.
     virtual void midiMessage (const std::uint8_t* /*bytes*/, int /*size*/) noexcept {}
+    // A MIDI controller's pitch wheel on this channel (round 162, issue #9), already scaled by the channel's pitch
+    // range (FL's Misc › Pitch range, ±2 semitones by default): every sounding and new note is bent by `semitones`
+    // until the wheel moves again. Audio thread. Hosted plugins get the raw MIDI pitch bend instead (midiMessage).
+    virtual void pitchBend (float /*semitones*/) noexcept {}
+    // A controller (CC 0…127, `value` 0..1) played live into a native instrument (the mod wheel is CC 1). Ignored by
+    // engines without MIDI controllers; hosted plugins get the raw message (midiMessage).
+    virtual void controlChange (int /*cc*/, float /*value*/) noexcept {}
+    // UI thread, before the instrument reaches the audio thread: a sampler whose sample is stretched keeping its pitch
+    // allocates its per-voice pitch shifters (keys transpose it without changing its length, like FL's Stretch modes).
+    virtual void prepareKeyShift (double /*sampleRate*/) {}
 
     // Adds (does not overwrite) n samples into left/right, with the gains already applied.
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;

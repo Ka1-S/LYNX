@@ -18,7 +18,10 @@ constexpr int audioClipKey (std::size_t playlistIndex) noexcept { return audioCl
 
 struct NoteEvent
 {
-    enum class Type : std::uint8_t { on, off, slide, choke }; // slide: glides the sounding notes to `key`; choke: cut group
+    enum class Type : std::uint8_t { on, off, slide, choke, control }; // slide: glides the sounding notes to `key`; choke: cut group
+    // control (live MIDI input only, round 162): `key` = CC number 0…127, controlPitchBend or controlPressure;
+    // `velocity` = the value, 0..1 (the pitch wheel: -1..1, 0 = centre)
+    static constexpr int controlPitchBend = 128, controlPressure = 129;
 
     int sampleOffset = 0;   // 0 .. numSamples-1 within the block
     Type type = Type::on;

@@ -22,6 +22,36 @@ std::shared_ptr<SampleData> timeStretch (const SampleData& input, double ratio, 
 // pitch-preserving stretch; callers keep resampling for it.
 StretchMethod stretchMethodForFlMode (int flMode) noexcept;
 
+// A voice's real-time pitch shifter (round 162, issue #9: a sampler stretched keeping its pitch follows the keys like
+// FL's Stretch modes — the note transposes the sample and its length stays). The voice reads its source `factor` times
+// faster (an exact transposition, as a resampler) and Signalsmith Stretch stretches that back to the source's length
+// (pitch kept): measured within 0.05 cent from 55 Hz up, where Signalsmith's own spectral transposition was off by up to
+// 30 cents with real-time block sizes. The voice primes it with primeLength (factor) input frames when the note starts,
+// so the output is aligned with the source (no latency); then each process() takes the input frames read for n output
+// frames (n / factor of them, accumulated by the caller). allocate() on the UI thread; start()/process() never allocate.
+class VoicePitchShifter
+{
+public:
+    static constexpr double minFactor = 0.25, maxFactor = 4.0; // ±2 octaves
+
+    VoicePitchShifter();
+    ~VoicePitchShifter();
+    VoicePitchShifter (const VoicePitchShifter&) = delete;
+    VoicePitchShifter& operator= (const VoicePitchShifter&) = delete;
+
+    void allocate (double sampleRate, StretchMethod method);
+    bool ready() const noexcept;
+    int primeLength (double factor) const noexcept;
+    int maxPrimeLength() const noexcept { return primeLength (minFactor); } // the longest: the lowest transposition
+    // `l`/`r` (r may equal l): primeLength (factor) frames of the transposed source from the note's start
+    void start (const float* l, const float* r, int frames) noexcept;
+    void process (const float* inL, const float* inR, int inFrames, float* outL, float* outR, int outFrames) noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+};
+
 namespace stretchdetail
 {
 // Exposed for the tests: attack positions (frames) found in a mono signal, strongest-first filtering already applied.

@@ -6029,10 +6029,18 @@ TEST (cut_groups_stretch_and_envelope_import)
     lynx::ChannelDef c;
     c.sampler.stretchBeats = 4.0f;
     inst->configure (c, 120.0);
-    inst->noteOn (72, 1.0f); // the note pitch doesn't change the speed
+    inst->noteOn (60, 1.0f);
     std::vector<float> a (48000), b (48000);
     inst->render (a.data(), b.data(), 48000, 1.0f, 1.0f);
     CHECK (std::abs (a[47999] - 0.5f) < 0.01f); // after 1 s it has read half
+    // FL's Resample: the key still transposes, like tape (round 162, issue #9): an octave up reads twice as fast
+    inst->allNotesOff();
+    std::fill (a.begin(), a.end(), 0.0f);
+    inst->render (a.data(), b.data(), 4800, 1.0f, 1.0f);
+    std::fill (a.begin(), a.end(), 0.0f);
+    inst->noteOn (72, 1.0f);
+    inst->render (a.data(), b.data(), 24000, 1.0f, 1.0f);
+    CHECK (std::abs (a[23999] - 0.5f) < 0.01f);
 
     // FL envelope time: 32950 = 2 s; < 101 = 0
     CHECK (std::abs (flp::Channel::envelopeTime (32950) - 2.0) < 0.01 && flp::Channel::envelopeTime (50) == 0.0);
@@ -16024,6 +16032,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Mp3157Tests.inc"
 #include "Quality160Tests.inc"
 #include "CrashReport159Tests.inc"
+#include "Sampler162Tests.inc"
 #include "Theme162Tests.inc"
 #include "PluginPresets162Tests.inc"
 #include "Look162Tests.inc"

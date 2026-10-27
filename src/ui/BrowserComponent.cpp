@@ -3064,7 +3064,7 @@ void BrowserComponent::openFile (const juce::File& file)
             c.name = name;
             c.instrument = InstrumentKind::sampler;
             c.samplePath = path;
-            c.mixerTrack = s.nextFreeInsert();
+            c.mixerTrack = s.claimFreeInsert();
             s.channels.push_back (c);
         });
         engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);
@@ -3089,7 +3089,7 @@ void BrowserComponent::openFile (const juce::File& file)
                 c.name = name;
                 c.instrument = InstrumentKind::synth;
                 c.synth = *synth;
-                c.mixerTrack = s.nextFreeInsert();
+                c.mixerTrack = s.claimFreeInsert();
                 s.channels.push_back (c);
             });
             engine.setSelectedChannel ((int) engine.getSong().channels.size() - 1);

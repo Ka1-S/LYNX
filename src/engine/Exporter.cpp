@@ -4,6 +4,7 @@
 #include "core/Mp3Encoder.h"
 #include "engine/AudioEngine.h"
 #include "engine/Text.h"
+#include "ui/I18n.h"
 
 namespace lynx
 {
@@ -51,6 +52,33 @@ std::int64_t tailTicksFor (const Song& song, const Options& o, std::int64_t& mus
 double tailSecondsFor (const Options& o)
 {
     return o.tail == TailMode::cut ? 0.0 : o.maxTailSeconds;
+}
+
+// Round 162 (issue #9: exporting over a file of the same name failed): the file is written next to the target under a
+// temporary name and replaces it only once complete, so a cancelled or failed export leaves the old file as it was. A
+// target another program holds open (a media player, a preview) is reported before the render starts.
+bool canReplace (const juce::File& target)
+{
+    if (! target.exists())
+        return true;
+    if (target.isDirectory())
+        return false;
+    juce::FileOutputStream probe (target); // opening for writing fails while another program holds it (Windows)
+    return probe.openedOk();
+}
+
+juce::String inUseMessage (const juce::File& target)
+{
+    return tr ("\"{0}\" is in use by another program (a media player, or a preview). Close it, or export with another name.",
+               { target.getFileName() });
+}
+
+bool replaceTarget (juce::TemporaryFile& temp, const juce::File& target, juce::String& error)
+{
+    if (temp.overwriteTargetFileWithTemporary())
+        return true;
+    error = canReplace (target) ? tr ("could not replace {0}", { target.getFullPathName() }) : inUseMessage (target);
+    return false;
 }
 
 int oggQualityIndex (juce::AudioFormat& format, int kbps)
@@ -107,6 +135,13 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
     render.hqAllPlugins = options.hqAllPlugins;
     render.pluginWarmUp = options.pluginWarmUp;
 
+    for (const auto f : formatsOf (options))
+        if (const auto file = f == options.format ? output : output.withFileExtension (extension (f)); ! canReplace (file))
+        {
+            error = inUseMessage (file);
+            return false;
+        }
+
     // streaming straight into the file when nothing needs the whole render first (the classic WAV/FLAC/OGG export)
     const auto streaming = options.format != exportopts::Format::mp3 && options.channels == Channels::stereo && ! options.normalize
                            && options.tail == TailMode::leave && formatsOf (options).size() == 1;
@@ -150,12 +185,12 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
     else
         format = std::make_unique<juce::WavAudioFormat>();
 
-    output.deleteFile();
-    auto stream = output.createOutputStream();
+    juce::TemporaryFile temp (output);
+    auto stream = temp.getFile().createOutputStream();
 
     if (stream == nullptr)
     {
-        error = utf8 ("could not create ") + output.getFullPathName();
+        error = tr ("could not create {0}", { output.getFullPathName() });
         return false;
     }
 
@@ -177,12 +212,11 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
 
     if (peak < 0.0f)
     {
-        output.deleteFile();
-        error = "cancelled";
+        error = "cancelled"; // (the temporary file goes away; an older file of that name stays)
         return false;
     }
 
-    return true;
+    return replaceTarget (temp, output, error);
 }
 
 bool ExportJob::writeBuffered (std::vector<float>& left, std::vector<float>& right, juce::String& error)
@@ -243,7 +277,7 @@ bool ExportJob::writeBuffered (std::vector<float>& left, std::vector<float>& rig
 
 bool ExportJob::writeFile (const Options& o, const juce::File& file, float* left, float* right, int frames, int channels, juce::String& error)
 {
-    file.deleteFile();
+    juce::TemporaryFile temp (file);
 
     if (o.format == exportopts::Format::mp3)
     {
@@ -262,12 +296,12 @@ bool ExportJob::writeFile (const Options& o, const juce::File& file, float* left
             encoder.encode (left + done, right + done, juce::jmin (block, frames - done), bytes);
         encoder.finish (bytes);
 
-        if (! file.replaceWithData (bytes.data(), bytes.size()))
+        if (! temp.getFile().replaceWithData (bytes.data(), bytes.size()))
         {
-            error = utf8 ("could not create ") + file.getFullPathName();
+            error = tr ("could not create {0}", { file.getFullPathName() });
             return false;
         }
-        return true;
+        return replaceTarget (temp, file, error);
     }
 
     std::unique_ptr<juce::AudioFormat> format;
@@ -285,10 +319,10 @@ bool ExportJob::writeFile (const Options& o, const juce::File& file, float* left
     else
         format = std::make_unique<juce::WavAudioFormat>();
 
-    auto stream = file.createOutputStream();
+    auto stream = temp.getFile().createOutputStream();
     if (stream == nullptr)
     {
-        error = utf8 ("could not create ") + file.getFullPathName();
+        error = tr ("could not create {0}", { file.getFullPathName() });
         return false;
     }
 
@@ -308,10 +342,9 @@ bool ExportJob::writeFile (const Options& o, const juce::File& file, float* left
 
     if (! ok)
     {
-        file.deleteFile();
-        error = utf8 ("could not write ") + file.getFullPathName();
+        error = tr ("could not write {0}", { file.getFullPathName() });
         return false;
     }
-    return true;
+    return replaceTarget (temp, file, error);
 }
 } // namespace lynx

@@ -10,7 +10,7 @@ PreviewPlayer::PreviewPlayer()
     kernel.setQuality (flrs::liveQuality);
 }
 
-void PreviewPlayer::play (std::shared_ptr<const SampleData> sample, bool loop, float newGain)
+void PreviewPlayer::play (std::shared_ptr<const SampleData> sample, bool loop, float newGain, bool forEditor)
 {
     std::shared_ptr<const SampleData> old;
     {
@@ -20,6 +20,7 @@ void PreviewPlayer::play (std::shared_ptr<const SampleData> sample, bool loop, f
         pendingLoop = loop;
         pendingGain = newGain;
         pendingBrowser = false;
+        pendingEditor = forEditor;
         hasPending = true;
     }
 }
@@ -34,6 +35,7 @@ void PreviewPlayer::playBrowser (std::shared_ptr<const SampleData> sample, float
         pendingLoop = false;
         pendingGain = newGain;
         pendingBrowser = true;
+        pendingEditor = false;
         hasPending = true;
     }
 }
@@ -53,6 +55,7 @@ void PreviewPlayer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             looping = pendingLoop;
             gain = pendingGain;
             browser = pendingBrowser;
+            editor = pendingEditor;
             position = 0.0;
         }
     }
@@ -69,7 +72,7 @@ void PreviewPlayer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     const auto rate = current->sampleRate / deviceRate;
     auto* outL = buffer.getWritePointer (0);
     auto* outR = buffer.getWritePointer (1);
-    const auto level = gain * (browser ? volume.load (std::memory_order_relaxed) : 1.0f);
+    const auto level = gain * (browser ? volume.load (std::memory_order_relaxed) : editor ? editorVolume.load (std::memory_order_relaxed) : 1.0f);
 
     // FL's sampler interpolation (24-point sinc, round 160) instead of the linear read it had: a 44.1 kHz file on a
     // 48 kHz device lost 1.5 dB at 10 kHz and had an image at −21 dBc (13.9 kHz) in the Browser and editor previews
