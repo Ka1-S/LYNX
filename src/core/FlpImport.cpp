@@ -1941,6 +1941,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      && def.instrument == InstrumentKind::synth)
             {
                 const auto note = flextra::inertPluginNote (c.pluginName); // round 165g: ReWired, Video Player, FL Studio Mobile
+                if (c.pluginName == "ReWired" || c.pluginName == "Fruity Video Player")
+                    def.muted = true; // no sound of their own in LYNX: the stand-in synth must not play their notes
                 ++r.unsupported[note.empty() ? c.pluginName : note]; // (Keyboard Controller only sends notes to other channels)
             }
         }

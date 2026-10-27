@@ -58,4 +58,16 @@ styles skipped) and opens web addresses and external links in the user's browser
 
 ## 5. Inert plugins
 Razer Chroma (vendor lighting) and FL Studio Mobile Rack FX are left out of the mixer with a note in the import report;
-ReWired, Fruity Video Player and FL Studio Mobile channels keep LYNX's synth substitute with a note saying why.
+FL Studio Mobile channels keep LYNX's synth substitute with a note saying why; ReWired and Fruity Video Player channels
+(no sound of their own) are imported muted, with the note.
+
+## 6. Left for a next round (groundwork)
+- Transmitter [DATA 34 presets, tmp scratch tr.py]: state = i32 version 3 + 47 ints. Ints 1–33 are controls 0…10000
+  (Default: 7475, 1968, 1968, 8743, 8743, 5000, 5000, 10000, 9112, 0, 5000, 5051, …), 34–42 flags/selectors (34–38
+  0/1 enables: "Transient only" clears 38, "Sustain only" clears 37; 39–40 selectors 0…5; 41–42 0/1), 46 = 49…90,
+  47 = 257 / 65793 (bytes). The DSP (transient / sustain split, Saturation / Bounce / Diffusion / Delay per section) needs
+  a decompile of Transmitter.dll before LYNX can reproduce it; until then an imported Transmitter is reported as unsupported.
+- Fruity Scratcher [DATA presets]: state = version 1001000 + 14 floats + the sample path. engine_x64.dll is only the
+  DVS timecode decoder; the scratch DSP is in the 4 MB Delphi DLL. An FL render exists (D:\lynx-work\flplugins165\r\m_ref.wav).
+- Fruity Video Player: a video window synced to the song; plan = decode with the user's ffmpeg (ui/VisualEditors.cpp
+  findFfmpeg) through a reading pipe, frames shown by song time. Not started.
