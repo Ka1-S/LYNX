@@ -49,3 +49,23 @@ FX Subida, FX White Noise Caida, Lead Hoover. (Olbaid Bajo Acustico: the DLL its
   is read (FL's DLL plays it: the DLL's partials are inharmonic, LYNX's were harmonic) **[EXEC]**.
 - **Pomona**: no single parameter explains it (`sweep_pomona.log`: every parameter/global that differs from
   Default.fst reset one at a time; best −8 dB) — several interacting causes, not found yet.
+- **Frequency phaser (type 209) at a high mix** (Ice bells, Magic swamp, Metal thingy, Church bell, Steam starship;
+  `py/` probes): the error starts at 10⁻⁴ relative and grows — a frequency drift. With the precision patched to 1
+  ("High") the same presets go from −13…−18 dB to −47…−56 dB **[EXEC]**: at precision 0 FL computes the phaser's
+  `2^x` frequency factor with IPP's 11-bit `Exp_32f_A11` (REA_rodada75 §5), which LYNX does not copy. The spectra
+  match (−35…−45 dB STFT); the residue is phase drift.
+- **Part parameter 2 = note start delay** [DECOMP FUN_00879540 case 2, FUN_0088ab10 0x88b150]: `p < 0`:
+  `(2^(−p/48) − 1)/255` s, `p ≥ 0`: `p·0.3125/tempo`; times the sample rate and the voice's articulator-8 output
+  (voice +0x3214), the voice's output starts that many samples later (its control-block grid shifts with it).
+  LYNX ignores it. Used by Rotochip (part B, −100) and Resynthesis/Harmony (−135) only: −47 dB on Rotochip with the
+  delay zeroed in both. Not implemented this round (LYNX's records share one control-block grid).
+
+## 4. Filter shapes 8, 10…13, 15, 16 [DECOMP FUN_00874ed0 + DLL constants]
+Used by 24 presets (18 of the audible outliers); LYNX switched that filter off. Tables (s = 1/(N−1), cos in double,
+`dB(x) = exp(float(x·−72)·float(ln10/20))`, `p16(x) = (x⁴)⁴`):
+- 8 (N 682): `−cos((1 − i·s/2)·π)`; 10 (N 1365): u = the same expression + 1 … `dB(u)·(1 − p16(u))`;
+- 11 (N 1024): `(1 − (cos(3π·(1 − i·s)) + 1)/2)·(1 − (cos(π·(1 − i·s)) + 1)/2)`;
+- 12 (N 4096, origin ½): first half `(1 − (cos(2π(1 − i·s)) + 1)/4)²`, second half `dB(x)·(1 − p16(x))`, x = 2·(i − N/2)·s;
+- 13 (N 1024): `exp(float((1 − (cos(π(1 − i·s)) + 1)/2)·18 − 18)·ln10/20)`;
+- 15 (N 4096, origin ½, ends 1/1): `a²·b² + b/8`, a = (cos(12π(1 − i·s)) + 1)/2, b = 1 − (cos(2π(1 − i·s)) + 1)/2;
+- 16 (N 2048, filled with 1.0, origin ½): the first and last N/3 entries `(1 − (cos(2π(1 − i·0.5/(N/3))) + 1)/2)²`.
