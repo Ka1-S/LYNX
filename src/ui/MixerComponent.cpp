@@ -534,6 +534,11 @@ void MixerStrips::paint (juce::Graphics& g)
             g.fillEllipse (r);
             g.setColour (armed ? colour::record.brighter (0.3f) : hovered (Part::arm) ? colour::textSecondary : colour::borderStrong);
             g.drawEllipse (r, 1.0f);
+            if (track.recordSafe) // record safe: a slash through the arm button
+            {
+                g.setColour (colour::textDisabled);
+                g.drawLine (r.getX() + 1.0f, r.getBottom() - 1.0f, r.getRight() - 1.0f, r.getY() + 1.0f, 1.2f);
+            }
 
             // the input level (inserts with an audio input source)
             if (track.inputChannel >= 0 && (std::size_t) t < inputLevels.size())
@@ -2677,6 +2682,11 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.fillEllipse (dot);
             g.setColour (armed ? colour::record.brighter (0.3f) : hoverInput == 1 ? colour::textSecondary : colour::borderStrong);
             g.drawEllipse (dot, 1.0f);
+            if (mt.recordSafe)
+            {
+                g.setColour (colour::textDisabled);
+                g.drawLine (dot.getX() + 1.0f, dot.getBottom() - 1.0f, dot.getRight() - 1.0f, dot.getY() + 1.0f, 1.2f);
+            }
         }
 
         auto box = inputBoxBounds().toFloat();
@@ -4119,6 +4129,15 @@ juce::String issueText (const AudioEngine::RecordingNotice& notice)
             return tr ("Please select an audio input first: the armed insert has none. Click the input box above the insert's effect slots in the Mixer (or right-click its arm button).");
         case I::insertWithoutInput: return tr ("Insert {0} is armed but has no audio input, so it records nothing.", { juce::String (notice.track) });
         case I::failed: return tr ("The audio input could not be used: {0}", { notice.detail });
+        case I::lowDisk:
+            return tr ("The recordings drive is almost full: about {0} minute(s) of recording left. Free some space or choose another project folder.",
+                       { notice.detail });
+        case I::recordSafe:
+            return tr ("Insert {0} is record safe, so it can't be armed. Right-click its arm button and turn \"Record safe\" off first.",
+                       { juce::String (notice.track) });
+        case I::framesLost:
+            return tr ("The disk could not keep up while recording: {0} sample(s) became silence (the timing of the take was kept). "
+                       "Record to a faster drive or close other programs that use the disk.", { notice.detail });
         case I::none: break;
     }
     return {};
@@ -4136,9 +4155,11 @@ void explain (const AudioEngine::RecordingNotice& notice)
     if (notice.issue == AudioEngine::InputIssue::none)
         return;
 
+    using I = AudioEngine::InputIssue;
+    const auto aboutRecording = notice.issue == I::lowDisk || notice.issue == I::recordSafe || notice.issue == I::framesLost;
     auto options = juce::MessageBoxOptions()
                        .withIconType (juce::MessageBoxIconType::WarningIcon)
-                       .withTitle (tr ("Audio input needed"))
+                       .withTitle (aboutRecording ? tr ("Recording") : tr ("Audio input needed"))
                        .withMessage (issueText (notice));
 
     if (aboutTheDevice (notice.issue) && openAudioSettings)
@@ -4246,6 +4267,13 @@ void showMenu (AudioEngine& engine, int track, juce::Component* target, std::fun
             continue;
         const auto ticked = track == 0 ? (mode == InputMonitor::off) == (mt.monitor == InputMonitor::off) : mt.monitor == mode;
         menu.addItem (tr (label), true, ticked, [&engine, track, mode = mode] { engine.setInsertMonitor (track, mode); });
+    }
+
+    if (track > 0) // record safe (round 163): the insert can't be armed by accident
+    {
+        menu.addSeparator();
+        menu.addItem (tr ("Record safe (can't be armed)"), true, mt.recordSafe,
+                      [&engine, track, safe = mt.recordSafe] { engine.setInsertRecordSafe (track, ! safe); });
     }
 
     menu.addSeparator();

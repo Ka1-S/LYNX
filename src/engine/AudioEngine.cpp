@@ -6,6 +6,7 @@
 #include "platform/Paths.h"
 #include "engine/FlStudio.h"
 
+#include <limits>
 #include <map>
 #include <thread>
 
@@ -182,6 +183,32 @@ void AudioEngine::restoreAudioDeviceState (const juce::XmlElement* state)
         audioDeviceFile().deleteFile();
 }
 
+namespace
+{
+AudioEngine::RecordingSettings loadRecordingSettings();
+}
+
+struct AudioEngine::Drainer final : juce::TimeSliceClient
+{
+    explicit Drainer (AudioEngine& e) : engine (e) {}
+    int useTimeSlice() override
+    {
+        std::vector<std::shared_ptr<Take>> list;
+        {
+            const juce::ScopedLock lock (engine.drainLock);
+            list = engine.draining;
+        }
+        for (auto& take : list)
+        {
+            const juce::ScopedLock lock (take->drainMutex);
+            take->drain();
+        }
+        return list.empty() ? 50 : 5;
+    }
+    AudioEngine& engine;
+};
+
+
 AudioEngine::AudioEngine (bool openAudioDevice)
     : workers (std::make_unique<WorkerPool> (workerCount(), raiseAudioThreadPriority)),
       song (Song::makeDefault())
@@ -226,6 +253,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
         deviceStateSaver = std::make_unique<DeviceStateSaver> (*this);
         midiPrefs = midiPrefsShared = prefs::MidiPrefs::fromText (midiSettingsFile().loadFileAsString().toStdString());
+        recordingSettings = loadRecordingSettings();
         saveGlobalLinks = true;
 
         prefetcher = std::make_unique<StreamPrefetcher> (transport);
@@ -250,12 +278,27 @@ AudioEngine::~AudioEngine()
     stopTimer();
     audioLogger.reset(); // closes the log file
 
+    // the takes in progress are closed as they are (complete WAVs); their journals stay, so the next start offers to
+    // put them on the Playlist (round 163)
     {
         const juce::SpinLock::ScopedLockType lock (takeLock);
-        for (auto& take : takes)
-            take.writer = nullptr; // closes the WAVs of the takes in progress (they stay in the recordings folder)
+        takes.fill (nullptr);
         takeCount = 0;
     }
+    {
+        const juce::ScopedLock lock (drainLock);
+        draining.clear();
+    }
+    if (drainer != nullptr)
+        recordThread.removeTimeSliceClient (drainer.get());
+    for (auto& take : openTakes)
+    {
+        take->stream->finish();
+        const juce::ScopedLock lock (take->drainMutex);
+        take->drain();
+        take->writer.close();
+    }
+    openTakes.clear();
 
     recordThread.stopThread (2000);
     prefetcher = nullptr;
@@ -583,6 +626,9 @@ void AudioEngine::setRecordOptions (const RecordOptions& options)
 {
     recordOptions = options;
     recordOptions.countInBars = juce::jlimit (0, 4, options.countInBars);
+    recordOptions.preRollBars = juce::jlimit (0, 8, options.preRollBars);
+    recordOptions.postRollBars = juce::jlimit (0, 8, options.postRollBars);
+    updateLinearSong();
     sendChangeMessage();
 }
 
@@ -594,6 +640,28 @@ void AudioEngine::startPlayback()
         return;
     }
 
+    // pre-roll and punch (round 163): playback starts before the range the take keeps; post-roll stops it after
+    activePunch.reset();
+    punchStopAt = -1;
+    auto startAt = (std::int64_t) transport.positionTicks.load();
+    if (audioArmed && recordOptions.recordAudio)
+    {
+        const auto here = (std::int64_t) std::llround (transport.positionTicks.load());
+        const auto punching = recordOptions.punchLoopRegion && song.mode == PlayMode::song && song.hasLoop();
+        const auto in = punching ? song.loopStart : here;
+        const auto out = punching ? song.loopEnd : std::numeric_limits<std::int64_t>::max() / 4;
+        const auto pre = recordOptions.preRollBars > 0 ? countInLength (song, recordOptions.preRollBars, std::max<std::int64_t> (0, in - 1)) : 0;
+        if (punching || pre > 0)
+        {
+            activePunch = PunchRange { in, out };
+            if (punching)
+                punchStopAt = out + (recordOptions.postRollBars > 0 ? countInLength (song, recordOptions.postRollBars, out) : 0);
+            startAt = std::max<std::int64_t> (0, in - pre);
+            transport.seekRequest.store ((double) startAt);
+        }
+        updateLinearSong();
+    }
+
     if (recordOptions.waitForInput)
     {
         waitingForInput.store (true);
@@ -603,8 +671,7 @@ void AudioEngine::startPlayback()
 
     if (recordOptions.countInBars > 0)
     {
-        const auto at = (std::int64_t) transport.positionTicks.load();
-        transport.countIn.store ((double) countInLength (song, recordOptions.countInBars, at));
+        transport.countIn.store ((double) countInLength (song, recordOptions.countInBars, startAt));
         sendChangeMessage();
         return;
     }
@@ -625,6 +692,12 @@ void AudioEngine::setInsertArmed (int track, bool armed)
 
     if (armed == wasArmed || track <= 0)
         return;
+
+    if (armed && isInsertRecordSafe (track)) // record safe (round 163): never armed by accident
+    {
+        notify (InputIssue::recordSafe, track);
+        return;
+    }
 
     if (armed)
         armedInserts.push_back (track);
@@ -802,9 +875,183 @@ void AudioEngine::updateAudioRecording()
     if (wantTake && ! open && recordingError.isEmpty())
         startAudioTake();
 
+    // post-roll over: playback stops (the take is closed below on the next tick)
+    if (open && punchStopAt >= 0 && transport.playing.load() && transport.positionTicks.load() >= (double) punchStopAt)
+    {
+        punchStopAt = -1;
+        stop();
+    }
+
+    // the first samples arrived: the journals that let a crash be recovered (round 163)
+    if (open && ! journalsWritten && takeStartTick.load() >= 0.0)
+        writeJournals();
+
+    // a file that could not be written (disk full, drive gone): say it once, the take stops there
+    for (auto& take : openTakes)
+        if (take->failed.load() && recordingError.isEmpty())
+        {
+            recordingError = take->writer.error().empty() ? juce::String ("could not write ") + take->file.getFullPathName()
+                                                          : juce::String::fromUTF8 (take->writer.error().c_str()) + ": " + take->file.getFullPathName();
+            notify (InputIssue::failed, take->track, recordingError);
+        }
+
     // playback stopped (or recording turned off) with something recorded: close the takes
     if (open && (! wantTake || (! transport.playing.load() && takeFrames.load() > 0)))
         finishAudioTake();
+}
+
+bool AudioEngine::Take::drain()
+{
+    if (stream == nullptr || failed.load())
+        return false;
+    const auto n = 8192;
+    if (scratch.size() < (std::size_t) (2 * n))
+        scratch.resize ((std::size_t) (2 * n));
+    auto any = false;
+    for (;;)
+    {
+        float* out[] = { scratch.data(), scratch.data() + n };
+        const auto got = stream->pull (out, n);
+        if (got <= 0)
+            break;
+        any = true;
+        const float* in[] = { out[0], out[1] };
+        if (! writer.write (in, got))
+        {
+            failed.store (true);
+            break;
+        }
+    }
+    return any;
+}
+
+namespace
+{
+juce::File recordingSettingsFile() { return PluginHost::settingsFolder().getChildFile ("recording.txt"); }
+juce::File inProgressFile() { return PluginHost::settingsFolder().getChildFile ("recordings-in-progress.txt"); }
+
+AudioEngine::RecordingSettings loadRecordingSettings()
+{
+    AudioEngine::RecordingSettings s;
+    for (const auto& raw : juce::StringArray::fromLines (recordingSettingsFile().loadFileAsString()))
+    {
+        const auto key = raw.upToFirstOccurrenceOf ("=", false, false).trim();
+        const auto value = raw.fromFirstOccurrenceOf ("=", false, false);
+        if (key == "format")
+            s.format = value.trim() == "float32" ? takes::SampleFormat::float32 : takes::SampleFormat::pcm24;
+        else if (key == "trackTakeNames")
+            s.trackTakeNames = value.getIntValue() != 0;
+        else if (key == "manualOffset")
+            s.manualOffset = juce::jlimit (-48000, 48000, value.getIntValue());
+        else if (key == "useMeasured")
+            s.useMeasured = value.getIntValue() != 0;
+        else if (key == "pingOutput")
+            s.pingOutput = juce::jlimit (0, 63, value.getIntValue());
+        else if (key == "pingInput")
+            s.pingInput = juce::jlimit (0, 63, value.getIntValue());
+        else if (key == "measured") // measured=<samples>\t<setup key>
+            s.measured[value.fromFirstOccurrenceOf ("\t", false, false).toStdString()] = value.upToFirstOccurrenceOf ("\t", false, false).getIntValue();
+    }
+    return s;
+}
+} // namespace
+
+void AudioEngine::setRecordingSettings (const RecordingSettings& settings)
+{
+    recordingSettings = settings;
+    juce::String text;
+    text << "format=" << (settings.format == takes::SampleFormat::float32 ? "float32" : "pcm24") << "\n"
+         << "trackTakeNames=" << (settings.trackTakeNames ? 1 : 0) << "\n"
+         << "manualOffset=" << settings.manualOffset << "\n"
+         << "useMeasured=" << (settings.useMeasured ? 1 : 0) << "\n"
+         << "pingOutput=" << settings.pingOutput << "\n"
+         << "pingInput=" << settings.pingInput << "\n";
+    for (const auto& [key, samples] : settings.measured)
+        text << "measured=" << samples << "\t" << juce::String::fromUTF8 (key.c_str()) << "\n";
+    if (deviceStateSaver != nullptr) // (a headless engine — tests, export — keeps the user's file as it is)
+        recordingSettingsFile().replaceWithText (text);
+    sendChangeMessage();
+}
+
+std::string AudioEngine::currentSetupKey() const
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr)
+        return {};
+    const auto setup = deviceManager.getAudioDeviceSetup();
+    return takes::setupKey (device->getTypeName().toStdString(), setup.outputDeviceName.toStdString(), setup.inputDeviceName.toStdString(),
+                            device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples());
+}
+
+takes::Latency AudioEngine::currentLatency() const
+{
+    takes::Latency l;
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        l.driverInput = device->getInputLatencyInSamples();
+        l.driverOutput = device->getOutputLatencyInSamples();
+    }
+    if (recordingSettings.useMeasured)
+        if (const auto it = recordingSettings.measured.find (currentSetupKey()); it != recordingSettings.measured.end())
+            l.measured = it->second;
+    l.manual = recordingSettings.manualOffset;
+    l.pdc = getLatencySamples();
+    return l;
+}
+
+juce::String AudioEngine::startLatencyPing()
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr)
+        return TR_NOOP ("no audio device is open");
+    if (transport.playing.load() || isCountingIn())
+        return TR_NOOP ("stop playback first");
+    if (! hasAudioInput())
+        if (const auto r = openAudioInput(); r.issue != InputIssue::none)
+            return TR_NOOP ("no audio input is open");
+    device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr)
+        return TR_NOOP ("no audio device is open");
+    const auto in = recordingSettings.pingInput, out = recordingSettings.pingOutput;
+    if (! device->getActiveInputChannels()[in])
+        return TR_NOOP ("the input channel is not open");
+    if (! device->getActiveOutputChannels()[out])
+        return TR_NOOP ("the output channel is not open");
+    // device channel -> the callback's index (only open channels are passed)
+    const auto slotOf = [] (const juce::BigInteger& active, int c) {
+        if (! active[c])
+            return -1;
+        int slot = 0;
+        for (int k = 0; k < c; ++k)
+            slot += active[k] ? 1 : 0;
+        return slot;
+    };
+    pingInput = slotOf (device->getActiveInputChannels(), in);
+    pingOutputs = { slotOf (device->getActiveOutputChannels(), out), slotOf (device->getActiveOutputChannels(), out + 1) };
+    const auto rate = device->getCurrentSampleRate() > 0.0 ? device->getCurrentSampleRate() : 48000.0;
+    ping.start (8, juce::jmax (4096, (int) (rate / 4.0)), 0.5f);
+    return {};
+}
+
+takes::LatencyPing::Result AudioEngine::finishLatencyPing()
+{
+    auto r = ping.result();
+    if (r.ok)
+    {
+        auto s = recordingSettings;
+        s.measured[currentSetupKey()] = r.samples;
+        setRecordingSettings (s);
+    }
+    return r;
+}
+
+void AudioEngine::setInsertRecordSafe (int track, bool safe)
+{
+    if (track <= 0 || track >= (int) song.mixer.size() || song.mixer[(std::size_t) track].recordSafe == safe)
+        return;
+    if (safe && isInsertArmed (track))
+        setInsertArmed (track, false);
+    editSong ([track, safe] (Song& s) { s.mixer[(std::size_t) track].recordSafe = safe; });
 }
 
 void AudioEngine::startAudioTake()
@@ -827,7 +1074,11 @@ void AudioEngine::startAudioTake()
 
     // one take per armed insert that has an input source; without armed inserts (Settings' "Record input audio"),
     // the first two input channels into a new insert
-    std::vector<Take> wanted;
+    struct Wanted
+    {
+        int track, first, channels;
+    };
+    std::vector<Wanted> wanted;
     std::vector<int> withoutInput;
 
     for (const auto t : armedInserts)
@@ -838,11 +1089,11 @@ void AudioEngine::startAudioTake()
         if (count == 0)
             withoutInput.push_back (t);
         else
-            wanted.push_back ({ t, first, count, {}, {} });
+            wanted.push_back ({ t, first, count });
     }
 
     if (armedInserts.empty())
-        wanted.push_back ({ 0, 0, juce::jmin (2, deviceChannels), {}, {} });
+        wanted.push_back ({ 0, 0, juce::jmin (2, deviceChannels) });
 
     if (wanted.empty())
     {
@@ -858,44 +1109,71 @@ void AudioEngine::startAudioTake()
     if (! folder.createDirectory()) // e.g. a read-only project folder: the global recordings folder
         folder = defaultRecordingFolder(), folder.createDirectory();
     takeSampleRate = device->getCurrentSampleRate();
-    takeLatency = device->getInputLatencyInSamples() + device->getOutputLatencyInSamples();
-    const auto now = juce::Time::getCurrentTime();
-    juce::WavAudioFormat wav;
+    takeLatency = currentLatency().total();
+    takeTicksPerSample = transport.ticksPerSample();
+    const auto format = recordingSettings.format;
 
-    for (auto& take : wanted)
+    // room on the drive (round 163): under 30 s refuse, under 10 minutes warn
     {
-        // FL's name (REA round 134): "<project>_<yyyy-mm-dd hh-mm-ss>_<insert name>", "_2", "_3"... when taken
+        int channels = 0;
+        for (const auto& w : wanted)
+            channels += w.channels;
+        const auto minutes = takes::minutesLeft (folder.getBytesFreeOnVolume(), takeSampleRate, channels, format);
+        if (minutes < 0.5)
+        {
+            recordingError = "the recordings drive is full";
+            notify (InputIssue::lowDisk, 0, juce::String (minutes, 1));
+            return;
+        }
+        if (minutes < 10.0)
+            notify (InputIssue::lowDisk, 0, juce::String (minutes, 1));
+    }
+
+    const auto now = juce::Time::getCurrentTime();
+    std::vector<std::shared_ptr<Take>> made;
+
+    for (const auto& w : wanted)
+    {
         juce::String insert;
-        if (take.track > 0)
-            insert = song.mixer[(std::size_t) take.track].name.empty() ? "Insert " + juce::String (take.track)
-                                                                       : juce::String::fromUTF8 (song.mixer[(std::size_t) take.track].name.c_str());
-        const auto name = juce::File::createLegalFileName (juce::String::fromUTF8 (
-            safety::recordingName (recordingStem.toStdString(), now.getYear(), now.getMonth() + 1, now.getDayOfMonth(), now.getHours(),
-                                   now.getMinutes(), now.getSeconds(), insert.toStdString()).c_str()));
-        const auto unique = safety::uniqueName (name.toStdString(), [&folder] (const std::string& n) {
-            return folder.getChildFile (juce::String::fromUTF8 (n.c_str()) + ".wav").exists();
-        });
-        take.file = folder.getChildFile (juce::String::fromUTF8 (unique.c_str()) + ".wav");
-        auto stream = take.file.createOutputStream();
-
-        if (stream == nullptr)
+        if (w.track > 0)
+            insert = song.mixer[(std::size_t) w.track].name.empty() ? "Insert " + juce::String (w.track)
+                                                                    : juce::String::fromUTF8 (song.mixer[(std::size_t) w.track].name.c_str());
+        juce::File file;
+        if (recordingSettings.trackTakeNames)
         {
-            recordingError = utf8 ("could not create ") + take.file.getFullPathName();
-            continue;
+            // "<Insert>_Take<N>.wav", N raised until the name is free (round 163)
+            for (int n = 1; n < 100000; ++n)
+            {
+                file = folder.getChildFile (juce::File::createLegalFileName (juce::String::fromUTF8 (takes::takeName (insert.toStdString(), n).c_str())) + ".wav");
+                if (! file.exists() && std::none_of (made.begin(), made.end(), [&file] (const std::shared_ptr<Take>& t) { return t->file == file; }))
+                    break;
+            }
+        }
+        else
+        {
+            // FL's name (REA round 134): "<project>_<yyyy-mm-dd hh-mm-ss>_<insert name>", "_2", "_3"... when taken
+            const auto name = juce::File::createLegalFileName (juce::String::fromUTF8 (
+                safety::recordingName (recordingStem.toStdString(), now.getYear(), now.getMonth() + 1, now.getDayOfMonth(), now.getHours(),
+                                       now.getMinutes(), now.getSeconds(), insert.toStdString()).c_str()));
+            const auto unique = safety::uniqueName (name.toStdString(), [&folder] (const std::string& n) {
+                return folder.getChildFile (juce::String::fromUTF8 (n.c_str()) + ".wav").exists();
+            });
+            file = folder.getChildFile (juce::String::fromUTF8 (unique.c_str()) + ".wav");
         }
 
-        auto* writer = wav.createWriterFor (stream.get(), takeSampleRate, (unsigned int) take.channels, 24, {}, 0);
-
-        if (writer == nullptr)
+        auto take = std::make_shared<Take>();
+        take->track = w.track;
+        take->first = w.first;
+        take->channels = w.channels;
+        take->file = file;
+        // ~22 s at 48 kHz of room between the audio thread and the disk
+        take->stream = std::make_unique<takes::TakeStream> (w.channels, 1 << 20);
+        if (! take->writer.open (file.getFullPathName().toStdString(), takeSampleRate, w.channels, format))
         {
-            stream.reset();
-            take.file.deleteFile();
-            recordingError = utf8 ("WAV does not accept this sample rate/channel count");
+            recordingError = utf8 ("could not create ") + file.getFullPathName();
             continue;
         }
-
-        stream.release(); // now owned by the writer
-        take.writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer, recordThread, 1 << 18);
+        made.push_back (std::move (take));
     }
 
     if (recordingError.isNotEmpty())
@@ -903,110 +1181,237 @@ void AudioEngine::startAudioTake()
 
     takeStartTick.store (-1.0);
     takeFrames.store (0);
+    takeTicks.store (0.0);
+    takeWrapCount.store (0);
+    lostFrames = 0;
+    journalsWritten = false;
+    openTakes = made;
+    {
+        const juce::ScopedLock lock (drainLock);
+        draining = made;
+    }
+    if (drainer == nullptr)
+        drainer = std::make_unique<Drainer> (*this);
+    if (! recordThread.isThreadRunning())
+        recordThread.startThread (juce::Thread::Priority::high);
+    recordThread.addTimeSliceClient (drainer.get());
+
     const juce::SpinLock::ScopedLockType lock (takeLock);
     takeCount = 0;
+    for (auto& take : made)
+        takes[(std::size_t) takeCount++] = take.get();
+    updateLinearSong();
+}
 
-    for (auto& take : wanted)
-        if (take.writer != nullptr)
-            takes[(std::size_t) takeCount++] = std::move (take);
+void AudioEngine::writeJournals()
+{
+    journalsWritten = true;
+    juce::StringArray list (juce::StringArray::fromLines (inProgressFile().loadFileAsString()));
+    list.removeEmptyStrings();
+    int k = 0;
+    for (const auto& take : openTakes)
+    {
+        takes::Journal j;
+        j.wav = take->file.getFullPathName().toStdString();
+        j.firstTick = takeStartTick.load();
+        j.ticksPerSample = takeTicksPerSample;
+        j.sampleRate = takeSampleRate;
+        j.latency = takeLatency;
+        j.insert = take->track;
+        j.playlistTrack = -1;
+        j.project = recordingStem.toStdString();
+        const auto journal = journalFor (take->file);
+        journal.replaceWithText (juce::String::fromUTF8 (takes::journalText (j).c_str()));
+        list.addIfNotAlreadyThere (journal.getFullPathName());
+        ++k;
+    }
+    if (deviceStateSaver != nullptr)
+        inProgressFile().replaceWithText (list.joinIntoString ("\n"));
 }
 
 void AudioEngine::finishAudioTake()
 {
-    std::vector<Take> done;
     {
         const juce::SpinLock::ScopedLockType lock (takeLock);
-        for (int k = 0; k < takeCount; ++k)
-            done.push_back (std::move (takes[(std::size_t) k]));
+        takes.fill (nullptr);
         takeCount = 0;
     }
+    liveInput.linearSong.store (false);
+    liveInput.noLoopRegion.store (false);
+    std::vector<std::shared_ptr<Take>> done;
+    done.swap (openTakes);
+    {
+        const juce::ScopedLock lock (drainLock);
+        draining.clear();
+    }
 
+    std::vector<std::shared_ptr<Take>> kept;
     for (auto& take : done)
     {
-        take.writer.reset(); // drains the queue and closes the WAV
-        if (take.file.existsAsFile())
-            sessionRecordings.push_back (take.file);
+        take->stream->finish(); // the audio thread let go of it (takeLock above)
+        const juce::ScopedLock lock (take->drainMutex);
+        take->drain();
+        lostFrames += take->stream->lostFrames();
+        take->writer.close();
+        if (take->file.existsAsFile())
+        {
+            sessionRecordings.push_back (take->file);
+            kept.push_back (take);
+        }
     }
 
     if (recordOptions.disarmOnStop) // FL's "Disarm on stop"
         for (const auto t : std::vector<int> (armedInserts))
             setInsertArmed (t, false);
 
+    // the journals go once the takes are on the Playlist (or thrown away)
+    const auto dropJournals = [this, &done] {
+        juce::StringArray list (juce::StringArray::fromLines (inProgressFile().loadFileAsString()));
+        for (const auto& take : done)
+        {
+            journalFor (take->file).deleteFile();
+            list.removeString (journalFor (take->file).getFullPathName());
+        }
+        list.removeEmptyStrings();
+        if (deviceStateSaver != nullptr)
+        {
+            if (list.isEmpty())
+                inProgressFile().deleteFile();
+            else
+                inProgressFile().replaceWithText (list.joinIntoString ("\n"));
+        }
+    };
+
     const auto frames = takeFrames.exchange (0);
     const auto startTick = takeStartTick.exchange (-1.0);
+    const auto ticks = takeTicks.exchange (0.0);
+    const auto keepPunch = activePunch;
+    activePunch.reset();
+    punchStopAt = -1;
+    std::vector<double> wraps;
+    for (int k = 0, count = takeWrapCount.exchange (0); k < count; ++k)
+        wraps.push_back ((double) takeWraps[(std::size_t) k].load() * takeTicksPerSample);
 
     if (frames <= 0 || startTick < 0.0)
     {
         for (auto& take : done)
-            take.file.deleteFile();
+        {
+            take->file.deleteFile();
+            forgetRecordings ({ take->file });
+        }
+        dropJournals();
         return;
     }
 
-    // what came into the interface corresponds to what was heard one latency earlier
-    const auto ticksPerSample = song.bpm * ppq / (60.0 * takeSampleRate);
-    auto start = (std::int64_t) std::llround (startTick - takeLatency * ticksPerSample);
-    std::int64_t offset = 0;
-    if (song.mode == PlayMode::song && ! song.hasLoop() && start >= song.songLength()) // (the position loops over the song)
-        start %= std::max<std::int64_t> (1, song.songLength());
+    if (lostFrames > 0)
+        notify (InputIssue::framesLost, 0, juce::String (lostFrames));
 
-    if (start < 0)
-    {
-        offset = -start;
-        start = 0;
-    }
+    // what came into the interface corresponds to what was heard one latency earlier; the clip lands on that
+    // song position to the sample (round 163: sub-tick rest in the source offset)
+    const auto placement = takes::place (startTick, ticks, takeTicksPerSample, takeLatency);
+    std::vector<takes::Part> parts;
+    if (keepPunch.has_value()) // pre-roll / punch in-out: only the range (the rest stays in the file)
+        parts = takes::punch (placement, { *keepPunch });
+    else if (song.mode == PlayMode::song && song.hasLoop())
+        parts = takes::loopPasses (placement, song.loopStart, song.loopEnd, ppq / 4, wraps); // one part per pass of the loop
+    else if (recordOptions.recordingMarkers && song.mode == PlayMode::song)
+        parts = takes::punch (placement, punchRanges (song.markers())); // FL's "Enable recording markers"
+    else
+        parts = takes::punch (placement, {});
 
-    const auto length = (std::int64_t) std::llround ((double) frames * ticksPerSample) - offset;
-
-    if (length <= 0)
-        return;
-
-    // FL's "Enable recording markers": only the parts inside the Start / Stop recording ranges become clips
-    const auto parts = recordOptions.recordingMarkers && song.mode == PlayMode::song ? punchParts (punchRanges (song.markers()), start, length, offset)
-                                                                                     : std::vector<ClipPart> { { start, length, offset } };
     if (parts.empty()) // the whole take was outside the ranges
     {
         for (auto& take : done)
-            take.file.deleteFile();
+        {
+            take->file.deleteFile();
+            forgetRecordings ({ take->file });
+        }
+        dropJournals();
         return;
     }
 
-    struct Made
+    std::vector<takes::TakeFile> made;
+    for (const auto& take : kept)
+        made.push_back ({ take->file.getFullPathName().toStdString(), take->file.getFileNameWithoutExtension().toStdString(), take->track });
+
+    editSong ([made, parts] (Song& s) { takes::placeTakeClips (s, made, parts); });
+    dropJournals();
+}
+
+std::vector<takes::Journal> AudioEngine::recoverInterruptedTakes (const std::vector<juce::File>& folders)
+{
+    // the journals listed as in progress, and any journal left in the given folders
+    juce::StringArray journals (juce::StringArray::fromLines (inProgressFile().loadFileAsString()));
+    auto where = folders;
+    where.push_back (defaultRecordingFolder());
+    for (const auto& folder : where)
+        for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, "*.lynxrec"))
+            journals.addIfNotAlreadyThere (f.getFullPathName());
+    journals.removeEmptyStrings();
+
+    std::vector<takes::Journal> out;
+    for (const auto& path : journals)
     {
-        std::string path, name;
-        int track;
+        const juce::File journal (path);
+        takes::Journal j;
+        if (! journal.existsAsFile() || ! takes::parseJournal (journal.loadFileAsString().toStdString(), j))
+            continue;
+        // (a take being recorded by this very session is not "interrupted")
+        if (std::any_of (openTakes.begin(), openTakes.end(), [&journal, this] (const std::shared_ptr<Take>& t) { return journalFor (t->file) == journal; }))
+            continue;
+        std::int64_t frames = 0;
+        if (! takes::repairWav (j.wav, &frames) || frames <= 0)
+            continue;
+        out.push_back (j);
+    }
+    return out;
+}
+
+int AudioEngine::placeRecoveredTakes (const std::vector<takes::Journal>& recovered)
+{
+    struct One
+    {
+        takes::TakeFile file;
+        std::vector<takes::Part> parts;
     };
-    std::vector<Made> made;
-    for (const auto& take : done)
-        made.push_back ({ take.file.getFullPathName().toStdString(), take.file.getFileNameWithoutExtension().toStdString(), take.track });
+    std::vector<One> placed;
+    for (const auto& j : recovered)
+    {
+        std::int64_t frames = 0;
+        if (! takes::repairWav (j.wav, &frames) || frames <= 0)
+            continue;
+        const auto placement = takes::place (j.firstTick, (double) frames * j.ticksPerSample, j.ticksPerSample, j.latency);
+        if (! placement.valid())
+            continue;
+        const juce::File wav (juce::String::fromUTF8 (j.wav.c_str()));
+        placed.push_back ({ { j.wav, wav.getFileNameWithoutExtension().toStdString(), j.insert }, takes::punch (placement, {}) });
+    }
+    if (! placed.empty())
+        editSong ([placed] (Song& s) {
+            for (const auto& p : placed)
+                takes::placeTakeClips (s, { p.file }, p.parts);
+        });
+    forgetInterruptedTakes (recovered);
+    return (int) placed.size();
+}
 
-    editSong ([=] (Song& s) {
-        int playlistTrack = 0;
-        for (const auto& clip : s.playlist)
-            playlistTrack = std::max (playlistTrack, clip.track + 1);
-
-        for (const auto& m : made) // each take on its own Playlist track, through the insert it was recorded on
-        {
-            ChannelDef c;
-            c.name = m.name;
-            c.instrument = InstrumentKind::audioClip;
-            c.samplePath = m.path;
-            c.mixerTrack = m.track > 0 && m.track < (int) s.mixer.size() ? m.track : s.claimFreeInsert();
-            s.channels.push_back (c);
-
-            for (const auto& part : parts)
-            {
-                Clip clip;
-                clip.kind = ClipKind::audio;
-                clip.channel = (int) s.channels.size() - 1;
-                clip.track = playlistTrack;
-                clip.start = part.start;
-                clip.length = part.length;
-                clip.offset = part.offset;
-                s.playlist.push_back (clip);
-            }
-            ++playlistTrack;
-        }
-    });
+void AudioEngine::forgetInterruptedTakes (const std::vector<takes::Journal>& recovered)
+{
+    juce::StringArray list (juce::StringArray::fromLines (inProgressFile().loadFileAsString()));
+    for (const auto& j : recovered)
+    {
+        const auto journal = journalFor (juce::File (juce::String::fromUTF8 (j.wav.c_str())));
+        journal.deleteFile();
+        list.removeString (journal.getFullPathName());
+    }
+    list.removeEmptyStrings();
+    if (deviceStateSaver != nullptr)
+    {
+        if (list.isEmpty())
+            inProgressFile().deleteFile();
+        else
+            inProgressFile().replaceWithText (list.joinIntoString ("\n"));
+    }
 }
 
 juce::File AudioEngine::defaultRecordingFolder()
@@ -1381,7 +1786,8 @@ void AudioEngine::updateRecording()
 
     // FL's "Enable recording markers" (song mode): a note that starts outside the Start / Stop recording ranges is
     // not recorded (its release finds no held note and is ignored too)
-    const auto punch = recordOptions.recordingMarkers && song.mode == PlayMode::song ? punchRanges (song.markers()) : std::vector<PunchRange> {};
+    const auto punch = activePunch.has_value() ? std::vector<PunchRange> { *activePunch } // pre-roll / punch in-out (round 163)
+                       : recordOptions.recordingMarkers && song.mode == PlayMode::song ? punchRanges (song.markers()) : std::vector<PunchRange> {};
     auto outsidePunch = [this, &punch] (const RecordedEvent& ev) {
         if (punch.empty() || ! ev.on)
             return false;
@@ -2813,8 +3219,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         const auto playing = transport.playing.load (std::memory_order_relaxed);
         const auto tps = transport.ticksPerSample();
         // Song mode: the loop region, or else the whole song (back to the start at its end, like FL)
-        const auto loop = playbackLoop (transport.songMode.load (std::memory_order_relaxed), transport.loopStart.load (std::memory_order_relaxed),
-                                        transport.loopEnd.load (std::memory_order_relaxed), transport.songEnd.load (std::memory_order_relaxed));
+        // (while audio takes record in Song mode without a loop region, the song plays on past its end instead of
+        // starting over: the take stays one piece, as in Pro Tools / Nuendo; round 163)
+        // (punching on the loop region: the region is not looped either, playback runs on into the post-roll)
+        const auto linear = liveInput.linearSong.load (std::memory_order_relaxed);
+        const auto throughRegion = liveInput.noLoopRegion.load (std::memory_order_relaxed);
+        const auto loop = playbackLoop (transport.songMode.load (std::memory_order_relaxed),
+                                        throughRegion ? 0.0 : transport.loopStart.load (std::memory_order_relaxed),
+                                        throughRegion ? 0.0 : transport.loopEnd.load (std::memory_order_relaxed),
+                                        linear ? 0.0 : transport.songEnd.load (std::memory_order_relaxed));
         const auto loopStart = loop.start, loopEnd = loop.end;
         const auto looping = playing && loop.active() && tps > 0.0;
 
@@ -2845,32 +3258,28 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
                 liveInput.numChannels = c + 1;
         }
 
-        // audio recording: this block's input goes to disk (without waiting on a lock)
+        // audio recording: this block's input goes to the takes' streams (without waiting on a lock). Every take gets
+        // every block (silence for an input channel missing now), so all of them keep the same timeline (round 163).
         if (playing && transport.recording.load (std::memory_order_relaxed))
         {
             const juce::SpinLock::ScopedTryLockType lock (takeLock);
 
             if (lock.isLocked() && takeCount > 0)
             {
-                auto wrote = false;
-
                 for (int k = 0; k < takeCount; ++k)
                 {
-                    auto& take = takes[(std::size_t) k];
-                    const std::array<const float*, 2> data { liveInput.channel (take.first, 0), liveInput.channel (take.first + take.channels - 1, 0) };
-
-                    if (data[0] == nullptr || data[1] == nullptr || take.writer == nullptr)
-                        continue;
-
-                    wrote = take.writer->write (data.data(), n) || wrote;
+                    auto* take = takes[(std::size_t) k];
+                    const std::array<const float*, 2> data { liveInput.channel (take->first, 0), liveInput.channel (take->first + take->channels - 1, 0) };
+                    if (data[0] == nullptr || data[1] == nullptr)
+                        take->stream->pushSilence (n);
+                    else
+                        take->stream->push (data.data(), n);
                 }
 
-                if (wrote)
-                {
-                    if (takeStartTick.load (std::memory_order_relaxed) < 0.0)
-                        takeStartTick.store (transport.positionTicks.load (std::memory_order_relaxed));
-                    takeFrames.fetch_add (n, std::memory_order_relaxed);
-                }
+                if (takeStartTick.load (std::memory_order_relaxed) < 0.0)
+                    takeStartTick.store (transport.positionTicks.load (std::memory_order_relaxed));
+                takeFrames.fetch_add (n, std::memory_order_relaxed);
+                takeTicks.store (takeTicks.load (std::memory_order_relaxed) + n * tps, std::memory_order_relaxed);
             }
         }
 
@@ -2904,12 +3313,36 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
             auto position = transport.positionTicks.load (std::memory_order_relaxed) + n * tps;
 
             if (looping && position >= loopEnd - 1e-6)
+            {
                 position = loopStart;
+                // loop recording: where this pass ends in the takes (round 163)
+                if (const auto frames = takeFrames.load (std::memory_order_relaxed); frames > 0 && takeStartTick.load (std::memory_order_relaxed) >= 0.0)
+                    if (const auto k = takeWrapCount.load (std::memory_order_relaxed); k < (int) takeWraps.size())
+                    {
+                        takeWraps[(std::size_t) k].store (frames, std::memory_order_relaxed);
+                        takeWrapCount.store (k + 1, std::memory_order_release);
+                    }
+            }
 
             transport.positionTicks.store (position, std::memory_order_relaxed);
         }
 
         done += n;
+    }
+
+    // the latency ping (round 163): only its clicks go out (no feedback through a monitored input), listened for on
+    // its input
+    if (ping.isRunning())
+    {
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputChannelData[ch] != nullptr)
+                juce::FloatVectorOperations::clear (outputChannelData[ch], numSamples);
+        std::array<float*, 2> clickOut {};
+        for (std::size_t k = 0; k < 2; ++k)
+            if (pingOutputs[k] >= 0 && pingOutputs[k] < numOutputChannels)
+                clickOut[k] = outputChannelData[pingOutputs[k]];
+        const auto* in = pingInput >= 0 && pingInput < numInputChannels ? inputChannelData[pingInput] : nullptr;
+        ping.process (in, clickOut.data(), 2, numSamples);
     }
 
     // the block is done: the workers sleep until the next one instead of spinning (REA round 116)

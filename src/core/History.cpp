@@ -53,7 +53,7 @@ bool sameTrack (const MixerTrack& a, const MixerTrack& b) noexcept
     return a.name == b.name && a.volume == b.volume && a.pan == b.pan && a.muted == b.muted && a.solo == b.solo && sameEffects (a, b)
            && sameRouting (a, b) && a.stereo == b.stereo && a.colour == b.colour && a.invertPhase == b.invertPhase
            && a.swapChannels == b.swapChannels && a.eq == b.eq
-           && a.inputChannel == b.inputChannel && a.inputStereo == b.inputStereo && a.monitor == b.monitor
+           && a.inputChannel == b.inputChannel && a.inputStereo == b.inputStereo && a.monitor == b.monitor && a.recordSafe == b.recordSafe
            && a.outputChannel == b.outputChannel && a.outputMode == b.outputMode;
 }
 

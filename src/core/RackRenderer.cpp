@@ -2121,7 +2121,8 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (playing && song.mode == PlayMode::song)
     {
-        scheduleSong (song, startTick, numSamples, ticksPerSample (bpm, sampleRate), events, resumeAudio, &state.schedule);
+        scheduleSong (song, startTick, numSamples, ticksPerSample (bpm, sampleRate), events, resumeAudio, &state.schedule,
+                      liveInput == nullptr || ! liveInput->linearSong.load (std::memory_order_relaxed));
     }
     else if (playing && ! song.patterns.empty())
     {

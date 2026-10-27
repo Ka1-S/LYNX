@@ -116,5 +116,7 @@ void scheduleSong (const Song& song,
                    double ticksPerSampleValue,
                    EventBuffer& out,
                    bool resume = false,
-                   const ScheduleIndex* index = nullptr) noexcept;
+                   const ScheduleIndex* index = nullptr,
+                   bool wrap = true) noexcept;
+// (wrap = false: the song plays once and is silent past its end — audio recording without a loop region, round 163)
 } // namespace lynx
