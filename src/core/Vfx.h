@@ -144,6 +144,26 @@ ColorMapperSettings defaultColorMapper();
 std::optional<ColorMapperSettings> parseColorMapper (const std::vector<std::uint8_t>& fl);
 std::vector<std::uint8_t> writeColorMapper (const ColorMapperSettings& s);
 
+// VFX Level Scaler: per voice property (tab) a transfer curve: Center, Multiply, Offset, Tension, Humanize (+ mode)
+struct LevelScalerSettings
+{
+    enum Tab { velocity, release, finePitch, pan, modX, modY, tabCount };
+    enum Field { center, multiply, offset, tension, humanize, humanizeMode, fieldCount };
+    std::uint32_t version = 1;
+    int selectedTab = 0;                 // (the editor's)
+    std::array<std::int32_t, 36> p {};   // p[6 · tab + field], FL's units (Center 0…8192, Multiply ±16384 = ×±2, …)
+    int& at (int tab, int field) noexcept { return p[(std::size_t) (tab * 6 + field)]; }
+    int at (int tab, int field) const noexcept { return p[(std::size_t) (tab * 6 + field)]; }
+    bool identity (int tab) const noexcept; // (passes the value untouched)
+    bool operator== (const LevelScalerSettings&) const = default;
+};
+LevelScalerSettings defaultLevelScaler();
+void resetLevelScalerTab (LevelScalerSettings& s, int tab);
+std::optional<LevelScalerSettings> parseLevelScaler (const std::vector<std::uint8_t>& fl);
+std::vector<std::uint8_t> writeLevelScaler (const LevelScalerSettings& s);
+// The curve: x in lo…hi → out in lo…hi; `random` 0…1 places it in the humanize range (FL's T(tab, x, lo, hi, rnd))
+double levelScale (const LevelScalerSettings& s, int tab, double x, double lo, double hi, double random) noexcept;
+
 // ---------------------------------------------------------------------------------------------------------------
 // Presets
 

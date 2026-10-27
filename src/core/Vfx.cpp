@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <functional>
 
 #include "core/Song.h"
 #include "flp/Flp.h"
@@ -236,6 +237,110 @@ std::vector<std::uint8_t> writeColorMapper (const ColorMapperSettings& s)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// VFX Level Scaler (REA_rodada164b §Level Scaler)
+
+bool LevelScalerSettings::identity (int tab) const noexcept
+{
+    return at (tab, multiply) == 8192 && at (tab, offset) == 0 && at (tab, tension) == 0 && at (tab, humanize) == 0;
+}
+
+void resetLevelScalerTab (LevelScalerSettings& s, int tab)
+{
+    // the editor's Reset: bipolar properties are centred
+    s.at (tab, LevelScalerSettings::center) = tab >= LevelScalerSettings::finePitch ? 4096 : 0;
+    s.at (tab, LevelScalerSettings::multiply) = 8192;
+    s.at (tab, LevelScalerSettings::offset) = 0;
+    s.at (tab, LevelScalerSettings::tension) = 0;
+    s.at (tab, LevelScalerSettings::humanize) = 0;
+    s.at (tab, LevelScalerSettings::humanizeMode) = 1;
+}
+
+LevelScalerSettings defaultLevelScaler()
+{
+    LevelScalerSettings s;
+    for (int t = 0; t < LevelScalerSettings::tabCount; ++t)
+        resetLevelScalerTab (s, t);
+    return s;
+}
+
+std::optional<LevelScalerSettings> parseLevelScaler (const std::vector<std::uint8_t>& fl)
+{
+    Reader r { fl.data(), fl.size() };
+    auto s = defaultLevelScaler();
+    s.version = r.u32();
+    if (r.failed)
+        return std::nullopt;
+    if (s.version >= 2)
+        return defaultLevelScaler(); // (FL ignores a state it does not know)
+    // chunks: id, 64-bit size, data (unknown ids skipped)
+    while (r.left() >= 12)
+    {
+        const auto id = r.u32();
+        const auto size = r.get<std::uint64_t>();
+        if (size > r.left())
+            return std::nullopt;
+        const auto end = r.pos + (std::size_t) size;
+        if (id == 0x3ea && size >= 1)
+            s.selectedTab = std::clamp ((int) r.get<std::uint8_t>(), 0, 5);
+        else if (id == 0x3e9 && size >= 144)
+        {
+            static constexpr std::array<std::pair<int, int>, 6> range { { { 0, 8192 }, { -16384, 16384 }, { -8192, 8192 }, { -8192, 8192 }, { 0, 16384 }, { 0, 2 } } };
+            for (int i = 0; i < 36; ++i)
+                s.p[(std::size_t) i] = std::clamp (r.i32(), range[(std::size_t) (i % 6)].first, range[(std::size_t) (i % 6)].second);
+        }
+        r.pos = end;
+    }
+    if (r.failed)
+        return std::nullopt;
+    return s;
+}
+
+std::vector<std::uint8_t> writeLevelScaler (const LevelScalerSettings& s)
+{
+    std::vector<std::uint8_t> out;
+    put<std::uint32_t> (out, 1);
+    put<std::uint32_t> (out, 0x3ea);
+    put<std::uint64_t> (out, 1);
+    put<std::uint8_t> (out, (std::uint8_t) std::clamp (s.selectedTab, 0, 5));
+    put<std::uint32_t> (out, 0x3e9);
+    put<std::uint64_t> (out, 144);
+    for (const auto v : s.p)
+        put<std::int32_t> (out, v);
+    return out;
+}
+
+double levelScale (const LevelScalerSettings& s, int tab, double x, double lo, double hi, double random) noexcept
+{
+    using L = LevelScalerSettings;
+    if (s.identity (tab) || ! (hi > lo))
+        return x;
+    const auto c = s.at (tab, L::center) / 8192.0;
+    const auto scale = 1.0 / std::max (c, 1.0 - c);
+    const auto tension = s.at (tab, L::tension);
+    const auto g = std::pow (8193.0, std::abs (tension) / 8192.0) - 1.0;
+    const auto mul = s.at (tab, L::multiply) / (8192.0 * scale);
+    const auto off = s.at (tab, L::offset) / 8192.0 + c;
+    const auto u = (x - lo) / (hi - lo);
+    const auto d = u - c;
+    const auto m = std::min (1.0, std::abs (d) * scale);
+    auto shape = m;
+    if (tension > 0 && g > 0.0)
+        shape = 1.0 - (std::pow (g + 1.0, 1.0 - m) - 1.0) / g;
+    else if (tension < 0 && g > 0.0)
+        shape = (std::pow (g + 1.0, m) - 1.0) / g;
+    const auto y = std::clamp ((d < 0.0 ? -shape : shape) * mul + off, 0.0, 1.0);
+    auto out = std::clamp (lo + y * (hi - lo), lo, hi);
+    if (const auto h = s.at (tab, L::humanize) / 16384.0; h > 0.0)
+    {
+        const auto mode = s.at (tab, L::humanizeMode);
+        const auto a = mode == 2 ? out : out - (out - lo) * h;
+        const auto b = mode == 0 ? out : out + (hi - out) * h;
+        out = a + std::clamp (random, 0.0, 1.0) * (b - a);
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Presets
 
 std::vector<Preset> builtInPresets (Kind kind)
@@ -300,6 +405,37 @@ std::vector<Preset> builtInPresets (Kind kind)
             inverted.rows[(std::size_t) pc] = { 11 - pc };
         out.push_back ({ "Special", "Inverted", writeKeyMapper (inverted) });
     }
+    if (kind == Kind::levelScaler)
+    {
+        using L = LevelScalerSettings;
+        auto make = [&] (const char* folder, const char* name, std::function<void (L&)> f) {
+            auto s = defaultLevelScaler();
+            f (s);
+            out.push_back ({ folder, name, writeLevelScaler (s) });
+        };
+        make ("Velocity", "Humanize (subtle)", [] (L& s) { s.at (L::velocity, L::humanize) = 2400; });
+        make ("Velocity", "Humanize (strong)", [] (L& s) { s.at (L::velocity, L::humanize) = 6000; });
+        make ("Velocity", "Softer", [] (L& s) { s.at (L::velocity, L::multiply) = 6144; });
+        make ("Velocity", "Compress", [] (L& s) {
+            s.at (L::velocity, L::center) = 6400;
+            s.at (L::velocity, L::multiply) = 4096;
+        });
+        make ("Velocity", "Expand", [] (L& s) {
+            s.at (L::velocity, L::center) = 6400;
+            s.at (L::velocity, L::multiply) = 12288;
+        });
+        make ("Velocity", "Fixed", [] (L& s) {
+            s.at (L::velocity, L::multiply) = 0;
+            s.at (L::velocity, L::offset) = 6400;
+        });
+        make ("Velocity", "Inverted", [] (L& s) {
+            s.at (L::velocity, L::center) = 4096;
+            s.at (L::velocity, L::multiply) = -8192;
+        });
+        make ("Other", "Random pan", [] (L& s) { s.at (L::pan, L::humanize) = 8192; });
+        make ("Other", "Detune (random fine pitch)", [] (L& s) { s.at (L::finePitch, L::humanize) = 300; });
+        make ("Other", "Short releases", [] (L& s) { s.at (L::release, L::offset) = -4096; });
+    }
     return out;
 }
 
@@ -326,6 +462,7 @@ std::vector<std::uint8_t> defaultState (Kind kind)
     {
         case Kind::keyMapper: return writeKeyMapper (defaultKeyMapper());
         case Kind::colorMapper: return writeColorMapper (defaultColorMapper());
+        case Kind::levelScaler: return writeLevelScaler (defaultLevelScaler());
         default: break;
     }
     return {};
@@ -699,6 +836,60 @@ public:
 };
 } // namespace
 
+namespace
+{
+// One voice in, one voice out, its velocity, fine pitch, pan, Mod X / Y and release velocity through the curves.
+// (FL re-evaluates the curves every tick from the parent's live levels; LYNX applies them when the note starts and
+// to its release velocity when it ends: the voices' levels do not change on their way here.)
+class LevelScaler final : public Base<LevelScalerSettings>
+{
+public:
+    explicit LevelScaler (LevelScalerSettings s) : Base (std::move (s)) {}
+    Kind kind() const noexcept override { return Kind::levelScaler; }
+    bool configure (const std::vector<std::uint8_t>& fl) override
+    {
+        auto s = parseLevelScaler (fl);
+        if (! s)
+            return false;
+        publish (std::move (*s));
+        return true;
+    }
+    void process (const Event* in, int count, int, const Transport&, EventList& out) noexcept override
+    {
+        using L = LevelScalerSettings;
+        const auto& s = current();
+        for (int i = 0; i < count; ++i)
+        {
+            const auto& e = in[i];
+            if (e.type == Event::Type::on)
+            {
+                auto v = e.voice;
+                // (FL's order: pan, Mod X, Mod Y, fine pitch, velocity; each with its own random, fixed for the note)
+                v.pan = (float) levelScale (s, L::pan, v.pan, -1.0, 1.0, random());
+                v.modX = (float) (levelScale (s, L::modX, v.modX * 2.0 - 1.0, -1.0, 1.0, random()) * 0.5 + 0.5);
+                v.modY = (float) (levelScale (s, L::modY, v.modY * 2.0 - 1.0, -1.0, 1.0, random()) * 0.5 + 0.5);
+                v.cents = (float) (levelScale (s, L::finePitch, v.cents / 1200.0, -1.0, 1.0, random()) * 1200.0);
+                v.velocity = (float) levelScale (s, L::velocity, v.velocity, 0.0, 1.0, random());
+                if (const auto id = voices.add (e.id, 0, v); id >= 0)
+                    out.add (onEvent (e.offset, 0, id, v));
+            }
+            else if (e.type == Event::Type::off)
+                voices.release (e.id, e.offset, (float) levelScale (s, L::release, e.voice.release, 0.0, 1.0, random()), out);
+        }
+    }
+
+private:
+    double random() noexcept
+    {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        return (double) (seed >> 8) / 16777216.0;
+    }
+    std::uint32_t seed = 0x2545f491u;
+};
+} // namespace
+
 std::unique_ptr<Processor> makeProcessor (Kind kind, const std::vector<std::uint8_t>& fl)
 {
     switch (kind)
@@ -707,6 +898,8 @@ std::unique_ptr<Processor> makeProcessor (Kind kind, const std::vector<std::uint
             return std::make_unique<KeyMapper> (parseKeyMapper (fl).value_or (defaultKeyMapper()));
         case Kind::colorMapper:
             return std::make_unique<ColorMapper> (parseColorMapper (fl).value_or (defaultColorMapper()));
+        case Kind::levelScaler:
+            return std::make_unique<LevelScaler> (parseLevelScaler (fl).value_or (defaultLevelScaler()));
         default: break;
     }
     return std::make_unique<ThroughProcessor> (kind);

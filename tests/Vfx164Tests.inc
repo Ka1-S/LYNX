@@ -316,3 +316,47 @@ TEST (vfx_key_mapper_pitch_slide_glides_to_the_new_note)
     }
     CHECK (steps == 18 && last < 1200.0f * 0.02f); // ~99 % of the way after 3 steps
 }
+
+TEST (vfx_level_scaler_curves_match_fl)
+{
+    using L = lynx::vfx::LevelScalerSettings;
+    auto s = lynx::vfx::defaultLevelScaler();
+    const auto fl = lynx::vfx::writeLevelScaler (s);
+    CHECK (fl.size() == 173);
+    CHECK (lynx::vfx::parseLevelScaler (fl) == s);
+    CHECK (lynx::vfx::levelScale (s, L::velocity, 0.3, 0.0, 1.0, 0.5) == 0.3); // identity
+    auto near = [] (double a, double b, double eps = 1e-4) { return std::abs (a - b) < eps; };
+    s.at (L::velocity, L::multiply) = 6842; // AutoBeat Lite
+    CHECK (near (lynx::vfx::levelScale (s, L::velocity, 0.78125, 0.0, 1.0, 0.0), 0.652504));
+    s = lynx::vfx::defaultLevelScaler();
+    s.at (L::velocity, L::tension) = 8192;
+    CHECK (near (lynx::vfx::levelScale (s, L::velocity, 0.5, 0.0, 1.0, 0.0), 0.989073));
+    s.at (L::velocity, L::tension) = -8192;
+    CHECK (near (lynx::vfx::levelScale (s, L::velocity, 0.5, 0.0, 1.0, 0.0), 0.010927));
+    s = lynx::vfx::defaultLevelScaler();
+    s.at (L::finePitch, L::multiply) = 4096;
+    CHECK (near (lynx::vfx::levelScale (s, L::finePitch, 0.5, -1.0, 1.0, 0.0) * 1200.0, 300.0, 0.01));
+    CHECK (near (lynx::vfx::levelScale (s, L::finePitch, -1.0, -1.0, 1.0, 0.0) * 1200.0, -600.0, 0.01));
+    s = lynx::vfx::defaultLevelScaler();
+    s.at (L::pan, L::offset) = 4096;
+    CHECK (near (lynx::vfx::levelScale (s, L::pan, 0.0, -1.0, 1.0, 0.0), 1.0));
+    CHECK (near (lynx::vfx::levelScale (s, L::pan, -1.0, -1.0, 1.0, 0.0), 0.0));
+    s = lynx::vfx::defaultLevelScaler();
+    s.at (L::modX, L::multiply) = -8192;
+    CHECK (near (lynx::vfx::levelScale (s, L::modX, 0.4, -1.0, 1.0, 0.0), -0.4));
+    // humanize: spread around the value, subtract below, add above
+    s = lynx::vfx::defaultLevelScaler();
+    s.at (L::velocity, L::humanize) = 8192;
+    CHECK (near (lynx::vfx::levelScale (s, L::velocity, 0.5, 0.0, 1.0, 0.0), 0.25) && near (lynx::vfx::levelScale (s, L::velocity, 0.5, 0.0, 1.0, 1.0), 0.75));
+    s.at (L::velocity, L::humanizeMode) = 0;
+    CHECK (near (lynx::vfx::levelScale (s, L::velocity, 0.5, 0.0, 1.0, 1.0), 0.5));
+    s.at (L::velocity, L::humanizeMode) = 2;
+    CHECK (near (lynx::vfx::levelScale (s, L::velocity, 0.5, 0.0, 1.0, 0.0), 0.5));
+    // the processor: a fixed velocity
+    auto fixed = lynx::vfx::defaultLevelScaler();
+    fixed.at (L::velocity, L::multiply) = 0;
+    fixed.at (L::velocity, L::offset) = 4096;
+    auto p = lynx::vfx::makeProcessor (lynx::vfx::Kind::levelScaler, lynx::vfx::writeLevelScaler (fixed));
+    const auto out = vfx164::run (*p, { vfx164::on (60, 0, 0, 0.9f), vfx164::on (64, 0, 0, 0.2f) });
+    CHECK (out.size() == 2 && near (out[0].voice.velocity, 0.5) && near (out[1].voice.velocity, 0.5) && out[0].voice.key == 60);
+}

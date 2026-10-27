@@ -124,7 +124,7 @@ ui::ValueSpec intSpec (const juce::String& name, int lo, int hi, int def, std::f
     s.maximum = hi;
     s.defaultValue = def;
     s.interval = 1.0;
-    s.pixelsForRange = std::max (120.0, (double) (hi - lo) * 6.0);
+    s.pixelsForRange = std::clamp ((double) (hi - lo) * 6.0, 120.0, 300.0);
     if (text)
     {
         s.toText = text;
@@ -471,6 +471,189 @@ private:
     std::array<juce::ComboBox, 16> ports, colours;
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// VFX Level Scaler: a tab per voice property, its curve's controls on the left, the curve on the right
+
+class LevelScalerBody final : public Body
+{
+public:
+    using L = vfx::LevelScalerSettings;
+
+    LevelScalerBody()
+    {
+        static const char* names[] = { TR_NOOP ("Velocity"), TR_NOOP ("Release"), TR_NOOP ("Fine pitch"), TR_NOOP ("Pan"), TR_NOOP ("Mod X"), TR_NOOP ("Mod Y") };
+        for (int t = 0; t < L::tabCount; ++t)
+        {
+            auto& b = tabs[(std::size_t) t];
+            b.setButtonText (tr (names[t]));
+            b.setClickingTogglesState (false);
+            b.setColour (juce::TextButton::buttonOnColourId, theme::colour::accentMuted);
+            b.onClick = [this, t] { change ([t] (L& st) { st.selectedTab = t; }); };
+            addAndMakeVisible (b);
+        }
+        auto knob = [this] (Knob& k, const juce::String& caption) {
+            k.caption = caption;
+            addAndMakeVisible (k);
+        };
+        knob (center, tr ("Center"));
+        knob (multiply, tr ("Multiply"));
+        knob (offset, tr ("Offset"));
+        knob (tension, tr ("Tension"));
+        knob (humanize, tr ("Humanize"));
+        mode.addItem (tr ("Subtract"), 1);
+        mode.addItem (tr ("Spread"), 2);
+        mode.addItem (tr ("Add"), 3);
+        mode.onChange = [this] { set (L::humanizeMode, mode.getSelectedId() - 1); };
+        ui::setHint (mode, tr ("Humanize mode: the random part goes below the value, around it or above it"));
+        addAndMakeVisible (mode);
+        reset.setButtonText (tr ("Reset"));
+        ui::setHint (reset, tr ("Reset all controls of this property"));
+        reset.onClick = [this] { change ([] (L& st) { vfx::resetLevelScalerTab (st, st.selectedTab); }); };
+        addAndMakeVisible (reset);
+    }
+
+    void refresh (const std::vector<std::uint8_t>& fl) override
+    {
+        settings = vfx::parseLevelScaler (fl).value_or (vfx::defaultLevelScaler());
+        for (int t = 0; t < L::tabCount; ++t)
+            tabs[(std::size_t) t].setToggleState (t == settings.selectedTab, juce::dontSendNotification);
+        mode.setSelectedId (std::clamp (settings.at (settings.selectedTab, L::humanizeMode), 0, 2) + 1, juce::dontSendNotification);
+        for (auto* k : { &center, &multiply, &offset, &tension, &humanize })
+            k->repaint();
+        repaint();
+    }
+
+    int preferredHeight() const override { return 360; }
+    int preferredWidth() const override { return 700; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (12, 6);
+        auto top = area.removeFromTop (28);
+        for (auto& b : tabs)
+            b.setBounds (top.removeFromLeft (92).reduced (2, 0));
+        area.removeFromTop (8);
+        auto left = area.removeFromLeft (230);
+        auto row1 = left.removeFromTop (92);
+        for (auto* k : { &center, &multiply, &offset })
+            k->setBounds (row1.removeFromLeft (76));
+        auto row2 = left.removeFromTop (92);
+        for (auto* k : { &tension, &humanize })
+            k->setBounds (row2.removeFromLeft (76));
+        auto side = row2.reduced (2, 14);
+        mode.setBounds (side.removeFromTop (26));
+        left.removeFromTop (8);
+        reset.setBounds (left.removeFromTop (26).withWidth (100));
+        graph = area.reduced (10, 0).toFloat();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        if (graph.isEmpty())
+            return;
+        const auto tab = settings.selectedTab;
+        const auto bipolar = tab >= L::finePitch;
+        const auto lo = bipolar ? -1.0 : 0.0, hi = 1.0;
+        g.setColour (theme::colour::bg0);
+        g.fillRoundedRectangle (graph, 4.0f);
+        g.setColour (theme::colour::border);
+        for (int k = 1; k < 8; ++k)
+        {
+            g.drawVerticalLine ((int) (graph.getX() + graph.getWidth() * (float) k / 8.0f), graph.getY(), graph.getBottom());
+            g.drawHorizontalLine ((int) (graph.getY() + graph.getHeight() * (float) k / 8.0f), graph.getX(), graph.getRight());
+        }
+        g.setColour (theme::colour::textDisabled);
+        g.setFont (theme::font (theme::type::title, true));
+        g.drawText (tabs[(std::size_t) tab].getButtonText(), graph.reduced (12.0f, 8.0f), juce::Justification::topLeft);
+        auto point = [&] (double u, double y) {
+            return juce::Point<float> (graph.getX() + (float) u * graph.getWidth(), graph.getBottom() - (float) ((y - lo) / (hi - lo)) * graph.getHeight());
+        };
+        g.setColour (theme::colour::borderStrong);
+        g.drawLine (juce::Line<float> (point (0.0, lo), point (1.0, hi)), 1.0f);
+        juce::Path curve, upper, lower;
+        constexpr int steps = 160;
+        for (int k = 0; k <= steps; ++k)
+        {
+            const auto u = (double) k / steps;
+            const auto x = lo + u * (hi - lo);
+            const auto p = point (u, vfx::levelScale (settings, tab, x, lo, hi, 0.5));
+            const auto a = point (u, vfx::levelScale (settings, tab, x, lo, hi, 0.0));
+            const auto b = point (u, vfx::levelScale (settings, tab, x, lo, hi, 1.0));
+            if (k == 0)
+            {
+                curve.startNewSubPath (p);
+                lower.startNewSubPath (a);
+                upper.startNewSubPath (b);
+            }
+            else
+            {
+                curve.lineTo (p);
+                lower.lineTo (a);
+                upper.lineTo (b);
+            }
+        }
+        if (settings.at (tab, L::humanize) > 0)
+        {
+            juce::Path band (upper);
+            for (int k = steps; k >= 0; --k)
+            {
+                const auto u = (double) k / steps;
+                band.lineTo (point (u, vfx::levelScale (settings, tab, lo + u * (hi - lo), lo, hi, 0.0)));
+            }
+            band.closeSubPath();
+            g.setColour (theme::colour::accent.withAlpha (0.16f));
+            g.fillPath (band);
+            g.setColour (theme::colour::accent.withAlpha (0.45f));
+            g.strokePath (upper, juce::PathStrokeType (1.0f));
+            g.strokePath (lower, juce::PathStrokeType (1.0f));
+        }
+        g.setColour (theme::colour::accent);
+        g.strokePath (curve, juce::PathStrokeType (2.2f));
+        g.setColour (theme::colour::borderStrong);
+        g.drawRoundedRectangle (graph, 4.0f, 1.0f);
+        g.setColour (theme::colour::textSecondary);
+        g.setFont (theme::font (theme::type::caption));
+        g.drawText (tr ("in"), graph.withTrimmedTop (graph.getHeight() - 16.0f).reduced (6.0f, 0.0f), juce::Justification::centredRight);
+        g.drawText (tr ("out"), graph.reduced (6.0f, 4.0f).withHeight (14.0f), juce::Justification::centredRight);
+    }
+
+private:
+    void change (std::function<void (L&)> f)
+    {
+        if (edit)
+            edit ([f] (std::vector<std::uint8_t>& fl) {
+                auto s = vfx::parseLevelScaler (fl).value_or (vfx::defaultLevelScaler());
+                f (s);
+                fl = vfx::writeLevelScaler (s);
+            });
+    }
+    void set (int field, double v)
+    {
+        change ([field, v] (L& st) { st.at (st.selectedTab, field) = (int) std::lround (v); });
+    }
+    double get (int field) const { return settings.at (settings.selectedTab, field); }
+    static juce::String percent (double v) { return juce::String (v * 100.0, 0) + "%"; }
+
+    L settings = vfx::defaultLevelScaler();
+    std::array<juce::TextButton, L::tabCount> tabs;
+    Knob center { intSpec (tr ("Center: the input level the curve turns around"), 0, 8192, 0, [] (double v) { return percent (v / 8192.0); }),
+                  [this] { return get (L::center); }, [this] (double v) { set (L::center, v); } };
+    Knob multiply { intSpec (tr ("Multiply: the slope around the center (negative inverts)"), -16384, 16384, 8192,
+                             [] (double v) { return juce::String::charToString (0xd7) + juce::String (v / 8192.0, 2); }),
+                    [this] { return get (L::multiply); }, [this] (double v) { set (L::multiply, v); } };
+    Knob offset { intSpec (tr ("Offset: moves every value up or down"), -8192, 8192, 0,
+                           [] (double v) { return (v > 0 ? "+" : "") + percent (v / 8192.0); }),
+                  [this] { return get (L::offset); }, [this] (double v) { set (L::offset, v); } };
+    Knob tension { intSpec (tr ("Tension: bends the curve (positive rises fast, negative starts slow)"), -8192, 8192, 0,
+                            [] (double v) { return (v > 0 ? "+" : "") + percent (v / 8192.0); }),
+                   [this] { return get (L::tension); }, [this] (double v) { set (L::tension, v); } };
+    Knob humanize { intSpec (tr ("Humanize: a random amount for each note"), 0, 16384, 0, [] (double v) { return percent (v / 16384.0); }),
+                    [this] { return get (L::humanize); }, [this] (double v) { set (L::humanize, v); } };
+    juce::ComboBox mode;
+    juce::TextButton reset;
+    juce::Rectangle<float> graph;
+};
+
 // A kind LYNX does not edit yet: says so (its notes pass through)
 class PendingBody final : public Body
 {
@@ -492,6 +675,7 @@ std::unique_ptr<Body> makeBody (vfx::Kind kind)
     {
         case vfx::Kind::keyMapper: return std::make_unique<KeyMapperBody>();
         case vfx::Kind::colorMapper: return std::make_unique<ColorMapperBody>();
+        case vfx::Kind::levelScaler: return std::make_unique<LevelScalerBody>();
         default: break;
     }
     return std::make_unique<PendingBody>();
