@@ -3,11 +3,13 @@
 
 Usage:
   scripts/make-msix-layout.py --version 0.1.20[-alpha] --bin <folder with LYNX.exe> --out <layout folder>
-                              [--identity-name N] [--publisher P] [--publisher-display D] [--test-identity]
+                              [--identity-name N] [--publisher P] [--publisher-display D] [--display-name L]
+                              [--test-identity]
                               [--extra file ...]
 
 The identity defaults come from the environment (MSIX_IDENTITY_NAME, MSIX_PUBLISHER, MSIX_PUBLISHER_DISPLAY: the
-repository variables, copied from Partner Center › Product identity) and fall back to placeholders. --test-identity
+repository variables, copied from Partner Center › Product identity) and fall back to placeholders; MSIX_DISPLAY_NAME
+is the app name reserved in Partner Center (default LYNX). --test-identity
 appends Windows' "unsigned package" OID to the publisher, so `Add-AppxPackage -AllowUnsigned` installs the package
 for a test (it can then never clash with the Store-signed one). See docs/STORE.md.
 """
@@ -48,7 +50,10 @@ def main(argv):
     ap.add_argument("--identity-name", default=os.environ.get("MSIX_IDENTITY_NAME") or PLACEHOLDER_NAME)
     ap.add_argument("--publisher", default=os.environ.get("MSIX_PUBLISHER") or PLACEHOLDER_PUBLISHER)
     ap.add_argument("--publisher-display", default=os.environ.get("MSIX_PUBLISHER_DISPLAY") or PLACEHOLDER_DISPLAY)
+    ap.add_argument("--display-name", default=os.environ.get("MSIX_DISPLAY_NAME") or "LYNX")
     ap.add_argument("--test-identity", action="store_true")
+    ap.add_argument("--loose", action="store_true",
+                    help="also write unqualified logo names, for Add-AppxPackage -Register without makepri's resources.pri")
     ap.add_argument("--extra", nargs="*", default=[], help="more files for the package root (Demo.lynx, LICENSE...)")
     a = ap.parse_args(argv)
 
@@ -69,7 +74,11 @@ def main(argv):
             raise SystemExit(f"missing {src}")
     for extra in a.extra:
         shutil.copy2(extra, a.out)
-    shutil.copytree(os.path.join(ROOT, "resources", "msix", "Assets"), os.path.join(a.out, "Assets"))
+    assets = os.path.join(a.out, "Assets")
+    shutil.copytree(os.path.join(ROOT, "resources", "msix", "Assets"), assets)
+    if a.loose:
+        for base in ("Square44x44Logo", "Square150x150Logo", "Wide310x150Logo", "SmallTile", "LargeTile", "StoreLogo", "ProjectFile"):
+            shutil.copy2(os.path.join(assets, base + ".scale-100.png"), os.path.join(assets, base + ".png"))
 
     with open(os.path.join(ROOT, "resources", "msix", "AppxManifest.xml.in"), encoding="utf-8") as f:
         manifest = f.read()
@@ -78,6 +87,7 @@ def main(argv):
         "@PUBLISHER@": publisher,
         "@PUBLISHER_DISPLAY@": a.publisher_display,
         "@VERSION@": msix_version(a.version),
+        "@DISPLAY_NAME@": a.display_name,
     }
     for key, value in fields.items():
         manifest = manifest.replace(key, xml_escape(value))
