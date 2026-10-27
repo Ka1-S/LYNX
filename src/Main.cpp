@@ -4319,6 +4319,7 @@ private:
                 kinds.push_back (own);
             kinds.push_back (lynx::EffectKind::apexLimiter); // round 114: display-first editor
             kinds.push_back (lynx::EffectKind::ridgeStrip); // round 145: the second pass shows the Vocal strip voicing
+            kinds.push_back (lynx::EffectKind::ridgeStrip); // round 165: the third pass shows the E console voicing
             kinds.push_back (lynx::EffectKind::compressor); // round 152: the RComp role's panel (vintage voicing, RComp ranges)
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
@@ -4375,6 +4376,14 @@ private:
                                                         { "Process order", 0.4783f }, { "De-esser", 1.0f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
                     name = "Ridge Strip (Vocal strip)";
+                }
+                else if (kind == lynx::EffectKind::ridgeStrip && ridgePasses == 3) // round 165: the E console, EQ to the side chain
+                {
+                    for (const auto& [param, value] : { std::pair<const char*, float> { "Voicing", 1.0f }, { "HPF", 0.3f }, { "HF gain", 0.8f },
+                                                        { "HF bell", 1.0f }, { "Ratio", 0.5f }, { "Comp. threshold", 0.4f }, { "EQ to SC", 1.0f },
+                                                        { "Filter split", 1.0f }, { "Expander", 1.0f } })
+                        fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                    name = "Ridge Strip (E console)";
                 }
                 else if (kind == lynx::EffectKind::ridgeStrip) // a vocal setting, so the graphs show something
                     for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },

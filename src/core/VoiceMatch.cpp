@@ -547,6 +547,12 @@ void Channel::reset() noexcept
     hp1.reset(); hp2.reset(); lp.reset(); vcaHp.reset();
     for (auto& b : bands)
         b.reset();
+    for (auto& c : sc)
+    {
+        c.hp1.reset(); c.hp2.reset(); c.lp.reset();
+        for (auto& b : c.bands)
+            b.reset();
+    }
     env = gr = gr1 = yl = yr = genv = ggr = 0.0;
     gateOpen = false;
 }
@@ -572,6 +578,13 @@ void Channel::design (const Settings& s) noexcept
     {
         bandOn[i] = bandBiquad (i, s, sr, a);
         if (bandOn[i]) { bands[i].b0 = a.b0; bands[i].b1 = a.b1; bands[i].b2 = a.b2; bands[i].a1 = a.a1; bands[i].a2 = a.a2; }
+    }
+    const auto coefs = [] (Biquad& to, const Biquad& from) { to.b0 = from.b0; to.b1 = from.b1; to.b2 = from.b2; to.a1 = from.a1; to.a2 = from.a2; };
+    for (auto& c : sc) // round 165: the side chain's copies
+    {
+        coefs (c.hp1, hp1); coefs (c.hp2, hp2); coefs (c.lp, lp);
+        for (int i = 0; i < 4; ++i)
+            coefs (c.bands[i], bands[i]);
     }
 }
 
@@ -628,6 +641,21 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
             }
     };
 
+    // round 165: EQ to the dynamics' side chain (model 0) — the detectors hear the filtered / equalised signal, the
+    // audio goes through the dynamics without them (the filters stay at the input when split)
+    const bool eqSc = s.eqToSidechain && s.model == 0;
+    auto sideChain = [this, &s] (ScChain& c, double a, double b) {
+        if (! s.filtersBeforeDynamics)
+        {
+            if (hpOn) { a = c.hp2.process (c.hp1.process ((float) a, 0), 0); b = c.hp2.process (c.hp1.process ((float) b, 1), 1); }
+            if (lpOn) { a = c.lp.process ((float) a, 0); b = c.lp.process ((float) b, 1); }
+        }
+        if (s.eqOn)
+            for (int k = 0; k < 4; ++k)
+                if (bandOn[k]) { a = c.bands[k].process ((float) a, 0); b = c.bands[k].process ((float) b, 1); }
+        return std::max (std::abs (a), std::abs (b));
+    };
+
     for (int i = 0; i < n; ++i)
     {
         double a = l[i], b = r[i];
@@ -638,14 +666,14 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
         }
         a *= inG;
         b *= inG;
-        if (s.filtersBeforeDynamics || s.dynamicsAfterEq)
+        if (eqSc ? s.filtersBeforeDynamics : (s.filtersBeforeDynamics || s.dynamicsAfterEq))
             filters (a, b);
-        if (s.dynamicsAfterEq && s.eqOn)
+        if (! eqSc && s.dynamicsAfterEq && s.eqOn)
             eq (a, b);
 
         if (gateOn)
         {
-            const double lev = std::max (std::abs (a), std::abs (b));
+            const double lev = eqSc ? sideChain (sc[0], a, b) : std::max (std::abs (a), std::abs (b));
             genv = lev > genv ? lev : genv + gD * (lev - genv);
             const double levDb = gainToDb (genv);
             double target;
@@ -669,8 +697,8 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
         if (compOn)
         {
             // feedback compressor: the detector hears the compressor's own output (the previous sample)
-            const double sc = std::max (std::abs (yl), std::abs (yr));
-            env += (sc > env ? dA : dR) * (sc - env);
+            const double det = eqSc ? sideChain (sc[1], yl, yr) : std::max (std::abs (yl), std::abs (yr));
+            env += (det > env ? dA : dR) * (det - env);
             const double o = gainToDb (env) - (s.compThreshold + law.thresholdOffset);
             const double target = law.slope * softplus (o, law.knee);
             gr1 += (target > gr1 ? cA : cR1) * (target - gr1);
@@ -701,7 +729,7 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
         a *= makeup;
         b *= makeup;
 
-        if (! s.dynamicsAfterEq)
+        if (! s.dynamicsAfterEq && ! eqSc)
         {
             if (! s.filtersBeforeDynamics)
                 filters (a, b);

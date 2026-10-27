@@ -438,6 +438,7 @@ vmatch::echannel::Settings consoleSettingsOf (const EffectParams& p) noexcept
     e.dynOn = on (p[dynOn]);
     e.dynamicsAfterEq = ! on (p[order]);
     e.filtersBeforeDynamics = on (p[filterSplit]);
+    e.eqToSidechain = on (p[eqToSidechain]); // round 165
     if (k4Voicing (p)) // round 148: the 4K console (its own Q scale, colour, mic pre, VCA, make-up, mix)
     {
         e.model = 1;
@@ -547,6 +548,7 @@ public:
         // round 147b: + the console's automatic make-up when switched on
         const auto outGain = (float) (dbToGain (trimDb (p[output]) + (on (p[autoMakeup]) ? autoMakeupDb (p) : 0.0)) * (on (p[phase]) ? -1.0 : 1.0));
         const bool eq = on (p[eqOn]), dyn = on (p[dynOn]), eqFirst = ! on (p[order]), fts = on (p[filtersToSidechain]);
+        const bool eqSc = on (p[eqToSidechain]); // round 165: the filters and the EQ in the side chain only
 
         // compressor
         const auto thr = compThresholdDb (p[compThreshold]), rat = ratio (p[compRatio]);
@@ -565,16 +567,18 @@ public:
         for (int i = 0; i < n; ++i)
         {
             float a = l[i] * inGain, b = r[i] * inGain;
-            if (! fts)
+            if (! fts && ! eqSc)
                 filters (audio, a, b);
-            if (eq && eqFirst)
+            if (eq && eqFirst && ! eqSc)
                 bands (audio, a, b);
 
             if (dyn && (compOn || gateOn))
             {
                 float sa = a, sb = b;
-                if (fts)
+                if (fts || eqSc)
                     filters (side, sa, sb);
+                if (eqSc && eq)
+                    bands (side, sa, sb);
                 const auto rect = (double) std::max (std::abs (sa), std::abs (sb));
                 // level detector: instant attack, 30 ms release (keeps the ripple of low notes out of the gain)
                 levelEnv = rect > levelEnv ? rect : levelRelease * levelEnv + (1.0 - levelRelease) * rect;
@@ -621,7 +625,7 @@ public:
                 maxGate = std::max (maxGate, (float) gateGr);
             }
 
-            if (eq && ! eqFirst)
+            if (eq && ! eqFirst && ! eqSc)
                 bands (audio, a, b);
             l[i] = a * outGain;
             r[i] = b * outGain;
@@ -2825,7 +2829,9 @@ const EffectInfo& ridgeInfo()
                                      { "Auto make-up", 0.0f }, { "Analog", 0.0f },
                                      // round 148: the 4K voicing
                                      { "4K voicing", 0.0f }, { "EQ colour", 0.0f }, { "Mic pre", 0.0f }, { "Mic gain", 0.0f },
-                                     { "Make-up offset", 0.5f } } };
+                                     { "Make-up offset", 0.5f },
+                                     // round 165
+                                     { "EQ to SC", 0.0f } } };
     return info;
 }
 
