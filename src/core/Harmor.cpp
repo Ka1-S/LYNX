@@ -1578,6 +1578,86 @@ std::optional<Table> shapeTable (int code, const Curve* curve)
         }
         T = Table (std::move (t), 0.5 * 4095, 1, 1);
     }
+    // the filter shapes 8, 10…13, 15, 16 (REA_rodada165g-flbeta165s §4, [DECOMP FUN_00874ed0] + DLL constants)
+    else if (code == 8 || code == 10)
+    {
+        const int N = code == 8 ? 682 : 1365;
+        auto t = mk (N, s);
+        for (int i = 0; i < N; ++i)
+        {
+            const auto c = std::cos ((1.0 - i * s * 0.5) * pi);
+            if (code == 8)
+                t[(std::size_t) i] = (float) (1.0 - (c + 1.0));
+            else
+            {
+                const auto u = 1.0 - (1.0 - (c + 1.0));
+                t[(std::size_t) i] = (float) (dbOf2 (u) * (1.0 - p16 (u)));
+            }
+        }
+        T = Table (std::move (t), 0, 1, 0);
+    }
+    else if (code == 11)
+    {
+        auto t = mk (1024, s);
+        for (int i = 0; i < 1024; ++i)
+        {
+            const auto a = 1.0 - (std::cos ((1.0 - i * s) * 9.42477796076938) + 1.0) * 0.5;
+            t[(std::size_t) i] = (float) (a * (1.0 - (std::cos ((1.0 - i * s) * pi) + 1.0) * 0.5));
+        }
+        T = Table (std::move (t), 0, 1, 0);
+    }
+    else if (code == 12)
+    {
+        const int N = 4096, half = N / 2;
+        auto t = mk (N, s);
+        for (int i = 0; i < N; ++i)
+            if (i < half)
+            {
+                const auto v = 1.0 - (std::cos ((1.0 - i * s) * twoPi) + 1.0) * 0.25;
+                t[(std::size_t) i] = (float) (v * v);
+            }
+            else
+            {
+                const auto x = (double) (i - half) * s * 2.0;
+                t[(std::size_t) i] = (float) (dbOf2 (x) * (1.0 - p16 (x)));
+            }
+        T = Table (std::move (t), 0.5 * (N - 1), 1, 0);
+    }
+    else if (code == 13)
+    {
+        auto t = mk (1024, s);
+        for (int i = 0; i < 1024; ++i)
+        {
+            const auto c = std::cos ((1.0 - i * s) * pi);
+            const auto a = (float) ((1.0 - (c + 1.0) * 0.5) * 18.0 + -18.0);
+            t[(std::size_t) i] = (float) std::exp ((double) (a * (float) ln10over20));
+        }
+        T = Table (std::move (t), 0, 1, 0);
+    }
+    else if (code == 15)
+    {
+        auto t = mk (4096, s);
+        for (int i = 0; i < 4096; ++i)
+        {
+            const auto a = (std::cos ((1.0 - i * s) * 37.69911184307752) + 1.0) * 0.5;
+            const auto b = 1.0 - (std::cos ((1.0 - i * s) * twoPi) + 1.0) * 0.5;
+            t[(std::size_t) i] = (float) (a * a * b * b + b * 0.125);
+        }
+        T = Table (std::move (t), 0.5 * 4095, 1, 1);
+    }
+    else if (code == 16)
+    {
+        const int N = 2048, M = N / 3;
+        std::vector<float> t ((std::size_t) N, 1.0f);
+        s = 0.5 / M;
+        for (int i = 0; i < M; ++i)
+        {
+            auto v = 1.0 - (std::cos ((1.0 - i * s) * twoPi) + 1.0) * 0.5;
+            v = v * v;
+            t[(std::size_t) i] = t[(std::size_t) (N - 1 - i)] = (float) v;
+        }
+        T = Table (std::move (t), 0.5 * (N - 1), 1, 1);
+    }
     else if (code == 100 || code == 108)
     {
         auto t = mk (1024, s);
