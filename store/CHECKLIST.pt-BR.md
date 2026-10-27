@@ -42,8 +42,26 @@ No app → **Iniciar envio**:
 | Classificação etária | Questionário IARC: categoria **App (não jogo)**; violência, sexo, linguagem, drogas, apostas: **não**; os usuários interagem/compartilham conteúdo entre si: **não**; compartilha localização: **não**; compras digitais: **não**; navegador sem restrição: **não**. Resultado esperado: Livre / 3+ |
 | Pacotes | Envie `LYNX-<versão>-store.msix` (baixado do release). Família: Windows 10/11 Desktop |
 | Recursos restritos (runFullTrust) | Cole: *"LYNX is a desktop digital audio workstation (Win32/JUCE). It needs full trust to host the user's VST3/CLAP audio plugins, open ASIO/WASAPI audio drivers with low latency and read and write the user's project and sample files anywhere on disk."* |
-| Listagens da Store | Inglês: `store/listing.en.md`; Português (Brasil): `store/listing.pt-BR.md`. Capturas: as 5 de `store/screenshots/` com as legendas do arquivo |
+| Listagens da Store | 16 idiomas prontos em `store/listings/` — o jeito rápido é importar tudo de uma vez (abaixo) |
 | Opções de envio | Notas para a certificação: *"Free open-source DAW. No account or sign-in needed. Open Demo.lynx from the app folder or File › New to test."* |
+
+### Listagens em 16 idiomas (importar de uma vez)
+
+Textos prontos: inglês, português (Brasil), espanhol (Espanha, e o mesmo texto para o México), francês, alemão,
+italiano, holandês, polonês, russo, turco, indonésio, japonês, coreano, chinês simplificado e tradicional. Cada um diz
+logo no começo que a interface do LYNX, por enquanto, é só em inglês e português (Brasil). O pacote declara só inglês e
+português (é a verdade); a Store aceita listagens em outros idiomas mesmo assim.
+
+1. No app → **Listagens da Store** → **Exportar listagem** → salve o `.csv` (ex.: em Downloads).
+2. Me mande o caminho do arquivo — ou rode você mesmo, na pasta do repositório:
+   `python scripts/store-listing-csv.py "<arquivo exportado>.csv" lynx-listings`
+   (cria a pasta `lynx-listings` com o CSV preenchido + capturas + logos; avisa se algum campo não coube).
+3. No app → **Importar listagens** → **Importar pasta** → escolha `lynx-listings`. Se aparecer erro, clique em
+   **Exibir erros** e me mande o texto.
+
+Sem importar: em **Gerenciar idiomas adicionais**, marque cada idioma e copie as seções do arquivo
+`store/listings/<idioma>.md` (Título = **LYNX SHARE**, Descrição, Novidades, Recursos, Termos de pesquisa, legendas)
+e envie as 5 capturas de `store/screenshots/`.
 
 Clique **Enviar para a Store**. A certificação costuma levar de 1 a 3 dias úteis; se reprovarem algo, o e-mail diz o
 quê — me mande o texto.

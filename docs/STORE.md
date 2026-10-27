@@ -12,7 +12,8 @@ is in the repository:
 | Package layout (exe + assets + filled manifest) | [`scripts/make-msix-layout.py`](../scripts/make-msix-layout.py) |
 | Build, install test, release asset | job `package` in [`.github/workflows/release.yml`](../.github/workflows/release.yml) → `LYNX-<version>-store.msix` |
 | Runtime differences when packaged | [`src/platform/Package.h`](../src/platform/Package.h), [`src/core/StorePackage.h`](../src/core/StorePackage.h) |
-| Store listing texts, screenshots, logos | [`store/`](../store) (`listing.en.md`, `listing.pt-BR.md`, `screenshots/`) |
+| Store listing texts in 15 languages, screenshots, logos | [`store/listings/`](../store/listings) (one file per language + `common.md`), `store/screenshots/`, `store/logo-300.png`, `store/box-art-1080.png` |
+| Listing import (Partner Center CSV) | [`scripts/store-listing-csv.py`](../scripts/store-listing-csv.py): fills Partner Center's exported listing CSV with every language |
 | Step-by-step for the maintainer (pt-BR) | [`store/CHECKLIST.pt-BR.md`](../store/CHECKLIST.pt-BR.md) |
 | winget manifest draft (installer exe) | [`store/winget/`](../store/winget) |
 
@@ -100,6 +101,24 @@ Add-AppxPackage -Register msix-test\AppxManifest.xml   # (loose files: no makepr
 lynx --packageinfo $PWD\packageinfo.txt; Get-Content packageinfo.txt
 Get-AppxPackage KA1WARE.LYNXSHARE | Remove-AppxPackage
 ```
+
+## Store listings in several languages
+
+`store/listings/<locale>.md` holds the listing per language: `en-us`, `pt-br`, `es-es` (also usable for `es-mx`),
+`fr-fr`, `de-de`, `it-it`, `nl-nl`, `pl-pl`, `ru-ru`, `tr-tr`, `id-id`, `ja-jp`, `ko-kr`, `zh-cn` (Simplified) and
+`zh-tw` (Traditional). LYNX's interface is English and Portuguese (Brazil) only, and every other listing says so near
+the top of its description.
+
+The package declares only `en-us` and `pt-br` (`<Resources>`): those are the languages the app really has. Partner
+Center accepts listings in languages the package does not declare (*Store listings › Manage additional languages*,
+[Microsoft: create Store listings](https://learn.microsoft.com/windows/apps/publish/publish-your-app/msix/create-app-store-listing));
+such a listing needs a Title (the reserved name, **LYNX SHARE**), a Description and a screenshot. Declaring languages
+in the manifest that the app does not have would be misleading, so the manifest stays as it is.
+
+Fastest way in: Partner Center › app overview › *Store listings* › **Export listing** (a CSV with Partner Center's
+field IDs) → `python scripts/store-listing-csv.py <exported.csv> lynx-listings` → **Import listings › Import folder** →
+`lynx-listings` (the CSV plus the screenshots and logos). The script lists anything it could not place and any text
+over Partner Center's limits.
 
 ## Store policy check
 
