@@ -16,4 +16,7 @@ Emphasis. Then the "Close" generators (Sytrus, Harmless, Ogun, GMS, Morphine, Sa
 ## Where I stopped
 
 - 16:40 start: worktree `lynx-wt-flexact165`, tools in `tmp/flexact165/` (bin = DLL copies, py, cpp, gh), data in
-  `/mnt/d/lynx-work/flexact165`. Extracting every state of the seven plug-ins from FL's Data folder.
+  `/mnt/d/lynx-work/flexact165`. States of the seven plug-ins extracted (`states/<tag>/`, `states/index.txt`).
+- 17:00 engines written and bit-exact against the DLLs (`py/lgbatch.py <kind> seed n`, `cpp/lgcmp.cpp`): Phase
+  Inverter, Center, Bass Boost, 7 Band EQ (`src/core/FlLegacyFx.{h,cpp}`). NOT yet wired into LYNX (EffectKinds,
+  import, mixer list, tests). Next: wire them, then Fruity Delay (v1), Transporter, Emphasis.
