@@ -15,7 +15,7 @@ namespace
 // the catalog's category names, for the translation table (core/PluginCatalog.cpp names them in English)
 [[maybe_unused]] const char* const categoryNames[] = { TR_NOOP ("Synth"),     TR_NOOP ("Sampler"),        TR_NOOP ("Drum"),          TR_NOOP ("Piano & keys"),
                                                        TR_NOOP ("Other"),     TR_NOOP ("Delay & reverb"), TR_NOOP ("Distortion"),    TR_NOOP ("Dynamics"),
-                                                       TR_NOOP ("EQ & filter"), TR_NOOP ("Modulation"),   TR_NOOP ("Pitch & vocal"), TR_NOOP ("Analyzer"),
+                                                       TR_NOOP ("EQ & filter"), TR_NOOP ("Modulation"),   TR_NOOP ("Pitch & vocal"), TR_NOOP ("Analyzer"), TR_NOOP ("Visual"),
                                                        TR_NOOP ("Utility") };
 
 const juce::String star = juce::String::fromUTF8 ("\xe2\x98\x85");

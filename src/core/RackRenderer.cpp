@@ -1599,7 +1599,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         // (nor a slot whose "Smart disable" is off, or a plugin that does not allow it — FL's per-plugin options, REA round 139)
         if (key < smartDisable.size() && slots[i].smartDisable && ! (isPlugin && ! slots[i].plugin.allowSmartDisable)
             && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
-            && slots[i].kind != EffectKind::newtime)
+            && slots[i].kind != EffectKind::newtime
+            // round 164c: a visual plugin keeps recording silence (its display falls, the video export stays in time)
+            && slots[i].kind != EffectKind::waveCandy && slots[i].kind != EffectKind::visualizer)
         {
             auto& sd = smartDisable[key];
 
