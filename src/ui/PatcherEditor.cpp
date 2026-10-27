@@ -22,6 +22,7 @@
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
 #include "ui/ChannelRackComponent.h"
+#include "ui/ChannelSettings.h"
 #include "ui/ControllerEditors.h"
 #include "ui/PluginPicker.h"
 #include "ui/PluginWindow.h"
@@ -804,6 +805,27 @@ private:
         return pins;
     }
 
+    // The MIDI output pins a node shows. A hosted plugin shows its notes output (round 164f) as FL activates it: when the
+    // plugin sends MIDI (an arpeggiator, a MIDI effect) or a cable already uses it.
+    int midiOutputsShown (const PatcherDoc& d, int n) const
+    {
+        const auto& node = d.nodes[(std::size_t) n];
+        const auto ports = patcher::nodePorts (node);
+        if (! ports.midiOut)
+            return 0;
+        if (vfx::kindOf (node.channel))
+            return patcher::shownMidiOutputs (d, n);
+        if (node.generator && node.channel.instrument == InstrumentKind::plugin)
+        {
+            if (std::any_of (d.wires.begin(), d.wires.end(), [n] (const PatchWire& w) { return w.kind == PatchWire::Kind::midi && w.from == n; }))
+                return 1;
+            const auto* graph = runningGraph();
+            const auto* plugin = graph != nullptr ? dynamic_cast<PluginInstrument*> (graph->instrumentAt (n).get()) : nullptr;
+            return plugin != nullptr && ! plugin->hasCrashed() && const_cast<PluginInstrument*> (plugin)->getInstance().producesMidi() ? 1 : 0;
+        }
+        return 1;
+    }
+
     std::vector<Pin> nodePins (const PatcherDoc& d, int n) const
     {
         std::vector<Pin> pins;
@@ -825,10 +847,9 @@ private:
         };
         if (ports.midiIn)
             add (false, PatchWire::Kind::midi, 0, tr ("Notes"));
-        if (ports.midiOut) // a MIDI Out node's notes (round 162); a VFX node's voice outputs (round 164b)
-        {
+        if (const auto shown = midiOutputsShown (d, n); shown > 0) // a MIDI Out node's notes (round 162); a VFX node's
+        {                                                           // voice outputs (round 164b); a plugin's notes (164f)
             const auto kind = vfx::kindOf (node.channel);
-            const auto shown = kind ? patcher::shownMidiOutputs (d, n) : 1;
             std::optional<vfx::KeyboardSplitterSettings> zones; // (the Keyboard Splitter's outputs carry the zones' names)
             if (kind == vfx::Kind::keyboardSplitter)
                 if (const auto st = vfx::readState (node.channel.pluginState))
@@ -901,7 +922,7 @@ private:
         else
         {
             const auto ports = patcher::nodePorts (d.nodes[(std::size_t) n]);
-            const auto midiOuts = ! ports.midiOut ? 0 : vfx::kindOf (d.nodes[(std::size_t) n].channel) ? patcher::shownMidiOutputs (d, n) : 1;
+            const auto midiOuts = midiOutputsShown (d, n);
             rows = std::max ({ 1, ports.audioIns + (ports.midiIn ? 1 : 0), ports.audioOuts + ports.controlOuts + midiOuts });
         }
         return { at.x, at.y, nodeWidth, headerHeight + (float) rows * pinSpacing + 4.0f };
@@ -1078,6 +1099,8 @@ private:
             if (param >= 0 && param < (int) info.params.size())
                 return juce::String::fromUTF8 (info.params[(std::size_t) param].name);
         }
+        if (isEnvelopeControllerNode (node) && (param == envelopeControllerModXParam || param == envelopeControllerModYParam))
+            return param == envelopeControllerModXParam ? tr ("Mod X") : tr ("Mod Y");
         return tr ("Parameter {0}", { juce::String (param + 1) });
     }
 
@@ -1116,10 +1139,20 @@ private:
         });
     }
 
+    static bool isEnvelopeControllerNode (const PatchNode& node)
+    {
+        return node.generator && node.channel.instrument == InstrumentKind::controller && ! parseKeyboardController (node.channel.controllerState);
+    }
+
     void chooseParameter (const PatchNode& node, std::function<void (int)> done)
     {
         juce::PopupMenu menu;
-        if (! node.generator && node.effect.kind != EffectKind::plugin)
+        if (isEnvelopeControllerNode (node)) // its global Mod X / Y (round 164f)
+        {
+            menu.addItem (tr ("Mod X"), [done] { done (envelopeControllerModXParam); });
+            menu.addItem (tr ("Mod Y"), [done] { done (envelopeControllerModYParam); });
+        }
+        else if (! node.generator && node.effect.kind != EffectKind::plugin)
         {
             const auto& info = effectInfo (node.effect.kind);
             for (int p = 0; p < (int) info.params.size(); ++p)
@@ -1837,6 +1870,13 @@ private:
             openToolWindow (makeEnvelopeControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
+        // a built-in engine (LYNX's synth / sampler, FL's engines): the editor it has on a channel (round 164f)
+        if (node.generator && hasNodeEditor (node.channel))
+            if (auto frame = makeNodeChannelFrame (engine, locate))
+            {
+                openToolWindow (std::move (frame), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+                return;
+            }
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Patcher"),
                                                 node.effect.kind == EffectKind::plugin || node.channel.instrument == InstrumentKind::plugin
                                                     ? tr ("This plugin could not be loaded (it is not installed or has not been scanned).")

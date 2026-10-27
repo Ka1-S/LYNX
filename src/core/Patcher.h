@@ -103,6 +103,11 @@ public:
     // what LYNX sends to the Patcher on MIDI port `port` (a MIDI Out on that port…): the nodes cabled to that pin
     void noteOnPort (int port, int key, float velocity, int midiChannel) noexcept;
     void noteOffPort (int port, int key, int midiChannel) noexcept;
+    // The same at a sample of the next block(s) (round 164f): `offset` counts from the next sample process() renders,
+    // so the notes the rack sends a mixer-slot Patcher land where they are in the chunk. Audio thread; past the
+    // queue's capacity notes are dropped.
+    void queueNoteOnPort (int port, int key, float velocity, int midiChannel, int offset) noexcept;
+    void queueNoteOffPort (int port, int key, int midiChannel, int offset) noexcept;
     bool takesMidiPort (int port) const noexcept;
     // a controller's mod wheel, other CCs, channel pressure and pitch wheel played into the Patcher's channel (round
     // 164e): like FL's Patcher (it takes MIDI input and passes it on), the instruments cabled to "From LYNX" notes get
@@ -168,6 +173,20 @@ private:
     // what they send out plays the instruments on their outputs at the exact sample (the piece is split there)
     struct VfxQueue;
     struct NoteOut;
+    struct TimedNote
+    {
+        int pin = 0, key = 60, midiChannel = -1, offset = 0;
+        float velocity = 0.0f; // 0 = note off
+    };
+    static constexpr int timedCapacity = 1024;
+    std::array<TimedNote, timedCapacity> timed {}; // queued notes, offsets from the next sample rendered
+    int timedCount = 0;
+    void queueTimed (int pin, int key, float velocity, int midiChannel, int offset) noexcept;
+    // hosted plugin nodes whose notes leave on their MIDI output pin (round 164f): what they sent in the last piece
+    // plays the nodes cabled to it at the next piece's start
+    std::vector<int> midiSources;
+    void routeNote (const std::vector<MidiTarget>& targets, int sourceNode, bool on, int key, float velocity, int midiChannel, int offset) noexcept;
+    void sortNoteOuts() noexcept;
     std::vector<int> vfxOrder;                // VFX nodes, sources before the nodes they feed
     std::vector<std::unique_ptr<VfxQueue>> vfxQueues; // [node] (null: not a VFX node)
     std::vector<NoteOut> noteOuts;            // what the VFX nodes play in the current piece (capacity reserved)

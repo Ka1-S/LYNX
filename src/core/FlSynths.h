@@ -80,6 +80,9 @@ struct EnvelopeControllerData : std::array<ControllerArticulator, 8>
     bool continuous = false;        // FL's flag bit 2: with no note the output follows base and the Mod X / Y maps
 };
 // Reads FL's state or the one LYNX writes (below).
+// FL's parameter numbers of the global Mod X / Mod Y knobs (REA_rodada15 FUN_008ae740: 11·k + s for the 8 outputs,
+// then 88 / 89, value / 65536): the automation / link targets of an Envelope Controller channel (round 164f)
+constexpr int envelopeControllerModXParam = 88, envelopeControllerModYParam = 89;
 std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector<std::uint8_t>& state);
 // LYNX's own state of an Envelope Controller ("LYEC" + version 2: the 8 articulators with their LFOs and maps, the
 // global Mod X / Y and flags), what its editor saves; version 1 (envelopes only) still loads.

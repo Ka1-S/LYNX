@@ -1,4 +1,5 @@
 #include "core/Song.h"
+#include "core/FlSynths.h"
 
 #include <algorithm>
 #include <iterator>
@@ -774,7 +775,15 @@ float Song::targetValue (const AutomationTarget& t) const noexcept
                 && t.param < maxEffectParams)
                 return mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].params[(std::size_t) t.param];
             return validTrack ? 0.5f : -1.0f; // plugin parameter: the value lives in the plugin
-        case AutomationTargetKind::channelParam: return validChannel ? 0.5f : -1.0f;
+        case AutomationTargetKind::channelParam:
+            if (! validChannel)
+                return -1.0f;
+            // an Envelope Controller's global Mod X / Y (round 164f): the value lives in its state
+            if (channels[(std::size_t) t.index].instrument == InstrumentKind::controller
+                && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
+                if (const auto ec = parseEnvelopeController (channels[(std::size_t) t.index].controllerState))
+                    return t.param == envelopeControllerModXParam ? ec->modX : ec->modY;
+            return 0.5f;
         case AutomationTargetKind::effectMix:
             return validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
                        ? mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].mix
@@ -814,6 +823,15 @@ bool Song::setTargetValue (const AutomationTarget& t, float v) noexcept
             }
             return false;
         case AutomationTargetKind::channelParam:
+            if (validChannel && channels[(std::size_t) t.index].instrument == InstrumentKind::controller
+                && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
+                if (auto ec = parseEnvelopeController (channels[(std::size_t) t.index].controllerState))
+                {
+                    (t.param == envelopeControllerModXParam ? ec->modX : ec->modY) = v;
+                    channels[(std::size_t) t.index].controllerState = writeEnvelopeController (*ec);
+                    return true;
+                }
+            return false;
         case AutomationTargetKind::none: break;
     }
 

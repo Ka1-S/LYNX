@@ -4838,6 +4838,24 @@ private:
             shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
         }
+        // FL's Dashboard presets of this PC's FL Studio, imported (round 164f): one PNG each
+        if (const auto fl = lynx::findFlStudio(); fl.installDir.isDirectory())
+            for (const auto& file : fl.installDir.getChildFile ("Data/Patches/Plugin presets/Generators/Dashboard").findChildFiles (juce::File::findFiles, false, "*.fst"))
+            {
+                juce::MemoryBlock bytes;
+                if (! file.loadFileAsData (bytes))
+                    continue;
+                const auto preset = flp::parseProject ({ (const std::uint8_t*) bytes.getData(), bytes.getSize() }, true);
+                const auto dash = preset.channels.empty() ? std::nullopt : lynx::surface::parseFlDashboard (preset.channels[0].pluginState);
+                if (! dash || dash->controls.empty())
+                    continue;
+                offline.editSong ([&] (lynx::Song& s) {
+                    s.channels[6].name = file.getFileNameWithoutExtension().toStdString();
+                    s.channels[6].patcher.surface = dash->controls;
+                });
+                offline.dispatchPendingMessages();
+                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + file.getFileNameWithoutExtension().replaceCharacter (' ', '-') + ".png");
+            }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
             for (int part = 0; part < 7; ++part)
@@ -5029,7 +5047,13 @@ private:
                 envelope.channel.name = "Envelope Controller";
                 envelope.channel.controllerState = lynx::writeEnvelopeController (lynx::defaultEnvelopeController());
                 envelope.x = 220.0f, envelope.y = 260.0f;
-                ch.patcher.nodes = { synth, chorus, midiOut, envelope };
+                lynx::PatchNode osc; // round 164f: an FL engine node (its editor opens from the node)
+                osc.generator = true;
+                osc.channel = lynx::natives::makeChannel (lynx::InstrumentKind::threeosc, lynx::flStudioAccess()).value_or (lynx::ChannelDef {});
+                osc.channel.instrument = lynx::InstrumentKind::threeosc;
+                osc.channel.name = "3x Osc";
+                osc.x = 420.0f, osc.y = 260.0f;
+                ch.patcher.nodes = { synth, chorus, midiOut, envelope, osc };
                 lynx::PatchWire notes, a, b, portIn, portOut, envNotes, envControl;
                 notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
                 a.from = 0, a.to = 1;
@@ -5038,11 +5062,23 @@ private:
                 portOut.kind = lynx::PatchWire::Kind::midi, portOut.from = 2, portOut.to = lynx::patchToHost, portOut.toPort = 3;
                 envNotes.kind = lynx::PatchWire::Kind::midi, envNotes.to = 3;
                 envControl.kind = lynx::PatchWire::Kind::control, envControl.from = 3, envControl.to = 1, envControl.toPort = 0;
-                ch.patcher.wires = { notes, a, b, portIn, portOut, envNotes, envControl };
+                lynx::PatchWire oscNotes, oscOut;
+                oscNotes.kind = lynx::PatchWire::Kind::midi, oscNotes.to = 4;
+                oscOut.from = 4;
+                ch.patcher.wires = { notes, a, b, portIn, portOut, envNotes, envControl, oscNotes, oscOut };
                 ch.patcher.fromMidiPorts = { 1, 5 };
                 ch.patcher.toMidiPorts = { 3 };
                 ch.patcher.outputX = 640.0f;
                 song.channels.push_back (ch);
+                // LYNX_PATCHERSHOT_SAVE=file.lynx: the demo as a project (a GUI check of the same Patchers, round 164f)
+                if (const auto save = juce::SystemStats::getEnvironmentVariable ("LYNX_PATCHERSHOT_SAVE", {}); save.isNotEmpty())
+                {
+                    if (! song.patterns.empty())
+                        for (int k = 0; k < 4; ++k)
+                            song.patterns[0].notes.push_back ({ (std::int64_t) k * lynx::ppq, lynx::ppq / 2, (int) song.channels.size() - 1, 60 + 4 * k, 0.8f });
+                    juce::String error;
+                    lynx::ProjectFile::save (song, juce::File (save), error);
+                }
                 offline.setSong (std::move (song));
             }
             offline.dispatchPendingMessages();
@@ -5076,6 +5112,18 @@ private:
                 {
                     lynx::PatcherWindows::openChannel (offline, c);
                     shootOpen ("-channel" + juce::String (c) + ".png");
+                    // each built-in generator node's editor, as a double-click opens it (round 164f)
+                    for (int n = 0; n < (int) song.channels[(std::size_t) c].patcher.nodes.size(); ++n)
+                        if (const auto& node = song.channels[(std::size_t) c].patcher.nodes[(std::size_t) n]; node.generator && lynx::hasNodeEditor (node.channel))
+                            if (auto frame = lynx::makeNodeChannelFrame (offline, [c, n] (lynx::Song& sg) -> lynx::ChannelDef* {
+                                    return c < (int) sg.channels.size() && n < (int) sg.channels[(std::size_t) c].patcher.nodes.size()
+                                               ? &sg.channels[(std::size_t) c].patcher.nodes[(std::size_t) n].channel
+                                               : nullptr;
+                                }))
+                            {
+                                offline.dispatchPendingMessages();
+                                savePng (frame->createComponentSnapshot (frame->getLocalBounds()), prefix + "-channel" + juce::String (c) + "-node" + juce::String (n) + ".png");
+                            }
                     lynx::PatcherWindows::shootMenus (offline, true, c, 0, [&] (const juce::Image& image, const juce::String& name) {
                         savePng (image, prefix + "-channel" + juce::String (c) + "-menu-" + name + ".png");
                     });
