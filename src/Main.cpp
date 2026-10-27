@@ -3,6 +3,7 @@
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 #include "core/HardwareInsert.h"
 #include "core/EchoSuite.h"
 #include "core/LynxTune.h"
@@ -4523,6 +4524,33 @@ private:
                     editor->paintEntireComponent (g, false);
                 }
                 const auto file = out.getChildFile ("Auto-pan-tweak.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
+            }
+
+            // round 165: Ember's Classic voicing (the Decapitator role) in its one-screen panel
+            {
+                namespace em = lynx::mixsuite::ember;
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::ember);
+                fx.params[em::voicing] = 1.0f;
+                fx.params[em::classicDrive] = 0.35f;
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Ember Saturator-classic.png");
                 file.deleteFile();
                 juce::PNGImageFormat png;
                 if (auto stream = file.createOutputStream())

@@ -361,7 +361,7 @@ struct Host
             pump (0);
             if (cmd == "pump") { pump (a[1].getIntValue()); continue; }
             if (cmd == "echo") { log (line.fromFirstOccurrenceOf (" ", false, false)); continue; }
-            if (cmd == "editor")
+            if (cmd == "editor" && ! a[1].endsWithIgnoreCase (".png")) // `editor <out.png> …` is the PrintWindow shot below
             {
                 if (plugin == nullptr) { log ("error: no plugin"); continue; }
                 std::unique_ptr<juce::AudioProcessorEditor> ed (plugin->createEditorIfNeeded());
