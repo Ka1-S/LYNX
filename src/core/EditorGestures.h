@@ -287,13 +287,13 @@ inline double lineValue (double x0, double v0, double x1, double v1, double x)
     return std::clamp (v0 + (v1 - v0) * t, 0.0, 1.0);
 }
 
-// FL's preview keyboards (Piano roll, Channel settings): where a key is clicked sets the note's velocity, soft at the
+// FL's Piano roll keyboard: where a key is clicked sets the note's velocity, soft at the
 // key's base and full at its tip (`along` pixels from the base of a key `length` pixels long), 1/127 at least.
 inline float keyClickVelocity (double along, double length)
 {
     if (length <= 0.0)
         return 0.8f;
-    return (float) std::clamp ((along + 0.5) / length, 1.0 / 127.0, 1.0);
+    return (float) std::clamp ((along + 1.0) / length, 1.0 / 127.0, 1.0);
 }
 
 // Alt+wheel over a note: the property moves by 4/127 per notch (Ctrl+Alt: 1/127), clamped to 0..1.
