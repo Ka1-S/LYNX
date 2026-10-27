@@ -48,6 +48,7 @@
 #include "core/DynamicsSuite.h"
 #include "core/VoiceTools.h"
 #include "core/VoiceShift.h"
+#include "core/VisualFx.h"
 
 #include "core/HardwareInsert.h"
 
@@ -2908,6 +2909,23 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                 { "Input stereo", 1.0f }, { "Round trip", 0.0f }, { "Ping", 0.0f } } };
             return info;
         }
+        case EffectKind::waveCandy:
+        {
+            // round 164c (core/VisualFx.h wavecandy::Param): a new one shows the spectrum, like FL's Default preset's analyser
+            static const EffectInfo info { "Wave Candy", { { "Mode", visualfx::wavecandy::modeValue (visualfx::wavecandy::Mode::spectrum) },
+                                                           { "Gain", 0.5f }, { "Hold", 0.0f }, { "Scope window", 0.5f }, { "Separation", 0.0f },
+                                                           { "Sync", 1.0f }, { "Speed", 0.35f }, { "Range", 0.5f }, { "Scale", 1.0f },
+                                                           { "Weighting", 1.0f }, { "Resolution", 0.5f }, { "Meter mode", 0.0f },
+                                                           { "Peak hold", 0.3f }, { "Decay", 0.5f }, { "Meter scale", 0.5f },
+                                                           { "Persistence", 0.5f }, { "Thickness", 0.3f }, { "Colour", 0.97f } } };
+            return info;
+        }
+        case EffectKind::visualizer:
+        {
+            static const EffectInfo info { "Visualizer", { { "Sensitivity", 0.5f }, { "Beat threshold", 0.4f }, { "Hue shift", 0.0f },
+                                                           { "Brightness", 1.0f }, { "Zoom", 0.5f }, { "Speed", 0.5f } } };
+            return info;
+        }
     }
     return eq;
 }
@@ -3374,6 +3392,10 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return lowlifter::paramText (param, v);
         case EffectKind::hardwareInsert:
             return hwinsert::paramText (param, v);
+        case EffectKind::waveCandy:
+            return visualfx::wavecandy::paramText (param, v);
+        case EffectKind::visualizer:
+            return visualfx::visualizer::paramText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3425,6 +3447,8 @@ EffectSlot makeEffectSlot (EffectKind kind)
         slot.params[i] = info.params[i].defaultValue;
     if (kind == EffectKind::patcher) // a new Patcher passes its input through, as FL's
         slot.patcher.wires.push_back ({});
+    if (kind == EffectKind::visualizer) // round 164c: LYNX's default scene
+        slot.state = visualfx::scene::toState (visualfx::scene::defaultScene());
 
     return slot;
 }
@@ -3624,6 +3648,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::flLowLifter: return lowlifter::make(); // round 154
         case EffectKind::hardwareInsert: return std::make_unique<hwinsert::HardwareInsertFx>(); // round 164d
+        case EffectKind::waveCandy:
+        case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

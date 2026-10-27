@@ -28,6 +28,7 @@
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
 #include "ui/PatcherEditor.h"
+#include "ui/VisualEditors.h"
 #include "ui/PluginPresetMenu.h"
 #include "ui/PluginWindow.h"
 #include "ui/ClipProperties.h"
@@ -733,6 +734,21 @@ public:
             // animates (demo signal) — round 122's check that an idle editor burns no CPU
             const auto i = args.indexOf ("--editorcpu");
             runEditorCpu (args[i + 1].unquoted());
+            return;
+        }
+
+        if (args.contains ("--visualtest"))
+        {
+            // LYNX.exe --visualtest <folder> [project.flp]: the visual plugins (round 164c) — the audio path's CPU, every
+            // Wave Candy mode and Visualizer scene drawn from a test signal (PNG + the editor's CPU each), and the video
+            // export of a project (default: FL's first ZGameEditor demo) with ffmpeg and as images. Writes report.txt.
+            const auto i = args.indexOf ("--visualtest");
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            const auto project = i + 2 < args.size() && ! args[i + 2].startsWith ("--") ? juce::File (args[i + 2].unquoted()) : juce::File();
+            lynx::runVisualTest (juce::File (args[i + 1].unquoted()), project, [this] (bool ok) {
+                setApplicationReturnValue (ok ? 0 : 1);
+                quit();
+            });
             return;
         }
 

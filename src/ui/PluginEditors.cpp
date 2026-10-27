@@ -2,6 +2,7 @@
 #include "ui/PatcherEditor.h"
 #include "ui/ControllerEditors.h"
 #include "ui/NewtoneEditor.h"
+#include "ui/VisualEditors.h"
 #include "ui/PluginEditors.h"
 
 #include <cstring>
@@ -4094,6 +4095,11 @@ void open (AudioEngine& engine, int track, int slot)
         PatcherWindows::openSlot (engine, track, slot);
         return;
     }
+    if (VisualWindows::handles (kind)) // Wave Candy / Visualizer: displays fed by the slot's tap (round 164c)
+    {
+        VisualWindows::open (engine, track, slot);
+        return;
+    }
     if (! canOpen (fxSlot))
         return;
     if (kind == EffectKind::formulaController) // the formula, its knobs and a monitor (REA round 133)
@@ -4146,6 +4152,7 @@ void closeAll()
     windows().clear();
     FormulaControllerWindows::closeAll();
     NewtoneWindows::closeAll();
+    VisualWindows::closeAll();
     FacetEqWindows::closeAll();
     ProEditorWindows::closeAll();
 }
