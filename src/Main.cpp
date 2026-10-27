@@ -438,6 +438,17 @@ public:
             return;
         }
 
+        if (args.contains ("--midisync-test"))
+        {
+            // LYNX --midisync-test report.txt ["output device"] ["input device"] (round 165f): MIDI clock timing
+            const auto i = args.indexOf ("--midisync-test");
+            const auto out = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].unquoted() : juce::String();
+            const auto in = args.size() > i + 3 && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
+            juce::File (args[i + 1].unquoted()).replaceWithText (lynx::MidiSyncIo::selfTest (out, in));
+            quit();
+            return;
+        }
+
         if (args.contains ("--devices") || args.contains ("--dispositivos")) // --dispositivos: legacy alias
         {
             // diagnostics: driver types and output devices JUCE offers (without opening any)
@@ -459,6 +470,10 @@ public:
                 for (const auto& name : type->getDeviceNames (true))
                     report << "  input=" << name << "\n";
             }
+            for (const auto& d : juce::MidiInput::getAvailableDevices())
+                report << "midi-in=" << d.name << "\n";
+            for (const auto& d : juce::MidiOutput::getAvailableDevices())
+                report << "midi-out=" << d.name << "\n";
 
             const auto flag = args.contains ("--devices") ? args.indexOf ("--devices") : args.indexOf ("--dispositivos");
             juce::File (args[flag + 1].unquoted()).replaceWithText (report);

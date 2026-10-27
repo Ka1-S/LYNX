@@ -342,6 +342,25 @@ void MidiPrefs::setInput (const MidiInputPrefs& in)
         inputs.push_back (in);
 }
 
+MidiOutputPrefs MidiPrefs::output (const std::string& name) const
+{
+    for (const auto& o : outputs)
+        if (o.name == name)
+            return o;
+    MidiOutputPrefs d;
+    d.name = name;
+    return d;
+}
+
+void MidiPrefs::setOutput (const MidiOutputPrefs& out)
+{
+    MidiOutputPrefs defaults;
+    defaults.name = out.name;
+    outputs.erase (std::remove_if (outputs.begin(), outputs.end(), [&] (const MidiOutputPrefs& o) { return o.name == out.name; }), outputs.end());
+    if (! (out == defaults))
+        outputs.push_back (out);
+}
+
 bool MidiPrefs::accepts (const std::string& device, int channel) const
 {
     const auto i = input (device);
@@ -386,6 +405,13 @@ std::string MidiPrefs::toText() const
     // input=<enabled>|<midi channel>|<target>|<device name>
     for (const auto& i : inputs)
         out += "input=" + std::string (i.enabled ? "1" : "0") + "|" + std::to_string (i.midiChannel) + "|" + std::to_string (i.target) + "|" + i.name + "\n";
+    // output=<master sync>|<sync type>|<offset ms>|<all notes off>|<device name>
+    for (const auto& o : outputs)
+        out += "output=" + std::string (o.masterSync ? "1" : "0") + "|" + o.syncType + "|" + std::to_string (o.offsetMs) + "|"
+               + (o.allNotesOff ? "1" : "0") + "|" + o.name + "\n";
+    // clockin=<offset ms>|<device name>
+    if (! clockInput.empty() || clockOffsetMs != 0)
+        out += "clockin=" + std::to_string (clockOffsetMs) + "|" + clockInput + "\n";
     // link=<cc>|<channel>|<target kind>|<index>|<slot>|<param>
     for (const auto& l : globalLinks)
         out += "link=" + std::to_string (l.cc) + "|" + std::to_string (l.channel) + "|" + std::to_string (l.kind) + "|" + std::to_string (l.index)
@@ -427,6 +453,27 @@ MidiPrefs MidiPrefs::fromText (const std::string& text)
             i.target = std::max (-1, toInt (trim (parts[2]), -1));
             i.name = parts[3];
             p.setInput (i);
+        }
+        else if (key == "output")
+        {
+            const auto parts = split (value, '|', 5);
+            if (parts.size() != 5 || parts[4].empty())
+                continue;
+            MidiOutputPrefs o;
+            o.masterSync = trim (parts[0]) == "1";
+            o.syncType = trim (parts[1]);
+            o.offsetMs = std::clamp (toInt (trim (parts[2]), 0), -1000, 1000);
+            o.allNotesOff = trim (parts[3]) == "1";
+            o.name = parts[4];
+            p.setOutput (o);
+        }
+        else if (key == "clockin")
+        {
+            const auto parts = split (value, '|', 2);
+            if (parts.size() != 2)
+                continue;
+            p.clockOffsetMs = std::clamp (toInt (trim (parts[0]), 0), -1000, 1000);
+            p.clockInput = parts[1];
         }
         else if (key == "link")
         {

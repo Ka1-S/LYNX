@@ -937,8 +937,103 @@ private:
     juce::ComboBox channel, plays;
 };
 
+// One output device (FL's Options › MIDI "Output" panel, round 165f): master sync (MIDI clock or MTC) with its
+// offset, and all notes off on init and after an export.
+class MidiOutputRow final : public juce::Component
+{
+public:
+    MidiOutputRow (const juce::String& deviceName, const prefs::MidiOutputPrefs& p, std::function<void (const prefs::MidiOutputPrefs&)> changed)
+        : prefsNow (p), onChange (std::move (changed))
+    {
+        name.setText (deviceName, juce::dontSendNotification);
+        name.setFont (theme::font (theme::type::body));
+        name.setColour (juce::Label::textColourId, theme::colour::textPrimary);
+        addAndMakeVisible (name);
+
+        sync.setButtonText (tr ("Send master sync"));
+        sync.setTooltip (tr ("Send master synchronization to this device"));
+        sync.setToggleState (p.masterSync, juce::dontSendNotification);
+        sync.onClick = [this] {
+            prefsNow.masterSync = sync.getToggleState();
+            update();
+        };
+        for (int t = 0; t < midisync::syncTypeCount; ++t)
+            type.addItem (tr (midisync::syncTypeName ((midisync::SyncType) t)), t + 1);
+        type.setTooltip (tr ("MIDI clock: 24 pulses per quarter note, Start / Continue / Stop and Song Position Pointer. "
+                             "MTC: MIDI Time Code quarter frames and a full frame when the position moves."));
+        type.setSelectedId ((int) midisync::syncTypeFromKey (p.syncType) + 1, juce::dontSendNotification);
+        type.onChange = [this] {
+            prefsNow.syncType = midisync::syncTypeKey ((midisync::SyncType) (type.getSelectedId() - 1));
+            update();
+        };
+        styleCombo (type);
+        offsetLabel.setText (tr ("Offset (ms)"), juce::dontSendNotification);
+        offsetLabel.setFont (theme::font (theme::type::small));
+        offsetLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        offset.setSliderStyle (juce::Slider::IncDecButtons);
+        offset.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 56, 24);
+        offset.setRange (-1000.0, 1000.0, 1.0);
+        offset.setValue (p.offsetMs, juce::dontSendNotification);
+        offset.setTooltip (tr ("Master sync offset (milliseconds): positive sends the sync later, negative earlier"));
+        offset.setDoubleClickReturnValue (true, 0.0);
+        offset.onValueChange = [this] {
+            prefsNow.offsetMs = (int) offset.getValue();
+            update();
+        };
+        notesOff.setButtonText (tr ("Send all notes off"));
+        notesOff.setTooltip (tr ("Send all notes off to this device on init and after an export"));
+        notesOff.setToggleState (p.allNotesOff, juce::dontSendNotification);
+        notesOff.onClick = [this] {
+            prefsNow.allNotesOff = notesOff.getToggleState();
+            update();
+        };
+        for (auto* c : std::initializer_list<juce::Component*> { &sync, &type, &offsetLabel, &offset, &notesOff })
+            addAndMakeVisible (c);
+        update (false);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (8, 4);
+        auto top = r.removeFromTop (24);
+        notesOff.setBounds (top.removeFromRight (170));
+        name.setBounds (top);
+        r.removeFromTop (4);
+        auto bottom = r.removeFromTop (26);
+        sync.setBounds (bottom.removeFromLeft (150));
+        bottom.removeFromLeft (8);
+        type.setBounds (bottom.removeFromLeft (190));
+        bottom.removeFromLeft (12);
+        offsetLabel.setBounds (bottom.removeFromLeft (76));
+        offset.setBounds (bottom.removeFromLeft (110));
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (theme::colour::bg1);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), theme::radius::md);
+    }
+
+private:
+    void update (bool notify = true)
+    {
+        type.setEnabled (prefsNow.masterSync);
+        offset.setEnabled (prefsNow.masterSync);
+        if (notify && onChange)
+            onChange (prefsNow);
+    }
+
+    prefs::MidiOutputPrefs prefsNow;
+    std::function<void (const prefs::MidiOutputPrefs&)> onChange;
+    juce::Label name, offsetLabel;
+    juce::ToggleButton sync, notesOff;
+    juce::ComboBox type;
+    juce::Slider offset;
+};
+
 class MidiPage final : public ScrollingPage,
                        private juce::ChangeListener,
+                       private juce::Timer,
                        private juce::ListBoxModel
 {
 public:
@@ -946,8 +1041,41 @@ public:
     {
         for (auto* c : std::initializer_list<juce::Component*> { &inputsTitle, &notesTitle, &controllersTitle, &inputsNote, &refresh, &noDevices,
                                                                  &velocityLabel, &velocityBox, &velocityNote, &typeLabel, &typeValue, &pickup,
-                                                                 &pickupNote, &linksLabel, &links, &removeLink, &removeAll })
+                                                                 &pickupNote, &linksLabel, &links, &removeLink, &removeAll, &outputsTitle,
+                                                                 &outputsNote, &noOutputs, &syncTitle, &clockLabel, &clockBox, &clockOffsetLabel,
+                                                                 &clockOffset, &clockStatusLabel, &clockStatus, &clockNote })
             add (*c);
+        styleNote (outputsNote, tr ("Send master sync drives drum machines, synths and other software from LYNX's transport: MIDI clock "
+                                    "with Song Position Pointer, or MIDI Time Code."));
+        styleLabel (noOutputs, tr ("No MIDI output devices found."));
+        styleLabel (clockLabel, tr ("External clock sync"));
+        clockBox.setTooltip (tr ("LYNX follows the MIDI clock of this input: its tempo, Start / Continue / Stop and Song Position Pointer"));
+        clockBox.onChange = [this] {
+            if (loading)
+                return;
+            auto p = engine.getMidiPrefs();
+            const auto id = clockBox.getSelectedId();
+            p.clockInput = id > 1 && id - 2 < clockInputs.size() ? clockInputs[id - 2].toStdString() : std::string();
+            set (p);
+        };
+        styleCombo (clockBox);
+        styleLabel (clockOffsetLabel, tr ("External sync offset (milliseconds)"));
+        clockOffset.setSliderStyle (juce::Slider::IncDecButtons);
+        clockOffset.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 80, 24);
+        clockOffset.setRange (-1000.0, 1000.0, 1.0);
+        clockOffset.setDoubleClickReturnValue (true, 0.0);
+        clockOffset.setTooltip (tr ("Positive plays LYNX later than the clock, negative earlier"));
+        clockOffset.onValueChange = [this] {
+            if (loading)
+                return;
+            auto p = engine.getMidiPrefs();
+            p.clockOffsetMs = (int) clockOffset.getValue();
+            set (p);
+        };
+        styleLabel (clockStatusLabel, tr ("Status"));
+        styleLabel (clockStatus, tr ("No clock"), false);
+        styleNote (clockNote, tr ("The input must be on in Input devices above. Song time will match the clock."));
+        startTimerHz (4);
         styleNote (inputsNote, tr ("Each input device can be turned off, listen to one MIDI channel only and play a fixed channel of the "
                                    "Channel Rack instead of the selected ones."));
         styleLabel (noDevices, tr ("No MIDI input devices found. Connect one and refresh the list."));
@@ -1004,6 +1132,15 @@ public:
         {
             // --snapshot: devices of a typical setup, and two links
             sampleDevices = { "Arturia KeyLab 49", "Akai MPD218" };
+            sampleOutputs = { "Roland TR-8S", "Korg volca sample" };
+            auto p = engine.getMidiPrefs();
+            prefs::MidiOutputPrefs drums;
+            drums.name = "Roland TR-8S";
+            drums.masterSync = true;
+            drums.allNotesOff = true;
+            p.setOutput (drums);
+            p.clockInput = "Akai MPD218";
+            engine.setMidiPrefs (p, false);
             engine.editSong ([] (Song& s) {
                 AutomationTarget volume;
                 volume.kind = AutomationTargetKind::mixerVolume;
@@ -1020,7 +1157,11 @@ public:
         load();
     }
 
-    ~MidiPage() override { engine.removeChangeListener (this); }
+    ~MidiPage() override
+    {
+        stopTimer();
+        engine.removeChangeListener (this);
+    }
 
 private:
     int layout (int width) override
@@ -1033,6 +1174,19 @@ private:
         for (auto& row : rows)
             row->setBounds (r.full (34).translated (0, -4));
         refresh.setBounds (r.full().removeFromLeft (150));
+
+        r.section (outputsTitle);
+        outputsNote.setBounds (r.full (32).translated (0, -4));
+        if (outputRows.empty())
+            noOutputs.setBounds (r.full (24));
+        for (auto& row : outputRows)
+            row->setBounds (r.full (66).translated (0, -4));
+
+        r.section (syncTitle);
+        clockBox.setBounds (r.row (clockLabel, 300));
+        clockOffset.setBounds (r.row (clockOffsetLabel, 200));
+        clockStatus.setBounds (r.row (clockStatusLabel, 0));
+        clockNote.setBounds (r.indented (16).translated (0, -3));
 
         r.section (notesTitle);
         velocityBox.setBounds (r.row (velocityLabel, 300));
@@ -1074,6 +1228,14 @@ private:
         const auto& p = engine.getMidiPrefs();
         velocityBox.setSelectedId ((int) p.velocity + 1, juce::dontSendNotification);
         pickup.setToggleState (p.pickup, juce::dontSendNotification);
+        {
+            auto id = 1;
+            for (int i = 0; i < clockInputs.size(); ++i)
+                if (clockInputs[i].toStdString() == p.clockInput)
+                    id = i + 2;
+            clockBox.setSelectedId (id, juce::dontSendNotification);
+        }
+        clockOffset.setValue (p.clockOffsetMs, juce::dontSendNotification);
         links.updateContent();
         links.repaint();
         removeLink.setEnabled (links.getSelectedRow() >= 0);
@@ -1109,7 +1271,59 @@ private:
             rows.push_back (std::move (row));
         }
         noDevices.setVisible (rows.empty());
+
+        // the clock input list: off, then the inputs (a saved one missing now stays listed)
+        clockInputs = names;
+        if (const auto saved = juce::String::fromUTF8 (engine.getMidiPrefs().clockInput.c_str()); saved.isNotEmpty() && ! clockInputs.contains (saved))
+            clockInputs.add (saved);
+        clockBox.clear (juce::dontSendNotification);
+        clockBox.addItem (tr ("Off"), 1);
+        for (int i = 0; i < clockInputs.size(); ++i)
+            clockBox.addItem (clockInputs[i], i + 2);
+
+        outputRows.clear();
+        juce::StringArray outputs;
+        if (persistent)
+            for (const auto& d : juce::MidiOutput::getAvailableDevices())
+                outputs.add (d.name);
+        else
+            outputs = sampleOutputs;
+        for (const auto& name : outputs)
+        {
+            auto row = std::make_unique<MidiOutputRow> (name, engine.getMidiPrefs().output (name.toStdString()), [this] (const prefs::MidiOutputPrefs& out) {
+                auto p = engine.getMidiPrefs();
+                p.setOutput (out);
+                set (p);
+            });
+            add (*row);
+            outputRows.push_back (std::move (row));
+        }
+        noOutputs.setVisible (outputRows.empty());
+        load();
         resized();
+    }
+
+    void timerCallback() override
+    {
+        const auto& p = engine.getMidiPrefs();
+        juce::String text;
+        if (p.clockInput.empty())
+            text = tr ("Off");
+        else if (! persistent)
+            text = tr ("Receiving clock {0} BPM", { "120.0" }); // --snapshot
+        else
+        {
+            const auto status = engine.getMidiSync().clockStatus();
+            if (status == "No clock")
+                text = tr ("No clock");
+            else if (status.rfind ("Clock is too fast", 0) == 0)
+                text = tr ("Clock is too fast!");
+            else
+                text = tr ("Receiving clock {0} BPM", { juce::String (engine.getMidiSync().receiver().bpm(), 1) })
+                       + (engine.getMidiSync().receiver().running() ? ", " + tr ("playing") : juce::String());
+        }
+        if (clockStatus.getText() != text)
+            clockStatus.setText (text, juce::dontSendNotification);
     }
 
     // links list
@@ -1162,6 +1376,12 @@ private:
     std::size_t channelCount = 0;
     juce::StringArray sampleDevices;
     std::vector<std::unique_ptr<MidiInputRow>> rows;
+    std::vector<std::unique_ptr<MidiOutputRow>> outputRows;
+    juce::StringArray sampleOutputs, clockInputs;
+    SectionTitle outputsTitle { tr ("Output devices") }, syncTitle { tr ("External sync") };
+    juce::Label outputsNote, noOutputs, clockLabel, clockOffsetLabel, clockStatusLabel, clockStatus, clockNote;
+    juce::ComboBox clockBox;
+    juce::Slider clockOffset;
     SectionTitle inputsTitle { tr ("Input devices") }, notesTitle { tr ("Notes") }, controllersTitle { tr ("Controllers") };
     juce::Label inputsNote, noDevices, velocityLabel, velocityNote, typeLabel, typeValue, pickupNote, linksLabel;
     juce::TextButton refresh { tr ("Refresh device list") }, removeLink { tr ("Remove link") }, removeAll { tr ("Remove all") };

@@ -18,6 +18,9 @@ struct Transport
     std::atomic<float> metronomeVolume { 1.0f }; // the metronome's volume (0..1.25, 1 = the default click level)
     std::atomic<bool> recording { false };
     std::atomic<double> bpm { 130.0 };
+    // External clock sync (round 165f): > 0 = the tempo LYNX follows from an incoming MIDI clock, over the song's
+    // (written by the audio thread only)
+    std::atomic<double> externalBpm { 0.0 };
     std::atomic<int> beatsPerBar { 4 };
 
     // Playlist time-signature changes for the metronome (song mode): the bar restarts at each
@@ -42,7 +45,8 @@ struct Transport
 
     double ticksPerSample() const noexcept
     {
-        return bpm.load (std::memory_order_relaxed) * ppq / (60.0 * sampleRate.load (std::memory_order_relaxed));
+        const auto external = externalBpm.load (std::memory_order_relaxed);
+        return (external > 0.0 ? external : bpm.load (std::memory_order_relaxed)) * ppq / (60.0 * sampleRate.load (std::memory_order_relaxed));
     }
 
     double positionInBeats() const noexcept

@@ -300,6 +300,8 @@ public:
 
     // Tempo used in the last block (changes with tempo automation). The transport advances with it.
     double currentBpm() const noexcept { return bpm; }
+    // > 0: the tempo of an external MIDI clock LYNX follows (round 165f), over the song's tempo and its automation
+    void setTempoOverride (double b) noexcept { tempoOverride = b; }
 
     // Events of the last block (for tests and diagnostics).
     const EventBuffer& lastEvents() const noexcept { return events; }
@@ -325,6 +327,7 @@ private:
 
     double sampleRate = 44100.0;
     double bpm = 120.0;
+    double tempoOverride = 0.0;
     bool wasPlaying = false;
     double expectedTick = -1.0; // where the next block should start, to detect jumps
     bool resumeAudio = false;
