@@ -629,6 +629,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     if (e.data.size() >= 116)
                         c.pitchRange = readLE<std::int32_t> (e.data, 112);
                     c.stretchTimeRaw = readLE<std::uint32_t> (e.data, 0x60);
+                    c.stretchPitch = readLE<std::int32_t> (e.data, 0x64);
                     c.stretchMul = readLE<std::int32_t> (e.data, 0x68);
                     c.stretchMode = readLE<std::int32_t> (e.data, 0x6C);
 

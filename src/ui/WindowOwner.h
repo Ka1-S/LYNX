@@ -24,6 +24,11 @@ bool isAboveMainWindow (juce::Component& window);
 void fitWindowOnScreen (juce::Component& window);
 void fitAllWindowsOnScreen();
 
+// Round 164: the content of a fixed-size window (a tool window, a dialog) that is taller or wider than the usable
+// screen (UI zoom 150%+, a small laptop screen) goes into a scrolling viewport that fits, so its buttons stay
+// reachable; a content that fits is returned as it is. The viewport follows the content's later size changes.
+std::unique_ptr<juce::Component> fitContentToScreen (std::unique_ptr<juce::Component> content);
+
 // --windowtest only: makes `window` the foreground window even when LYNX was started in the background.
 void forceForegroundForTest (juce::Component& window);
 

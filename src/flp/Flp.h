@@ -156,6 +156,7 @@ struct Channel
 
     // 0xD7: time-stretch
     std::uint32_t stretchTimeRaw = 0; // in 1/192 of a beat: int or float, depending on Project::flagsA9
+    int stretchPitch = 0;             // Time stretching › PITCH (cents); FL ignores it in Resample mode (REA_rodada164e-clippitch)
     int stretchMul = 0;               // factor = 2^(v/10000)
     int stretchMode = 0;              // 0 resample, < 0 real-time stretch, >= 1 offline
     float stretchTime = 0.0f;         // already decoded (1/192 of a beat)

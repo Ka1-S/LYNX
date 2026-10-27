@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <ctime>
 
 #if JUCE_WINDOWS
@@ -315,5 +316,108 @@ void fitAllWindowsOnScreen()
     for (int i = desktop.getNumComponents(); --i >= 0;)
         if (auto* window = dynamic_cast<juce::ResizableWindow*> (desktop.getComponent (i)))
             fitWindowOnScreen (*window);
+}
+namespace
+{
+// the usable screen of the main window (or the primary one), in logical pixels
+juce::Rectangle<int> usableScreen()
+{
+    const auto& displays = juce::Desktop::getInstance().getDisplays();
+    const juce::Displays::Display* display = nullptr;
+    if (auto* main = juce::TopLevelWindow::getActiveTopLevelWindow())
+        display = displays.getDisplayForRect (main->getScreenBounds());
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+    return display != nullptr ? display->userArea : juce::Rectangle<int> (0, 0, 1280, 720);
+}
+
+// a window's frame (title bar and borders, logical px): this window's own once it is on the screen, else another
+// LYNX window's (the same window manager draws them), else a typical native title bar
+juce::BorderSize<int> windowFrame (juce::Component* window)
+{
+    auto frameOf = [] (juce::Component* c) -> std::optional<juce::BorderSize<int>> {
+        if (c != nullptr)
+            if (auto* peer = c->getPeer())
+                if (const auto f = peer->getFrameSizeIfPresent(); f && f->getTop() > 0)
+                    return *f;
+        return std::nullopt;
+    };
+    if (const auto own = frameOf (window))
+        return *own;
+    for (int i = 0; i < juce::TopLevelWindow::getNumTopLevelWindows(); ++i)
+        if (const auto other = frameOf (juce::TopLevelWindow::getTopLevelWindow (i)))
+            return *other;
+    return { 32, 8, 8, 8 };
+}
+
+class ScrollingContent final : public juce::Component,
+                               private juce::ComponentListener
+{
+public:
+    explicit ScrollingContent (std::unique_ptr<juce::Component> c) : content (c.release())
+    {
+        setName (content->getName());
+        viewport.setViewedComponent (content, true); // (the viewport deletes it)
+        viewport.setScrollBarThickness (12);
+        addAndMakeVisible (viewport);
+        content->addComponentListener (this);
+        fit();
+    }
+
+    ~ScrollingContent() override
+    {
+        if (content != nullptr)
+            content->removeComponentListener (this);
+    }
+
+    void resized() override { viewport.setBounds (getLocalBounds()); }
+
+    // on the screen: fitted again with the window's real frame, and the window placed so it is all on the screen
+    void parentHierarchyChanged() override
+    {
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<ScrollingContent> (this)] {
+            if (safe != nullptr && safe->getPeer() != nullptr)
+                safe->fit();
+        });
+    }
+
+    void fit()
+    {
+        if (content == nullptr)
+            return;
+        const auto area = usableScreen();
+        auto* window = getTopLevelComponent() != this ? getTopLevelComponent() : nullptr;
+        const auto frame = windowFrame (window);
+        const auto f = windowfit::scrollFit (content->getWidth(), content->getHeight(), area.getWidth(), area.getHeight(), frame.getLeftAndRight(),
+                                             frame.getTopAndBottom(), viewport.getScrollBarThickness());
+        viewport.setScrollBarsShown (f.scrollsV, f.scrollsH);
+        setSize (f.w, f.h);
+        if (window != nullptr && window->isOnDesktop())
+            fitWindowOnScreen (*window);
+    }
+
+private:
+    void componentMovedOrResized (juce::Component&, bool, bool wasResized) override
+    {
+        if (wasResized)
+            fit(); // (the window follows its content's size)
+    }
+
+    juce::Component::SafePointer<juce::Component> content;
+    juce::Viewport viewport;
+};
+} // namespace
+
+std::unique_ptr<juce::Component> fitContentToScreen (std::unique_ptr<juce::Component> content)
+{
+    if (content == nullptr)
+        return content;
+    const auto area = usableScreen();
+    const auto frame = windowFrame (nullptr);
+    const auto f = windowfit::scrollFit (content->getWidth(), content->getHeight(), area.getWidth(), area.getHeight(), frame.getLeftAndRight(),
+                                         frame.getTopAndBottom(), 12);
+    if (! f.scrolls())
+        return content;
+    return std::make_unique<ScrollingContent> (std::move (content));
 }
 } // namespace lynx

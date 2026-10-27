@@ -453,6 +453,19 @@ std::vector<std::uint8_t> dx10Snapshot (const flp::Channel& c)
     return s;
 }
 
+void applyFlStretchPanel (SamplerSettings& s, int mode, int pitchCents, int mul, float timeTicks, double sampleSeconds, double bpm)
+{
+    if (mode != 0)
+    {
+        s.keepPitch = true;
+        s.stretchMethod = stretchMethodForFlMode (mode);
+        s.pitch = std::clamp (s.pitch + std::clamp (pitchCents, -4800, 4800) / 100.0f, -24.0f, 24.0f);
+    }
+
+    if (timeTicks <= 0.0f && mul != 0 && sampleSeconds > 0.0 && bpm > 0.0)
+        s.stretchBeats = std::clamp ((float) (sampleSeconds * std::pow (2.0, mul / 10000.0) * bpm / 60.0), 0.0f, 4096.0f);
+}
+
 void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads)
 {
     if (channel < 0 || channel >= (int) song.channels.size() || pads.empty())
@@ -880,11 +893,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (c.rootNote >= 0 && c.rootNote <= 127)
             def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - c.rootNote), -24.0f, 24.0f);
 
-        // an FL audio clip channel's header pitch and root note are not its time-stretch pitch: LYNX played its clips
-        // untransposed before round 163 made the channel pitch transpose clips, and keeps them so ([ASSUMPTION], not
-        // measured in FL; FL's stretch pitch is not read yet)
-        if (isAudioClip)
-            def.sampler.pitch = 0.0f;
+        // an FL audio clip plays like a C5 note of its channel: the header pitch, the root note and the fine tune
+        // transpose it too [FL: measured, REA_rodada164e-clippitch §2 — round 163 had dropped them on an assumption]
 
         def.swingMix = std::clamp (c.swingMix / 128.0f, 0.0f, 1.0f);
         def.cutGroup = c.cutGroup;
@@ -1841,6 +1851,18 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
             def.sampler.keepPitch = c.stretchMode != 0; // only FL's "Resample" changes the pitch
             def.sampler.stretchMethod = stretchMethodForFlMode (c.stretchMode);
+        }
+
+        // FL's time-stretching panel on a sample channel or an audio clip [FL: measured, REA_rodada164e-clippitch §2]:
+        // every mode but Resample keeps the length (also without a TIME: the keys, the pitch knob and the root note
+        // transpose keeping the length) and adds its PITCH knob; Resample ignores that knob. MUL without a TIME
+        // stretches the sample by 2^(MUL/10000) (Resample: slower and lower), at the project's tempo here.
+        if ((c.type == flp::ChannelType::sampler || isAudioClip)
+            && (def.instrument == InstrumentKind::sampler || def.instrument == InstrumentKind::audioClip))
+        {
+            const auto needsLength = c.stretchTime <= 0.0f && c.stretchMul != 0 && ! def.samplePath.empty() && options.sampleSeconds;
+            applyFlStretchPanel (def.sampler, c.stretchMode, c.stretchPitch, c.stretchMul, c.stretchTime,
+                                 needsLength ? options.sampleSeconds (def.samplePath) : 0.0, song.bpm);
         }
         // report: what happened to this channel's generator/sample
         if (options.report != nullptr)
