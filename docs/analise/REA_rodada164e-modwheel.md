@@ -63,4 +63,5 @@ ignore CC 1 / pressure (`Instrument::controlChange` default), hosted plugins get
 
 ## Where I stopped
 
-- Done: research (above), Patcher forwarding + tests. Build/test/landing: see the commit list in the final report.
+- Done: research (above), Patcher forwarding + tests (commit 8e2c1df0). [VERIFIED] build-local with FL Data: 1757356 checks, 0 failures (both misc164m tests ran); Windows build (build-win-misc164m) OK.
+- Next round, if wanted: sustain pedal (CC64) on native instruments needs its own FL check first; a live FL MIDI test needs a loopback MIDI device on the machine.
