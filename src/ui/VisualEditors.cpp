@@ -2542,6 +2542,8 @@ public:
             g.setColour (l.enabled ? theme::colour::textPrimary : theme::colour::textDisabled);
             g.setFont (theme::font (theme::type::small));
             auto label = tr (scene::typeName (l.type));
+            if (scene::isShaderType (l.type)) // (round 165e: the effect's name, its kind in brackets)
+                label = tr (scene::effectName (l.type, l.effect)) + " (" + tr (scene::typeName (l.type)).upToFirstOccurrenceOf (" (", false, false) + ")";
             if (l.type == scene::LayerType::text && ! l.text.empty())
                 label << ": " << juce::String::fromUTF8 (l.text.c_str()).upToFirstOccurrenceOf ("\n", false, false);
             g.drawText (label, r, juce::Justification::centredLeft, true);

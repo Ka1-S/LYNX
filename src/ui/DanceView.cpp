@@ -69,7 +69,7 @@ juce::Rectangle<float> reach (juce::Point<float> feet, float height)
 void draw (juce::Graphics& g, juce::Point<float> feet, float height, const dance::Pose& pose, bool mirrored, juce::Colour outfit)
 {
     // facing: a spin squeezes the body through its side (never to nothing); behind = the back of the head
-    const auto facing = std::abs (pose.turn) < 0.14f ? (pose.turn < 0.0f ? -0.14f : 0.14f) : pose.turn;
+    const auto facing = std::abs (pose.turn) < 0.32f ? (pose.turn < 0.0f ? -0.32f : 0.32f) : pose.turn;
     const auto back = pose.turn < 0.0f;
     Rig r { feet, height, facing * (mirrored ? -1.0f : 1.0f), pose.squash };
     const auto outline = juce::jmax (1.2f, height * 0.011f);
@@ -87,7 +87,7 @@ void draw (juce::Graphics& g, juce::Point<float> feet, float height, const dance
     const auto shoulderL = neck - up * 0.035f - side * 0.085f, shoulderR = neck - up * 0.035f + side * 0.085f;
     const auto headUp = P { std::sin (pose.lean + pose.head), std::cos (pose.lean + pose.head) };
     const auto headSide = P { headUp.y, -headUp.x };
-    const auto headC = neck + headUp * 0.105f;
+    const auto headC = neck + headUp * 0.115f;
 
     auto legPoints = [&] (int i) {
         const auto top = hip + side * (i == 0 ? -0.055f : 0.055f);
@@ -105,17 +105,17 @@ void draw (juce::Graphics& g, juce::Point<float> feet, float height, const dance
     // the tail (a lynx's short bob), behind the body
     {
         const auto base = hip + side * 0.045f - up * 0.02f;
-        const auto a = 2.0f + pose.tail * 0.5f; // out to the right and up
-        const auto tip = base + dir (-a) * 0.11f;
-        limb (g, r, base, (base + tip) * 0.5f, tip, 0.05f, furDark);
-        blob (g, r.at (tip), r.px (0.022f), r.px (0.022f), line, 0.0f);
+        const auto a = -0.9f + pose.tail * 0.35f; // a short bob, down and out to the right
+        const auto tip = base + dir (a) * 0.07f;
+        limb (g, r, base, (base + tip) * 0.5f, tip, 0.055f, furDark);
+        blob (g, r.at (tip), r.px (0.02f), r.px (0.02f), line, 0.0f);
     }
 
     // legs, shoes
     for (int i = 0; i < 2; ++i)
     {
         const auto l = legPoints (i);
-        limb (g, r, l[0], l[1], l[2], 0.06f, fur);
+        limb (g, r, l[0], l[1], l[2], 0.072f, fur);
         const auto toe = r.at (l[2]) + P { (i == 0 ? -1.0f : 1.0f) * r.px (0.035f) * std::abs (r.sx), 0.0f };
         const auto shoeBox = juce::Rectangle<float> (r.px (0.11f) * std::abs (r.sx) + 4.0f, r.px (0.055f)).withCentre ((r.at (l[2]) + toe) * 0.5f);
         g.setColour (shoe);
@@ -164,8 +164,8 @@ void draw (juce::Graphics& g, juce::Point<float> feet, float height, const dance
     for (int i = 0; i < 2; ++i)
     {
         const auto a = armPoints (i);
-        limb (g, r, a[0], a[1], a[2], 0.05f, fur);
-        blob (g, r.at (a[2]), r.px (0.034f), r.px (0.034f), cream, outline);
+        limb (g, r, a[0], a[1], a[2], 0.06f, fur);
+        blob (g, r.at (a[2]), r.px (0.038f), r.px (0.038f), cream, outline);
     }
 
     // the head: ears with tufts, the face
@@ -173,9 +173,9 @@ void draw (juce::Graphics& g, juce::Point<float> feet, float height, const dance
         for (int i = 0; i < 2; ++i)
         {
             const auto s = i == 0 ? -1.0f : 1.0f;
-            const auto baseIn = headC + headUp * 0.055f + headSide * (s * 0.02f);
-            const auto baseOut = headC + headUp * 0.035f + headSide * (s * 0.085f);
-            const auto tip = headC + headUp * 0.15f + headSide * (s * 0.07f);
+            const auto baseIn = headC + headUp * 0.07f + headSide * (s * 0.025f);
+            const auto baseOut = headC + headUp * 0.045f + headSide * (s * 0.1f);
+            const auto tip = headC + headUp * 0.17f + headSide * (s * 0.085f);
             juce::Path ear;
             ear.startNewSubPath (r.at (baseIn));
             ear.lineTo (r.at (tip));
@@ -188,19 +188,19 @@ void draw (juce::Graphics& g, juce::Point<float> feet, float height, const dance
             // the tuft
             juce::Path tuft;
             tuft.startNewSubPath (r.at (tip));
-            tuft.lineTo (r.at (tip + headUp * 0.05f + headSide * (s * 0.01f)));
+            tuft.lineTo (r.at (tip + headUp * 0.028f + headSide * (s * 0.006f)));
             g.strokePath (tuft, juce::PathStrokeType (juce::jmax (1.5f, r.px (0.014f)), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
         const auto c = r.at (headC);
-        blob (g, c, r.px (0.095f) * std::abs (r.sx), r.px (0.088f), fur, outline);
+        blob (g, c, r.px (0.112f) * std::abs (r.sx), r.px (0.102f), fur, outline);
         // cheek ruffs (a lynx's side whiskers)
         for (int i = 0; i < 2; ++i)
         {
             const auto s = i == 0 ? -1.0f : 1.0f;
             juce::Path ruff;
-            ruff.startNewSubPath (r.at (headC + headSide * (s * 0.08f) + headUp * 0.01f));
-            ruff.lineTo (r.at (headC + headSide * (s * 0.125f) - headUp * 0.045f));
-            ruff.lineTo (r.at (headC + headSide * (s * 0.06f) - headUp * 0.06f));
+            ruff.startNewSubPath (r.at (headC + headSide * (s * 0.095f) + headUp * 0.01f));
+            ruff.lineTo (r.at (headC + headSide * (s * 0.145f) - headUp * 0.05f));
+            ruff.lineTo (r.at (headC + headSide * (s * 0.07f) - headUp * 0.07f));
             ruff.closeSubPath();
             g.setColour (cream);
             g.fillPath (ruff);
@@ -210,17 +210,17 @@ void draw (juce::Graphics& g, juce::Point<float> feet, float height, const dance
         if (! back)
         {
             // muzzle, eyes, nose
-            blob (g, r.at (headC - headUp * 0.035f), r.px (0.05f) * std::abs (r.sx), r.px (0.032f), cream, 0.0f);
+            blob (g, r.at (headC - headUp * 0.04f), r.px (0.058f) * std::abs (r.sx), r.px (0.036f), cream, 0.0f);
             for (int i = 0; i < 2; ++i)
             {
                 const auto s = i == 0 ? -1.0f : 1.0f;
-                const auto e = r.at (headC + headUp * 0.015f + headSide * (s * 0.038f));
-                blob (g, e, r.px (0.014f) * std::abs (r.sx) + 0.6f, r.px (0.019f), line, 0.0f);
+                const auto e = r.at (headC + headUp * 0.018f + headSide * (s * 0.044f));
+                blob (g, e, r.px (0.016f) * std::abs (r.sx) + 0.6f, r.px (0.022f), line, 0.0f);
                 g.setColour (juce::Colours::white);
                 g.fillEllipse (juce::Rectangle<float> (r.px (0.008f), r.px (0.008f)).withCentre (e + P { -r.px (0.004f), -r.px (0.006f) }));
             }
             juce::Path n;
-            const auto nc = r.at (headC - headUp * 0.022f);
+            const auto nc = r.at (headC - headUp * 0.026f);
             const auto nw = r.px (0.018f) * std::abs (r.sx) + 0.8f;
             n.addTriangle (nc.x - nw, nc.y - nw * 0.6f, nc.x + nw, nc.y - nw * 0.6f, nc.x, nc.y + nw * 0.6f);
             g.setColour (nose);
@@ -597,7 +597,7 @@ public:
         for (auto* c : std::initializer_list<juce::Component*> { &moveBox, &mirrored, &shown, &size, &speed, &colour, &place })
             addAndMakeVisible (c);
         load();
-        setSize (640, 320);
+        setSize (660, 340);
         startTimerHz (30);
     }
 
@@ -644,8 +644,6 @@ public:
             auto r = row();
             moveLabel = r.removeFromLeft (60);
             moveBox.setBounds (r.removeFromLeft (180));
-            r.removeFromLeft (10);
-            mirrored.setBounds (r);
         }
         {
             auto r = row();
@@ -659,10 +657,14 @@ public:
         }
         {
             auto r = row();
-            shown.setBounds (r.removeFromLeft (160));
-            colour.setBounds (r.removeFromLeft (130));
+            shown.setBounds (r.removeFromLeft (170));
+            mirrored.setBounds (r.removeFromLeft (140));
+        }
+        {
+            auto r = row();
+            colour.setBounds (r.removeFromLeft (150));
             r.removeFromLeft (8);
-            place.setBounds (r.removeFromLeft (150));
+            place.setBounds (r.removeFromLeft (170));
         }
         keysArea = area;
     }

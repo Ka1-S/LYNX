@@ -325,6 +325,13 @@ struct GlSceneRenderer::Impl
         glDisable (GL_STENCIL_TEST);
         glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glUseProgram (0);
+        // JUCE's 2D renderer expects texture unit 0 active (else its glyph / image textures land on another unit and
+        // text drawn after a shader layer disappears)
+        for (int unit = 4; unit >= 0; --unit)
+        {
+            glActiveTexture ((GLenum) (GL_TEXTURE0 + unit));
+            glBindTexture (GL_TEXTURE_2D, 0);
+        }
     }
 
     static juce::Colour hued (std::uint32_t argb, float hueShift)
@@ -435,6 +442,7 @@ struct GlSceneRenderer::Impl
 
     void drawFlat (juce::OpenGLFrameBuffer& target, const vs::Scene& s, std::size_t from, std::size_t to, const Frame& f)
     {
+        resetState();
         {
             auto g2 = juce::createOpenGLGraphicsContext (*context, target);
             juce::Graphics g (*g2);

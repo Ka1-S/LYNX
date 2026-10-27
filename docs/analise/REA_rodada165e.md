@@ -38,3 +38,37 @@ art (procedural dancer, moves picked by notes), FL's Fruity Dance channels impor
   start (Main.cpp) with a message.
 - Checks: shaders compiled and rendered on Linux (Xvfb + Mesa llvmpipe, software); real Windows GPU at most a few
   seconds per check, tiny windows, under ~/.cache/lynx-wingui.lock.
+
+## 1. Scope (measured before building)
+
+- ZGameEditor Visualizer (REA_rodada164c §1): 230 presets, 119 effects in 15 categories; most are GLSL programs run
+  by ZGameEditor scripts. LYNX does not run ZGE scripts or copy its shaders: it has its own small set of shader
+  effects per category and maps each ZGE effect to the closest one on import (§4). Kept out: Physics (2 uses),
+  "Scenes" as full 3D worlds (mapped to a 3D object / terrain / canvas look-alike), HUD meters beyond what the 2D
+  layers already draw.
+- Fruity Dance: FL's character and its moves are FL artwork — not copied. LYNX draws its own character (a lynx, the
+  app's mascot) procedurally; only the behaviour (keys, state) follows FL.
+
+## 2. The Visualizer's GPU path [CODE]
+
+- `ui/VisualGl.{h,cpp}`, `ui/VisualGlShaders.inc`: a JUCE `OpenGLContext` on its own child component
+  (`GlSceneView`); the 2D layers draw into frame buffers through JUCE's OpenGL renderer, the shader layers are
+  full-screen passes; layers are composed in two ping-pong buffers with per-layer blend modes (Normal, Add, Screen,
+  Multiply, Overlay, Difference, Lighten, Darken).
+- Shader layer types (after the 9 2D types): Canvas (Plasma, Tunnel, Cells, Kaleidoscope, Clouds, Warp stars,
+  Electric, Sun rays), Terrain 3D (Spectrum mountains from a 64 x 128 spectrum-history texture, Shaded hills,
+  Retro road), 3D object (ray-marched Reactive sphere, Torus, Cube grid, Ring tunnel), Feedback (Zoom trails, Spin
+  tunnel, Kaleido feedback, Warp, Echo, Smoke drift — each keeps its own previous picture), Post-process (Bloom,
+  Blur — downsampled two-pass Gaussian —, RGB shift, Pixelate, Dot matrix, Scan lines, Vignette, Colour
+  correction, Kaleidoscope, Mirror, Edge detect, Shake, Glitch, Film grain, Invert on beat).
+- Audio-reactive uniforms: level, bass, mid, high, beat, the layer's band × React, the 64-band spectrum texture and
+  its history; Size / Amount / Speed / Count / X / Y / the two colours drive each effect (hint per effect).
+- 8 new built-in GPU scenes (Retro road, Spectrum mountains, Reactive sphere, Kaleido feedback, Plasma tunnel, Cube
+  city, Electric storm, Neon CRT).
+- The audio stays where it was: the tap is read and analysed on the message thread (as the 2D preview), the frame
+  is handed to the GL thread under a small mutex — the audio thread is untouched.
+- Fallback: no context in 5 s, shader compile/link failure of the base programs, or the user's GPU button off → the
+  2D renderer (Canvas and Terrain drawn simplified, 3D / Feedback / Post-process skipped, with a note in the editor).
+- Full screen and video export use the same renderer; the export draws each frame off-screen at the export size
+  (1080p included) through a thumbnail context in the progress window, read back with glReadPixels; if the GPU
+  stops answering (15 s) the rest of the export is drawn in 2D.
