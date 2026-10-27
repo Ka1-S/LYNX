@@ -2776,7 +2776,7 @@ juce::PopupMenu AudioEditor::mainMenu()
         }
         const auto at = selection.empty() ? cursor : selection.start;
         const auto length = selection.empty() ? (std::int64_t) doc.audio.sampleRate : selection.length();
-        ae::generateNoise (doc, selection, 0.5f, (std::uint32_t) juce::Random::getSystemRandom().nextInt(), length);
+        ae::generateNoise (doc, selection, 1.0f, (std::uint32_t) juce::Random::getSystemRandom().nextInt(), length);
         selection = { at, at + length };
         commit (tr ("Generate noise"));
         if (history.size() <= 2)

@@ -4,6 +4,8 @@
 #include <cmath>
 #include <functional>
 #include <numeric>
+#include <tuple>
+#include <utility>
 
 namespace lynx::audioedit
 {
@@ -587,50 +589,82 @@ void ampTool (Document& doc, Range r, const AmpSettings& s)
     }
 }
 
-float lossyNormalize (Document& doc, Range r, double clipFraction)
+float lossyNormalize (Document& doc, Range r, double maxSeconds)
 {
+    // FL's way [DEC 0x697920]: try 249 phase rotations of the selection (k * 2pi / 250, the signal turned through its
+    // analytic counterpart: x cos t + H(x) sin t), keep the one with the lowest peak, then normalize to full scale.
+    // A phase rotation does not change the magnitude spectrum, so the sound stays the same to the ear (mostly) while
+    // its peaks get lower, so it can be made louder. Over `maxSeconds` (FL: 30 s) it is a plain normalize.
     r = orAll (doc, r);
     auto& a = doc.audio;
-    if (r.empty())
+    if (r.empty() || a.channels.empty())
         return 1.0f;
-    // the level that only `clipFraction` of the samples exceed (a 4096-bin histogram of |x| up to the peak)
-    float peak = 0.0f;
+    float before = 0.0f;
     for (const auto& ch : a.channels)
-        peak = std::max (peak, peakOf (ch, r.start, r.end));
-    if (peak <= 1.0e-9f)
+        before = std::max (before, peakOf (ch, r.start, r.end));
+    if (before <= 1.0e-9f)
         return 1.0f;
-    constexpr int bins = 4096;
-    std::vector<std::int64_t> hist (bins, 0);
-    std::int64_t total = 0;
-    for (const auto& ch : a.channels)
-        for (auto i = r.start; i < r.end; ++i)
-        {
-            ++hist[(std::size_t) std::min (bins - 1, (int) (std::abs (ch[(std::size_t) i]) / peak * bins))];
-            ++total;
-        }
-    const auto allowed = (std::int64_t) std::ceil (std::clamp (clipFraction, 0.0, 0.1) * (double) total);
-    std::int64_t above = 0;
-    int b = bins - 1;
-    for (; b > 0; --b)
+    const auto len = (std::size_t) (r.end - r.start);
+    if ((double) len <= maxSeconds * a.sampleRate)
     {
-        if (above + hist[(std::size_t) b] > allowed)
-            break;
-        above += hist[(std::size_t) b];
+        std::size_t n = 1;
+        while (n < len * 2) // padded: the rotation is circular, the padding keeps the ends apart
+            n <<= 1;
+        std::vector<std::vector<double>> hil;
+        for (const auto& ch : a.channels)
+        {
+            std::vector<double> re (n, 0.0), im (n, 0.0);
+            for (std::size_t i = 0; i < len; ++i)
+                re[i] = ch[(std::size_t) r.start + i];
+            fftInPlace (re, im, false);
+            // the Hilbert transform: -j on positive frequencies, +j on negative ones, 0 at DC and Nyquist
+            for (std::size_t k = 1; k < n / 2; ++k)
+            {
+                std::tie (re[k], im[k]) = std::pair (im[k], -re[k]);
+                std::tie (re[n - k], im[n - k]) = std::pair (-im[n - k], re[n - k]);
+            }
+            re[0] = im[0] = re[n / 2] = im[n / 2] = 0.0;
+            fftInPlace (re, im, true);
+            for (auto& v : re)
+                v /= (double) n;
+            re.resize (len);
+            hil.push_back (std::move (re));
+        }
+        double bestPeak = before, bestAngle = 0.0;
+        for (int k = 1; k < 250; ++k)
+        {
+            const auto t = (double) k * 2.0 * pi / 250.0, c = std::cos (t), s = std::sin (t);
+            double pk = 0.0;
+            for (std::size_t chn = 0; chn < a.channels.size() && pk < bestPeak; ++chn)
+                for (std::size_t i = 0; i < len; ++i)
+                    pk = std::max (pk, std::abs (a.channels[chn][(std::size_t) r.start + i] * c + hil[chn][i] * s));
+            if (pk < bestPeak)
+            {
+                bestPeak = pk;
+                bestAngle = t;
+            }
+        }
+        if (bestAngle != 0.0)
+        {
+            const auto c = std::cos (bestAngle), s = std::sin (bestAngle);
+            for (std::size_t chn = 0; chn < a.channels.size(); ++chn)
+                for (std::size_t i = 0; i < len; ++i)
+                {
+                    auto& v = a.channels[chn][(std::size_t) r.start + i];
+                    v = (float) (v * c + hil[chn][i] * s);
+                }
+        }
     }
-    const auto level = std::max (peak * 0.25f, peak * (float) (b + 1) / bins); // never more than +12 dB over normalize
-    const auto gain = 1.0f / level;
-    constexpr float knee = 0.9f;
+    float after = 0.0f;
+    for (const auto& ch : a.channels)
+        after = std::max (after, peakOf (ch, r.start, r.end));
+    if (after <= 1.0e-9f)
+        return 1.0f;
+    const auto gain = 1.0f / after;
     for (auto& ch : a.channels)
         for (auto i = r.start; i < r.end; ++i)
-        {
-            const auto x = ch[(std::size_t) i] * gain;
-            const auto m = std::abs (x);
-            if (m > knee)
-                ch[(std::size_t) i] = std::copysign (knee + (1.0f - knee) * std::tanh ((m - knee) / (1.0f - knee)), x);
-            else
-                ch[(std::size_t) i] = x;
-        }
-    return gain;
+            ch[(std::size_t) i] = std::clamp (ch[(std::size_t) i] * gain, -1.0f, 1.0f);
+    return before / after; // how much lower the peak got (FL shows it in dB after the edit)
 }
 
 bool monoIfMono (Document& doc, float tolerance)

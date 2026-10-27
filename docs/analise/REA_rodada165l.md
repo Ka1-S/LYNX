@@ -68,3 +68,19 @@ start from the same shapes (the numbers, not the files).
 - The editor: "Edit: Wave / Volume / Panning / Stereo sep" (E) like Edison's edit selector; the envelopes are heard when
   playing and mixed down by Tools › Mixdown amp envelopes; Tools menu in FL's groups (Envelope, Amp, Waveform, Time,
   Channels, Synthesis, Noise gating, Spectral, Regions).
+
+## 4. Decompiled behaviour [DEC] (FLEngine_x64.dll, read-only project of r165f)
+
+- **Normalize menu (TEditor `NormalizeMenuClick` 0xce57c0)** dispatches on the item tag. Fade in (8) / fade out (9)
+  are a volume ramp 0→1 / 1→0 with tension 0.999999 / 0.9999; "mono if mono" (10) only converts when the channels
+  are identical; declick in/out (11/12) are the region declickers.
+- **Lossy normalize (tag 15, 0x697920)**: only when the selection is ≤ 30 000 ms (`len * 1000 / rate`), else a plain
+  normalize. It tries passes k = 1..249 with an angle `k * 0.0251327 = k * 2π/250`, measures the peak of the
+  selection after each trial transform, keeps the lowest, applies it, then normalizes to 1.0 and reports
+  `Gain: x dB` = 20·log10(old peak / new peak). The trial transform works on a 2^n FFT (n = log2 of a size derived
+  from the sample rate, clamped 4..20) and does not change the magnitude spectrum, i.e. a constant phase rotation.
+  LYNX: `lossyNormalize` = the same search with an analytic-signal (Hilbert) rotation `x cos t + H(x) sin t`, then
+  normalize; returns the ratio. (Was a soft-clip guess before.)
+- **Generate noise (WDelMenuClick tag 10)**: fills the selection with noise then normalizes it to 1.0.
+- **Claw machine (0xcd2070)**: the form is modal; OK runs the core (0xc7b460) on the selection under one undo step
+  named "claw machine".

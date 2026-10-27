@@ -127,12 +127,13 @@ TEST (audioedittools_amp_mixdown_and_levels_round165l)
     CHECK (std::abs (rmsOf (v.audio.channels[0], 0, vn / 4) - 0.5 / std::sqrt (2.0)) < 0.01);
     CHECK (rmsOf (v.audio.channels[0], vn - vn / 50, vn) < 0.01);
 
-    // lossy normalize: louder than plain normalize, never over full scale
-    auto ln = noiseDoc (0.5, 0.25f);
-    ln.audio.channels[0][100] = 0.9f; // one stray peak
+    // lossy normalize (a phase rotation that lowers the peaks, then normalize): a click train gets much louder
+    auto ln = noiseDoc (0.5, 0.0f);
+    for (std::size_t i = 50; i < ln.audio.channels[0].size(); i += 100)
+        ln.audio.channels[0][i] = 0.9f;
     auto plain = ln;
     ae::normalize (plain, {}, 0.0f);
-    ae::lossyNormalize (ln, {});
+    CHECK (ae::lossyNormalize (ln, {}) > 1.5f);
     CHECK (rmsOf (ln.audio.channels[0], 0, ln.audio.frames()) > 1.5 * rmsOf (plain.audio.channels[0], 0, plain.audio.frames()));
     CHECK (ae::peak (ln.audio, {}) <= 1.0f);
 

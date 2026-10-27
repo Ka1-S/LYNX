@@ -93,9 +93,11 @@ struct AmpSettings
 };
 void ampTool (Document& doc, Range r, const AmpSettings& s);
 
-// Lossy normalize: normalizes so that `clipFraction` of the samples (the loudest few) go over full scale and are
-// soft-clipped, giving a louder result than a plain normalize. Returns the gain applied.
-float lossyNormalize (Document& doc, Range r, double clipFraction = 0.0005);
+// Lossy normalize (FL's): turns the phase of the selection (one rotation for all of it, the one of 249 that lowers the
+// peak most) and normalizes, so it ends up louder than a plain normalize with the same magnitude spectrum. Selections
+// longer than `maxSeconds` get a plain normalize. Returns how much lower the peak got by
+// the rotation (old peak / rotated peak, 1 = none: FL reports it as "Gain: x dB").
+float lossyNormalize (Document& doc, Range r, double maxSeconds = 30.0);
 // Stereo audio whose channels are the same (within `tolerance`) becomes mono. True if it was converted.
 bool monoIfMono (Document& doc, float tolerance = 1.0e-6f);
 // White noise at `level` (peak, linear) over the range (an empty range: inserted at r.start, `frames` long).
