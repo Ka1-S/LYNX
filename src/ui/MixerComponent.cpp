@@ -3,6 +3,7 @@
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
 
+#include "core/Patcherize.h"
 #include "core/FlEffects.h"
 #include "core/ProjectContents.h"
 #include "core/FruityVocoder.h"
@@ -4277,6 +4278,24 @@ void EffectsPanel::showSlotMenu (int slot)
             addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::effectParam, track, slot, 0 });
     }
 
+    // FL's Patcherize / Patcherize all (round 165m): the effect (or the whole chain) into a new Patcher, same sound
+    menu.addSeparator();
+    menu.addItem (tr ("Patcherize"), patcherize::canPatcherizeSlot (engine.getSong(), track, slot), false, [this, slot] {
+        engine.capturePluginStates(); // (the plugins' current settings go with them)
+        int placed = -1;
+        engine.editSong ([t = track, slot, &placed] (Song& song) { placed = patcherize::patcherizeSlots (song, t, slot, false); });
+        if (placed >= 0)
+            selectedSlot = placed;
+        repaint();
+    });
+    menu.addItem (tr ("Patcherize all"), patcherize::slotsForAll (engine.getSong(), track).size() > 1, false, [this, slot] {
+        engine.capturePluginStates();
+        int placed = -1;
+        engine.editSong ([t = track, slot, &placed] (Song& song) { placed = patcherize::patcherizeSlots (song, t, slot, true); });
+        if (placed >= 0)
+            selectedSlot = placed;
+        repaint();
+    });
     menu.addSeparator();
     menu.addItem (tr ("Delete"), [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });

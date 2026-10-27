@@ -3,6 +3,7 @@
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
 #include "ui/ChannelRackComponent.h"
+#include "core/Patcherize.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 
@@ -1882,6 +1883,12 @@ void ChannelRackComponent::showChannelMenu (int channel)
         menu.addSubMenu (tr ("Insert"), insert);
     }
     menu.addSubMenu (tr ("Replace"), instruments);
+    // FL's Patcherize (round 165m): the channel's instrument into a new Patcher, same sound
+    menu.addItem (tr ("Patcherize"), selected <= 1 && patcherize::canPatcherizeChannel (engine.getSong(), channel), false, [this, channel] {
+        engine.capturePluginStates(); // (the plugin's current settings go with it)
+        closeEditor (channel);
+        engine.editSong ([channel] (Song& s) { patcherize::patcherizeChannel (s, channel); });
+    });
     menu.addItem (selected > 1 ? tr ("Clone {0} channels", { juce::String (selected) }) : tr ("Clone") + "\tAlt+C", [this] { cloneSelected(); });
 
     if (selected > 1)

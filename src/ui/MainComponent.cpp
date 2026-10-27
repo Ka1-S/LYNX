@@ -1385,10 +1385,10 @@ void MainComponent::loadUiSettings()
              : key == "disarmOnStop" ? o.disarmOnStop : o.startsPlayback) = on;
             engine.setRecordOptions (o);
         }
-        else if (key == "recordAutomation" || key == "recordQuantiseAutomation")
+        else if (key == "recordAutomation" || key == "recordQuantiseAutomation" || key == "recordClips")
         {
             auto o = engine.getRecordOptions();
-            (key == "recordAutomation" ? o.recordAutomation : o.quantiseAutomation) = on;
+            (key == "recordAutomation" ? o.recordAutomation : key == "recordClips" ? o.recordClips : o.quantiseAutomation) = on;
             engine.setRecordOptions (o);
         }
         else if (key == "recordToStepSequencer" || key == "recordingMarkers" || key == "recordNoteEnd")
@@ -1466,6 +1466,7 @@ void MainComponent::saveUiSettings()
                                       + "\nrecordToStepSequencer=" + juce::String (engine.getRecordOptions().toStepSequencer ? 1 : 0)
                                       + "\nrecordingMarkers=" + juce::String (engine.getRecordOptions().recordingMarkers ? 1 : 0)
                                       + "\nrecordAutomation=" + juce::String (engine.getRecordOptions().recordAutomation ? 1 : 0)
+                                      + "\nrecordClips=" + juce::String (engine.getRecordOptions().recordClips ? 1 : 0)
                                       + "\nrecordQuantiseAutomation=" + juce::String (engine.getRecordOptions().quantiseAutomation ? 1 : 0)
                                       + "\nrecordPunchLoop=" + juce::String (engine.getRecordOptions().punchLoopRegion ? 1 : 0)
                                       + "\nrecordPreRoll=" + juce::String (engine.getRecordOptions().preRollBars)
@@ -1745,6 +1746,12 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
             action (menu, "playlist.quantizeStarts", tr ("Quantize the clips' starts"));
             action (menu, "playlist.quantizeHalf", tr ("Quantize the clips' starts 50% (halfway to the grid)"));
             menu.addSubMenu (tr ("Zoom"), zoomMenu ("playlist."));
+            menu.addSeparator();
+            // FL's Performance mode (round 165m)
+            action (menu, "playlist.performanceMode", tr ("Performance mode"), true, engine.getSong().performanceMode);
+            action (menu, "playlist.zoomPerformance", tr ("Zoom on performance clips"), engine.getSong().performanceZoneEnd() > 0);
+            action (menu, "playlist.perfClipProgress", tr ("Performance clip progress"), true, playlist.clipProgressShown());
+            action (menu, "playlist.perfTrackProgress", tr ("Performance track progress"), true, playlist.trackProgressShown());
             break;
         case Panel::pianoRoll:
         {
@@ -2119,6 +2126,8 @@ void MainComponent::showRecordMenu()
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordNotes = ! r.recordNotes; }); });
     menu.addItem (tr ("Audio of the armed mixer inserts (becomes Playlist clips)"), true, o.recordAudio,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordAudio = ! r.recordAudio; }); });
+    menu.addItem (tr ("Clips (Performance mode: the launched clips are written into the arrangement)"), true, o.recordClips,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordClips = ! r.recordClips; }); });
     menu.addItem (tr ("Ask what to record when recording starts"), true, o.askWhatToRecord,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.askWhatToRecord = ! r.askWhatToRecord; }); });
     // FL's "Options" section (REA round 134)

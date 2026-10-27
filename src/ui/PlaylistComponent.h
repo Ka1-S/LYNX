@@ -91,6 +91,8 @@ public:
 
     // Ripple editing: resizing a clip's end moves the later clips on its track, deleting closes the gap.
     bool isRippleOn() const noexcept { return ripple; }
+    bool clipProgressShown() const noexcept { return showClipProgress; }
+    bool trackProgressShown() const noexcept { return showTrackProgress; }
     void setRipple (bool on);
     void rippleDeleteSelection();
 
@@ -135,7 +137,15 @@ public:
 
 private:
     enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint,
-                      trackResize, preview };
+                      trackResize, preview, perfLaunch };
+    // Performance mode (round 165m): the clip a click launched (its release goes with the mouse button)
+    int perfTrack = -1;
+    std::int64_t perfClip = -1;
+    std::array<std::int64_t, 64> perfShown {}; // the zone's playing / pending state last painted, to repaint on change
+    void paintPerformance (juce::Graphics& g, juce::Rectangle<int> grid);
+    void togglePerformanceMode();
+    void zoomOnPerformanceClips();
+    bool showClipProgress = true, showTrackProgress = true; // FL's View › Performance clip / track progress
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
