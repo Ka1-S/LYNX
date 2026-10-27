@@ -7,7 +7,11 @@ REA/Ghidra (clean-room); [SRC] open-source tuner source read (licence noted); [m
 
 ## Where I stopped
 
-- Started: worktree ../lynx-wt-tune165 (feature/tune165), round doc. Next: baseline measurements.
+- Done: harness (tmp/tune165/py: synth, measure, real, atsyn, lxsyn, lxreal), 10 synthetic takes, renders through
+  Auto-Tune Pro (retune 20 / 0 / Classic) and Waves Tune RT (Note Transition 20 ms) — scored
+  (D:\lynx-work\tune165\res_syn_refs.txt). Her 24 live-set takes: substitute params dumped to D:\lynx-work\tune165\params.
+- Building minitune (LynxTune.cpp + VocalPitch.cpp only; fast A/B loop) and the FL Pitcher harness (pit.exe).
+- Next: LYNX baseline scores, then experiments (wip copies in tmp/tune165/wip, E1 = voicing hysteresis).
 
 ## 1. Method: the three-way comparison harness
 
