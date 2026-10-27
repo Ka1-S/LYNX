@@ -4780,11 +4780,23 @@ private:
                 portOut.kind = lynx::PatchWire::Kind::midi, portOut.from = 2, portOut.to = lynx::patchToHost, portOut.toPort = 3;
                 envNotes.kind = lynx::PatchWire::Kind::midi, envNotes.to = 3;
                 envControl.kind = lynx::PatchWire::Kind::control, envControl.from = 3, envControl.to = 1, envControl.toPort = 0;
-                ch.patcher.wires = { notes, a, b, portIn, portOut, envNotes, envControl };
+                lynx::PatchWire oscNotes, oscOut;
+                oscNotes.kind = lynx::PatchWire::Kind::midi, oscNotes.to = 4;
+                oscOut.from = 4;
+                ch.patcher.wires = { notes, a, b, portIn, portOut, envNotes, envControl, oscNotes, oscOut };
                 ch.patcher.fromMidiPorts = { 1, 5 };
                 ch.patcher.toMidiPorts = { 3 };
                 ch.patcher.outputX = 640.0f;
                 song.channels.push_back (ch);
+                // LYNX_PATCHERSHOT_SAVE=file.lynx: the demo as a project (a GUI check of the same Patchers, round 164f)
+                if (const auto save = juce::SystemStats::getEnvironmentVariable ("LYNX_PATCHERSHOT_SAVE", {}); save.isNotEmpty())
+                {
+                    if (! song.patterns.empty())
+                        for (int k = 0; k < 4; ++k)
+                            song.patterns[0].notes.push_back ({ (std::int64_t) k * lynx::ppq, lynx::ppq / 2, (int) song.channels.size() - 1, 60 + 4 * k, 0.8f });
+                    juce::String error;
+                    lynx::ProjectFile::save (song, juce::File (save), error);
+                }
                 offline.setSong (std::move (song));
             }
             offline.dispatchPendingMessages();
