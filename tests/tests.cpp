@@ -16038,6 +16038,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "CrashReport159Tests.inc"
 #include "Sampler162Tests.inc"
 #include "Workflow163cTests.inc"
+#include "Misc164mTests.inc"
 #include "Theme162Tests.inc"
 #include "PluginPresets162Tests.inc"
 #include "Look162Tests.inc"
