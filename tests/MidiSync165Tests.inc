@@ -107,6 +107,31 @@ TEST (midisync165_spp_and_continue_on_start_elsewhere_and_jumps)
     CHECK (run.sent[1].second.bytes[0] == 0xf2 && run.sent[1].second.bytes[1] == (1000 & 0x7f) && run.sent[1].second.bytes[2] == (1000 >> 7));
 }
 
+TEST (midisync165_loop_wrap_detected_without_a_flag)
+{
+    // the engine's loop: the position goes back to the loop start between two parts of a block, unflagged
+    using namespace midisync165;
+    Generator g;
+    Run run;
+    double ticks = 0.0;
+    std::int64_t sample = 0;
+    play (g, run, ticks, sample, 4, 1000, 120.0); // 160 ticks played
+    ticks = 0.0;                                  // wrap to 0
+    play (g, run, ticks, sample, 2, 1000, 120.0);
+    CHECK (countStatus (run, 0xfa) == 2 && countStatus (run, 0xfc) == 1);
+    std::vector<std::int64_t> pulses;
+    for (const auto& [at, m] : run.sent)
+        if (m.bytes[0] == 0xf8)
+            pulses.push_back (at);
+    CHECK (pulses.size() == 6 && pulses[4] == 4000 && pulses[5] == 5000);
+    // a wrap to bar 2: SPP 16 + Continue
+    ticks = 3840.0;
+    run.sent.clear();
+    play (g, run, ticks, sample, 1, 1000, 120.0);
+    CHECK (run.sent.size() >= 4 && run.sent[0].second.bytes[0] == 0xfc && run.sent[1].second.bytes[0] == 0xf2 && run.sent[1].second.bytes[1] == 16
+           && run.sent[2].second.bytes[0] == 0xfb && run.sent[3].second.bytes[0] == 0xf8 && run.sent[3].first == sample - 1000);
+}
+
 TEST (midisync165_mtc_timecode_labels_drop_frame)
 {
     using namespace lynx::midisync;

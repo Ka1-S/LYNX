@@ -142,6 +142,7 @@ void Generator::reset() noexcept
 {
     wasPlaying = false;
     nextPulseTicks = 0.0;
+    expectedTicks = 0.0;
     nextQuarter = 0;
     mtcSeconds = 0.0;
 }
@@ -150,10 +151,15 @@ void Generator::process (const Block& block, double songSeconds, BlockMessages& 
 {
     if (block.numSamples <= 0)
         return;
+    // a jump the caller didn't flag: the block doesn't start where the last one ended (loop wrap, a click on the
+    // timeline, an external clock's relocate)
+    auto b = block;
+    b.jumped = block.jumped || (block.playing && wasPlaying && std::abs (block.startTicks - expectedTicks) > 0.5);
     if (syncType == SyncType::midiClock)
-        processClock (block, out);
+        processClock (b, out);
     else
-        processMtc (block, songSeconds, out);
+        processMtc (b, songSeconds, out);
+    expectedTicks = block.startTicks + block.numSamples * block.ticksPerSample;
 }
 
 void Generator::processClock (const Block& block, BlockMessages& out) noexcept

@@ -98,7 +98,8 @@ struct Block
     double sampleRate = 44100.0;
     int numSamples = 0;
     bool playing = false;
-    bool jumped = false;          // the position was moved before this block (seek, loop wrap) while playing
+    bool jumped = false;          // the position was moved before this block while playing (also detected: a block
+                                  // that doesn't start where the previous one ended)
 };
 
 // Song Position Pointer value (MIDI beats = 16th notes) for a tick position; rounded up to the next 16th so the
@@ -126,6 +127,7 @@ private:
     SyncType syncType = SyncType::midiClock;
     bool wasPlaying = false;
     double nextPulseTicks = 0.0;         // the next clock pulse position (multiple of 40 ticks)
+    double expectedTicks = 0.0;          // where the next block should start (else: a jump)
     std::int64_t nextQuarter = 0;        // MTC: the next quarter-frame index (frame * 4 + piece)
     double mtcSeconds = 0.0;             // MTC: the song time at the next block's first sample
 };
