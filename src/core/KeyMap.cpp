@@ -52,6 +52,7 @@ std::vector<Action> makeActions()
         { "view.toolbar", TR_NOOP ("Show or hide the toolbar panels"), Context::global, { chord (f11, ctrl) } },
         { "view.audioEditor", TR_NOOP ("Open the audio editor"), Context::global, {} },
         { "view.tempoTapper", TR_NOOP ("Tempo tapper (tap the tempo)"), Context::global, {} },
+        { "view.sampleBrowser", TR_NOOP ("Sample browser (separate window)"), Context::global, {} },
 
         // workspace panels
         { "panel.playlist", TR_NOOP ("Show, focus or hide the Playlist"), Context::global, { chord (f5) } },
