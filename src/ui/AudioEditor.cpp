@@ -1445,6 +1445,31 @@ private:
             zoomToFit();
     }
 
+    // the clipboard stretched to the selection's length (pitch kept), or drum-stretched (slices keep their attacks),
+    // replacing the selection
+    void pasteFitted (bool drum)
+    {
+        const auto& clip = clipboard();
+        if (clip.empty() || selection.empty() || recState != RecState::idle)
+            return;
+        stopPlayback();
+        ae::Document part;
+        part.audio = ae::conform (clip, doc.audio.numChannels(), doc.audio.sampleRate);
+        const auto ratio = (double) selection.length() / (double) juce::jmax<std::int64_t> (1, part.audio.frames());
+        if (drum)
+        {
+            ae::DrumStretchSettings s;
+            s.ratio = ratio;
+            ae::drumloopStretch (part, {}, s);
+        }
+        else
+            ae::timeStretch (part, {}, ratio);
+        for (auto& ch : part.audio.channels)
+            ch.resize ((std::size_t) selection.length(), 0.0f);
+        ae::pasteReplace (doc, selection, part.audio);
+        commit (drum ? tr ("Paste replace (drum)") : tr ("Paste stretch"));
+    }
+
     void fade (bool in)
     {
         const auto curve = fadeCurve;
@@ -2315,7 +2340,7 @@ private:
         envButton.setButtonText (tr (envModeName (m)));
         envButton.setToggleState (m != EnvMode::wave, juce::dontSendNotification);
         if (m != EnvMode::wave)
-            setStatus (tr ("Click to add a point, drag to move it, right-click deletes, Alt+drag bends. Tools > Envelope mixes it down."), false);
+            setStatus (tr ("Right-click (or click) adds a point, drag moves it, right-click or Alt+click on a point deletes it, the hollow handles bend. Tools > Mixdown amp envelopes applies it."), false);
         repaint();
     }
 
@@ -2342,18 +2367,34 @@ private:
         return -1;
     }
 
-    // returns true when the click was for the envelope
+    // the segment (its end point) whose hollow tension handle is under p, or -1
+    int envelopeHandleHit (juce::Point<float> p)
+    {
+        auto& env = currentEnvelope();
+        for (int i = 1; i < (int) env.points.size(); ++i)
+        {
+            const auto& a = env.points[(std::size_t) i - 1];
+            const auto& b = env.points[(std::size_t) i];
+            if (envX (b.x) - envX (a.x) < 14.0f)
+                continue;
+            const auto mx = 0.5 * (a.x + b.x);
+            if (juce::Point<float> (envX (mx), envY (env.at (mx))).getDistanceFrom (p) < 6.0f)
+                return i;
+        }
+        return -1;
+    }
+
+    // FL's point editing on the envelope: right-click (or click) on an empty spot adds a point and drags it, drag a
+    // point moves it, right-click or Alt+click on a point deletes it, the hollow handle between two points bends the
+    // segment (right-click it: straight). Returns true when the click was for the envelope.
     bool envelopeMouseDown (const juce::MouseEvent& e)
     {
         auto& env = currentEnvelope();
         const auto hit = envelopeHit (e.position);
         envChanged = false;
         if (env.empty())
-        {
-            // a new envelope starts flat at its neutral value (unity / centre)
-            env = ae::Envelope::flat (0.5);
-        }
-        if (e.mods.isPopupMenu() && hit >= 0 && ! e.mods.isAltDown())
+            env = ae::Envelope::flat (0.5); // a new envelope starts flat at its neutral value (unity / centre)
+        if (hit >= 0 && (e.mods.isPopupMenu() || e.mods.isAltDown()))
         {
             env.points.erase (env.points.begin() + hit);
             if (env.points.empty())
@@ -2361,22 +2402,20 @@ private:
             commit (tr ("Delete envelope point"));
             return true;
         }
-        if (e.mods.isAltDown())
+        if (const auto h = envelopeHandleHit (e.position); h > 0 && hit < 0)
         {
-            const auto x = envPosition (e.x);
-            for (int i = 1; i < (int) env.points.size(); ++i)
-                if (x <= env.points[(std::size_t) i].x)
-                {
-                    envDragPoint = i;
-                    envBendStartY = e.position.y;
-                    envBendStartTension = env.points[(std::size_t) i].tension;
-                    drag = Drag::envBend;
-                    return true;
-                }
+            if (e.mods.isPopupMenu())
+            {
+                env.points[(std::size_t) h].tension = 0.0f;
+                commit (tr ("Edit envelope"));
+                return true;
+            }
+            envDragPoint = h;
+            envBendStartY = e.position.y;
+            envBendStartTension = env.points[(std::size_t) h].tension;
+            drag = Drag::envBend;
             return true;
         }
-        if (e.mods.isPopupMenu())
-            return false; // the edit menu
         envDragPoint = hit >= 0 ? hit : env.insert (envPosition (e.x), envValue (e.position.y));
         envChanged = hit < 0;
         drag = Drag::envPoint;
@@ -2446,6 +2485,17 @@ private:
             }
             g.setColour (l.colour.withAlpha (active ? 0.95f : 0.4f));
             g.strokePath (path, juce::PathStrokeType (active ? 1.8f : 1.2f));
+            if (active)
+                for (int i = 1; i < (int) l.env->points.size(); ++i)
+                {
+                    const auto& a = l.env->points[(std::size_t) i - 1];
+                    const auto& b = l.env->points[(std::size_t) i];
+                    if (envX (b.x) - envX (a.x) < 14.0f)
+                        continue;
+                    const auto mx = 0.5 * (a.x + b.x);
+                    g.setColour (l.colour.withAlpha (0.8f));
+                    g.drawEllipse (envX (mx) - 3.0f, envY (l.env->at (mx)) - 3.0f, 6.0f, 6.0f, 1.2f);
+                }
             if (active)
                 for (const auto& p : l.env->points)
                 {
@@ -2592,6 +2642,9 @@ juce::PopupMenu AudioEditor::editMenu (bool contextual)
     menu.addItem (tr ("Paste insert") + "\tCtrl+V", clip && selection.empty(), false, [this] { paste (false); });
     menu.addItem (tr ("Paste replace"), clip && sel, false, [this] { paste (false); });
     menu.addItem (tr ("Paste mix"), clip && has, false, [this] { paste (true); });
+    // Edison's "Paste stretch" / "Paste replace (drum)" (round 165l): the clipboard brought to the selection's length
+    menu.addItem (tr ("Paste stretch"), clip && sel, false, [this] { pasteFitted (false); });
+    menu.addItem (tr ("Paste replace (drum)"), clip && sel, false, [this] { pasteFitted (true); });
     menu.addSeparator();
     menu.addItem (tr ("Delete") + "\tDel", sel, false, [this] { deleteSelection(); });
     menu.addItem (tr ("Clear (silence)"), sel, false, [this] { edit (tr ("Silence"), [] (ae::Document& d, ae::Range r) { ae::clear (d, r); }, true); });

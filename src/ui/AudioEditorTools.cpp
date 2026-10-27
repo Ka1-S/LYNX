@@ -145,6 +145,17 @@ void CurveEditor::paint (juce::Graphics& g)
         g.fillPath (fill);
         g.setColour (theme::colour::accent);
         g.strokePath (curve, juce::PathStrokeType (1.6f));
+        for (int i = 1; i < (int) envelope.points.size(); ++i)
+        {
+            const auto& a0 = envelope.points[(std::size_t) i - 1];
+            const auto& b0 = envelope.points[(std::size_t) i];
+            if (toScreen (b0.x, b0.y).x - toScreen (a0.x, a0.y).x < 14.0f)
+                continue;
+            const auto mx = 0.5 * (a0.x + b0.x);
+            const auto h = toScreen (mx, envelope.at (mx));
+            g.setColour (i == bending || h.getDistanceFrom (hover) < 6.0f ? theme::colour::textPrimary : theme::colour::accent.withAlpha (0.8f));
+            g.drawEllipse (h.x - 3.0f, h.y - 3.0f, 6.0f, 6.0f, 1.2f);
+        }
         for (int i = 0; i < (int) envelope.points.size(); ++i)
         {
             const auto& p = envelope.points[(std::size_t) i];
@@ -176,11 +187,28 @@ void CurveEditor::mouseMove (const juce::MouseEvent& e)
     repaint();
 }
 
+int CurveEditor::hitHandle (juce::Point<float> p) const
+{
+    for (int i = 1; i < (int) envelope.points.size(); ++i)
+    {
+        const auto& a = envelope.points[(std::size_t) i - 1];
+        const auto& b = envelope.points[(std::size_t) i];
+        if (toScreen (b.x, b.y).x - toScreen (a.x, a.y).x < 14.0f)
+            continue;
+        const auto mx = 0.5 * (a.x + b.x);
+        if (toScreen (mx, envelope.at (mx)).getDistanceFrom (p) < 6.0f)
+            return i;
+    }
+    return -1;
+}
+
 void CurveEditor::mouseDown (const juce::MouseEvent& e)
 {
     changed = false;
     const auto hit = hitPoint (e.position);
-    if (e.mods.isPopupMenu() && hit >= 0 && ! e.mods.isAltDown())
+    // FL's point editing: right-click (or a click) on an empty spot adds a point and drags it, right-click or
+    // Alt+click on a point deletes it, the hollow handle between two points bends the segment (right-click: straight)
+    if (hit >= 0 && (e.mods.isPopupMenu() || e.mods.isAltDown()))
     {
         if (envelope.points.size() > 1)
         {
@@ -192,19 +220,20 @@ void CurveEditor::mouseDown (const juce::MouseEvent& e)
         repaint();
         return;
     }
-    if (e.mods.isAltDown() || e.mods.isPopupMenu())
+    if (const auto h = hitHandle (e.position); h > 0 && hit < 0)
     {
-        // bend the segment under the mouse (its end point's tension)
-        const auto [x, y] = fromScreen (e.position);
-        juce::ignoreUnused (y);
-        for (int i = 1; i < (int) envelope.points.size(); ++i)
-            if (x <= envelope.points[(std::size_t) i].x)
-            {
-                bending = i;
-                bendStartY = e.position.y;
-                bendStartTension = envelope.points[(std::size_t) i].tension;
-                break;
-            }
+        if (e.mods.isPopupMenu())
+        {
+            envelope.points[(std::size_t) h].tension = 0.0f;
+            changed = true;
+            if (onChange)
+                onChange();
+            repaint();
+            return;
+        }
+        bending = h;
+        bendStartY = e.position.y;
+        bendStartTension = envelope.points[(std::size_t) h].tension;
         return;
     }
     if (hit >= 0)
@@ -714,7 +743,7 @@ private:
                         describe = [where] { return where + "\n" + tr ("Copy the reference audio first (Ctrl+C in any audio editor), then open Match spectrum."); };
                 }
                 else
-                    describe = [where] { return where + "\n" + tr ("Draw the gain over frequency (centre line = unchanged). Right-click deletes a point, Alt+drag bends."); };
+                    describe = [where] { return where + "\n" + tr ("Draw the gain over frequency (centre line = unchanged). Right-click adds a point, right-click or Alt+click on a point deletes it, the hollow handles bend."); };
                 makeProcess = [=, this, &c] {
                     ae::EqSettings s;
                     s.gain = c.envelope;

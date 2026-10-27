@@ -61,9 +61,10 @@ std::unique_ptr<juce::Component> makeToolPanel (Host& host, Tool tool);
 // Opens the tool in its own window (one audio-editor tool window at a time).
 void showTool (Host& host, Tool tool);
 
-// A point-envelope editor (the curves of the tool forms and of the envelopes drawn over the audio): click on an
-// empty spot adds a point and drags it, drag a point moves it, right-click a point deletes it, Alt+drag (or drag with
-// the right button) on a segment bends it (tension), double-click a point straightens its segment.
+// A point-envelope editor (the curves of the tool forms), with FL's point editing: right-click (or click) on an empty
+// spot adds a point and drags it, drag a point moves it (Shift: only its level), right-click or Alt+click on a point
+// deletes it, the hollow handle between two points bends the segment (right-click it: straight again), double-click
+// a point straightens the segment that ends at it.
 class CurveEditor : public juce::Component
 {
 public:
@@ -99,6 +100,7 @@ public:
 
 private:
     int hitPoint (juce::Point<float> p) const;
+    int hitHandle (juce::Point<float> p) const; // the segment whose tension handle is under p (its end point), or -1
     int dragging = -1, bending = -1;
     float bendStartY = 0.0f, bendStartTension = 0.0f;
     bool changed = false;

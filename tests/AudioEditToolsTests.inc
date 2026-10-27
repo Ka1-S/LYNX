@@ -378,3 +378,21 @@ TEST (audioedittools_claw_drumloop_loop_tuner_round165l)
     const auto jump = std::abs (x[(std::size_t) t.loopEnd - 1] - x[(std::size_t) t.loopStart - 1]);
     CHECK (jump < 0.02f); // the end now leads where the audio before the start led
 }
+
+#ifndef LYNX_MINI_HARNESS // (needs core/EventEdit)
+#include "core/EventEdit.h"
+
+TEST (eventedit_to_automation_points_round165l)
+{
+    lynx::PatternEvents lane;
+    // a ramp of events (0, 0.1, ..., 0.9) every 24 ticks, then a hold
+    for (int i = 0; i < 10; ++i)
+        lane.events.push_back ({ i * 24, i * 0.1f });
+    const auto exact = lynx::eventedit::toAutomationPoints (lane, 1.0f);
+    CHECK (exact.size() == 19u); // a step (two points) per change, plus the first
+    CHECK (exact.front().tick == 0 && exact.back().tick == 9 * 24);
+    const auto simple = lynx::eventedit::toAutomationPoints (lane, 0.4f);
+    CHECK (simple.size() < 6u);
+    CHECK (std::abs (simple.back().value - 0.9f) < 1e-6f);
+}
+#endif
