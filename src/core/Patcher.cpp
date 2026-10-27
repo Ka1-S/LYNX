@@ -45,12 +45,32 @@ bool sameInstrumentSetup (const ChannelDef& a, const ChannelDef& b)
     // a VFX node takes new settings while it runs (its held voices end as they started): only its kind is structure
     if (a.instrument == InstrumentKind::vfx || b.instrument == InstrumentKind::vfx)
         return a.instrument == b.instrument && vfx::kindOf (a) == vfx::kindOf (b);
-    if (a.instrument != b.instrument || a.samplePath != b.samplePath || a.zones != b.zones || a.modelParams != b.modelParams
-        || a.pluginState != b.pluginState || a.plugin.id != b.plugin.id || ! (a.plugin == b.plugin) || a.controllerState != b.controllerState)
+    if (a.instrument != b.instrument)
         return false;
-    if (a.instrument == InstrumentKind::patcher)
-        return sameStructure (a.patcher, b.patcher);
-    return true;
+    // the rack's own rule for a channel (RackState::build): what configure() cannot take means a new instance; the rest
+    // reaches the running one (round 164f: an engine edited in its editor inside a Patcher keeps playing, as on a
+    // channel, instead of starting again on each knob move)
+    switch (a.instrument)
+    {
+        case InstrumentKind::plugin:
+            return a.plugin.id == b.plugin.id && a.plugin == b.plugin && a.pluginState == b.pluginState;
+        case InstrumentKind::patcher: return sameStructure (a.patcher, b.patcher);
+        case InstrumentKind::midiOut: return a.pluginState == b.pluginState; // (its MIDI channel is in the graph's routes)
+        case InstrumentKind::controller: // (a Keyboard Controller has 1 output, an Envelope Controller 8)
+            return parseKeyboardController (a.controllerState).has_value() == parseKeyboardController (b.controllerState).has_value();
+        case InstrumentKind::sampler:
+        case InstrumentKind::audioClip:
+        case InstrumentKind::flkeys:
+            return a.samplePath == b.samplePath && a.zones == b.zones && a.modelParams == b.modelParams && a.sampler.keepPitch == b.sampler.keepPitch
+                   && (! a.sampler.keepPitch || (a.sampler.stretchBeats == b.sampler.stretchBeats && a.sampler.stretchMethod == b.sampler.stretchMethod));
+        case InstrumentKind::granulizer:
+        case InstrumentKind::soundfont: return a.samplePath == b.samplePath;
+        case InstrumentKind::directwave: return a.zones == b.zones && a.modelParams == b.modelParams && a.pluginState == b.pluginState;
+        case InstrumentKind::dashboard: // (its outputs are structure)
+            return std::equal (a.patcher.surface.begin(), a.patcher.surface.end(), b.patcher.surface.begin(), b.patcher.surface.end(),
+                               [] (const SurfaceControl& x, const SurfaceControl& y) { return x.kind == y.kind; });
+        default: return true;
+    }
 }
 
 float mapControl (const std::vector<float>& curve, float v) noexcept
@@ -100,7 +120,9 @@ NodePorts nodePorts (const PatchNode& node)
         if (node.channel.instrument == InstrumentKind::controller || node.channel.instrument == InstrumentKind::midiOut
             || node.channel.instrument == InstrumentKind::dashboard || node.channel.instrument == InstrumentKind::layer)
             p.audioOuts = 0; // (no sound of their own)
-        p.midiOut = node.channel.instrument == InstrumentKind::midiOut;
+        // a MIDI Out node; a hosted plugin's notes out (round 164f: an arpeggiator / MIDI effect plugin plays the
+        // nodes cabled to it, as FL's Patcher shows a plugin's MIDI output)
+        p.midiOut = node.channel.instrument == InstrumentKind::midiOut || node.channel.instrument == InstrumentKind::plugin;
         p.midiOuts = p.midiOut ? 1 : 0;
         if (const auto kind = vfx::kindOf (node.channel)) // a VFX node: voices in, voices out (round 164b)
         {
@@ -176,6 +198,7 @@ struct Graph::Node
     std::shared_ptr<Instrument> instrument;
     bool plugin = false; // values reach it through setParameter (control cables), not the params array
     vfx::Processor* vfx = nullptr;                    // a VFX node's processor (owned by its instrument)
+    std::vector<MidiTarget> midiOutTargets;           // a plugin node: what its MIDI output pin reaches
     std::vector<std::vector<MidiTarget>> vfxTargets;  // [voice output] what it reaches
 
     struct Head
@@ -428,8 +451,18 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
         for (int i = 0; i < count; ++i)
             if (! placed[(std::size_t) i] && nodes[(std::size_t) i]->vfx != nullptr)
                 vfxOrder.push_back (i);
-        noteOuts.reserve (vfx::EventList::capacity);
     }
+    // hosted plugin nodes with a cable on their MIDI output (round 164f)
+    for (int i = 0; i < count; ++i)
+    {
+        auto& node = *nodes[(std::size_t) i];
+        if (! node.generator || node.instrument == nullptr || node.vfx != nullptr || doc.nodes[(std::size_t) i].channel.instrument != InstrumentKind::plugin)
+            continue;
+        node.midiOutTargets = midiTargetsOf (doc, i, 0);
+        if (! node.midiOutTargets.empty())
+            midiSources.push_back (i);
+    }
+    noteOuts.reserve (vfx::EventList::capacity);
 
     published = doc.published;
     publishedValues.assign (published.size(), std::numeric_limits<float>::quiet_NaN());
@@ -722,6 +755,49 @@ void Graph::noteOffPort (int port, int key, int midiChannel) noexcept
         deliver (patchMidiPortPin (port), false, key, 0.0f, midiChannel);
 }
 
+void Graph::queueTimed (int pin, int key, float velocity, int midiChannel, int offset) noexcept
+{
+    if (pin < 0 || pin >= (int) pinTargets.size() || pinTargets[(std::size_t) pin].empty() || timedCount >= timedCapacity)
+        return;
+    timed[(std::size_t) timedCount++] = { pin, key, midiChannel, std::max (0, offset), velocity };
+}
+
+void Graph::queueNoteOnPort (int port, int key, float velocity, int midiChannel, int offset) noexcept
+{
+    if (port >= 0 && port < patchMidiPorts)
+        queueTimed (patchMidiPortPin (port), key, std::max (velocity, 1.0e-6f), midiChannel, offset);
+}
+
+void Graph::queueNoteOffPort (int port, int key, int midiChannel, int offset) noexcept
+{
+    if (port >= 0 && port < patchMidiPorts)
+        queueTimed (patchMidiPortPin (port), key, 0.0f, midiChannel, offset);
+}
+
+void Graph::routeNote (const std::vector<MidiTarget>& targets, int sourceNode, bool on, int key, float velocity, int midiChannel, int offset) noexcept
+{
+    for (const auto& t : targets)
+    {
+        const auto channel = t.midiChannel >= 0 ? t.midiChannel : midiChannel;
+        vfx::Event e;
+        e.type = on ? vfx::Event::Type::on : vfx::Event::Type::off;
+        e.offset = offset;
+        e.voice.key = key;
+        e.voice.velocity = velocity;
+        e.voice.colour = channel >= 0 ? (channel & 15) : 0;
+        e.id = vfx::inputId (key, e.voice.colour);
+        if (sourceNode >= 0)
+            e.id += (sourceNode + 1) * (1 << 20); // (ids of different sources never meet)
+        if (t.vfx)
+        {
+            if (auto& q = vfxQueues[(std::size_t) t.node])
+                q->in.add (e);
+        }
+        else if (noteOuts.size() < noteOuts.capacity())
+            noteOuts.push_back ({ t.node, channel, e });
+    }
+}
+
 template <typename F>
 void Graph::forNoteTargets (F&& f) noexcept
 {
@@ -752,6 +828,7 @@ bool Graph::takesMidiPort (int port) const noexcept
 
 void Graph::allNotesOff() noexcept
 {
+    timedCount = 0;
     // the VFX nodes' voices end (their instruments stop below anyway); their queues empty
     for (const auto i : vfxOrder)
     {
@@ -886,13 +963,43 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
             values.nodes[(std::size_t) c.to].params[(std::size_t) c.param] = v;
     }
 
-    if (! hasVfx)
+    noteOuts.clear();
+    // notes queued at their sample (the rack's notes into a mixer-slot Patcher, round 164f): the ones in this piece
+    if (timedCount > 0)
+    {
+        int kept = 0;
+        for (int k = 0; k < timedCount; ++k)
+        {
+            auto t = timed[(std::size_t) k];
+            if (t.offset < n)
+                routeNote (pinTargets[(std::size_t) t.pin], -1, t.velocity > 0.0f, t.key, t.velocity, t.midiChannel, t.offset);
+            else
+            {
+                t.offset -= n;
+                timed[(std::size_t) kept++] = t;
+            }
+        }
+        timedCount = kept;
+    }
+    // what the hosted plugin nodes sent out in the last piece (round 164f), at this piece's start
+    for (const auto i : midiSources)
+    {
+        std::array<Instrument::MidiOutNote, 128> sent;
+        auto& node = *nodes[(std::size_t) i];
+        const auto count = node.instrument->takeMidiOutput (sent.data(), (int) sent.size());
+        for (int k = 0; k < count; ++k)
+            routeNote (node.midiOutTargets, i, sent[(std::size_t) k].velocity > 0.0f, sent[(std::size_t) k].key, sent[(std::size_t) k].velocity, -1, 0);
+    }
+    if (hasVfx)
+        runVfx (n, bpm);
+    if (noteOuts.empty())
     {
         renderNodes (inL, inR, scL, scR, outL, outR, 0, n, bpm);
         return;
     }
-    // VFX nodes: what they play lands at its sample; the piece is rendered in parts between those samples
-    runVfx (n, bpm);
+    // what the VFX nodes, the queued notes and the plugins play lands at its sample: the piece is rendered in parts
+    // between those samples
+    sortNoteOuts();
     std::size_t next = 0;
     for (int position = 0; position < n;)
     {
@@ -910,7 +1017,6 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
 
 void Graph::runVfx (int n, double bpm) noexcept
 {
-    noteOuts.clear();
     vfx::Transport t;
     t.sampleRate = rate;
     t.bpm = bpm;
@@ -927,6 +1033,11 @@ void Graph::runVfx (int n, double bpm) noexcept
             routeVfxOutput (i, q.out[k]);
         q.out.clear();
     }
+    ticks += (double) n * bpm * (double) ppq / (60.0 * rate);
+}
+
+void Graph::sortNoteOuts() noexcept
+{
     // (stable insertion sort in place: std::stable_sort may allocate on the audio thread)
     for (std::size_t i = 1; i < noteOuts.size(); ++i)
     {
@@ -936,7 +1047,6 @@ void Graph::runVfx (int n, double bpm) noexcept
             noteOuts[j] = noteOuts[j - 1];
         noteOuts[j] = o;
     }
-    ticks += (double) n * bpm * (double) ppq / (60.0 * rate);
 }
 
 void Graph::routeVfxOutput (int node, const vfx::Event& e) noexcept

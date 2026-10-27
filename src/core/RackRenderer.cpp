@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/FlSynths.h"
 #include "core/Layer.h"
 #include "core/Vfx.h"
 #include "core/FacetEq.h"
@@ -786,7 +787,10 @@ void RackState::buildAutomationTables()
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::patcher // (its published parameters)
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::soundfont // (LYNX Soundfont's knobs)
-                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))))
+                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))
+                                  // an Envelope Controller's global Mod X / Y (round 164f)
+                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::controller
+                                      && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
                 else
                     used = false;
@@ -1293,10 +1297,20 @@ void RackRenderer::deliverToEffects (const RackState& state, const NoteEvent& e)
             continue;
         if (auto* graph = patcher::graphOf (state.effects[(std::size_t) route.track][(std::size_t) route.slot].get()))
         {
+            // at the note's sample in the chunk the slot renders next (round 164f; it was the chunk's start); a slot
+            // that is off renders nothing and gets nothing
+            const auto& slot = state.song.mixer[(std::size_t) route.track].effects[(std::size_t) route.slot];
+            if (! state.song.slotActive (slot))
+                continue;
             if (e.type == NoteEvent::Type::on)
-                graph->noteOnPort (route.port, e.key, e.velocity, route.midiChannel);
+            {
+                graph->queueNoteOnPort (route.port, e.key, e.velocity, route.midiChannel, e.sampleOffset);
+                // a note wakes a smart-disabled slot: the instruments inside play it (a silent insert is their usual place)
+                if (const auto key = (std::size_t) route.track * maxEffectSlots + (std::size_t) route.slot; key < smartDisable.size())
+                    smartDisable[key].silentSamples = 0;
+            }
             else
-                graph->noteOffPort (route.port, e.key, route.midiChannel);
+                graph->queueNoteOffPort (route.port, e.key, route.midiChannel, e.sampleOffset);
         }
     }
 }
@@ -2381,7 +2395,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         events.sortByOffset();
     }
 
-    // MIDI to the mixer-slot Patchers that take a MIDI port (round 162): at the chunk's start
+    // MIDI to the mixer-slot Patchers that take a MIDI port (round 162): at its sample (round 164f)
     if (state.hasEffectMidiRoutes)
         for (int k = 0; k < events.size(); ++k)
             deliverToEffects (state, events[k]);

@@ -2711,6 +2711,16 @@ public:
         nextModY = modY;
     }
 
+    // automation / links of the global Mod X / Mod Y (FL's parameters 88 / 89, round 164f): they hold until the knob
+    // is moved in the editor
+    void setParameter (int index, float value) noexcept override
+    {
+        if (index == envelopeControllerModXParam)
+            autoModX = std::clamp (value, 0.0f, 1.0f);
+        else if (index == envelopeControllerModYParam)
+            autoModY = std::clamp (value, 0.0f, 1.0f);
+    }
+
     void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
 
     void noteOn (int key, float velocity) noexcept override
@@ -2770,12 +2780,23 @@ public:
         const auto changed = mailbox.read (data);
         if (data.keyboard)
             return;
+        // the editor moved Mod X / Y: that value wins over the last automation value
+        if (data.articulators.modX != seenModX)
+        {
+            seenModX = data.articulators.modX;
+            autoModX = std::numeric_limits<float>::quiet_NaN();
+        }
+        if (data.articulators.modY != seenModY)
+        {
+            seenModY = data.articulators.modY;
+            autoModY = std::numeric_limits<float>::quiet_NaN();
+        }
+        const auto modX = std::isnan (autoModX) ? data.articulators.modX : autoModX;
+        const auto modY = std::isnan (autoModY) ? data.articulators.modY : autoModY;
         if (changed)
             for (std::size_t k = 0; k < values.size(); ++k)
                 if (! voices[k].active && (! voices[k].used || data.articulators.continuous))
-                    values[k] = data.articulators.continuous
-                                    ? controllerRestingValue (data.articulators[k], data.articulators.modX, data.articulators.modY)
-                                    : data.articulators[k].base;
+                    values[k] = data.articulators.continuous ? controllerRestingValue (data.articulators[k], modX, modY) : data.articulators[k].base;
         const auto seconds = n / sampleRate;
         for (std::size_t k = 0; k < voices.size(); ++k)
         {
@@ -2784,7 +2805,7 @@ public:
             if (! v.active)
             {
                 if (data.articulators.continuous)
-                    values[k] = controllerRestingValue (a, data.articulators.modX, data.articulators.modY);
+                    values[k] = controllerRestingValue (a, modX, modY);
                 continue;
             }
             v.sinceOn += seconds;
@@ -2793,7 +2814,7 @@ public:
             v.lfoPhase = a.lfoGlobal ? globalPhase (k) : v.lfoPhase + data.lfoRate[k] * seconds;
             if (v.lfoPhase > 1.0e6)
                 v.lfoPhase -= std::floor (v.lfoPhase);
-            values[k] = controllerValue (a, v.sinceOn, v.sinceRelease, v.lfoPhase, v.note, data.articulators.modX, data.articulators.modY);
+            values[k] = controllerValue (a, v.sinceOn, v.sinceRelease, v.lfoPhase, v.note, modX, modY);
             if (controllerVoiceFinished (a, v.sinceOn, v.sinceRelease))
                 v.active = false; // the output holds its last value
         }
@@ -2838,6 +2859,8 @@ private:
     std::array<float, 8> values { 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f };
     double sampleRate = 44100.0, songTicks = 0.0;
     float nextModX = 0.5f, nextModY = 0.5f;
+    float autoModX = std::numeric_limits<float>::quiet_NaN(), autoModY = std::numeric_limits<float>::quiet_NaN();
+    float seenModX = -1.0f, seenModY = -1.0f;
     std::uint32_t randomState = 0x2545F491u;
 };
 } // namespace

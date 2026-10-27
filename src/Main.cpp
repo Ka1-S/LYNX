@@ -4765,7 +4765,13 @@ private:
                 envelope.channel.name = "Envelope Controller";
                 envelope.channel.controllerState = lynx::writeEnvelopeController (lynx::defaultEnvelopeController());
                 envelope.x = 220.0f, envelope.y = 260.0f;
-                ch.patcher.nodes = { synth, chorus, midiOut, envelope };
+                lynx::PatchNode osc; // round 164f: an FL engine node (its editor opens from the node)
+                osc.generator = true;
+                osc.channel = lynx::natives::makeChannel (lynx::InstrumentKind::threeosc, lynx::flStudioAccess()).value_or (lynx::ChannelDef {});
+                osc.channel.instrument = lynx::InstrumentKind::threeosc;
+                osc.channel.name = "3x Osc";
+                osc.x = 420.0f, osc.y = 260.0f;
+                ch.patcher.nodes = { synth, chorus, midiOut, envelope, osc };
                 lynx::PatchWire notes, a, b, portIn, portOut, envNotes, envControl;
                 notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
                 a.from = 0, a.to = 1;
@@ -4812,6 +4818,18 @@ private:
                 {
                     lynx::PatcherWindows::openChannel (offline, c);
                     shootOpen ("-channel" + juce::String (c) + ".png");
+                    // each built-in generator node's editor, as a double-click opens it (round 164f)
+                    for (int n = 0; n < (int) song.channels[(std::size_t) c].patcher.nodes.size(); ++n)
+                        if (const auto& node = song.channels[(std::size_t) c].patcher.nodes[(std::size_t) n]; node.generator && lynx::hasNodeEditor (node.channel))
+                            if (auto frame = lynx::makeNodeChannelFrame (offline, [c, n] (lynx::Song& sg) -> lynx::ChannelDef* {
+                                    return c < (int) sg.channels.size() && n < (int) sg.channels[(std::size_t) c].patcher.nodes.size()
+                                               ? &sg.channels[(std::size_t) c].patcher.nodes[(std::size_t) n].channel
+                                               : nullptr;
+                                }))
+                            {
+                                offline.dispatchPendingMessages();
+                                savePng (frame->createComponentSnapshot (frame->getLocalBounds()), prefix + "-channel" + juce::String (c) + "-node" + juce::String (n) + ".png");
+                            }
                     lynx::PatcherWindows::shootMenus (offline, true, c, 0, [&] (const juce::Image& image, const juce::String& name) {
                         savePng (image, prefix + "-channel" + juce::String (c) + "-menu-" + name + ".png");
                     });

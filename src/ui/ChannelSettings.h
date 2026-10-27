@@ -27,4 +27,9 @@ std::unique_ptr<juce::Component> makeChannelModulationPanel (AudioEngine& engine
 // The whole channel window (REA round 143b): FL's header strip (tabs; On, Pan, Vol, Track) over the instrument page,
 // the "Envelope / instrument" tab (synth, sampler) and the "Misc" tab. `tab` < 0 = the Misc tab.
 std::unique_ptr<juce::Component> makeChannelFrame (AudioEngine& engine, int channel, int tab = 0);
+
+// A Patcher node's built-in generator (round 164f): the same pages as on a channel — the instrument's page and, for
+// the synth and the sampler, the Envelope / instrument tab — editing the node `locate` finds. Null: no page for it.
+bool hasNodeEditor (const ChannelDef& channel) noexcept;
+std::unique_ptr<juce::Component> makeNodeChannelFrame (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate);
 } // namespace lynx

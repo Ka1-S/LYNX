@@ -629,6 +629,10 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
                 if (t.param >= 0 && t.param < plugin->getParameters().size())
                     param = plugin->getParameters()[t.param]->getName (40);
             }
+            else if (t.kind == AutomationTargetKind::channelParam && t.index >= 0 && t.index < (int) song.channels.size()
+                     && song.channels[(std::size_t) t.index].instrument == InstrumentKind::controller
+                     && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
+                param = t.param == envelopeControllerModXParam ? tr ("Mod X") : tr ("Mod Y"); // (round 164f)
             else if (t.kind == AutomationTargetKind::effectParam && t.index < (int) song.mixer.size()
                      && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size())
             {

@@ -811,9 +811,15 @@ public:
         pad.set = [this] (juce::Point<float> v) { editAll ([v] (EnvelopeControllerData& d) { d.modX = v.x; d.modY = v.y; }); };
         ui::setHint (pad, tr ("Mod X / Mod Y: the inputs of the Modulation X / Y maps (each note adds its own Mod X / Y)"));
         addAndMakeVisible (pad);
-        modX = makeKnob (unitSpec (tr ("Mod X"), 0.5, std::nullopt), [this] { return (double) data().modX; },
+        // automatable and linkable on a Channel Rack channel (FL's parameters 88 / 89, round 164f)
+        auto modTarget = [this] (int param) -> std::optional<AutomationTarget> {
+            if (channel < 0)
+                return std::nullopt;
+            return AutomationTarget { AutomationTargetKind::channelParam, channel, 0, param };
+        };
+        modX = makeKnob (unitSpec (tr ("Mod X"), 0.5, modTarget (envelopeControllerModXParam)), [this] { return (double) data().modX; },
                          [this] (double v) { editAll ([v] (EnvelopeControllerData& d) { d.modX = (float) v; }); }, "X");
-        modY = makeKnob (unitSpec (tr ("Mod Y"), 0.5, std::nullopt), [this] { return (double) data().modY; },
+        modY = makeKnob (unitSpec (tr ("Mod Y"), 0.5, modTarget (envelopeControllerModYParam)), [this] { return (double) data().modY; },
                          [this] (double v) { editAll ([v] (EnvelopeControllerData& d) { d.modY = (float) v; }); }, "Y");
 
         base = makeKnob (unitSpec (tr ("Base"), 0.5, std::nullopt), [this] { return (double) articulator().base; },

@@ -51,6 +51,27 @@ namespace lynx
 {
 namespace
 {
+// Which channel a page edits (round 164f): a Channel Rack channel, or the generator of a Patcher node found through
+// `locate` (index −1) — the same pages edit both, so a node opens the editor its engine has on a channel.
+struct ChannelRef
+{
+    std::function<ChannelDef* (Song&)> locate;
+    int index = -1; // the Channel Rack index (automation targets, its windows); −1 = a Patcher node
+
+    static ChannelRef rack (int c)
+    {
+        return { [c] (Song& s) -> ChannelDef* { return c >= 0 && c < (int) s.channels.size() ? &s.channels[(std::size_t) c] : nullptr; }, c };
+    }
+    const ChannelDef* get (const AudioEngine& engine) const { return locate ? locate (const_cast<Song&> (engine.getSong())) : nullptr; }
+    void edit (AudioEngine& engine, std::function<void (ChannelDef&)> change) const
+    {
+        engine.editSong ([l = locate, change = std::move (change)] (Song& s) {
+            if (auto* d = l ? l (s) : nullptr)
+                change (*d);
+        });
+    }
+};
+
 void showModulationFor (juce::Component& from, AudioEngine& engine, int channel);
 
 // Cutoff and pitch envelopes (FL's channel envelopes), used by the synth and the sampler.
@@ -307,9 +328,9 @@ class ModulationPanel final : public juce::Component,
                               private juce::ChangeListener
 {
 public:
-    ModulationPanel (AudioEngine& e, int c)
+    ModulationPanel (AudioEngine& e, ChannelRef c)
         : engine (e),
-          channel (c)
+          ref (std::move (c))
     {
         envelopes.onChange = [this] { apply(); };
         lfos.onChange = [this] { apply(); };
@@ -330,13 +351,12 @@ public:
         lfos.setBounds (area.removeFromTop (LfoEditor::preferredHeight));
     }
 
-    int getChannel() const noexcept { return channel; }
+    int getChannel() const noexcept { return ref.index; }
 
 private:
     const ChannelDef* current() const
     {
-        const auto& channels = engine.getSong().channels;
-        return channel >= 0 && channel < (int) channels.size() ? &channels[(std::size_t) channel] : nullptr;
+        return ref.get (engine);
     }
 
     bool isSynth() const { return current() != nullptr && current()->instrument == InstrumentKind::synth; }
@@ -372,8 +392,8 @@ private:
         const auto lfo = lfos.read();
         const auto synth = isSynth();
 
-        engine.editSong ([c = channel, synth, filter, pitch, lfo] (Song& song) {
-            auto& ch = song.channels[(std::size_t) c];
+        ref.edit (engine, [synth, filter, pitch, lfo] (ChannelDef& channelDef) {
+            auto& ch = channelDef;
 
             if (synth)
             {
@@ -393,7 +413,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
 
     AudioEngine& engine;
-    int channel;
+    ChannelRef ref;
     ModEnvelopeEditor envelopes;
     LfoEditor lfos;
 };
@@ -499,11 +519,13 @@ private:
 class ModelPanel final : public juce::Component
 {
 public:
-    ModelPanel (AudioEngine& e, int c)
+    ModelPanel (AudioEngine& e, ChannelRef c)
         : engine (e),
-          channel (c)
+          ref (std::move (c))
     {
-        const auto& def = engine.getSong().channels[(std::size_t) channel];
+        static const ChannelDef none;
+        const auto* found = ref.get (engine);
+        const auto& def = found != nullptr ? *found : none;
         sakura = def.instrument == InstrumentKind::sakura;
         boobass = def.instrument == InstrumentKind::boobass;
         drumsynth = def.instrument == InstrumentKind::drumsynth;
@@ -564,8 +586,8 @@ public:
             knob->setValue (index < (int) def.modelParams.size() ? def.modelParams[(std::size_t) index] : 0.0, juce::dontSendNotification);
             knob->setName (name);
             knob->onValueChange = [this, index, k = knob.get()] {
-                engine.editSong ([c = channel, index, v = (float) k->getValue()] (Song& song) {
-                    auto& params = song.channels[(std::size_t) c].modelParams;
+                ref.edit (engine, [index, v = (float) k->getValue()] (ChannelDef& channelDef) {
+                    auto& params = channelDef.modelParams;
                     if (index < (int) params.size())
                         params[(std::size_t) index] = v;
                 });
@@ -606,8 +628,8 @@ public:
             knob->setValue (value, juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, k, s = knob.get()] {
-                engine.editSong ([c = channel, k, v = (std::int32_t) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [k, v = (std::int32_t) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (const auto o = harmorParamOffset (st, k.part, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
@@ -663,8 +685,8 @@ public:
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, k, paramOffset, s = knob.get()] {
-                engine.editSong ([c = channel, k, paramOffset, v = (float) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [k, paramOffset, v = (float) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (const auto o = paramOffset (st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
@@ -689,8 +711,8 @@ public:
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0, 1.0) : 0.0, juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, at, s = knob.get()] {
-                engine.editSong ([c = channel, at, v = s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [at, v = s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (simSynthStateUsable (st))
                         std::memcpy (st.data() + at, &v, 8);
                 });
@@ -718,8 +740,8 @@ public:
             knob->setValue ((double) std::clamp ((int) value, (int) k.low, (int) k.high), juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, at, s = knob.get()] {
-                engine.editSong ([c = channel, at, v = (std::int32_t) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [at, v = (std::int32_t) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (slayerStateUsable (st) && at + 4 <= st.size())
                         std::memcpy (st.data() + at, &v, 4);
                 });
@@ -739,8 +761,8 @@ public:
             knob->setValue (std::clamp (*value, d.low, d.high), juce::dontSendNotification);
             knob->setName (d.name);
             knob->onValueChange = [this, setting, s = knob.get()] {
-                engine.editSong ([c = channel, setting, v = (int) s->getValue()] (Song& song) {
-                    sytrus::setSetting (song.channels[(std::size_t) c].pluginState, setting, v);
+                ref.edit (engine, [setting, v = (int) s->getValue()] (ChannelDef& channelDef) {
+                    sytrus::setSetting (channelDef.pluginState, setting, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -763,8 +785,8 @@ public:
             knob->setValue (*value, juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, index = k.index, s = knob.get()] {
-                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
-                    ogunSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                ref.edit (engine, [index, v = (int) s->getValue()] (ChannelDef& channelDef) {
+                    ogunSetParam (channelDef.pluginState, index, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -781,8 +803,8 @@ public:
             knob->setValue (fruitKickParam (def.pluginState, k.index), juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, index = k.index, s = knob.get()] {
-                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
-                    fruitKickSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                ref.edit (engine, [index, v = (int) s->getValue()] (ChannelDef& channelDef) {
+                    fruitKickSetParam (channelDef.pluginState, index, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -806,8 +828,8 @@ public:
             knob->setValue (*value, juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, index = k.index, s = knob.get()] {
-                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
-                    dx10SetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                ref.edit (engine, [index, v = (int) s->getValue()] (ChannelDef& channelDef) {
+                    dx10SetParam (channelDef.pluginState, index, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -830,8 +852,8 @@ public:
             knob->setValue (*value, juce::dontSendNotification);
             knob->setName (threeOscNames[index]);
             knob->onValueChange = [this, index, s = knob.get()] {
-                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
-                    threeOscSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                ref.edit (engine, [index, v = (int) s->getValue()] (ChannelDef& channelDef) {
+                    threeOscSetParam (channelDef.pluginState, index, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -852,8 +874,8 @@ public:
             knob->setValue (*value, juce::dontSendNotification);
             knob->setName (granulizerNames[index]);
             knob->onValueChange = [this, index, s = knob.get()] {
-                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
-                    granulizerSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                ref.edit (engine, [index, v = (int) s->getValue()] (ChannelDef& channelDef) {
+                    granulizerSetParam (channelDef.pluginState, index, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -870,8 +892,8 @@ public:
             knob->setValue (std::clamp ((double) value, 0.0, 1.0), juce::dontSendNotification);
             knob->setName (name);
             knob->onValueChange = [this, index, s = knob.get()] {
-                engine.editSong ([c = channel, index, v = (float) s->getValue()] (Song& song) {
-                    drumaxxSetParam (song.channels[(std::size_t) c].pluginState, index, v);
+                ref.edit (engine, [index, v = (float) s->getValue()] (ChannelDef& channelDef) {
+                    drumaxxSetParam (channelDef.pluginState, index, v);
                 });
             };
             addAndMakeVisible (*knob);
@@ -894,8 +916,8 @@ public:
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, k, s = knob.get()] {
-                engine.editSong ([c = channel, k, v = (float) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [k, v = (float) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (const auto o = keplerPanelOffset (st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
@@ -917,8 +939,8 @@ public:
             knob->setValue (std::clamp ((double) value, k.low, k.high), juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, k, s = knob.get()] {
-                engine.editSong ([c = channel, k, v = (std::int32_t) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [k, v = (std::int32_t) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (st.size() >= 20)
                         std::memcpy (st.data() + 4 * k.index, &v, 4);
                 });
@@ -941,8 +963,8 @@ public:
             knob->setValue (std::clamp ((double) value, k.low, k.high), juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, k, s = knob.get()] {
-                engine.editSong ([c = channel, k, v = (std::int32_t) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [k, v = (std::int32_t) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (const auto o = beepMapParamOffset (st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
@@ -967,8 +989,8 @@ public:
             knob->setValue (std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f, juce::dontSendNotification);
             knob->setName (k.name);
             knob->onValueChange = [this, k, s = knob.get()] {
-                engine.editSong ([c = channel, k, v = (float) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [k, v = (float) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (const auto o = sawerParamOffset (st, k.index); o >= 0)
                         std::memcpy (st.data() + o, &v, 4);
                 });
@@ -988,8 +1010,8 @@ public:
             knob->setValue (std::clamp ((double) state->knobs[(std::size_t) index], (double) r.min, (double) r.max), juce::dontSendNotification);
             knob->setName (r.name);
             knob->onValueChange = [this, index, s = knob.get()] {
-                engine.editSong ([c = channel, index, v = (int) s->getValue()] (Song& song) {
-                    auto& st = song.channels[(std::size_t) c].pluginState;
+                ref.edit (engine, [index, v = (int) s->getValue()] (ChannelDef& channelDef) {
+                    auto& st = channelDef.pluginState;
                     if (auto parsed = flkeys::parseState (st))
                     {
                         parsed->knobs[(std::size_t) index] = v;
@@ -1222,7 +1244,10 @@ public:
         using namespace theme;
         const skin::StyleScope styleScope (skin::resolve (pageStyle));
         const auto f = layoutFactor();
-        const auto& def = engine.getSong().channels[(std::size_t) channel];
+        const auto* found = ref.get (engine);
+        if (found == nullptr)
+            return;
+        const auto& def = *found;
         const auto caption = [&] (const char* text, juce::Rectangle<float> r, bool dimmed, juce::Justification j) {
             if (text == nullptr || *text == 0)
                 return;
@@ -1496,7 +1521,7 @@ public:
 
 private:
     AudioEngine& engine;
-    int channel;
+    ChannelRef ref;
     juce::Colour accent { skin::colour::crimson }; // the plugin page's accent (ui/PluginSkin.h)
     skin::Style pageStyle = skin::Style::glow;     // the plugin page's automatic style (round 126)
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
@@ -1512,9 +1537,9 @@ class SettingsPanel final : public juce::Component,
                             private juce::ChangeListener
 {
 public:
-    SettingsPanel (AudioEngine& e, int c)
+    SettingsPanel (AudioEngine& e, ChannelRef c)
         : engine (e),
-          channel (c)
+          ref (std::move (c))
     {
         setup (pitch, pitchLabel, TR_NOOP ("Pitch"), -24.0, 24.0, 0.01, " st");
         pitch.setTooltip (tr ("The sample's pitch in semitones (0.5 = 50 cents). The Piano Roll's keys play it chromatically around its root note (Misc › Root note, C5 by default); right-click the channel › Pitch... for semitones + cents"));
@@ -1539,7 +1564,7 @@ public:
         filterType.onChange = [this] { apply(); };
         addAndMakeVisible (filterType);
         modulationButton.setButtonText (tr ("Modulation (envelopes and LFOs)..."));
-        modulationButton.onClick = [this] { showModulationFor (*this, engine, channel); };
+        modulationButton.onClick = [this] { showModulationFor (*this, engine, ref.index); };
         addAndMakeVisible (modulationButton);
         regionEnd.setDoubleClickReturnValue (true, 1.0);
         regionStart.setTooltip (tr ("Where the sample starts playing (fraction of the file)"));
@@ -1642,7 +1667,7 @@ public:
         porta.setBounds (area.removeFromLeft (100).removeFromTop (24));
     }
 
-    int getChannel() const noexcept { return channel; }
+    int getChannel() const noexcept { return ref.index; }
 
 private:
     void setup (juce::Slider& s, juce::Label& label, const char* name, double lo, double hi, double step, const char* suffix)
@@ -1661,8 +1686,7 @@ private:
 
     const ChannelDef* current() const
     {
-        const auto& channels = engine.getSong().channels;
-        return channel >= 0 && channel < (int) channels.size() ? &channels[(std::size_t) channel] : nullptr;
+        return ref.get (engine);
     }
 
     void refresh()
@@ -1739,7 +1763,7 @@ private:
         if (s == current()->sampler)
             return;
 
-        engine.editSong ([c = channel, s] (Song& song) { song.channels[(std::size_t) c].sampler = s; });
+        ref.edit (engine, [s] (ChannelDef& channelDef) { channelDef.sampler = s; });
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
@@ -1758,7 +1782,7 @@ private:
     }
 
     AudioEngine& engine;
-    int channel;
+    ChannelRef ref;
     bool updating = false;
     juce::Slider pitch, gain, attack, release, decay, sustain, stretch, regionStart, regionEnd, cutoff, resonance;
     juce::Label pitchLabel, gainLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
@@ -1774,9 +1798,9 @@ class SynthPanel final : public juce::Component,
                          private juce::ChangeListener
 {
 public:
-    SynthPanel (AudioEngine& e, int c)
+    SynthPanel (AudioEngine& e, ChannelRef c)
         : engine (e),
-          channel (c)
+          ref (std::move (c))
     {
         for (int o = 0; o < 3; ++o)
         {
@@ -1825,7 +1849,7 @@ public:
         addAndMakeVisible (ring);
 
         modulationButton.setButtonText (tr ("Modulation (envelopes and LFOs)..."));
-        modulationButton.onClick = [this] { showModulationFor (*this, engine, channel); };
+        modulationButton.onClick = [this] { showModulationFor (*this, engine, ref.index); };
         addAndMakeVisible (modulationButton);
 
         for (auto* s : { &attack, &decay, &release })
@@ -1852,7 +1876,7 @@ public:
             const auto index = presetBox.getSelectedId() - 1;
 
             if (juce::isPositiveAndBelow (index, (int) presets.size()) && current() != nullptr)
-                engine.editSong ([c = channel, s = presets[(std::size_t) index].second] (Song& song) { song.channels[(std::size_t) c].synth = s; });
+                ref.edit (engine, [s = presets[(std::size_t) index].second] (ChannelDef& channelDef) { channelDef.synth = s; });
 
             presetBox.setSelectedId (0, juce::dontSendNotification);
         };
@@ -1893,7 +1917,7 @@ public:
 
     ~SynthPanel() override { engine.removeChangeListener (this); }
 
-    int getChannel() const noexcept { return channel; }
+    int getChannel() const noexcept { return ref.index; }
 
     void resized() override
     {
@@ -2033,7 +2057,7 @@ private:
         const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
 
         if (auto synth = synthFromFlPreset (std::vector<std::uint8_t> (bytes, bytes + data.getSize())))
-            engine.editSong ([c = channel, s = *synth] (Song& song) { song.channels[(std::size_t) c].synth = s; });
+            ref.edit (engine, [s = *synth] (ChannelDef& channelDef) { channelDef.synth = s; });
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("FL presets"),
                                                     tr ("This preset is not for a synth LYNX converts, or it could not be read."));
@@ -2053,8 +2077,7 @@ private:
 
     const ChannelDef* current() const
     {
-        const auto& channels = engine.getSong().channels;
-        return channel >= 0 && channel < (int) channels.size() ? &channels[(std::size_t) channel] : nullptr;
+        return ref.get (engine);
     }
 
     void refresh()
@@ -2140,7 +2163,7 @@ private:
         if (s == current()->synth)
             return;
 
-        engine.editSong ([c = channel, s] (Song& song) { song.channels[(std::size_t) c].synth = s; });
+        ref.edit (engine, [s] (ChannelDef& channelDef) { channelDef.synth = s; });
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
@@ -2159,7 +2182,7 @@ private:
     }
 
     AudioEngine& engine;
-    int channel;
+    ChannelRef ref;
     bool updating = false;
     std::array<Row, 3> rows;
     juce::Slider attack, decay, sustain, release, cutoff, resonance, fm, fmDecay, keyTrack, sweep, sweepTime, bandLow, bandMid, bandHigh;
@@ -3037,8 +3060,9 @@ class ChannelFrame final : public juce::Component,
 public:
     static constexpr int headerHeight = 62;
 
-    ChannelFrame (AudioEngine& e, int c, std::unique_ptr<juce::Component> instrumentPage, std::unique_ptr<juce::Component> envelopePage)
-        : engine (e), channel (c)
+    // c.index < 0 (a Patcher node, round 164f): the instrument's pages alone, without the channel's header and Misc tab
+    ChannelFrame (AudioEngine& e, ChannelRef c, std::unique_ptr<juce::Component> instrumentPage, std::unique_ptr<juce::Component> envelopePage)
+        : engine (e), channel (c.index), node (c.index < 0)
     {
         auto addPage = [this] (std::unique_ptr<juce::Component> page, const juce::String& title, const juce::String& tip) {
             auto button = std::make_unique<juce::TextButton> (title);
@@ -3057,6 +3081,18 @@ public:
             addPage (std::move (instrumentPage), tr ("Plugin"), tr ("The instrument's own settings"));
         if (envelopePage != nullptr)
             addPage (std::move (envelopePage), tr ("Envelope / instrument"), tr ("Envelope / instrument settings: the filter and pitch envelopes and the LFOs"));
+        if (node)
+        {
+            int width = 1, height = 1;
+            for (auto& p : pages)
+            {
+                width = juce::jmax (width, p->getWidth());
+                height = juce::jmax (height, p->getHeight());
+            }
+            setSize (width, headerHeight + height);
+            showTab (0);
+            return;
+        }
         addPage (std::make_unique<MiscPanel> (engine, channel), tr ("Misc"), tr ("Miscellaneous functions: levels, polyphony, time, tracking, cut groups, arpeggiator, echo delay"));
 
         on.setButtonText (tr ("On"));
@@ -3138,7 +3174,11 @@ public:
         showTab (0);
     }
 
-    ~ChannelFrame() override { engine.removeChangeListener (this); }
+    ~ChannelFrame() override
+    {
+        if (! node)
+            engine.removeChangeListener (this);
+    }
 
     void showTab (int index)
     {
@@ -3198,6 +3238,7 @@ private:
 
     AudioEngine& engine;
     int channel;
+    bool node = false;
     int current = 0;
     std::vector<std::unique_ptr<juce::TextButton>> tabs;
     std::vector<std::unique_ptr<juce::Component>> pages;
@@ -3213,10 +3254,42 @@ bool hasEnvelopeTab (InstrumentKind kind) noexcept
 
 void showModulationFor (juce::Component& from, AudioEngine& engine, int channel)
 {
-    if (auto* frame = from.findParentComponentOfClass<ChannelFrame>(); frame != nullptr && frame->tabCount() > 2)
+    if (auto* frame = from.findParentComponentOfClass<ChannelFrame>(); frame != nullptr && frame->tabCount() >= 2)
         frame->showTab (1);
-    else
+    else if (channel >= 0)
         openChannelModulation (engine, channel);
+}
+
+bool isModelKind (InstrumentKind kind) noexcept
+{
+    return kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
+           || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
+           || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
+           || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
+           || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone
+           || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
+           || kind == InstrumentKind::threeosc
+           || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass
+           || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp || kind == InstrumentKind::plucked
+           || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer || kind == InstrumentKind::flkeys
+           || kind == InstrumentKind::granulizer || kind == InstrumentKind::drumaxx
+           || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance || kind == InstrumentKind::sytrus;
+}
+
+// The instrument page of a channel or a Patcher node (null: none of its own)
+std::unique_ptr<juce::Component> makeInstrumentPage (AudioEngine& engine, const ChannelRef& ref)
+{
+    const auto* def = ref.get (engine);
+    if (def == nullptr)
+        return nullptr;
+    const auto kind = def->instrument;
+    if (kind == InstrumentKind::synth)
+        return std::make_unique<SynthPanel> (engine, ref);
+    if (isModelKind (kind))
+        return std::make_unique<ModelPanel> (engine, ref);
+    if (kind == InstrumentKind::sampler)
+        return std::make_unique<SettingsPanel> (engine, ref);
+    return nullptr;
 }
 
 class SettingsWindow final : public juce::DocumentWindow
@@ -3242,9 +3315,9 @@ public:
         }
 
         if (modulation)
-            setContentOwned (new ModulationPanel (engine, channel), true);
+            setContentOwned (new ModulationPanel (engine, ChannelRef::rack (channel)), true);
         else if (! hasChannelSettings (engine.getSong().channels[(std::size_t) channel].instrument))
-            setContentOwned (new ChannelFrame (engine, channel, nullptr, nullptr), true); // the Misc tab alone
+            setContentOwned (new ChannelFrame (engine, ChannelRef::rack (channel), nullptr, nullptr), true); // the Misc tab alone
         else
             setContentOwned (makeChannelFrame (engine, channel).release(), true);
 
@@ -3380,14 +3453,14 @@ void closeChannelSettings (int channel)
 
 std::unique_ptr<juce::Component> makeChannelModulationPanel (AudioEngine& engine, int channel)
 {
-    return std::make_unique<ModulationPanel> (engine, channel);
+    return std::make_unique<ModulationPanel> (engine, ChannelRef::rack (channel));
 }
 
 std::unique_ptr<juce::Component> makeChannelFrame (AudioEngine& engine, int channel, int tab)
 {
     const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
-    auto frame = std::make_unique<ChannelFrame> (engine, channel, makeChannelSettingsPanel (engine, channel),
-                                                 hasEnvelopeTab (kind) ? std::make_unique<ModulationPanel> (engine, channel) : nullptr);
+    auto frame = std::make_unique<ChannelFrame> (engine, ChannelRef::rack (channel), makeChannelSettingsPanel (engine, channel),
+                                                 hasEnvelopeTab (kind) ? std::make_unique<ModulationPanel> (engine, ChannelRef::rack (channel)) : nullptr);
     frame->showTab (tab < 0 ? frame->tabCount() - 1 : tab);
     return frame;
 }
@@ -3395,7 +3468,7 @@ std::unique_ptr<juce::Component> makeChannelFrame (AudioEngine& engine, int chan
 std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, int channel)
 {
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
-        return std::make_unique<SynthPanel> (engine, channel);
+        return std::make_unique<SynthPanel> (engine, ChannelRef::rack (channel));
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
     {
         if (parseKeyboardController (engine.getSong().channels[(std::size_t) channel].controllerState))
@@ -3427,8 +3500,26 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
                  || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer || kind == InstrumentKind::flkeys
                  || kind == InstrumentKind::granulizer || kind == InstrumentKind::drumaxx
                  || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance || kind == InstrumentKind::sytrus)
-        return std::make_unique<ModelPanel> (engine, channel);
+        return std::make_unique<ModelPanel> (engine, ChannelRef::rack (channel));
 
-    return std::make_unique<SettingsPanel> (engine, channel);
+    return std::make_unique<SettingsPanel> (engine, ChannelRef::rack (channel));
+}
+
+bool hasNodeEditor (const ChannelDef& channel) noexcept
+{
+    return channel.instrument == InstrumentKind::synth || channel.instrument == InstrumentKind::sampler || isModelKind (channel.instrument);
+}
+
+std::unique_ptr<juce::Component> makeNodeChannelFrame (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate)
+{
+    ChannelRef ref { std::move (locate), -1 };
+    const auto* def = ref.get (engine);
+    if (def == nullptr)
+        return nullptr;
+    auto page = makeInstrumentPage (engine, ref);
+    if (page == nullptr)
+        return nullptr;
+    const auto kind = def->instrument;
+    return std::make_unique<ChannelFrame> (engine, ref, std::move (page), hasEnvelopeTab (kind) ? std::make_unique<ModulationPanel> (engine, ref) : nullptr);
 }
 } // namespace lynx
