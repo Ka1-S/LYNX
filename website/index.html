@@ -847,6 +847,12 @@ const DL = {
   linux:{name:'Linux', main:{re:[/\.AppImage$/i], en:'AppImage', pt:'AppImage', ext:''},
          alt:{re:[/linux.*\.tar\.gz$/i], en:'Archive', pt:'Arquivo', ext:'.tar.gz'}}
 };
+// Microsoft Store page (docs/STORE.md): once set, Windows' main button opens the Store ("recommended": signed by
+// Microsoft, no SmartScreen warning, updates itself) and the installer / zip move to "More formats".
+// Replace STORE_PRODUCT_ID with the listing's product id (Partner Center › Product identity › Store ID) when it is live.
+const STORE_URL = 'https://apps.microsoft.com/detail/STORE_PRODUCT_ID';
+if (STORE_URL) DL.win = Object.assign({}, DL.win, {store:{en:'Microsoft Store', pt:'Microsoft Store', ext:''},
+                                                  inst:DL.win.main});
 const dlUrl = {};   // 'win.main' -> browser_download_url
 function detectOS(){
   const q = new URLSearchParams(location.search).get('os');   // ?os=win|mac|linux|any (testing)
@@ -866,15 +872,19 @@ function renderDownload(){
   const T = pt ? {for:n=>'Baixar para '+n, dl:'Baixar', more:'Mais formatos:', yours:'Seu sistema'}
                : {for:n=>'Download for '+n, dl:'Download', more:'More formats:', yours:'Your system'};
   const H = pt ? {
+    winStore:'<b>Windows 10 ou 11, 64 bits.</b> Recomendado: instale pela <b>Microsoft Store</b> — assinado pela Microsoft, sem aviso do SmartScreen e se atualiza sozinho. O instalador e o zip portátil continuam em <i>Mais formatos</i> (ainda sem assinatura de código: se o SmartScreen avisar, clique em <i>Mais informações</i> → <i>Executar assim mesmo</i>).',
     win:'<b>Windows 10 ou 11, 64 bits.</b> O instalador não pede admin. O executável ainda não tem assinatura de código: se o SmartScreen avisar, clique em <i>Mais informações</i> → <i>Executar assim mesmo</i>.',
     mac:'<b>macOS 11 ou mais novo, Apple Silicon ou Intel.</b> O app ainda não é notarizado pela Apple: arraste o LYNX para Aplicativos e, na primeira vez, clique com o botão direito nele → <i>Abrir</i> → <i>Abrir</i> (no macOS 15 ou mais novo: tente abrir uma vez e depois <i>Ajustes do Sistema → Privacidade e Segurança → Abrir Mesmo Assim</i>). Ou no Terminal: <code>xattr -dr com.apple.quarantine /Applications/LYNX.app</code>',
     linux:'<b>Linux x86_64 com glibc 2.35 ou mais novo</b> (Ubuntu 22.04, Debian 12, Fedora 36 ou mais novos). AppImage: <code>chmod +x LYNX-*.AppImage</code> e execute (algumas distros precisam do libfuse2). O .tar.gz traz um <code>install.sh</code> que instala no seu usuário com atalho no menu.'
   } : {
+    winStore:'<b>Windows 10 or 11, 64-bit.</b> Recommended: install from the <b>Microsoft Store</b> — signed by Microsoft, no SmartScreen warning, and it updates itself. The installer and the portable zip stay under <i>More formats</i> (not code-signed yet: if SmartScreen warns, choose <i>More info</i> → <i>Run anyway</i>).',
     win:'<b>Windows 10 or 11, 64-bit.</b> The installer needs no admin rights. The executable is not code-signed yet: if SmartScreen warns, choose <i>More info</i> → <i>Run anyway</i>.',
     mac:'<b>macOS 11 or newer, Apple Silicon or Intel.</b> The app is not notarized by Apple yet: drag LYNX to Applications, then the first time right-click it → <i>Open</i> → <i>Open</i> (on macOS 15 or newer: try to open it once, then <i>System Settings → Privacy &amp; Security → Open Anyway</i>). Or in Terminal: <code>xattr -dr com.apple.quarantine /Applications/LYNX.app</code>',
     linux:'<b>Linux x86_64 with glibc 2.35 or newer</b> (Ubuntu 22.04, Debian 12, Fedora 36 or newer). AppImage: <code>chmod +x LYNX-*.AppImage</code>, then run it (some distros need libfuse2). The .tar.gz has an <code>install.sh</code> that installs for your user with a menu entry.'
   };
-  const url = (os,k) => dlUrl[os+'.'+k] || RELEASES;
+  const store = o => o === 'win' && DL.win.store;
+  if (store('win')) H.win = H.winStore;
+  const url = (os,k) => store(os) && k === 'main' ? STORE_URL : dlUrl[os+'.'+(store(os) && k === 'inst' ? 'main' : k)] || RELEASES;
   const fmt = f => (pt ? f.pt : f.en) + (f.ext ? ' (' + f.ext + ')' : '');
   const OSICON = {
     win:'<svg class="os" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.6l7.4-1v7H3zM11.4 4.4L21 3v8.6h-9.6zM3 12.4h7.4v7.1L3 18.4zM11.4 12.4H21V21l-9.6-1.4z"/></svg>',
@@ -884,11 +894,11 @@ function renderDownload(){
   const chip = (os,k) => `<a href="${url(os,k)}"><b>${DL[os].name}</b>${fmt(DL[os][k])}</a>`;
   // always all three platforms side by side; the visitor's OS only gets the accent
   const btns = Object.keys(DL).map(o => `<a class="btn ${o===userOS ? 'btn-red' : 'btn-ghost'}" href="${url(o,'main')}"${o===userOS ? ' aria-current="true"' : ''}>`
-      + `${OSICON[o]}<span>${DL[o].name}</span><small>${fmt(DL[o].main)}</small>${o===userOS ? `<em>${T.yours}</em>` : ''}</a>`).join('');
+      + `${OSICON[o]}<span>${DL[o].name}</span><small>${fmt(store(o) ? DL[o].store : DL[o].main)}</small>${o===userOS ? `<em>${T.yours}</em>` : ''}</a>`).join('');
   const hint = userOS ? `<div>${H[userOS]}</div>` : Object.keys(DL).map(o => `<div>${H[o]}</div>`).join('');
   const alts = Object.keys(DL).filter(o => DL[o].alt);
   if (userOS) alts.sort((a,b) => (b===userOS) - (a===userOS));
-  const row = `<span>${T.more}</span>` + alts.map(o => chip(o,'alt')).join('');
+  const row = `<span>${T.more}</span>` + alts.map(o => (store(o) ? chip(o,'inst') : '') + chip(o,'alt')).join('');
   $$('[data-os-btns]').forEach(e => e.innerHTML = btns);
   $('#dlHint').innerHTML = hint; $('#dlOther').innerHTML = row;
 }
