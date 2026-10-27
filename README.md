@@ -37,7 +37,7 @@ Windows, macOS and Linux.</p>
 
 <p align="center">
   <img src="docs/img/workspace.png" alt="The LYNX workspace: browser, playlist, piano roll, channel rack and mixer" width="100%">
-  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>) in the 0.1.18 workspace: browser, Piano Roll, Channel Rack and Mixer.</sub>
+  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>) in the 0.1.19 workspace: browser, Piano Roll, Channel Rack and Mixer.</sub>
 </p>
 
 ---
@@ -163,6 +163,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Sampler with zones, slices, time-stretch (Signalsmith Stretch) and disk streaming
 - **LYNX Soundfont**: SF2/SF3 player with a preset search across all your SoundFonts
 - Built-in drums (kick, snare, hat, clap)
+- Layer channels, FL-style VFX note effects (Sequencer/arpeggiator, Key Mapper, Keyboard Splitter…) and controllers (X-Y, X-Y-Z, Dashboard, Envelope, Voltage)
 - VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows and Linux optionally sandboxed in a separate process; a searchable plugin picker with favorites
 
 </td>
@@ -173,6 +174,8 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Delay, reverb, chorus, filter, distortion, lo-fi
 - Effector (12 algorithms), vocoder with side inputs, pitch correction
 - Volume gate, rhythmic envelope, auto-pan, Linkwitz-Riley crossover
+- Wave Candy analyzer and an audio-reactive Visualizer with video export
+- Hardware Insert for outboard gear, with round-trip ping and delay compensation
 - Pitch shift, frequency shifter, utility, Patcher (a node graph of effects, instruments and plugins with audio, MIDI and control cables)
 
 </td>
