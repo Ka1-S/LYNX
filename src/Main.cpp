@@ -2227,7 +2227,8 @@ private:
             std::unique_ptr<juce::DocumentWindow> tall, big;
             std::function<void()> done;
 
-            void check (const juce::String& what, juce::Component& w)
+            // `whole`: the window must fit entirely (a resizable one); else its title bar and close button must be on the screen
+            void check (const juce::String& what, juce::Component& w, bool whole)
             {
                 juce::BorderSize<int> frame;
                 if (auto* peer = w.getPeer())
@@ -2237,7 +2238,7 @@ private:
                 const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (outer);
                 const auto area = display != nullptr ? display->userArea : outer;
                 const auto passed = outer.getY() >= area.getY() && outer.getRight() <= area.getRight() && outer.getX() >= area.getX()
-                                    && outer.getBottom() <= area.getBottom() + 1;
+                                    && (! whole || outer.getBottom() <= area.getBottom() + 1);
                 report << (passed ? "ok   " : "FAIL ") << what << " window=" << outer.toString() << " (frame " << frame.getTop() << ","
                        << frame.getLeft() << ") screen=" << area.toString() << "\n";
                 ok = ok && passed;
@@ -2265,7 +2266,7 @@ private:
                 ++step;
                 if (step == 1)
                 {
-                    check ("tall tool window", *tall);
+                    check ("tall tool window: title bar and close button on the screen", *tall, false);
                     tall.reset();
                     // a resizable window that fits at 100%, then the zoom goes up (the main window's case)
                     juce::Desktop::getInstance().setGlobalScaleFactor (1.0f);
@@ -2286,7 +2287,7 @@ private:
                 }
                 if (step == 3)
                 {
-                    check ("resizable window after the zoom change", *big);
+                    check ("resizable window after the zoom change: fits the screen", *big, true);
                     big.reset();
                     report << "result=" << (ok ? "OK" : "FAILED") << "\n";
                     juce::File (path).replaceWithText (report);
