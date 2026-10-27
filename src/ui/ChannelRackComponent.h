@@ -234,7 +234,12 @@ class ChannelRackViewport final : public juce::Viewport,
                                   public juce::DragAndDropTarget
 {
 public:
-    explicit ChannelRackViewport (ChannelRackComponent& r) : rack (r) {}
+    explicit ChannelRackViewport (ChannelRackComponent& r) : rack (r)
+    {
+        // juce::Viewport makes itself transparent to clicks, so drag-and-drop would skip it and the empty space under
+        // the last channel would not accept drops. Children still get their own clicks.
+        setInterceptsMouseClicks (true, true);
+    }
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override { return rack.isInterestedInFileDrag (files); }
     void filesDropped (const juce::StringArray& files, int x, int y) override

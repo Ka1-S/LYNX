@@ -12,8 +12,10 @@ Evidence markers: **[MAN]** FL's manual (the HTML help that ships with FL 2026),
 - 17:05: checkpoint compiles on Linux; verified in the Linux app under Xvfb (shots in the session scratchpad, see
   "Verification"): items 1, 3 (Browser drag and external XDND drop), 5, 6, 7, 8, 10. Added since: FL's F-key
   window actions (item 4), visible ghost steps, drops on the rack panel's free space, Ctrl+Alt+wheel, the Theme page
-  clamp fix, unit tests `tests/Fl165Tests.inc`, pt-BR strings. Next: rebuild (build slots are queued), re-shoot,
-  build-local with FL Data, Windows build, land.
+  clamp fix, unit tests `tests/Fl165Tests.inc`, pt-BR strings.
+- 18:12: drop on the rack's free space failed in the app: juce::Viewport calls `setInterceptsMouseClicks (false, true)`
+  on itself, so the drag target search skipped it. `ChannelRackViewport` now intercepts clicks. Next: re-test that
+  drop, finish build-local + Windows build, merge main, land.
 
 ## FL's behaviour, item by item
 
