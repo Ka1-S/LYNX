@@ -209,8 +209,9 @@ juce::String actionHint (gesture::Action action, bool playlist)
         case A::zoomRange: return tr ("[LMB] click zooms in, drag a range to zoom to it  [RMB] zooms out");
         case A::listen: return playlist ? tr ("[LMB] click or drag plays from here") : tr ("[LMB] click or drag plays the notes under the cursor");
         case A::fade: return tr ("Fade: [LMB] drag sets its length");
-        case A::movePoint: return tr ("Point: [LMB] drag moves, then [Shift] keeps time, [Ctrl] keeps value  [RMB] deletes");
-        case A::addPoint: return tr ("Curve: [LMB] adds a point");
+        case A::movePoint: return tr ("Point: [LMB] drag moves, then [Shift] keeps time, [Ctrl] keeps value  [Alt] no snap  [RMB] menu");
+        case A::addPoint: return tr ("Curve: [LMB] or [RMB] adds a point (hold and drag to place it)");
+        case A::bendSegment: return tr ("Tension: [LMB] drag up / down bends the segment ([Ctrl] fine)  [RMB] straight");
         case A::openMenu: return tr ("[LMB] clip menu");
         case A::none: break;
     }
