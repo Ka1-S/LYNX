@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/Vfx.h"
 #include "core/Patcher.h"
 #include <filesystem>
 #include "core/EditorPolish.h"
@@ -1247,6 +1248,16 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.pluginState = c.pluginState;
         }
 
+        // FL's VFX plugins (round 164b): note processors, with FL's state as it is
+        if (const auto kind = vfx::kindOfFlName (c.pluginName))
+        {
+            def.instrument = InstrumentKind::vfx;
+            vfx::State vs;
+            vs.kind = *kind;
+            vs.fl = c.pluginState.empty() ? vfx::defaultState (*kind) : c.pluginState;
+            def.pluginState = vfx::writeState (vs);
+        }
+
         // Fruit Kick, MiniSynth, ... (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
         bool adoptedFromPlugin = false;
         if (def.instrument == InstrumentKind::synth)
@@ -1863,6 +1874,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.unsupported["Fruity Wrapper (plugin state not readable)"]; // e.g. a wrapper version newer than 12
             else if (plugin == "midi out" && def.instrument == InstrumentKind::midiOut)
                 ++r.converted[c.pluginName];
+            else if (def.instrument == InstrumentKind::vfx)
+                ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (Keyboard Controller only sends notes to other channels)
@@ -2044,7 +2057,23 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             constexpr float spreadX = 2.0f, spreadY = 1.6f;
             node.x = fl.x * spreadX;
             node.y = fl.y * spreadY;
-            if (fl.generator)
+            if (const auto kind = vfx::kindOfFlName (fl.plugin)) // a VFX node (an effect in FL's graph): voices in, voices out
+            {
+                node.generator = true;
+                vfx::makeChannel (node.channel, *kind);
+                vfx::State vs;
+                vs.kind = *kind;
+                vs.fl = fl.state.empty() ? vfx::defaultState (*kind) : fl.state;
+                node.channel.pluginState = vfx::writeState (vs);
+                if (! fl.label.empty())
+                    node.channel.name = fl.label;
+                node.channel.mixerTrack = 0;
+                node.channel.volume = 1.0f;
+                node.channel.pan = 0.0f;
+                if ((options.report != nullptr))
+                    ++options.report->converted["Patcher: " + fl.plugin];
+            }
+            else if (fl.generator)
             {
                 node.generator = true;
                 flp::Project mini;
@@ -2214,11 +2243,17 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
                 else
                 {
-                    // a node's MIDI output: a MIDI Out's (round 162); other plugins' MIDI outputs are not passed yet
+                    // a node's MIDI output: a MIDI Out's (round 162), a VFX node's voice output N (FL's pin N, 1…;
+                    // round 164b); other plugins' MIDI outputs are not passed yet
                     const auto& source = doc.nodes[(std::size_t) w.from];
-                    if (! source.generator || source.channel.instrument != InstrumentKind::midiOut)
+                    if (! source.generator)
                         continue;
-                    w.fromPort = 0;
+                    if (source.channel.instrument == InstrumentKind::vfx)
+                        w.fromPort = std::max (0, src->index - 1);
+                    else if (source.channel.instrument == InstrumentKind::midiOut)
+                        w.fromPort = 0;
+                    else
+                        continue;
                 }
                 if (w.to == patchToHost) // "MIDI port N": the notes go to the plugins on that MIDI port
                 {

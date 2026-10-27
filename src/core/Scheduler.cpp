@@ -137,6 +137,7 @@ void schedulePatternLoop (const Pattern& pattern,
         on.modX = note.modX;
         on.modY = note.modY;
         on.release = note.release;
+        on.colour = (std::int8_t) (note.colour & 15);
         const auto timing = noteTiming (note, swing, channelOf (channels, note.channel));
         const auto start = timing.start;
 
@@ -306,6 +307,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             e.modX = note.modX;
             e.modY = note.modY;
             e.release = note.release;
+            e.colour = (std::int8_t) (note.colour & 15);
 
             if (note.slide)
             {

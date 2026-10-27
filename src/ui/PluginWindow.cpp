@@ -776,7 +776,8 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
     return menu;
 }
 
-void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen, juce::Component* owner)
+void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen, juce::Component* owner,
+                     std::function<void (ChannelDef)> onBuiltIn)
 {
     // FL's way (round 151): the favourites right here, every other plugin in the picker ("More plugins...", FL's
     // list of every generator / effect with its categories, search and favourite stars). The old menu listed all
@@ -801,15 +802,22 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
     if (menu.getNumItems() > 0)
         menu.addSeparator();
 
-    if (kind == 0)
+    if (kind == 0 && ! onBuiltIn)
         menu.addItem (tr ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});
     else
         menu.addItem (instruments ? tr ("More plugins... ({0} instruments)", { juce::String (kind) }) : tr ("More plugins... ({0} effects)", { juce::String (kind) }),
-                      [&engine, instruments, onChosen, safe = juce::Component::SafePointer<juce::Component> (owner), hasOwner = owner != nullptr] {
-                          showPluginPicker (engine, instruments, [onChosen, safe, hasOwner] (PluginRef ref) {
-                              if (! hasOwner || safe != nullptr)
-                                  onChosen (ref);
-                          });
+                      [&engine, instruments, onChosen, onBuiltIn, safe = juce::Component::SafePointer<juce::Component> (owner), hasOwner = owner != nullptr] {
+                          showPluginPicker (
+                              engine, instruments,
+                              [onChosen, safe, hasOwner] (PluginRef ref) {
+                                  if (! hasOwner || safe != nullptr)
+                                      onChosen (ref);
+                              },
+                              ! onBuiltIn ? std::function<void (ChannelDef)>()
+                                          : [onBuiltIn, safe, hasOwner] (ChannelDef c) {
+                                                if (! hasOwner || safe != nullptr)
+                                                    onBuiltIn (std::move (c));
+                                            });
                       });
 
     menu.addSeparator();
