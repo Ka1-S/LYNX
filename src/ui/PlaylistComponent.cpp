@@ -2820,7 +2820,7 @@ int PlaylistComponent::markerTagAt (int x, int y) const
     if (y < rulerTop + timelineHeight - 12 || y >= headerHeight)
         return -1;
     const auto& list = engine.getSong().markers();
-    const auto f = font (type::caption, true);
+    const auto f = theme::font (theme::type::caption, true);
     for (int i = (int) list.size(); --i >= 0;) // the later tag is drawn on top
     {
         const auto mx = tickToX ((double) list[(std::size_t) i].tick);
