@@ -300,6 +300,22 @@ std::vector<std::uint8_t> writeSequencer (const SequencerSettings& s);
 // Rotates all six lanes of the current program by `delta` steps (FL's Pattern shift)
 void shiftPattern (SequencerSettings& s, int delta);
 
+// VFX Script: FL's Python note scripts. The state is an INI text (UTF-8 with a BOM, CRLF): [Script] Source= (the
+// source on one line, line breaks as "<linebreak>"), [Parameters] (the script's controls by name), [Surface].
+// LYNX keeps it as it is; it does not run Python, so the notes pass through.
+struct ScriptSettings
+{
+    std::string text;
+    std::string source() const;                 // line breaks restored ("\n")
+    void setSource (const std::string& source); // (keeps every other line)
+    std::vector<std::pair<std::string, std::string>> parameters() const;
+    bool hasSurface() const;
+    bool operator== (const ScriptSettings&) const = default;
+};
+ScriptSettings defaultScript();
+std::optional<ScriptSettings> parseScript (const std::vector<std::uint8_t>& fl);
+std::vector<std::uint8_t> writeScript (const ScriptSettings& s);
+
 // ---------------------------------------------------------------------------------------------------------------
 // Presets
 

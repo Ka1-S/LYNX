@@ -788,6 +788,118 @@ std::optional<std::vector<std::uint8_t>> stateFromFlPreset (const std::vector<st
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// VFX Script
+
+namespace
+{
+// the INI's lines (CRLF or LF) with their section
+template <typename F>
+void scriptLines (const std::string& text, F&& f)
+{
+    std::string section;
+    std::size_t at = 0;
+    while (at <= text.size())
+    {
+        auto end = text.find ('\n', at);
+        if (end == std::string::npos)
+            end = text.size();
+        auto from = at, to = end; // (the line without its BOM / CR)
+        if (to > from && text[to - 1] == '\r')
+            --to;
+        if (from == 0 && text.rfind ("\xEF\xBB\xBF", 0) == 0)
+            from = std::min<std::size_t> (3, to);
+        const auto line = text.substr (from, to - from);
+        if (line.size() >= 2 && line.front() == '[' && line.back() == ']')
+            section = line.substr (1, line.size() - 2);
+        else if (! f (section, line, from, to))
+            return;
+        if (end == text.size())
+            break;
+        at = end + 1;
+    }
+}
+} // namespace
+
+std::string ScriptSettings::source() const
+{
+    std::string out;
+    scriptLines (text, [&] (const std::string& section, const std::string& line, std::size_t, std::size_t) {
+        if (section != "Script" || line.rfind ("Source=", 0) != 0)
+            return true;
+        auto s = line.substr (7);
+        for (std::size_t k = 0; (k = s.find ("<linebreak>", k)) != std::string::npos;)
+            s.replace (k, 11, "\n");
+        out = s;
+        return false;
+    });
+    return out;
+}
+
+void ScriptSettings::setSource (const std::string& source)
+{
+    std::string flat;
+    for (std::size_t i = 0; i < source.size(); ++i)
+    {
+        if (source[i] == '\r')
+            continue;
+        if (source[i] == '\n')
+            flat += "<linebreak>";
+        else
+            flat += source[i];
+    }
+    bool done = false;
+    scriptLines (text, [&] (const std::string& section, const std::string& line, std::size_t from, std::size_t to) {
+        if (section != "Script" || line.rfind ("Source=", 0) != 0)
+            return true;
+        text.replace (from, to - from, "Source=" + flat);
+        done = true;
+        return false;
+    });
+    if (! done)
+        text = "\xEF\xBB\xBF[Script]\r\nSource=" + flat + "\r\n" + (text.rfind ("\xEF\xBB\xBF", 0) == 0 ? text.substr (3) : text);
+}
+
+std::vector<std::pair<std::string, std::string>> ScriptSettings::parameters() const
+{
+    std::vector<std::pair<std::string, std::string>> out;
+    scriptLines (text, [&] (const std::string& section, const std::string& line, std::size_t, std::size_t) {
+        if (section == "Parameters")
+            if (const auto eq = line.find ('='); eq != std::string::npos)
+                out.emplace_back (line.substr (0, eq), line.substr (eq + 1));
+        return true;
+    });
+    return out;
+}
+
+bool ScriptSettings::hasSurface() const { return text.find ("\r\n[Surface]") != std::string::npos || text.find ("\n[Surface]") != std::string::npos; }
+
+ScriptSettings defaultScript()
+{
+    ScriptSettings s;
+    s.text = "\xEF\xBB\xBF[Script]\r\nSource=import flvfx as vfx\r\n";
+    return s;
+}
+
+std::optional<ScriptSettings> parseScript (const std::vector<std::uint8_t>& fl)
+{
+    Reader r { fl.data(), fl.size() };
+    const auto n = r.u32();
+    if (r.failed || n != r.left())
+        return std::nullopt;
+    ScriptSettings s;
+    s.text.assign ((const char*) fl.data() + 4, n);
+    return s;
+}
+
+std::vector<std::uint8_t> writeScript (const ScriptSettings& s)
+{
+    std::vector<std::uint8_t> out;
+    put<std::uint32_t> (out, (std::uint32_t) s.text.size());
+    out.insert (out.end(), s.text.begin(), s.text.end());
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 
 std::vector<std::uint8_t> defaultState (Kind kind)
 {
@@ -799,7 +911,7 @@ std::vector<std::uint8_t> defaultState (Kind kind)
         case Kind::keyboardSplitter: return writeKeyboardSplitter (defaultKeyboardSplitter());
         case Kind::envelope: return writeEnvelope (defaultEnvelope());
         case Kind::sequencer: return writeSequencer (defaultSequencer());
-        default: break;
+        case Kind::script: return writeScript (defaultScript());
     }
     return {};
 }

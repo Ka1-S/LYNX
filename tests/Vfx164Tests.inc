@@ -796,3 +796,55 @@ TEST (vfx_sequencer_cost_per_block)
     std::printf ("  sequencer: 1 s of audio in %.3f ms (%d notes)\n", ms, notes);
     CHECK (notes > 30 && ms < 20.0);
 }
+
+TEST (vfx_script_keeps_fl_scripts_as_they_are)
+{
+    using namespace lynx::vfx;
+    auto s = defaultScript();
+    CHECK (s.source() == "import flvfx as vfx");
+    s.setSource ("import flvfx as vfx\n\ndef onTriggerVoice(v):\n    v.trigger()\n");
+    CHECK (s.text.find ("Source=import flvfx as vfx<linebreak><linebreak>def onTriggerVoice(v):<linebreak>") != std::string::npos);
+    CHECK (s.source() == "import flvfx as vfx\n\ndef onTriggerVoice(v):\n    v.trigger()\n");
+    CHECK (parseScript (writeScript (s)) == s);
+    CHECK (! parseScript ({ 9, 0, 0, 0, 'x' }));
+    // a script plays its notes through unchanged
+    auto p = makeProcessor (Kind::script, writeScript (s));
+    const auto out = vfx164::run (*p, { vfx164::on (60) });
+    CHECK (out.size() == 1 && out[0].voice.key == 60);
+    if (realFlpDir.empty())
+        return;
+    namespace fs = std::filesystem;
+    const auto dir = fs::path (realFlpDir) / "Patches" / "Plugin presets" / "Effects" / "VFX Script";
+    if (! fs::is_directory (dir))
+        return;
+    int files = 0;
+    for (const auto& entry : fs::recursive_directory_iterator (dir))
+    {
+        if (entry.path().extension() != ".fst")
+            continue;
+        std::ifstream in (entry.path(), std::ios::binary);
+        const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), {});
+        const auto state = stateFromFlPreset (bytes, Kind::script);
+        CHECK (state.has_value());
+        if (! state)
+            continue;
+        const auto script = parseScript (*state);
+        CHECK (script && writeScript (*script) == *state);
+        if (! script)
+            continue;
+        ++files;
+        // the source written back as it was read changes nothing
+        auto again = *script;
+        again.setSource (script->source());
+        CHECK (again.text == script->text);
+        if (entry.path().filename() == "Arpeggiator.fst")
+        {
+            const auto params = script->parameters();
+            CHECK (std::find (params.begin(), params.end(), std::pair<std::string, std::string> { "Speed", "2" }) != params.end());
+            CHECK (std::find (params.begin(), params.end(), std::pair<std::string, std::string> { "Duration", "196608" }) != params.end());
+            CHECK (script->source().find ("<linebreak>") == std::string::npos && script->source().size() > 1000);
+        }
+    }
+    std::printf ("  %d FL scripts\n", files);
+    CHECK (files >= 80);
+}

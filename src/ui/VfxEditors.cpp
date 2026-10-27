@@ -1823,6 +1823,95 @@ private:
     Grid matrix, lane;
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// VFX Script: the script and the values of its controls, kept as FL saved them (LYNX does not run Python)
+
+class ScriptBody final : public Body
+{
+public:
+    ScriptBody()
+    {
+        for (auto* e : { &source, &values })
+        {
+            e->setMultiLine (true, false);
+            e->setReturnKeyStartsNewLine (true);
+            e->setTabKeyUsedAsCharacter (true);
+            e->setScrollbarsShown (true);
+            e->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain));
+            addAndMakeVisible (e);
+        }
+        values.setReadOnly (true);
+        source.onTextChange = [this] { save.setEnabled (source.getText().replace ("\r\n", "\n").toStdString() != loaded); };
+        save.setButtonText (tr ("Save the script"));
+        save.setEnabled (false);
+        save.onClick = [this] {
+            const auto text = source.getText().replace ("\r\n", "\n").toStdString();
+            if (edit)
+                edit ([text] (std::vector<std::uint8_t>& fl) {
+                    auto s = vfx::parseScript (fl).value_or (vfx::defaultScript());
+                    s.setSource (text);
+                    fl = vfx::writeScript (s);
+                });
+        };
+        ui::setHint (save, tr ("Keeps the edited script in the project (FL Studio runs it when the project opens there)"));
+        addAndMakeVisible (save);
+    }
+
+    void refresh (const std::vector<std::uint8_t>& fl) override
+    {
+        const auto s = vfx::parseScript (fl).value_or (vfx::defaultScript());
+        const auto text = s.source();
+        if (text != loaded) // (a pending edit stays while other things change)
+        {
+            loaded = text;
+            source.setText (juce::String::fromUTF8 (text.c_str()), juce::dontSendNotification);
+        }
+        save.setEnabled (source.getText().replace ("\r\n", "\n").toStdString() != loaded);
+        juce::String list;
+        for (const auto& [name, value] : s.parameters())
+            list << juce::String::fromUTF8 (name.c_str()) << " = " << juce::String::fromUTF8 (value.c_str()) << "\n";
+        if (s.hasSurface())
+            list << "\n" << tr ("(with an embedded Control Surface)");
+        values.setText (list.isEmpty() ? tr ("(no saved control values)") : list, juce::dontSendNotification);
+    }
+
+    int preferredWidth() const override { return 900; }
+    int preferredHeight() const override { return 520; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (12, 6);
+        area.removeFromTop (40);
+        auto bottom = area.removeFromBottom (30);
+        save.setBounds (bottom.removeFromRight (160).withTrimmedTop (4));
+        auto right = area.removeFromRight (260);
+        right.removeFromTop (18);
+        values.setBounds (right);
+        area.removeFromRight (10);
+        area.removeFromTop (18);
+        source.setBounds (area);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto area = getLocalBounds().reduced (12, 6);
+        g.setColour (theme::colour::warning);
+        g.setFont (theme::font (theme::type::body));
+        g.drawFittedText (tr ("LYNX keeps the script and its settings but does not run Python scripts yet: the notes pass through unchanged."),
+                          area.removeFromTop (36), juce::Justification::centredLeft, 2);
+        g.setFont (theme::font (theme::type::caption));
+        g.setColour (theme::colour::textSecondary);
+        const auto top = area.removeFromTop (18);
+        g.drawText (theme::caps (tr ("Script")), top, juce::Justification::centredLeft);
+        g.drawText (theme::caps (tr ("Control values")), top.withTrimmedLeft (top.getWidth() - 260), juce::Justification::centredLeft);
+    }
+
+private:
+    juce::TextEditor source, values;
+    juce::TextButton save;
+    std::string loaded;
+};
+
 // A kind LYNX does not edit yet: says so (its notes pass through)
 class PendingBody final : public Body
 {
@@ -1848,7 +1937,7 @@ std::unique_ptr<Body> makeBody (vfx::Kind kind)
         case vfx::Kind::keyboardSplitter: return std::make_unique<KeyboardSplitterBody>();
         case vfx::Kind::envelope: return std::make_unique<EnvelopeBody>();
         case vfx::Kind::sequencer: return std::make_unique<SequencerBody>();
-        default: break;
+        case vfx::Kind::script: return std::make_unique<ScriptBody>();
     }
     return std::make_unique<PendingBody>();
 }
