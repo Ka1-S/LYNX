@@ -1503,7 +1503,10 @@ public:
         // with "keep pitch" the sample arrives already stretched (RackState): play at normal speed; the keys then
         // transpose it through each voice's pitch shifter (round 162), so its length stays
         stretchBeats.store (s.keepPitch ? 0.0f : std::max (0.0f, s.stretchBeats));
-        keyShift.store (! clipMode && s.keepPitch && s.stretchBeats > 0.0f);
+        // keep length (round 163): with "keep pitch" a transposition never changes the length — the keys of a sampler, the
+        // pitch knob and the fine tune of a sampler or an audio clip go through each voice's pitch shifter, stretched to
+        // the tempo or not
+        keyShift.store (s.keepPitch);
         keyShiftMethod.store ((int) s.stretchMethod);
         regionStart.store (std::clamp (s.regionStart, 0.0f, 1.0f));
         regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
@@ -1597,6 +1600,11 @@ public:
         }
         const auto base = baseRate (*data);
         auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
+        // a resampled (pitched) clip reads its file faster or slower: a start inside it moves with that speed (the
+        // Playlist shows the file at that speed too, clipops::framesPerTick)
+        if (clipMode && ! keyShift.load (std::memory_order_relaxed))
+            if (const auto cents = (double) pitch.load() * 100.0 + nextCents; cents != 0.0)
+                startFrame = first + std::max (0.0, startSeconds * sampleRate * flrs::speedFor ((float) cents, base));
         if (clipMode) // FL starts an audio clip on a whole source frame (round 110 §1: ceil or round fit, floor is 1 late)
             startFrame = std::round (startFrame);
 
@@ -1631,7 +1639,10 @@ public:
         // key at the sample's own pitch and ignored the pitch knob and the fine tune)
         const auto root = zone != nullptr ? zone->zone.rootKey : 60;
         const auto tune = zone != nullptr ? (double) zone->zone.tune : 0.0;
-        const auto semitones = clipMode ? 0.0 : (sliced ? 0 : key - root) + tune + (double) pitch.load() + nextCents / 100.0;
+        // an audio clip has no key: its channel's pitch and fine tune transpose it (round 163 — the Clip properties' and
+        // Channel settings' pitch did nothing to clips); Resample changes its speed, "keep pitch" its pitch only
+        const auto semitones = clipMode ? (double) pitch.load() + nextCents / 100.0
+                                        : (sliced ? 0 : key - root) + tune + (double) pitch.load() + nextCents / 100.0;
         const auto attackSeconds = clipMode ? 0.0f : attack.load();
 
         *target = {};
@@ -1875,7 +1886,7 @@ public:
 
     void prepareKeyShift (double sr) override
     {
-        if (clipMode || ! keyShift.load())
+        if (! keyShift.load())
             return;
         const auto method = (StretchMethod) keyShiftMethod.load();
         for (auto& shifter : shifterPool)

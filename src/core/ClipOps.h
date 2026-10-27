@@ -31,6 +31,65 @@ inline std::int64_t fileTicks (const SamplerSettings& sampler, double fileFrames
     return perTick > 0.0 ? (std::int64_t) std::llround (fileFrames / perTick) : 0;
 }
 
+// How much faster an audio clip's channel reads its file because of its pitch (round 163): 2^(semitones/12) for the
+// pitch knob plus Misc › Fine tune when it resamples; 1 with "keep pitch" (the pitch shifter keeps the length).
+inline double clipSpeed (const ChannelDef& channel) noexcept
+{
+    if (channel.sampler.keepPitch)
+        return 1.0;
+    const auto semitones = (double) std::clamp (channel.sampler.pitch, -24.0f, 24.0f) + (double) channel.misc.fineTune / 100.0;
+    return std::exp2 (semitones / 12.0);
+}
+
+// framesPerTick / fileTicks of an audio clip's channel, its pitch included (what the Playlist shows and plays).
+inline double framesPerTick (const ChannelDef& channel, double fileFrames, double fileRate, double bpm) noexcept
+{
+    return framesPerTick (channel.sampler, fileFrames, fileRate, bpm) * clipSpeed (channel);
+}
+
+inline std::int64_t fileTicks (const ChannelDef& channel, double fileFrames, double fileRate, double bpm) noexcept
+{
+    const auto perTick = framesPerTick (channel, fileFrames, fileRate, bpm);
+    return perTick > 0.0 ? (std::int64_t) std::llround (fileFrames / perTick) : 0;
+}
+
+// Scales every clip of audio channel `channel` (offset, length, fades) after its file's length in ticks changed from
+// `before` to `after` (a stretch or a resampling pitch), so each keeps showing and playing the same audio.
+inline void rescaleClipsOf (Song& song, int channel, std::int64_t before, std::int64_t after) noexcept
+{
+    if (before <= 0 || after <= 0 || before == after)
+        return;
+    const auto k = (double) after / (double) before;
+    for (auto& c : song.playlist)
+        if (c.kind == ClipKind::audio && c.channel == channel)
+        {
+            const auto exact = ((double) c.offset + (double) c.offsetFraction) * k;
+            c.offset = (std::int64_t) std::llround (exact);
+            c.offsetFraction = (float) (exact - (double) c.offset);
+            c.length = std::max<std::int64_t> (1, (std::int64_t) std::llround ((double) c.length * k));
+            c.fadeIn = (std::int64_t) std::llround ((double) c.fadeIn * k);
+            c.fadeOut = (std::int64_t) std::llround ((double) c.fadeOut * k);
+        }
+}
+
+// The "Pitch..." command (round 163) on a sample channel or an audio clip's channel: the pitch knob gets `semitones`
+// plus `cents` (fractions of a semitone; the fine tune is left alone), and `keepLength` chooses the stretch engine
+// (pitch only) or resampling (the speed follows, like a tape). An audio channel's clips follow its new length when it
+// resamples. `fileFrames`/`fileRate` = its file (0 when unknown: the clips are left as they are).
+inline void setChannelPitch (Song& song, int channel, double semitones, double cents, bool keepLength, double fileFrames = 0.0,
+                             double fileRate = 0.0)
+{
+    if (channel < 0 || channel >= (int) song.channels.size())
+        return;
+    auto& ch = song.channels[(std::size_t) channel];
+    const auto audio = ch.instrument == InstrumentKind::audioClip;
+    const auto before = audio && fileFrames > 0.0 ? fileTicks (ch, fileFrames, fileRate, song.bpm) : 0;
+    ch.sampler.pitch = (float) std::clamp (semitones + cents / 100.0, -24.0, 24.0);
+    ch.sampler.keepPitch = keepLength;
+    if (audio && fileFrames > 0.0)
+        rescaleClipsOf (song, channel, before, fileTicks (ch, fileFrames, fileRate, song.bpm));
+}
+
 // "Fit to tempo": the number of beats a loop of `seconds` most likely spans, assuming it is a power-of-two
 // number of beats (1, 2, 4, 8 ... 256) recorded at some other tempo; picks the nearest at the project's tempo.
 inline float fitBeats (double seconds, double bpm) noexcept
