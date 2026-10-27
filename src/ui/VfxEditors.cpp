@@ -1248,7 +1248,7 @@ public:
             k->setBounds (knobs.withWidth (62).translated ((int) (k == &attack ? 0 : k == &decay ? 1 : k == &sustain ? 2 : 3) * 66, 0));
         for (auto* k : { &speed, &lfoTension, &skew, &pulseWidth })
             k->setBounds (knobs.withWidth (62).translated ((int) (k == &speed ? 0 : k == &lfoTension ? 1 : k == &skew ? 2 : 3) * 66, 0));
-        area.removeFromBottom (6);
+        area.removeFromBottom (22); // (the help line)
         editor.setBounds (area);
     }
 
@@ -1304,7 +1304,7 @@ private:
     static juce::String keyText (double v)
     {
         const auto k = (int) std::lround (v) - 1; // (FL stores the key + 1)
-        return k < 0 ? juce::String ("-") : juce::MidiMessage::getMidiNoteName (std::clamp (k, 0, 131), true, true, 0);
+        return k < 0 ? juce::String ("-") : pitchClassName (k % 12) + juce::String (k / 12 - 1); // (LYNX's names: 60 = C4)
     }
 
     E settings = vfx::defaultEnvelope();
@@ -1386,7 +1386,7 @@ public:
         toggle (latch, tr ("Latch"), S::latch, tr ("Latch: the notes keep playing after the keys are released, until a new chord"));
         toggle (polyKeys, tr ("Poly"), S::polyKeys, tr ("Several keys per step (else one)"));
         toggle (polyOctave, tr ("Poly"), S::polyOctave, tr ("Several octaves per step (else one)"));
-        toggle (gateLaneMode, tr ("Channels"), S::gateLaneMode, tr ("The gate lane sets each step's output channel instead of its length"));
+        toggle (gateLaneMode, tr ("Chan."), S::gateLaneMode, tr ("The gate lane sets each step's output channel instead of its length"));
 
         combo (arpMode, tr ("Mode"), S::arpMode, { tr ("Off"), tr ("On"), tr ("Thru"), tr ("On from 2 keys, else off"), tr ("On from 2 keys, else thru"),
                                                     tr ("On from 3 keys, else off"), tr ("On from 3 keys, else thru") });
@@ -1456,7 +1456,7 @@ public:
     void refresh (const std::vector<std::uint8_t>& fl) override
     {
         settings = vfx::parseSequencer (fl).value_or (vfx::defaultSequencer());
-        program.setButtonText (juce::String (settings.program() + 1).paddedLeft ('0', 3) + "  " + juce::String (settings.current().nameText()));
+        program.setButtonText (juce::String (settings.program()).paddedLeft ('0', 3) + ". " + juce::String (settings.current().nameText()));
         for (int k = 0; k < 4; ++k)
             pages[(std::size_t) k].setToggleState (k == settings.get (S::page), juce::dontSendNotification);
         for (int k = 0; k < layerCount; ++k)
@@ -1502,15 +1502,15 @@ public:
         for (int l = 0; l < layerCount; ++l)
         {
             auto row = lanes.removeFromTop (24).reduced (0, 1);
-            auto label = row.removeFromLeft (Grid::labelWidth + 50);
-            laneButtons[(std::size_t) l].setBounds (label.removeFromLeft (Grid::labelWidth + 6));
+            auto label = row.removeFromLeft (Grid::labelWidth).withTrimmedRight (4);
+            laneButtons[(std::size_t) l].setBounds (label.removeFromLeft (78));
             if (l == noteSelect)
                 polyKeys.setBounds (label.reduced (2, 0));
             if (l == octave)
                 polyOctave.setBounds (label.reduced (2, 0));
             if (l == gate)
-                gateLaneMode.setBounds (label.reduced (2, 0).withWidth (60));
-            rows[(std::size_t) l].setBounds (row.withX (area.getX() + Grid::labelWidth).withWidth (area.getWidth() - Grid::labelWidth));
+                gateLaneMode.setBounds (label.reduced (2, 0));
+            rows[(std::size_t) l].setBounds (row);
         }
         area.removeFromBottom (8);
         grid.setBounds (area);
@@ -1622,7 +1622,7 @@ public:
     struct Grid final : juce::Component
     {
         SequencerBody* owner = nullptr;
-        static constexpr int labelWidth = 70;
+        static constexpr int labelWidth = 128;
 
         int layer() const { return owner->shown; }
         bool bars() const
@@ -1928,9 +1928,10 @@ private:
         {
             juce::PopupMenu sub;
             for (int p = group; p < std::min (group + 16, (int) settings.programs.size()); ++p)
-                sub.addItem (juce::String (p + 1).paddedLeft ('0', 3) + "  " + juce::String (settings.programs[(std::size_t) p].nameText()), true,
+                sub.addItem (juce::String (p).paddedLeft ('0', 3) + ". " + juce::String (settings.programs[(std::size_t) p].nameText()), true,
                              p == settings.program(), [this, p] { change ([p] (S& s) { s.set (S::currentProgram, p); }); });
-            menu.addSubMenu (juce::String (group + 1) + "-" + juce::String (group + 16), sub, true, nullptr, settings.program() / 16 == group / 16);
+            menu.addSubMenu (juce::String (group).paddedLeft ('0', 3) + "-" + juce::String (group + 15).paddedLeft ('0', 3), sub, true, nullptr,
+                             settings.program() / 16 == group / 16);
         }
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&program));
     }
@@ -2143,13 +2144,14 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (theme::colour::bg2);
-        auto top = getLocalBounds().removeFromTop (40).reduced (14, 0);
+        // the name, and below it what the plugin does (left of the preset selector)
+        auto top = getLocalBounds().removeFromTop (40).reduced (14, 3).withTrimmedRight (280);
         g.setColour (theme::colour::textPrimary);
         g.setFont (theme::font (theme::type::title, true));
-        g.drawText (vfx::flName (kind), top.removeFromLeft (220), juce::Justification::centredLeft);
+        g.drawText (vfx::flName (kind), top.removeFromTop (19), juce::Justification::bottomLeft);
         g.setColour (theme::colour::textSecondary);
         g.setFont (theme::font (theme::type::caption));
-        g.drawText (description (kind), top.withTrimmedRight (300), juce::Justification::centredLeft);
+        g.drawText (description (kind), top, juce::Justification::centredLeft, true);
         g.setColour (theme::colour::border);
         g.drawHorizontalLine (40, 0.0f, (float) getWidth());
     }

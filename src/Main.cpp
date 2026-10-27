@@ -4482,7 +4482,7 @@ private:
         lynx::PatchNode mapper;
         mapper.generator = true;
         lynx::vfx::makeChannel (mapper.channel, lynx::vfx::Kind::colorMapper);
-        mapper.x = 160.0f;
+        mapper.x = 260.0f;
         patcher.patcher.nodes.push_back (mapper);
         lynx::PatchWire notes;
         notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
@@ -4493,7 +4493,7 @@ private:
             synth.generator = true;
             synth.channel.instrument = lynx::InstrumentKind::synth;
             synth.channel.name = "Synth " + std::to_string (k + 1);
-            synth.x = 400.0f, synth.y = (float) k * 90.0f;
+            synth.x = 520.0f, synth.y = (float) k * 90.0f;
             patcher.patcher.nodes.push_back (synth);
             lynx::PatchWire in, out;
             in.kind = lynx::PatchWire::Kind::midi, in.from = 0, in.fromPort = k, in.to = 1 + k;
@@ -4501,7 +4501,7 @@ private:
             patcher.patcher.wires.push_back (in);
             patcher.patcher.wires.push_back (out);
         }
-        patcher.patcher.outputX = 620.0f;
+        patcher.patcher.outputX = 760.0f;
         song.channels.push_back (patcher);
         offline.setSong (std::move (song));
         offline.dispatchPendingMessages();
@@ -4512,6 +4512,42 @@ private:
                 savePng (panel->createComponentSnapshot (panel->getLocalBounds()),
                          prefix + "-" + juce::String (lynx::vfx::flName (*lynx::vfx::kindOf (offline.getSong().channels[(std::size_t) c]))).replaceCharacter (' ', '-').toLowerCase() + ".png");
             }
+        // with FL Studio installed: the Sequencer with FL's factory bank (to compare with FL's own editor) and
+        // a Script with FL's "Snap To Scale"
+        if (const auto roots = lynx::findFlStudioRoots(); ! roots.data.empty())
+        {
+            const auto data = juce::File (juce::String::fromUTF8 (roots.data.c_str()));
+            const std::pair<lynx::vfx::Kind, juce::String> extra[] = {
+                { lynx::vfx::Kind::sequencer, "Patches/Plugin database/Effects/Patcher/VFX Sequencer.fst" },
+                { lynx::vfx::Kind::script, "Patches/Plugin presets/Effects/VFX Script/Snap To Scale.fst" },
+            };
+            for (const auto& [kind, path] : extra)
+            {
+                juce::MemoryBlock bytes;
+                if (! data.getChildFile (path).loadFileAsData (bytes))
+                    continue;
+                const auto* b = static_cast<const std::uint8_t*> (bytes.getData());
+                const auto fl = lynx::vfx::stateFromFlPreset (std::vector<std::uint8_t> (b, b + bytes.getSize()), kind);
+                int index = -1;
+                for (int c = 0; c < lynx::vfx::kindCount; ++c)
+                    if (lynx::vfx::kindOf (offline.getSong().channels[(std::size_t) c]) == kind)
+                        index = c;
+                if (! fl || index < 0)
+                    continue;
+                offline.editSong ([&] (lynx::Song& s) {
+                    auto st = *lynx::vfx::readState (s.channels[(std::size_t) index].pluginState);
+                    st.fl = *fl;
+                    s.channels[(std::size_t) index].pluginState = lynx::vfx::writeState (st);
+                });
+                offline.dispatchPendingMessages();
+                if (auto panel = lynx::makeChannelSettingsPanel (offline, index))
+                {
+                    offline.dispatchPendingMessages();
+                    savePng (panel->createComponentSnapshot (panel->getLocalBounds()),
+                             prefix + "-" + juce::String (lynx::vfx::flName (kind)).replaceCharacter (' ', '-').toLowerCase() + "-fl.png");
+                }
+            }
+        }
         lynx::PatcherWindows::openChannel (offline, lynx::vfx::kindCount);
         for (int k = 0; k < juce::TopLevelWindow::getNumTopLevelWindows(); ++k)
             if (auto* w = dynamic_cast<juce::DocumentWindow*> (juce::TopLevelWindow::getTopLevelWindow (k)))
