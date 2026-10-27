@@ -106,6 +106,9 @@ Linux (WSLg) build, `--visualtest` and `--editorcpu`-style runs:
 - Drawing one 1280×720 Visualizer frame off-screen: 3.4–12.9 ms depending on the scene (cached background and glow
   images, small particles as rectangles; measured while a Windows build ran) — a 3-minute 30 fps video is drawn in
   about real time or faster.
+- Windows (LYNX.exe, zig build, `--visualtest` with the FL demo "Sacco - FlashyWaves"): audio path +0.0006–0.0024 %;
+  editors 10–22 % animating (vectorscope the most), 2.2–2.8 % idle; scene frame 1.9–9.4 ms; plain export first sound
+  at 0.002 s; image-sequence export OK (no ffmpeg installed on this Windows).
 - Video: MP4 1280×720 30 fps h264 + AAC with ffmpeg 7.0.2; PNG + audio.wav fallback without ffmpeg; the captured
   input matches the rendered WAV sample for sample (correlation of the first block 1.000).
 
