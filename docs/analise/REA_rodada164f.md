@@ -77,3 +77,16 @@ instruments inside a slot on a silent insert used to stay asleep after 4 s of si
 - The plugin node's MIDI out pin is shown only when the running plugin reports MIDI output or a cable already uses it;
   a plugin that is not loaded yet (missing / still scanning) hides it.
 - Envelope Controller Mod X / Y from FL projects: import path assumed [HYP], no FL project automating params 88 / 89 found.
+
+## Addendum (round 164 delay164): the "73 samples late" mixer-slot onset
+
+After the r164f merge the mixer-slot Patcher test saw the note 73 samples after its sample and the test was relaxed
+(183f0a3a). Root cause: no leaked state and no engine bug. The test song comes from `Song::makeDefault()`, whose Master
+carries the template limiter; `Limiter` (core/Effects.cpp) looks 1.5 ms ahead = `lround (0.0015 × 48000)` = 72 samples
+and reports it (`latencySamples`, `PdcPlan::total` = 72), so the whole mix leaves the Master 72 samples later; the 73rd is
+the synth's first sample (its sine starts at phase 0, the first non-zero sample is the next one). Measured: alone and after
+the full suite the onset is identical (11150 for a note at 11077), and the original r164f commit (73b61c4e) built and run
+alone gives the same 11150 — the strict assertion never held with the default Master. Users: nothing to fix — the delay is
+the Master limiter's reported look-ahead, the same for every track (PDC aligns hardware-output routes to it).
+The test now asserts the absolute sample again: without Master effects the onset is the note's sample (+1 for the sine's
+zero), and with the default limiter exactly `PdcPlan::total` (72) later [TEST `patcher164f_mixer_slot_patcher_notes_land_at_their_sample`].
