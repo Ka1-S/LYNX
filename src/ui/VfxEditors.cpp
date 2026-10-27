@@ -654,6 +654,674 @@ private:
     juce::Rectangle<float> graph;
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// An FL mapping / envelope curve, edited with the mouse: drag a point, double-click to add one, right-click a point to
+// remove it, drag a segment up or down to bend it; Alt+click a segment straightens it
+
+class CurveEditor final : public juce::Component
+{
+public:
+    std::function<void (const vfx::MapCurve&)> onChange;
+    std::function<void (juce::Graphics&, juce::Rectangle<float>, double xMax)> drawGrid; // under the curves
+    std::vector<std::pair<vfx::MapCurve, juce::Colour>> behind;                          // other curves, faint
+    double fixedXMax = 0.0;  // > 0: the x range (maps: 1); else it follows the curve (envelopes)
+    bool bipolar = false;    // a centre line
+    int sustainPoint = -1, loopPoint = -1;
+    juce::Colour colour = theme::colour::accent;
+    float marker = -1.0f;    // a vertical line (x), e.g. the last note
+
+    void setCurve (const vfx::MapCurve& c)
+    {
+        if (dragging < 0 && bending < 0)
+            curve = c;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = plot();
+        g.setColour (theme::colour::bg0);
+        g.fillRoundedRectangle (area, 4.0f);
+        const auto xMax = range();
+        if (drawGrid)
+            drawGrid (g, area, xMax);
+        if (bipolar)
+        {
+            g.setColour (theme::colour::borderStrong);
+            g.drawHorizontalLine ((int) area.getCentreY(), area.getX(), area.getRight());
+        }
+        for (const auto& [c, col] : behind)
+            stroke (g, c, col.withAlpha (0.35f), 1.2f, false);
+        stroke (g, curve, colour, 2.2f, true);
+        for (int i = 0; i < (int) curve.points.size(); ++i)
+        {
+            const auto p = toScreen (curve.points[(std::size_t) i]);
+            const auto r = i == hover || i == dragging ? 5.5f : 4.0f;
+            g.setColour (theme::colour::bg0);
+            g.fillEllipse (juce::Rectangle<float> (r * 2.0f + 2.0f, r * 2.0f + 2.0f).withCentre (p));
+            g.setColour (i == sustainPoint ? theme::colour::warning : colour);
+            g.fillEllipse (juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (p));
+        }
+        if (sustainPoint >= 0 && sustainPoint < (int) curve.points.size())
+        {
+            const auto x = toScreen (curve.points[(std::size_t) sustainPoint]).x;
+            g.setColour (theme::colour::warning.withAlpha (0.6f));
+            g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
+            g.setFont (theme::font (theme::type::caption));
+            g.drawText (tr ("sustain"), juce::Rectangle<float> (x + 3.0f, area.getY() + 2.0f, 60.0f, 14.0f), juce::Justification::centredLeft);
+        }
+        if (marker >= 0.0f && marker <= xMax)
+        {
+            g.setColour (theme::colour::textPrimary.withAlpha (0.7f));
+            const auto x = area.getX() + (float) (marker / xMax) * area.getWidth();
+            g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
+        }
+        g.setColour (theme::colour::borderStrong);
+        g.drawRoundedRectangle (area, 4.0f, 1.0f);
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const auto h = pointAt (e.position);
+        if (h != hover)
+        {
+            hover = h;
+            repaint();
+        }
+    }
+    void mouseExit (const juce::MouseEvent&) override
+    {
+        hover = -1;
+        repaint();
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto at = pointAt (e.position);
+        if (e.mods.isPopupMenu())
+        {
+            if (at > 0 && at < (int) curve.points.size() - 1 && curve.points.size() > 2)
+            {
+                curve.points.erase (curve.points.begin() + at);
+                hover = -1;
+                commit();
+            }
+            return;
+        }
+        if (at >= 0)
+        {
+            dragging = at;
+            return;
+        }
+        const auto seg = segmentAt (e.position.x);
+        if (seg > 0 && e.mods.isAltDown())
+        {
+            curve.points[(std::size_t) seg].tension = 0.0f;
+            curve.points[(std::size_t) seg].b15 = 2;
+            commit();
+            return;
+        }
+        if (seg > 0)
+        {
+            bending = seg;
+            bendStart = curve.points[(std::size_t) seg].tension;
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        const auto area = plot();
+        if (dragging >= 0)
+        {
+            auto& p = curve.points[(std::size_t) dragging];
+            const auto xMax = range();
+            auto x = (double) ((e.position.x - area.getX()) / area.getWidth()) * xMax;
+            const auto lo = dragging == 0 ? 0.0 : curve.points[(std::size_t) dragging - 1].x;
+            const auto hi = dragging + 1 < (int) curve.points.size() ? curve.points[(std::size_t) dragging + 1].x : (fixedXMax > 0.0 ? fixedXMax : 1.0e4);
+            p.x = dragging == 0 ? 0.0 : std::clamp (x, lo, hi);
+            p.y = std::clamp ((double) ((area.getBottom() - e.position.y) / area.getHeight()), 0.0, 1.0);
+            if (e.mods.isShiftDown()) // (snap the level to 1/8)
+                p.y = std::round (p.y * 8.0) / 8.0;
+            commit();
+        }
+        else if (bending > 0)
+        {
+            auto& p = curve.points[(std::size_t) bending];
+            const auto rising = p.y >= curve.points[(std::size_t) bending - 1].y;
+            const auto dy = (float) -e.getDistanceFromDragStartY() / 120.0f;
+            p.tension = std::clamp (bendStart + (rising ? -dy : dy), -1.0f, 1.0f);
+            p.b15 = p.tension == 0.0f ? 2 : p.tension > 0.0f ? 1 : 0xff;
+            commit();
+        }
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        dragging = bending = -1;
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (pointAt (e.position) >= 0)
+            return;
+        const auto area = plot();
+        const auto x = (double) ((e.position.x - area.getX()) / area.getWidth()) * range();
+        const auto y = std::clamp ((double) ((area.getBottom() - e.position.y) / area.getHeight()), 0.0, 1.0);
+        auto at = curve.points.begin();
+        while (at != curve.points.end() && at->x <= x)
+            ++at;
+        if (at == curve.points.begin())
+            return;
+        curve.points.insert (at, vfx::MapCurve::Point { x, y });
+        commit();
+    }
+
+private:
+    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (2.0f, 2.0f); }
+    double range() const
+    {
+        if (fixedXMax > 0.0)
+            return fixedXMax;
+        const auto last = curve.points.empty() ? 1.0 : curve.points.back().x;
+        return std::max (1.0, std::ceil (last * 1.25 * 4.0) / 4.0);
+    }
+    juce::Point<float> toScreen (const vfx::MapCurve::Point& p) const
+    {
+        const auto area = plot();
+        return { area.getX() + (float) (p.x / range()) * area.getWidth(), area.getBottom() - (float) p.y * area.getHeight() };
+    }
+    int pointAt (juce::Point<float> at) const
+    {
+        for (int i = (int) curve.points.size() - 1; i >= 0; --i)
+            if (toScreen (curve.points[(std::size_t) i]).getDistanceFrom (at) < 8.0f)
+                return i;
+        return -1;
+    }
+    int segmentAt (float sx) const
+    {
+        for (int i = 1; i < (int) curve.points.size(); ++i)
+            if (sx >= toScreen (curve.points[(std::size_t) i - 1]).x && sx < toScreen (curve.points[(std::size_t) i]).x)
+                return i;
+        return -1;
+    }
+    void stroke (juce::Graphics& g, const vfx::MapCurve& c, juce::Colour col, float width, bool fill) const
+    {
+        if (c.points.empty())
+            return;
+        const auto area = plot();
+        const auto xMax = range();
+        juce::Path path;
+        const auto steps = (int) area.getWidth() / 2;
+        for (int k = 0; k <= steps; ++k)
+        {
+            const auto x = xMax * k / steps;
+            const juce::Point<float> p (area.getX() + area.getWidth() * (float) k / (float) steps, area.getBottom() - (float) c.at (x) * area.getHeight());
+            if (k == 0)
+                path.startNewSubPath (p);
+            else
+                path.lineTo (p);
+        }
+        if (fill)
+        {
+            juce::Path under (path);
+            under.lineTo (area.getBottomRight());
+            under.lineTo (area.getBottomLeft());
+            under.closeSubPath();
+            g.setColour (col.withAlpha (0.12f));
+            g.fillPath (under);
+        }
+        g.setColour (col);
+        g.strokePath (path, juce::PathStrokeType (width));
+    }
+    void commit()
+    {
+        repaint();
+        if (onChange)
+            onChange (curve);
+    }
+
+    vfx::MapCurve curve;
+    int hover = -1, dragging = -1, bending = -1;
+    float bendStart = 0.0f;
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// VFX Keyboard Splitter: the zones, a page per map (keyboard, velocity), the current zone's map over the others
+
+juce::Colour zoneColour (int z)
+{
+    return juce::Colour::fromHSV (std::fmod ((float) z * 2.5f / 16.0f, 1.0f), 0.62f, 0.95f, 1.0f);
+}
+
+class KeyboardSplitterBody final : public Body
+{
+public:
+    using S = vfx::KeyboardSplitterSettings;
+
+    KeyboardSplitterBody()
+    {
+        for (int z = 0; z < 16; ++z)
+        {
+            auto& b = zoneButtons[(std::size_t) z];
+            b.setButtonText (juce::String (z + 1));
+            b.setClickingTogglesState (false);
+            b.onClick = [this, z] {
+                zone = z;
+                refreshControls();
+            };
+            addAndMakeVisible (b);
+        }
+        for (int p = 0; p < 2; ++p)
+        {
+            auto& b = pages[(std::size_t) p];
+            b.setButtonText (p == 0 ? tr ("Keyboard") : tr ("Velocity"));
+            b.setClickingTogglesState (false);
+            b.setColour (juce::TextButton::buttonOnColourId, theme::colour::accentMuted);
+            b.onClick = [this, p] { change ([p] (S& st) { st.page = p; }); };
+            addAndMakeVisible (b);
+        }
+        name.setTextToShowWhenEmpty (tr ("Zone {0}", { "1" }), theme::colour::textDisabled);
+        name.onReturnKey = name.onFocusLost = [this] {
+            change ([z = zone, text = name.getText().trim().toStdString()] (S& st) { st.zones[(std::size_t) z].name = text; });
+        };
+        ui::setHint (name, tr ("The zone's name (its output's name in the Patcher)"));
+        addAndMakeVisible (name);
+        flag.onClick = [this] {
+            change ([z = zone, on = flag.getToggleState()] (S& st) {
+                auto& zn = st.zones[(std::size_t) z];
+                (st.page == 0 ? zn.random : zn.absolute) = on;
+            });
+        };
+        addAndMakeVisible (flag);
+        transpose.caption = tr ("Transpose");
+        addAndMakeVisible (transpose);
+        for (auto [label, make] : std::initializer_list<std::pair<const char*, int>> { { TR_NOOP ("Whole keyboard"), 0 }, { TR_NOOP ("Clear"), 1 } })
+        {
+            auto* b = make == 0 ? &whole : &clear;
+            b->setButtonText (tr (label));
+            b->onClick = [this, make = make] {
+                change ([z = zone, make] (S& st) {
+                    auto& curve = st.page == 0 ? st.zones[(std::size_t) z].keyboard : st.zones[(std::size_t) z].velocity;
+                    curve = vfx::MapCurve::flat (make == 0 ? 1.0 : (st.page == 0 ? 0.0 : 1.0));
+                });
+            };
+            addAndMakeVisible (b);
+        }
+        ui::setHint (whole, tr ("The whole range at full level"));
+        ui::setHint (clear, tr ("Back to the map's default (the zone is off when both maps are)"));
+        editor.fixedXMax = 1.0;
+        editor.onChange = [this] (const vfx::MapCurve& c) {
+            change ([z = zone, c] (S& st) { (st.page == 0 ? st.zones[(std::size_t) z].keyboard : st.zones[(std::size_t) z].velocity) = c; });
+        };
+        editor.drawGrid = [this] (juce::Graphics& g, juce::Rectangle<float> area, double) {
+            g.setFont (theme::font (theme::type::caption));
+            if (settings.page == 0) // octaves: C0 … C10 (x = key / 132)
+                for (int key = 0; key <= 132; key += 12)
+                {
+                    const auto x = area.getX() + area.getWidth() * (float) key / 132.0f;
+                    g.setColour (theme::colour::border);
+                    g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
+                    g.setColour (theme::colour::textSecondary);
+                    if (key < 132)
+                        g.drawText ("C" + juce::String (key / 12), juce::Rectangle<float> (x + 3.0f, area.getBottom() - 16.0f, 40.0f, 14.0f), juce::Justification::centredLeft);
+                }
+            else
+                for (int q = 1; q < 4; ++q)
+                {
+                    g.setColour (theme::colour::border);
+                    g.drawVerticalLine ((int) (area.getX() + area.getWidth() * (float) q / 4.0f), area.getY(), area.getBottom());
+                }
+            for (int q = 1; q < 4; ++q)
+            {
+                g.setColour (theme::colour::border.withAlpha (0.5f));
+                g.drawHorizontalLine ((int) (area.getY() + area.getHeight() * (float) q / 4.0f), area.getX(), area.getRight());
+            }
+        };
+        addAndMakeVisible (editor);
+    }
+
+    void refresh (const std::vector<std::uint8_t>& fl) override
+    {
+        settings = vfx::parseKeyboardSplitter (fl).value_or (vfx::defaultKeyboardSplitter());
+        refreshControls();
+    }
+
+    int preferredHeight() const override { return 400; }
+    int preferredWidth() const override { return 860; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (12, 6);
+        auto top = area.removeFromTop (30);
+        for (auto& b : zoneButtons)
+            b.setBounds (top.removeFromLeft (30).reduced (1, 0));
+        top.removeFromLeft (12);
+        name.setBounds (top.removeFromLeft (150).reduced (0, 2));
+        top.removeFromLeft (12);
+        for (auto& b : pages)
+            b.setBounds (top.removeFromLeft (84).reduced (1, 0));
+        area.removeFromTop (6);
+        auto row = area.removeFromTop (64);
+        transpose.setBounds (row.removeFromLeft (70));
+        row.removeFromLeft (10);
+        flag.setBounds (row.removeFromLeft (220).withSizeKeepingCentre (220, 24));
+        clear.setBounds (row.removeFromRight (90).withSizeKeepingCentre (90, 26));
+        row.removeFromRight (6);
+        whole.setBounds (row.removeFromRight (130).withSizeKeepingCentre (130, 26));
+        area.removeFromTop (6);
+        editor.setBounds (area);
+    }
+
+private:
+    void refreshControls()
+    {
+        const auto& z = settings.zones[(std::size_t) zone];
+        for (int k = 0; k < 16; ++k)
+        {
+            auto& b = zoneButtons[(std::size_t) k];
+            const auto active = settings.zones[(std::size_t) k].active();
+            b.setColour (juce::TextButton::buttonColourId, active ? zoneColour (k).withAlpha (0.55f) : theme::colour::bg3);
+            b.setColour (juce::TextButton::buttonOnColourId, zoneColour (k));
+            b.setColour (juce::TextButton::textColourOffId, active ? theme::colour::textPrimary : theme::colour::textDisabled);
+            b.setToggleState (k == zone, juce::dontSendNotification);
+        }
+        for (int p = 0; p < 2; ++p)
+            pages[(std::size_t) p].setToggleState (p == settings.page, juce::dontSendNotification);
+        if (! name.hasKeyboardFocus (true))
+            name.setText (juce::String::fromUTF8 (z.name.c_str()), juce::dontSendNotification);
+        name.setTextToShowWhenEmpty (tr ("Zone {0}", { juce::String (zone + 1) }), theme::colour::textDisabled);
+        const auto keyboard = settings.page == 0;
+        flag.setButtonText (keyboard ? tr ("Random (the map is a probability)") : tr ("Absolute (the map sets the volume)"));
+        ui::setHint (flag, keyboard ? tr ("Random: each note goes to one of the random zones, picked by their keyboard maps")
+                                    : tr ("Absolute: the velocity map gives the volume instead of scaling the note's"));
+        flag.setToggleState (keyboard ? z.random : z.absolute, juce::dontSendNotification);
+        transpose.setVisible (keyboard);
+        editor.colour = zoneColour (zone);
+        editor.behind.clear();
+        for (int k = 0; k < 16; ++k)
+            if (k != zone && settings.zones[(std::size_t) k].active())
+                editor.behind.emplace_back (keyboard ? settings.zones[(std::size_t) k].keyboard : settings.zones[(std::size_t) k].velocity, zoneColour (k));
+        editor.setCurve (keyboard ? z.keyboard : z.velocity);
+        transpose.repaint();
+        repaint();
+    }
+
+    void change (std::function<void (S&)> f)
+    {
+        if (edit)
+            edit ([f] (std::vector<std::uint8_t>& fl) {
+                auto s = vfx::parseKeyboardSplitter (fl).value_or (vfx::defaultKeyboardSplitter());
+                f (s);
+                fl = vfx::writeKeyboardSplitter (s);
+            });
+    }
+
+    S settings = vfx::defaultKeyboardSplitter();
+    int zone = 0;
+    std::array<juce::TextButton, 16> zoneButtons;
+    std::array<juce::TextButton, 2> pages;
+    juce::TextEditor name;
+    juce::ToggleButton flag;
+    juce::TextButton whole, clear;
+    Knob transpose { intSpec (tr ("Transpose (semitones)"), -48, 48, 0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) std::lround (v)); }),
+                     [this] { return (double) settings.zones[(std::size_t) zone].transpose; },
+                     [this] (double v) { change ([z = zone, v] (S& st) { st.zones[(std::size_t) z].transpose = (int) std::lround (v); }); } };
+    CurveEditor editor;
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// VFX Envelope: 16 articulators (each for a note colour and key range), 5 targets, an envelope and an LFO each
+
+class EnvelopeBody final : public Body
+{
+public:
+    using E = vfx::EnvelopeSettings;
+
+    EnvelopeBody()
+    {
+        for (int g = 0; g < 16; ++g)
+        {
+            auto& b = articulatorButtons[(std::size_t) g];
+            b.setButtonText (juce::String (g + 1));
+            b.setClickingTogglesState (false);
+            b.setColour (juce::TextButton::buttonOnColourId, theme::colour::accent);
+            b.onClick = [this, g] { change ([g] (E& st) { st.shownArticulator = g; }); };
+            ui::setHint (b, tr ("Articulator {0}", { juce::String (g + 1) }));
+            addAndMakeVisible (b);
+        }
+        static const char* targetNames[] = { TR_NOOP ("Velocity"), TR_NOOP ("Pitch"), TR_NOOP ("Pan"), TR_NOOP ("Mod X"), TR_NOOP ("Mod Y") };
+        for (int t = 0; t < 5; ++t)
+        {
+            auto& b = targets[(std::size_t) t];
+            b.setButtonText (tr (targetNames[t]));
+            b.setClickingTogglesState (false);
+            b.setColour (juce::TextButton::buttonOnColourId, theme::colour::accentMuted);
+            b.onClick = [this, t] { change ([t] (E& st) { st.shownTarget = t; }); };
+            addAndMakeVisible (b);
+        }
+        for (int p = 0; p < 2; ++p)
+        {
+            auto& b = partTabs[(std::size_t) p];
+            b.setButtonText (p == 0 ? tr ("Envelope") : tr ("LFO"));
+            b.setClickingTogglesState (false);
+            b.setColour (juce::TextButton::buttonOnColourId, theme::colour::accentMuted);
+            b.onClick = [this, p] { change ([p] (E& st) { st.shownPart = p; }); };
+            addAndMakeVisible (b);
+        }
+        for (int c = 0; c < 16; ++c)
+            colour.addItem (tr ("Colour {0}", { juce::String (c + 1) }), c + 1);
+        colour.onChange = [this] { changeArticulator ([c = colour.getSelectedId() - 1] (E::Articulator& a) { a.colour = std::max (0, c); }); };
+        ui::setHint (colour, tr ("The note colour this articulator works on (the MIDI channel)"));
+        addAndMakeVisible (colour);
+        enable.setButtonText (tr ("Enable"));
+        enable.onClick = [this] { change ([on = enable.getToggleState()] (E& st) { st.enabled = on; }); };
+        ui::setHint (enable, tr ("Off: the notes pass unchanged"));
+        addAndMakeVisible (enable);
+        partOn.onClick = [this] {
+            changePart ([lfo = settings.shownPart == 1, on = partOn.getToggleState()] (E::Part& p) { (lfo ? p.lfoAmp : p.envelope).footer[1] = on ? -1 : 0; });
+        };
+        addAndMakeVisible (partOn);
+        tempo.setButtonText (tr ("Tempo"));
+        tempo.onClick = [this] {
+            changePart ([lfo = settings.shownPart == 1, on = tempo.getToggleState()] (E::Part& p) {
+                auto& f = (lfo ? p.lfoAmp : p.envelope).footer[0];
+                f = on ? (f | 1) : (f & ~1);
+            });
+        };
+        ui::setHint (tempo, tr ("Tempo: the time in beats (else in seconds)"));
+        addAndMakeVisible (tempo);
+        for (auto* k : { &low, &high, &base, &envLevel, &lfoLevel, &attack, &decay, &sustain, &release, &speed, &lfoTension, &skew, &pulseWidth })
+            addAndMakeVisible (k);
+        low.caption = tr ("Low");
+        high.caption = tr ("High");
+        base.caption = tr ("Base");
+        envLevel.caption = tr ("Env");
+        lfoLevel.caption = tr ("LFO");
+        attack.caption = tr ("Attack");
+        decay.caption = tr ("Decay");
+        sustain.caption = tr ("Sustain");
+        release.caption = tr ("Release");
+        speed.caption = tr ("Speed");
+        lfoTension.caption = tr ("Tension");
+        skew.caption = tr ("Skew");
+        pulseWidth.caption = tr ("Pulse width");
+        editor.onChange = [this] (const vfx::MapCurve& c) {
+            changePart ([lfo = settings.shownPart == 1, c] (E::Part& p) {
+                auto& curve = lfo ? p.lfoAmp : p.envelope;
+                const auto footer = curve.footer;
+                curve = c;
+                curve.footer = footer;
+                // the sustain / decay / loop points stay inside the curve
+                for (const auto k : { 2, 3, 4 })
+                    if (curve.footer[(std::size_t) k] >= (int) curve.points.size())
+                        curve.footer[(std::size_t) k] = (int) curve.points.size() - 1;
+            });
+        };
+        addAndMakeVisible (editor);
+    }
+
+    void refresh (const std::vector<std::uint8_t>& fl) override
+    {
+        settings = vfx::parseEnvelope (fl).value_or (vfx::defaultEnvelope());
+        const auto& a = articulator();
+        const auto& p = part();
+        for (int g = 0; g < 16; ++g)
+        {
+            const auto& ag = settings.articulators[(std::size_t) g];
+            const auto used = std::any_of (ag.parts.begin(), ag.parts.end(), [] (const E::Part& q) { return q.lfoOn() || (q.envOn() && ! neutral (q)); });
+            articulatorButtons[(std::size_t) g].setColour (juce::TextButton::textColourOffId, used ? theme::colour::textPrimary : theme::colour::textDisabled);
+            articulatorButtons[(std::size_t) g].setToggleState (g == settings.shownArticulator, juce::dontSendNotification);
+        }
+        for (int t = 0; t < 5; ++t)
+        {
+            const auto& q = a.parts[(std::size_t) t];
+            targets[(std::size_t) t].setToggleState (t == settings.shownTarget, juce::dontSendNotification);
+            targets[(std::size_t) t].setColour (juce::TextButton::textColourOffId,
+                                                q.lfoOn() || (q.envOn() && ! neutral (q)) ? theme::colour::accent : theme::colour::textPrimary);
+        }
+        for (int k = 0; k < 2; ++k)
+            partTabs[(std::size_t) k].setToggleState (k == settings.shownPart, juce::dontSendNotification);
+        colour.setSelectedId (a.colour + 1, juce::dontSendNotification);
+        enable.setToggleState (settings.enabled, juce::dontSendNotification);
+        const auto lfo = settings.shownPart == 1;
+        const auto& curve = lfo ? p.lfoAmp : p.envelope;
+        partOn.setButtonText (lfo ? tr ("LFO on") : tr ("Envelope on"));
+        partOn.setToggleState (lfo ? p.lfoOn() : p.envOn(), juce::dontSendNotification);
+        tempo.setToggleState ((curve.footer[0] & 1) != 0, juce::dontSendNotification);
+        for (auto* k : { &attack, &decay, &sustain, &release })
+            k->setVisible (! lfo);
+        for (auto* k : { &speed, &lfoTension, &skew, &pulseWidth })
+            k->setVisible (lfo);
+        editor.bipolar = lfo || settings.shownTarget != E::velocity;
+        editor.sustainPoint = curve.footer[4];
+        editor.setCurve (curve);
+        for (auto* c : getChildren())
+            if (dynamic_cast<Knob*> (c) != nullptr)
+                c->repaint();
+        repaint();
+    }
+
+    int preferredHeight() const override { return 470; }
+    int preferredWidth() const override { return 860; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (12, 6);
+        auto top = area.removeFromTop (30);
+        for (auto& b : articulatorButtons)
+            b.setBounds (top.removeFromLeft (28).reduced (1, 0));
+        top.removeFromLeft (14);
+        for (auto& b : targets)
+            b.setBounds (top.removeFromLeft (72).reduced (1, 0));
+        enable.setBounds (top.removeFromRight (90));
+        area.removeFromTop (8);
+        auto row = area.removeFromTop (70);
+        auto left = row.removeFromLeft (130);
+        colour.setBounds (left.removeFromTop (26));
+        for (auto* k : { &low, &high })
+            k->setBounds (row.removeFromLeft (62));
+        row.removeFromLeft (14);
+        for (auto* k : { &base, &envLevel, &lfoLevel })
+            k->setBounds (row.removeFromLeft (62));
+        area.removeFromTop (8);
+        auto parts = area.removeFromTop (28);
+        for (auto& b : partTabs)
+            b.setBounds (parts.removeFromLeft (100).reduced (1, 0));
+        parts.removeFromLeft (14);
+        partOn.setBounds (parts.removeFromLeft (140));
+        tempo.setBounds (parts.removeFromLeft (90));
+        area.removeFromTop (6);
+        auto knobs = area.removeFromBottom (70);
+        for (auto* k : { &attack, &decay, &sustain, &release })
+            k->setBounds (knobs.withWidth (62).translated ((int) (k == &attack ? 0 : k == &decay ? 1 : k == &sustain ? 2 : 3) * 66, 0));
+        for (auto* k : { &speed, &lfoTension, &skew, &pulseWidth })
+            k->setBounds (knobs.withWidth (62).translated ((int) (k == &speed ? 0 : k == &lfoTension ? 1 : k == &skew ? 2 : 3) * 66, 0));
+        area.removeFromBottom (6);
+        editor.setBounds (area);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (theme::colour::textSecondary);
+        g.setFont (theme::font (theme::type::caption));
+        const auto& p = part();
+        const auto lfo = settings.shownPart == 1;
+        const auto unit = ((lfo ? p.lfoAmp : p.envelope).footer[0] & 1) != 0 ? tr ("beats") : tr ("seconds");
+        g.drawText (tr ("Time in {0}. Drag a point, double-click to add one, right-click to remove it, drag a segment to bend it.", { unit }),
+                    editor.getBounds().translated (0, editor.getHeight() + 2).withHeight (14), juce::Justification::centredLeft);
+    }
+
+private:
+    static bool neutral (const E::Part& p)
+    {
+        return std::all_of (p.envelope.points.begin(), p.envelope.points.end(), [] (const vfx::MapCurve::Point& q) { return std::abs (q.y - 0.5) < 1e-6; })
+               && std::abs (p.base - 0.5f) < 1e-6f;
+    }
+    const E::Articulator& articulator() const { return settings.articulators[(std::size_t) settings.shownArticulator]; }
+    const E::Part& part() const { return articulator().parts[(std::size_t) settings.shownTarget]; }
+
+    void change (std::function<void (E&)> f)
+    {
+        if (edit)
+            edit ([f] (std::vector<std::uint8_t>& fl) {
+                auto s = vfx::parseEnvelope (fl).value_or (vfx::defaultEnvelope());
+                f (s);
+                fl = vfx::writeEnvelope (s);
+            });
+    }
+    void changeArticulator (std::function<void (E::Articulator&)> f)
+    {
+        change ([f] (E& st) { f (st.articulators[(std::size_t) st.shownArticulator]); });
+    }
+    void changePart (std::function<void (E::Part&)> f)
+    {
+        change ([f] (E& st) { f (st.articulators[(std::size_t) st.shownArticulator].parts[(std::size_t) st.shownTarget]); });
+    }
+    Knob partKnob (const juce::String& hint, int lo, int hi, int def, std::function<int& (E::Part&)> field, std::function<juce::String (double)> text = nullptr)
+    {
+        return Knob (intSpec (hint, lo, hi, def, std::move (text)),
+                     [this, field] { auto p = part(); return (double) field (p); },
+                     [this, field] (double v) { changePart ([field, v] (E::Part& p) { field (p) = (int) std::lround (v); }); });
+    }
+    Knob levelKnob (const juce::String& hint, int lo, int hi, int def, float E::Part::*field)
+    {
+        return Knob (intSpec (hint, lo, hi, def, [lo] (double v) { return lo < 0 ? juce::String (v / 2.56, 0) + "%" : juce::String (v / 2.56, 0) + "%"; }),
+                     [this, field] { return (double) std::lround (part().*field * 256.0f); },
+                     [this, field] (double v) { changePart ([field, v] (E::Part& p) { p.*field = (float) (v / 256.0); }); });
+    }
+    static juce::String keyText (double v)
+    {
+        const auto k = (int) std::lround (v) - 1; // (FL stores the key + 1)
+        return k < 0 ? juce::String ("-") : juce::MidiMessage::getMidiNoteName (std::clamp (k, 0, 131), true, true, 0);
+    }
+
+    E settings = vfx::defaultEnvelope();
+    std::array<juce::TextButton, 16> articulatorButtons;
+    std::array<juce::TextButton, 5> targets;
+    std::array<juce::TextButton, 2> partTabs;
+    juce::ComboBox colour;
+    juce::ToggleButton enable, partOn, tempo;
+    Knob low { intSpec (tr ("Low key: the lowest note this articulator works on"), 0, 132, 0, keyText),
+               [this] { return (double) articulator().low; },
+               [this] (double v) { changeArticulator ([v] (E::Articulator& a) { a.low = (int) std::lround (v); a.high = std::max (a.high, a.low); }); } };
+    Knob high { intSpec (tr ("High key: the highest note this articulator works on"), 0, 132, 132, keyText),
+                [this] { return (double) articulator().high; },
+                [this] (double v) { changeArticulator ([v] (E::Articulator& a) { a.high = (int) std::lround (v); a.low = std::min (a.low, a.high); }); } };
+    Knob base = levelKnob (tr ("Base level"), 0, 256, 128, &E::Part::base);
+    Knob envLevel = levelKnob (tr ("Envelope level"), -256, 256, 256, &E::Part::env);
+    Knob lfoLevel = levelKnob (tr ("LFO level"), -256, 256, 256, &E::Part::lfo);
+    Knob attack = partKnob (tr ("Attack: scales the time up to the decay point"), 0, 256, 128, [] (E::Part& p) -> int& { return p.adsr[0]; });
+    Knob decay = partKnob (tr ("Decay: scales the time up to the sustain point"), 0, 256, 128, [] (E::Part& p) -> int& { return p.adsr[1]; });
+    Knob sustain = partKnob (tr ("Sustain: raises or lowers the sustain level"), -256, 256, 0, [] (E::Part& p) -> int& { return p.adsr[2]; });
+    Knob release = partKnob (tr ("Release: scales the time after the sustain point"), 0, 256, 128, [] (E::Part& p) -> int& { return p.adsr[3]; });
+    Knob speed = partKnob (tr ("LFO speed"), 0, 65536, 40898, [] (E::Part& p) -> int& { return p.speed; }, [] (double v) {
+        const auto rate = (std::pow (10001.0, v / 65536.0) - 1.0) / 625.0;
+        return juce::String (rate, rate < 1.0 ? 2 : 1);
+    });
+    Knob lfoTension = partKnob (tr ("LFO tension"), -128, 128, 0, [] (E::Part& p) -> int& { return p.tension; });
+    Knob skew = partKnob (tr ("LFO skew"), -128, 128, 0, [] (E::Part& p) -> int& { return p.skew; });
+    Knob pulseWidth = partKnob (tr ("LFO pulse width"), -128, 128, 0, [] (E::Part& p) -> int& { return p.pulseWidth; });
+    CurveEditor editor;
+};
+
 // A kind LYNX does not edit yet: says so (its notes pass through)
 class PendingBody final : public Body
 {
@@ -676,6 +1344,8 @@ std::unique_ptr<Body> makeBody (vfx::Kind kind)
         case vfx::Kind::keyMapper: return std::make_unique<KeyMapperBody>();
         case vfx::Kind::colorMapper: return std::make_unique<ColorMapperBody>();
         case vfx::Kind::levelScaler: return std::make_unique<LevelScalerBody>();
+        case vfx::Kind::keyboardSplitter: return std::make_unique<KeyboardSplitterBody>();
+        case vfx::Kind::envelope: return std::make_unique<EnvelopeBody>();
         default: break;
     }
     return std::make_unique<PendingBody>();

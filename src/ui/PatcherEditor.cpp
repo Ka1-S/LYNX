@@ -823,8 +823,15 @@ private:
         {
             const auto kind = vfx::kindOf (node.channel);
             const auto shown = kind ? patcher::shownMidiOutputs (d, n) : 1;
+            std::optional<vfx::KeyboardSplitterSettings> zones; // (the Keyboard Splitter's outputs carry the zones' names)
+            if (kind == vfx::Kind::keyboardSplitter)
+                if (const auto st = vfx::readState (node.channel.pluginState))
+                    zones = vfx::parseKeyboardSplitter (st->fl);
             for (int o = 0; o < shown; ++o)
-                add (true, PatchWire::Kind::midi, o, kind ? juce::String (vfx::outputName (*kind, o)) : tr ("MIDI out"));
+                add (true, PatchWire::Kind::midi, o,
+                     zones && o < 16 && ! zones->zones[(std::size_t) o].name.empty() ? juce::String::fromUTF8 (zones->zones[(std::size_t) o].name.c_str())
+                     : kind ? juce::String (vfx::outputName (*kind, o))
+                            : tr ("MIDI out"));
         }
         for (int i = 0; i < ports.audioIns; ++i)
             add (false, PatchWire::Kind::audio, i, i == 0 ? tr ("In") : tr ("Side-chain"));

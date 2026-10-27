@@ -6,6 +6,7 @@
 #include <cstring>
 #include <functional>
 
+#include "core/FlSynths.h"
 #include "core/Song.h"
 #include "flp/Flp.h"
 
@@ -54,6 +55,7 @@ class Handoff
 {
 public:
     explicit Handoff (T initial) : active (std::make_unique<T> (std::move (initial))) {}
+    explicit Handoff (std::unique_ptr<T> initial) : active (std::move (initial)) {}
     ~Handoff()
     {
         delete pending.exchange (nullptr);
@@ -63,6 +65,11 @@ public:
     {
         delete retired.exchange (nullptr);
         delete pending.exchange (new T (std::move (value)));
+    }
+    void publish (std::unique_ptr<T> value)
+    {
+        delete retired.exchange (nullptr);
+        delete pending.exchange (value.release());
     }
     // audio thread: true when new settings arrived
     bool take() noexcept
@@ -341,6 +348,402 @@ double levelScale (const LevelScalerSettings& s, int tab, double x, double lo, d
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// FL's mapping curves and VFX Keyboard Splitter (REA_rodada164b §Keyboard Splitter)
+
+MapCurve MapCurve::flat (double level)
+{
+    MapCurve m;
+    m.points.push_back ({ 0.0, level });
+    m.points.push_back ({ 1.0, level });
+    return m;
+}
+
+double MapCurve::at (double x) const noexcept
+{
+    if (points.empty())
+        return 0.0;
+    if (x <= points.front().x)
+        return points.front().y;
+    for (std::size_t i = 1; i < points.size(); ++i)
+        if (x < points[i].x)
+        {
+            const auto& a = points[i - 1];
+            const auto& b = points[i];
+            if (b.curve == 2) // hold: the previous level up to this point
+                return a.y;
+            auto f = b.x > a.x ? (x - a.x) / (b.x - a.x) : 1.0;
+            if (b.tension != 0.0f) // (the automation clips' bend, FL's sign)
+                f = std::pow (f, std::pow (2.0, (double) -b.tension * 3.0));
+            return a.y + (b.y - a.y) * f;
+        }
+    return points.back().y;
+}
+
+bool MapCurve::isFlat (double level) const noexcept
+{
+    return std::all_of (points.begin(), points.end(), [level] (const Point& p) { return std::abs (p.y - level) < 1e-9; });
+}
+
+namespace
+{
+bool readMap (Reader& r, MapCurve& m)
+{
+    r.i32(); // kind (3)
+    const auto version = r.i32();
+    const auto n = r.i32();
+    if (r.failed || n < 0 || n > 4096 || version < 2 || version > 3)
+        return false;
+    m.points.clear();
+    double x = 0.0;
+    for (int k = 0; k < n; ++k)
+    {
+        MapCurve::Point p;
+        const auto dx = r.get<double>();
+        x += std::isfinite (dx) ? dx : 0.0;
+        p.x = x;
+        p.y = r.get<double>();
+        if (! std::isfinite (p.y))
+            p.y = 0.0;
+        p.tension = r.get<float>();
+        if (! std::isfinite (p.tension))
+            p.tension = 0.0f;
+        p.curve = r.get<std::uint8_t>();
+        p.b13 = r.get<std::uint8_t>();
+        p.b14 = r.get<std::uint8_t>();
+        p.b15 = r.get<std::uint8_t>();
+        m.points.push_back (p);
+    }
+    for (auto& f : m.footer)
+        f = r.i32();
+    return ! r.failed;
+}
+
+void writeMap (std::vector<std::uint8_t>& out, const MapCurve& m, int kind = 3)
+{
+    put<std::int32_t> (out, kind);
+    put<std::int32_t> (out, 3);
+    put<std::int32_t> (out, (std::int32_t) m.points.size());
+    double x = 0.0;
+    for (const auto& p : m.points)
+    {
+        put<double> (out, p.x - x);
+        x = p.x;
+        put<double> (out, p.y);
+        put<float> (out, p.tension);
+        put<std::uint8_t> (out, p.curve);
+        put<std::uint8_t> (out, p.b13);
+        put<std::uint8_t> (out, p.b14);
+        put<std::uint8_t> (out, p.b15); // (FL's shape flag: 2 straight, 1 / 0xff bent up / down)
+    }
+    for (const auto f : m.footer)
+        put<std::int32_t> (out, f);
+}
+} // namespace
+
+KeyboardSplitterSettings defaultKeyboardSplitter()
+{
+    KeyboardSplitterSettings s;
+    s.zones[0].keyboard = MapCurve::flat (1.0); // zone 1: the whole keyboard
+    return s;
+}
+
+std::optional<KeyboardSplitterSettings> parseKeyboardSplitter (const std::vector<std::uint8_t>& fl)
+{
+    Reader r { fl.data(), fl.size() };
+    KeyboardSplitterSettings s;
+    s.header = r.u32();
+    if (r.failed || s.header >= 0x100004 || (s.header & 0xfffff) == 0)
+        return std::nullopt;
+    if ((s.header >> 20) != 0)
+        s.page = std::clamp ((int) r.get<std::uint8_t>(), 0, 1);
+    for (auto& z : s.zones)
+    {
+        if (! readMap (r, z.keyboard) || ! readMap (r, z.velocity))
+            return std::nullopt;
+        z.transpose = std::clamp (r.i32(), -48, 48);
+        z.absolute = r.get<std::uint8_t>() != 0;
+        z.random = r.get<std::uint8_t>() != 0;
+        // name: u8 length (255: a u32 follows), UTF-16 characters
+        std::uint32_t length = r.get<std::uint8_t>();
+        if (length == 255)
+            length = r.u32();
+        if (r.failed || length > 4096 || length * 2 > r.left())
+            return std::nullopt;
+        std::u16string name;
+        for (std::uint32_t k = 0; k < length; ++k)
+            name.push_back ((char16_t) r.get<std::uint16_t>());
+        z.name.clear();
+        for (std::size_t k = 0; k < name.size(); ++k)
+        {
+            std::uint32_t c = name[k];
+            if (c >= 0xd800 && c < 0xdc00 && k + 1 < name.size())
+                c = 0x10000 + ((c - 0xd800) << 10) + ((std::uint32_t) name[++k] - 0xdc00);
+            if (c < 0x80)
+                z.name.push_back ((char) c);
+            else if (c < 0x800)
+                z.name += { (char) (0xc0 | (c >> 6)), (char) (0x80 | (c & 0x3f)) };
+            else if (c < 0x10000)
+                z.name += { (char) (0xe0 | (c >> 12)), (char) (0x80 | ((c >> 6) & 0x3f)), (char) (0x80 | (c & 0x3f)) };
+            else
+                z.name += { (char) (0xf0 | (c >> 18)), (char) (0x80 | ((c >> 12) & 0x3f)), (char) (0x80 | ((c >> 6) & 0x3f)), (char) (0x80 | (c & 0x3f)) };
+        }
+    }
+    if (r.failed)
+        return std::nullopt;
+    return s;
+}
+
+std::vector<std::uint8_t> writeKeyboardSplitter (const KeyboardSplitterSettings& s)
+{
+    std::vector<std::uint8_t> out;
+    put<std::uint32_t> (out, 0x100003);
+    put<std::uint8_t> (out, (std::uint8_t) std::clamp (s.page, 0, 1));
+    for (const auto& z : s.zones)
+    {
+        writeMap (out, z.keyboard);
+        writeMap (out, z.velocity);
+        put<std::int32_t> (out, z.transpose);
+        put<std::uint8_t> (out, z.absolute ? 1 : 0);
+        put<std::uint8_t> (out, z.random ? 1 : 0);
+        std::u16string name;
+        for (std::size_t k = 0; k < z.name.size();)
+        {
+            const auto b = (std::uint8_t) z.name[k];
+            std::uint32_t c = b;
+            int more = b >= 0xf0 ? 3 : b >= 0xe0 ? 2 : b >= 0xc0 ? 1 : 0;
+            c = more == 3 ? b & 0x07 : more == 2 ? b & 0x0f : more == 1 ? b & 0x1f : b;
+            ++k;
+            for (; more > 0 && k < z.name.size(); --more, ++k)
+                c = (c << 6) | ((std::uint8_t) z.name[k] & 0x3f);
+            if (c >= 0x10000)
+            {
+                c -= 0x10000;
+                name.push_back ((char16_t) (0xd800 + (c >> 10)));
+                name.push_back ((char16_t) (0xdc00 + (c & 0x3ff)));
+            }
+            else
+                name.push_back ((char16_t) c);
+        }
+        if (name.size() < 255)
+            put<std::uint8_t> (out, (std::uint8_t) name.size());
+        else
+        {
+            put<std::uint8_t> (out, 255);
+            put<std::uint32_t> (out, (std::uint32_t) name.size());
+        }
+        for (const auto c : name)
+            put<std::uint16_t> (out, (std::uint16_t) c);
+    }
+    return out;
+}
+
+double splitterGain (double m) noexcept
+{
+    return m >= 1.0 ? 1.0 : (std::pow (11.0, m) - 1.0) / 10.0;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// VFX Envelope (REA_rodada164b §Envelope)
+
+namespace
+{
+MapCurve curveOf (std::initializer_list<std::tuple<double, double, float>> points, std::array<std::int32_t, 5> footer)
+{
+    MapCurve m;
+    for (const auto& [x, y, t] : points)
+        m.points.push_back ({ x, y, t });
+    m.footer = footer;
+    return m;
+}
+} // namespace
+
+EnvelopeSettings defaultEnvelope()
+{
+    EnvelopeSettings s;
+    for (int g = 0; g < 16; ++g)
+    {
+        auto& a = s.articulators[(std::size_t) g];
+        for (int t = 0; t < EnvelopeSettings::targetCount; ++t)
+        {
+            auto& p = a.parts[(std::size_t) t];
+            p.lfoAmp = curveOf ({ { 0.0, 0.5, 0.0f }, { 1.0, 0.5, 0.0f }, { 1.25, 1.0, 0.0f }, { 2.25, 0.5, 0.0f } }, { 0, 0, -1, -1, -1 });
+            if (t == EnvelopeSettings::velocity)
+            {
+                p.base = 0.0f;
+                // a volume envelope: attack, a peak, sustain at half (= the note's own level), release
+                p.envelope = curveOf ({ { 0.0, 0.0, 0.0f }, { 0.75, 1.0, 0.2f }, { 2.25, 0.5, 0.2f }, { 2.5, 0.0, 0.2f } },
+                                      { 0, g == 0 ? -1 : 0, 1, -1, 2 });
+            }
+            else
+            {
+                p.base = 0.5f;
+                p.env = t == EnvelopeSettings::pitch ? 0.25f : 1.0f;
+                p.envelope = curveOf ({ { 0.0, 0.5, 0.0f }, { 0.25, 0.5, 0.0f } }, { 1, -1, -1, -1, -1 }); // (on, neutral)
+            }
+        }
+    }
+    return s;
+}
+
+namespace
+{
+bool readPart (Reader& r, EnvelopeSettings::Part& p)
+{
+    p.version = r.i32();
+    p.base = r.get<float>();
+    p.env = r.get<float>();
+    p.lfo = r.get<float>();
+    if (! readMap (r, p.envelope))
+        return false;
+    for (auto& k : p.adsr)
+        k = r.i32();
+    if (! readMap (r, p.lfoAmp))
+        return false;
+    p.speed = r.i32();
+    p.tension = r.i32();
+    p.skew = r.i32();
+    p.pulseWidth = r.i32();
+    p.phase = p.version >= 3 ? r.i32() : 0;
+    for (auto* f : { &p.base, &p.env, &p.lfo })
+        if (! std::isfinite (*f))
+            *f = 0.0f;
+    return ! r.failed;
+}
+
+void writePart (std::vector<std::uint8_t>& out, const EnvelopeSettings::Part& p)
+{
+    put<std::int32_t> (out, 3);
+    put<float> (out, p.base);
+    put<float> (out, p.env);
+    put<float> (out, p.lfo);
+    writeMap (out, p.envelope, 1);
+    for (const auto k : p.adsr)
+        put<std::int32_t> (out, k);
+    writeMap (out, p.lfoAmp, 2);
+    for (const auto v : { p.speed, p.tension, p.skew, p.pulseWidth, p.phase })
+        put<std::int32_t> (out, v);
+}
+
+void writeChunk (std::vector<std::uint8_t>& out, std::int32_t id, const std::vector<std::uint8_t>& data)
+{
+    put<std::int32_t> (out, id);
+    put<std::int64_t> (out, (std::int64_t) data.size());
+    out.insert (out.end(), data.begin(), data.end());
+}
+} // namespace
+
+std::optional<EnvelopeSettings> parseEnvelope (const std::vector<std::uint8_t>& fl)
+{
+    Reader r { fl.data(), fl.size() };
+    auto s = defaultEnvelope();
+    s.header = r.u32();
+    if (r.failed || s.header >= 0x10004)
+        return std::nullopt;
+    std::vector<std::int32_t> params;
+    int group = 0, target = 0;
+    while (r.left() >= 12)
+    {
+        const auto id = r.i32();
+        const auto size = r.get<std::int64_t>();
+        if (size < 0 || (std::uint64_t) size > r.left())
+            return std::nullopt;
+        const auto end = r.pos + (std::size_t) size;
+        Reader c { fl.data(), end, r.pos };
+        switch (id)
+        {
+            case 1003:
+                s.enabled = c.i32() != 0;
+                s.shownArticulator = std::clamp (c.i32(), 0, 15);
+                s.shownTarget = std::clamp (c.i32(), 0, 4);
+                s.shownPart = std::clamp (c.i32(), 0, 1);
+                break;
+            case 1008:
+                params.clear();
+                while (c.left() >= 4)
+                    params.push_back (c.i32());
+                break;
+            case 1007:
+                for (auto& t : s.toggles)
+                    t = c.left() >= 4 ? c.i32() : 0;
+                break;
+            case 1004:
+            {
+                group = std::clamp (c.i32(), 0, 15);
+                auto& a = s.articulators[(std::size_t) group];
+                a.colour = std::clamp (c.i32(), 0, 15);
+                a.low = std::clamp (c.i32(), 0, 132);
+                a.high = std::clamp (c.i32(), 0, 132);
+                break;
+            }
+            case 1005:
+                group = std::clamp (c.i32(), 0, 15);
+                target = std::clamp (c.i32(), 0, 4);
+                break;
+            case 1006:
+                if (! readPart (c, s.articulators[(std::size_t) group].parts[(std::size_t) target]))
+                    return std::nullopt;
+                break;
+            default: break;
+        }
+        r.pos = end;
+    }
+    if (r.failed)
+        return std::nullopt;
+    // the parameter values set the base / envelope / LFO levels (FL pushes them after loading)
+    if (params.size() >= 880)
+        for (int g = 0; g < 16; ++g)
+            for (int t = 0; t < 5; ++t)
+            {
+                auto& p = s.articulators[(std::size_t) g].parts[(std::size_t) t];
+                const auto at = (std::size_t) ((g * 5 + t) * 11);
+                p.base = std::clamp (params[at + 8], 0, 256) / 256.0f;
+                p.env = std::clamp (params[at + 9], -256, 256) / 256.0f;
+                p.lfo = std::clamp (params[at + 10], -256, 256) / 256.0f;
+            }
+    return s;
+}
+
+std::vector<std::uint8_t> writeEnvelope (const EnvelopeSettings& s)
+{
+    std::vector<std::uint8_t> out, chunk;
+    put<std::uint32_t> (out, 0x10003);
+    for (const auto v : { s.enabled ? 1 : 0, s.shownArticulator, s.shownTarget, s.shownPart })
+        put<std::int32_t> (chunk, v);
+    writeChunk (out, 1003, chunk);
+    chunk.clear();
+    for (const auto& a : s.articulators)
+        for (const auto& p : a.parts)
+            for (const auto v : { p.adsr[0], p.adsr[1], p.adsr[2], p.adsr[3], p.speed, p.tension, p.skew, p.pulseWidth,
+                                  (std::int32_t) std::lround (p.base * 256.0f), (std::int32_t) std::lround (p.env * 256.0f),
+                                  (std::int32_t) std::lround (p.lfo * 256.0f) })
+                put<std::int32_t> (chunk, v);
+    writeChunk (out, 1008, chunk);
+    chunk.clear();
+    for (const auto t : s.toggles)
+        put<std::int32_t> (chunk, t);
+    writeChunk (out, 1007, chunk);
+    for (int g = 0; g < 16; ++g)
+    {
+        const auto& a = s.articulators[(std::size_t) g];
+        chunk.clear();
+        for (const auto v : { g, a.colour, a.low, a.high })
+            put<std::int32_t> (chunk, v);
+        writeChunk (out, 1004, chunk);
+        for (int t = 0; t < 5; ++t)
+        {
+            chunk.clear();
+            for (const auto v : { g, t, 0 })
+                put<std::int32_t> (chunk, v);
+            writeChunk (out, 1005, chunk);
+            chunk.clear();
+            writePart (chunk, a.parts[(std::size_t) t]);
+            writeChunk (out, 1006, chunk);
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Presets
 
 std::vector<Preset> builtInPresets (Kind kind)
@@ -463,6 +866,8 @@ std::vector<std::uint8_t> defaultState (Kind kind)
         case Kind::keyMapper: return writeKeyMapper (defaultKeyMapper());
         case Kind::colorMapper: return writeColorMapper (defaultColorMapper());
         case Kind::levelScaler: return writeLevelScaler (defaultLevelScaler());
+        case Kind::keyboardSplitter: return writeKeyboardSplitter (defaultKeyboardSplitter());
+        case Kind::envelope: return writeEnvelope (defaultEnvelope());
         default: break;
     }
     return {};
@@ -890,6 +1295,429 @@ private:
 };
 } // namespace
 
+namespace
+{
+// Each note on every zone whose keyboard × velocity level is above zero, on that zone's output (FL: the level
+// scales the note's volume, or replaces it with Absolute; Random zones play one of them, picked by their keyboard
+// level). LYNX works in velocities: vol = (11^(1.28 v) − 1) / 10 both ways.
+class KeyboardSplitter final : public Base<KeyboardSplitterSettings>
+{
+public:
+    explicit KeyboardSplitter (KeyboardSplitterSettings s) : Base (std::move (s)) {}
+    Kind kind() const noexcept override { return Kind::keyboardSplitter; }
+    bool configure (const std::vector<std::uint8_t>& fl) override
+    {
+        auto s = parseKeyboardSplitter (fl);
+        if (! s)
+            return false;
+        publish (std::move (*s));
+        return true;
+    }
+    void process (const Event* in, int count, int, const Transport&, EventList& out) noexcept override
+    {
+        const auto& s = current();
+        for (int i = 0; i < count; ++i)
+        {
+            const auto& e = in[i];
+            if (e.type == Event::Type::off)
+            {
+                voices.release (e.id, e.offset, e.voice.release, out);
+                continue;
+            }
+            if (e.type != Event::Type::on)
+                continue;
+            const auto x = ((double) e.voice.key + e.voice.cents / 100.0) / 132.0;
+            const auto velocity = std::min (1.0, (double) e.voice.velocity);
+            std::array<double, 16> w {};
+            bool anyRandom = false;
+            for (int z = 0; z < 16; ++z)
+            {
+                const auto& zone = s.zones[(std::size_t) z];
+                if (! zone.active())
+                    continue;
+                w[(std::size_t) z] = splitterGain (zone.keyboard.at (x));
+                anyRandom = anyRandom || zone.random;
+            }
+            if (anyRandom) // one weighted pick among the random zones, which then plays at full level
+            {
+                double total = 0.0;
+                for (int z = 0; z < 16; ++z)
+                    if (s.zones[(std::size_t) z].random && s.zones[(std::size_t) z].active())
+                        total += w[(std::size_t) z];
+                const auto r = random() * total;
+                int chosen = -1;
+                double acc = 0.0;
+                for (int z = 0; z < 16; ++z)
+                    if (s.zones[(std::size_t) z].random && s.zones[(std::size_t) z].active() && w[(std::size_t) z] > 0.0)
+                    {
+                        if (acc <= r)
+                            chosen = z;
+                        acc += w[(std::size_t) z];
+                        w[(std::size_t) z] = 0.0;
+                    }
+                if (chosen >= 0) // (FL then falls back on zone 1; LYNX plays no random zone)
+                    w[(std::size_t) chosen] = 1.0;
+            }
+            const auto volumeIn = velocityToVolume (velocity);
+            for (int z = 0; z < 16; ++z)
+            {
+                const auto& zone = s.zones[(std::size_t) z];
+                if (w[(std::size_t) z] <= 0.0)
+                    continue;
+                const auto level = w[(std::size_t) z] * splitterGain (zone.velocity.at (velocity));
+                if (level <= 1e-5)
+                    continue;
+                auto v = e.voice;
+                v.velocity = (float) volumeToVelocity (zone.absolute ? level : volumeIn * level);
+                v.key = e.voice.key + zone.transpose;
+                if (v.key < 0 || v.key > 127)
+                    continue;
+                if (const auto id = voices.add (e.id, z, v); id >= 0)
+                    out.add (onEvent (e.offset, z, id, v));
+            }
+        }
+    }
+
+private:
+    static double velocityToVolume (double v) noexcept { return (std::pow (11.0, 1.28 * v) - 1.0) / 10.0; }
+    static double volumeToVelocity (double vol) noexcept { return std::clamp (std::log (10.0 * vol + 1.0) / std::log (11.0) / 1.28, 0.0, 1.0); }
+    double random() noexcept
+    {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        return (double) (seed >> 8) / 16777216.0;
+    }
+    std::uint32_t seed = 0x12bd6aau;
+};
+} // namespace
+
+namespace
+{
+// An FL curve as the Envelope Controller's (core/FlSynths.h): accumulated points, LYNX's tension sign on the segment
+// starting at a point, a hold as a step
+void toArticulator (const MapCurve& m, ControllerArticulator& a)
+{
+    a.count = 0;
+    a.sustain = -1;
+    a.decayPoint = -1;
+    const auto sustain = m.footer[4], decay = m.footer[2];
+    for (std::size_t i = 0; i < m.points.size() && a.count < (int) a.time.size(); ++i)
+    {
+        const auto& p = m.points[i];
+        if (i > 0)
+        {
+            if (p.curve == 2 && p.x > m.points[i - 1].x && a.count + 1 < (int) a.time.size())
+            {
+                a.time[(std::size_t) a.count] = (float) p.x;
+                a.level[(std::size_t) a.count] = a.level[(std::size_t) a.count - 1];
+                a.tension[(std::size_t) a.count] = 0.0f;
+                ++a.count;
+            }
+            else if (p.curve <= 1)
+                a.tension[(std::size_t) a.count - 1] = std::clamp (-p.tension, -1.0f, 1.0f);
+        }
+        if ((int) i == sustain)
+            a.sustain = a.count;
+        if ((int) i == decay)
+            a.decayPoint = a.count;
+        a.time[(std::size_t) a.count] = (float) p.x;
+        a.level[(std::size_t) a.count] = (float) std::clamp (p.y, 0.0, 1.0);
+        a.tension[(std::size_t) a.count] = 0.0f;
+        ++a.count;
+    }
+}
+
+// What the audio thread evaluates: per articulator and target the envelope, the LFO amplitude and the LFO wave
+struct EnvelopeRuntime
+{
+    struct Part
+    {
+        bool envOn = false, lfoOn = false, envTempo = false, lfoTempo = false;
+        float base = 0.5f, env = 0.0f, lfo = 0.0f, offset = 0.5f;
+        ControllerArticulator envelope, amplitude, wave; // (levels 0…1 with base 0: their curves' values)
+        double rate = 1.0, startPhase = 0.0;            // LFO: cycles per unit, phase at the trigger
+    };
+    struct Articulator
+    {
+        int colour = 0, low = 0, high = 132;
+        std::array<Part, 5> parts;
+    };
+    bool enabled = true;
+    std::array<Articulator, 16> articulators;
+
+    // (big: on the heap, never on a stack)
+    static std::unique_ptr<EnvelopeRuntime> from (const EnvelopeSettings& s)
+    {
+        auto made = std::make_unique<EnvelopeRuntime>();
+        auto& rt = *made;
+        rt.enabled = s.enabled;
+        for (int g = 0; g < 16; ++g)
+        {
+            const auto& a = s.articulators[(std::size_t) g];
+            auto& r = rt.articulators[(std::size_t) g];
+            r.colour = a.colour;
+            r.low = a.low;
+            r.high = a.high;
+            for (int t = 0; t < 5; ++t)
+            {
+                const auto& p = a.parts[(std::size_t) t];
+                auto& q = r.parts[(std::size_t) t];
+                q.envOn = p.envOn() && ! p.envelope.points.empty();
+                q.lfoOn = p.lfoOn();
+                q.envTempo = (p.envelope.footer[0] & 1) != 0;
+                q.lfoTempo = (p.lfoAmp.footer[0] & 1) != 0;
+                q.base = p.base;
+                q.env = p.env;
+                q.lfo = p.lfo;
+                q.offset = t == EnvelopeSettings::velocity ? 0.0f : 0.5f;
+                toArticulator (p.envelope, q.envelope);
+                q.envelope.adsr = p.adsr;
+                q.envelope = controllerWithKnobs (q.envelope);
+                for (auto* c : { &q.envelope, &q.amplitude })
+                {
+                    c->base = 0.0f;
+                    c->envLevel = 1.0f;
+                    c->bipolar = false;
+                    c->envOn = true;
+                }
+                toArticulator (p.lfoAmp, q.amplitude);
+                q.wave.lfoSpeed = p.speed;
+                q.wave.lfoTension = p.tension;
+                q.wave.lfoSkew = p.skew;
+                q.wave.lfoPulseWidth = p.pulseWidth;
+                q.wave.lfoPhase = p.phase;
+                q.rate = controllerLfoRate (q.wave);
+                q.startPhase = controllerLfoStartPhase (q.wave);
+            }
+        }
+        return made;
+    }
+};
+
+// One note in, the same note out, its volume, fine pitch, pan and Mod X / Y moved by the envelopes and LFOs of every
+// articulator whose note colour and key range it matches (FL re-applies them each tick; LYNX each block).
+class Envelope final : public Processor
+{
+public:
+    explicit Envelope (const EnvelopeSettings& s) : settings (EnvelopeRuntime::from (s)) {}
+    Kind kind() const noexcept override { return Kind::envelope; }
+    bool configure (const std::vector<std::uint8_t>& fl) override
+    {
+        auto s = parseEnvelope (fl);
+        if (! s)
+            return false;
+        settings.publish (EnvelopeRuntime::from (*s));
+        return true;
+    }
+    bool busy() const noexcept override { return count > 0; }
+
+    void releaseAll (EventList& out) noexcept override
+    {
+        for (int i = 0; i < count; ++i)
+            if (! voices[(std::size_t) i].released)
+                out.add (offEvent (voices[(std::size_t) i], 0));
+        count = 0;
+    }
+
+    void process (const Event* in, int n, int samples, const Transport& transport, EventList& out) noexcept override
+    {
+        settings.take();
+        const auto& rt = settings.get();
+        const auto seconds = samples / std::max (1.0, transport.sampleRate);
+        const auto beats = seconds * transport.bpm / 60.0;
+        // the voices sounding move on (and send what changed)
+        for (int i = 0; i < count; ++i)
+        {
+            auto& v = voices[(std::size_t) i];
+            v.seconds += seconds;
+            v.beats += beats;
+            if (v.released)
+            {
+                v.releaseSeconds += seconds;
+                v.releaseBeats += beats;
+            }
+            apply (rt, v, 0, &out);
+        }
+        // the finished ones go (their output was released and their envelopes have ended, or 30 s after the release)
+        int kept = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            const auto& v = voices[(std::size_t) i];
+            if (v.released && (v.releaseSeconds > 30.0 || finished (rt, v)))
+                continue;
+            voices[(std::size_t) kept++] = v;
+        }
+        count = kept;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto& e = in[i];
+            if (e.type == Event::Type::on)
+            {
+                Voice v;
+                v.input = e.id;
+                v.id = nextId++;
+                if (nextId > 1 << 30)
+                    nextId = 1;
+                v.source = e.voice;
+                v.sent = e.voice;
+                for (int g = 0; g < 16; ++g)
+                {
+                    const auto& a = rt.articulators[(std::size_t) g];
+                    const auto key = e.voice.key + 1;
+                    if (a.colour == e.voice.colour && key >= a.low && key <= a.high)
+                        v.matched |= (std::uint16_t) (1u << g);
+                }
+                Voice playing = v;
+                apply (rt, playing, e.offset, nullptr);
+                out.add (onEvent (e.offset, 0, playing.id, playing.sent));
+                if (count < (int) voices.size())
+                    voices[(std::size_t) count++] = playing;
+            }
+            else if (e.type == Event::Type::off)
+                for (int k = 0; k < count; ++k)
+                {
+                    auto& v = voices[(std::size_t) k];
+                    if (v.input == e.id && ! v.released)
+                    {
+                        v.released = true;
+                        v.source.release = e.voice.release;
+                        out.add (offEvent (v, e.offset));
+                    }
+                }
+        }
+    }
+
+private:
+    struct Voice
+    {
+        int input = -1, id = 0;
+        Voice() = default;
+        vfx::Voice source, sent;
+        std::uint16_t matched = 0;
+        bool released = false;
+        double seconds = 0.0, beats = 0.0, releaseSeconds = 0.0, releaseBeats = 0.0;
+    };
+
+    static Event offEvent (const Voice& v, int offset) noexcept
+    {
+        Event e;
+        e.type = Event::Type::off;
+        e.offset = offset;
+        e.id = v.id;
+        e.voice = v.sent;
+        e.voice.release = v.source.release;
+        return e;
+    }
+
+    // the voice's levels now (FL's per-voice apply); with `out`, prop events for what changed
+    static void apply (const EnvelopeRuntime& rt, Voice& v, int offset, EventList* out) noexcept
+    {
+        auto now = v.source;
+        if (rt.enabled && v.matched != 0)
+        {
+            const auto sourceVolume = (std::pow (11.0, 1.28 * (double) v.source.velocity) - 1.0) / 10.0;
+            auto volume = sourceVolume;
+            double cents = v.source.cents, pan = v.source.pan, modX = v.source.modX * 2.0 - 1.0, modY = v.source.modY * 2.0 - 1.0;
+            for (int g = 15; g >= 0; --g) // (FL: the last articulator first)
+            {
+                if ((v.matched & (1u << g)) == 0)
+                    continue;
+                for (int t = 4; t >= 0; --t)
+                {
+                    const auto& p = rt.articulators[(std::size_t) g].parts[(std::size_t) t];
+                    if (! p.envOn && ! p.lfoOn)
+                        continue;
+                    const auto envTime = p.envTempo ? v.beats : v.seconds;
+                    const auto envRelease = ! v.released ? -1.0 : p.envTempo ? v.releaseBeats : v.releaseSeconds;
+                    const auto e = p.envOn ? controllerValue (p.envelope, envTime, envRelease) - p.offset : 0.0f;
+                    double l = 0.0;
+                    if (p.lfoOn)
+                    {
+                        const auto lfoTime = p.lfoTempo ? v.beats : v.seconds;
+                        const auto lfoRelease = ! v.released ? -1.0 : p.lfoTempo ? v.releaseBeats : v.releaseSeconds;
+                        const auto amp = controllerValue (p.amplitude, lfoTime, lfoRelease) - 0.5;
+                        l = amp * controllerLfoWave (p.wave, p.startPhase + p.rate * lfoTime);
+                    }
+                    if (t == EnvelopeSettings::velocity)
+                    {
+                        double m = p.base;
+                        if (p.envOn)
+                            m = p.env >= 0.0f ? p.base + 2.0 * p.env * e : (1.0 - p.base) + 2.0 * std::abs (p.env) * (1.0 - e);
+                        if (p.lfoOn)
+                            m *= 2.0 * p.lfo * l;
+                        volume = std::clamp (volume * m, 0.0, 4.0);
+                        continue;
+                    }
+                    auto d = (double) p.base - 0.5;
+                    if (p.envOn)
+                        d += 2.0 * p.env * e;
+                    if (p.lfoOn)
+                        d += 2.0 * p.lfo * l;
+                    if (t == EnvelopeSettings::pitch)
+                        cents += d * 4800.0;
+                    else if (t == EnvelopeSettings::pan)
+                        pan = std::clamp (pan + d, -1.0, 1.0);
+                    else if (t == EnvelopeSettings::modX)
+                        modX = std::clamp (modX + d, -2.0, 2.0);
+                    else
+                        modY = std::clamp (modY + d, -2.0, 2.0);
+                }
+            }
+            if (volume != sourceVolume)
+                now.velocity = (float) std::clamp (std::log (10.0 * volume + 1.0) / std::log (11.0) / 1.28, 0.0, 1.0);
+            now.cents = (float) std::clamp (cents, -6000.0 - v.source.key * 100.0, 6700.0 - v.source.key * 100.0);
+            now.pan = (float) pan;
+            now.modX = (float) std::clamp (modX * 0.5 + 0.5, 0.0, 1.0);
+            now.modY = (float) std::clamp (modY * 0.5 + 0.5, 0.0, 1.0);
+        }
+        if (out != nullptr)
+        {
+            auto send = [&] (Prop prop, float before, float after) {
+                if (std::abs (after - before) < 1e-4f)
+                    return;
+                Event p;
+                p.type = Event::Type::prop;
+                p.offset = offset;
+                p.id = v.id;
+                p.voice = v.sent;
+                p.prop = prop;
+                p.value = after;
+                out->add (p);
+            };
+            send (Prop::velocity, v.sent.velocity, now.velocity);
+            send (Prop::pitch, v.sent.cents, now.cents);
+            send (Prop::pan, v.sent.pan, now.pan);
+            send (Prop::modX, v.sent.modX, now.modX);
+            send (Prop::modY, v.sent.modY, now.modY);
+        }
+        now.key = v.source.key;
+        v.sent = now;
+    }
+
+    static bool finished (const EnvelopeRuntime& rt, const Voice& v) noexcept
+    {
+        if (! rt.enabled || v.matched == 0)
+            return true;
+        for (int g = 0; g < 16; ++g)
+            if ((v.matched & (1u << g)) != 0)
+                for (const auto& p : rt.articulators[(std::size_t) g].parts)
+                {
+                    if (p.envOn && ! controllerVoiceFinished (p.envelope, p.envTempo ? v.beats : v.seconds, p.envTempo ? v.releaseBeats : v.releaseSeconds))
+                        return false;
+                    if (p.lfoOn && ! controllerVoiceFinished (p.amplitude, p.lfoTempo ? v.beats : v.seconds, p.lfoTempo ? v.releaseBeats : v.releaseSeconds))
+                        return false;
+                }
+        return true;
+    }
+
+    Handoff<EnvelopeRuntime> settings;
+    std::array<Voice, 256> voices {};
+    int count = 0, nextId = 1;
+};
+} // namespace
+
 std::unique_ptr<Processor> makeProcessor (Kind kind, const std::vector<std::uint8_t>& fl)
 {
     switch (kind)
@@ -900,6 +1728,10 @@ std::unique_ptr<Processor> makeProcessor (Kind kind, const std::vector<std::uint
             return std::make_unique<ColorMapper> (parseColorMapper (fl).value_or (defaultColorMapper()));
         case Kind::levelScaler:
             return std::make_unique<LevelScaler> (parseLevelScaler (fl).value_or (defaultLevelScaler()));
+        case Kind::keyboardSplitter:
+            return std::make_unique<KeyboardSplitter> (parseKeyboardSplitter (fl).value_or (defaultKeyboardSplitter()));
+        case Kind::envelope:
+            return std::make_unique<Envelope> (parseEnvelope (fl).value_or (defaultEnvelope()));
         default: break;
     }
     return std::make_unique<ThroughProcessor> (kind);

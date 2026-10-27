@@ -360,3 +360,169 @@ TEST (vfx_level_scaler_curves_match_fl)
     const auto out = vfx164::run (*p, { vfx164::on (60, 0, 0, 0.9f), vfx164::on (64, 0, 0, 0.2f) });
     CHECK (out.size() == 2 && near (out[0].voice.velocity, 0.5) && near (out[1].voice.velocity, 0.5) && out[0].voice.key == 60);
 }
+
+TEST (vfx_keyboard_splitter_zones)
+{
+    using namespace vfx164;
+    using S = lynx::vfx::KeyboardSplitterSettings;
+    auto keys = [] (const std::vector<lynx::vfx::Event>& out) {
+        std::vector<std::pair<int, int>> k; // (output, key)
+        for (const auto& e : out)
+            if (e.type == lynx::vfx::Event::Type::on)
+                k.emplace_back (e.output, e.voice.key);
+        std::sort (k.begin(), k.end());
+        return k;
+    };
+    auto def = lynx::vfx::defaultKeyboardSplitter();
+    CHECK (lynx::vfx::parseKeyboardSplitter (lynx::vfx::writeKeyboardSplitter (def)) == def);
+    auto p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyboardSplitter, lynx::vfx::writeKeyboardSplitter (def));
+    auto out = run (*p, { on (60, 0, 0, 0.78125f) });
+    CHECK (out.size() == 1 && out[0].output == 0 && out[0].voice.key == 60 && std::abs (out[0].voice.velocity - 0.78125f) < 1e-4f);
+    // FL's "3 zone split transposed"
+    S split;
+    auto zone = [] (double from, double to) {
+        lynx::vfx::MapCurve m;
+        m.points.push_back ({ 0.0, 0.0 });
+        m.points.push_back ({ from / 132.0, 0.0 });
+        m.points.push_back ({ from / 132.0, 1.0 });
+        m.points.push_back ({ (to + 1) / 132.0, 1.0 });
+        m.points.push_back ({ (to + 1) / 132.0, 0.0 });
+        m.points.push_back ({ 1.0, 0.0 });
+        return m;
+    };
+    split.zones[0].keyboard = zone (0, 47);
+    split.zones[0].transpose = 36;
+    split.zones[1].keyboard = zone (48, 83);
+    split.zones[2].keyboard = zone (84, 131);
+    split.zones[2].transpose = -36;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyboardSplitter, lynx::vfx::writeKeyboardSplitter (split));
+    CHECK ((keys (run (*p, { on (40) })) == std::vector<std::pair<int, int>> { { 0, 76 } }));
+    CHECK ((keys (run (*p, { on (60) })) == std::vector<std::pair<int, int>> { { 1, 60 } }));
+    CHECK ((keys (run (*p, { on (90) })) == std::vector<std::pair<int, int>> { { 2, 54 } }));
+    out = run (*p, { off (40) });
+    CHECK (out.size() == 1 && out[0].type == lynx::vfx::Event::Type::off && out[0].voice.key == 76 && out[0].output == 0);
+    // Velocity / Limited (absolute): v 1 → map 0.75 → velocity 0.75 / 1.28
+    S limited = lynx::vfx::defaultKeyboardSplitter();
+    limited.zones[0].velocity.points = { { 0.0, 0.0 }, { 0.75, 0.75 }, { 1.0, 0.75 } };
+    limited.zones[0].absolute = true;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyboardSplitter, lynx::vfx::writeKeyboardSplitter (limited));
+    out = run (*p, { on (60, 0, 0, 1.0f), on (62, 0, 0, 0.4f) });
+    CHECK (out.size() == 2 && std::abs (out[0].voice.velocity - 0.5859f) < 1e-3f && std::abs (out[1].voice.velocity - 0.3125f) < 1e-3f);
+    // random zones: each note on exactly one of them
+    S rnd;
+    rnd.zones[0].keyboard = rnd.zones[1].keyboard = lynx::vfx::MapCurve::flat (1.0);
+    rnd.zones[0].random = rnd.zones[1].random = true;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyboardSplitter, lynx::vfx::writeKeyboardSplitter (rnd));
+    int counts[2] {};
+    for (int k = 0; k < 200; ++k)
+    {
+        out = run (*p, { on (60), off (60, 1) });
+        CHECK (out.size() == 2);
+        if (! out.empty())
+            ++counts[std::clamp (out[0].output, 0, 1)];
+    }
+    CHECK (counts[0] > 50 && counts[1] > 50);
+}
+
+TEST (vfx_reads_fl_factory_presets)
+{
+    if (realFlpDir.empty())
+        return;
+    namespace fs = std::filesystem;
+    int files = 0;
+    for (const auto kind : { lynx::vfx::Kind::keyMapper, lynx::vfx::Kind::keyboardSplitter, lynx::vfx::Kind::envelope })
+    {
+        const auto dir = fs::path (realFlpDir) / "Patches" / "Plugin presets" / "Effects" / lynx::vfx::flName (kind);
+        if (! fs::is_directory (dir))
+            continue;
+        for (const auto& entry : fs::recursive_directory_iterator (dir))
+        {
+            if (entry.path().extension() != ".fst")
+                continue;
+            std::ifstream in (entry.path(), std::ios::binary);
+            const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), {});
+            const auto state = lynx::vfx::stateFromFlPreset (bytes, kind);
+            CHECK (state.has_value());
+            if (! state)
+            {
+                std::printf ("  not read: %s\n", entry.path().string().c_str());
+                continue;
+            }
+            ++files;
+            if (kind == lynx::vfx::Kind::keyMapper)
+            {
+                const auto s = lynx::vfx::parseKeyMapper (*state);
+                CHECK (s && lynx::vfx::writeKeyMapper (*s) == *state);
+            }
+            if (kind == lynx::vfx::Kind::keyboardSplitter)
+            {
+                const auto s = lynx::vfx::parseKeyboardSplitter (*state);
+                CHECK (s.has_value());
+                if (s)
+                {
+                    const auto again = lynx::vfx::parseKeyboardSplitter (lynx::vfx::writeKeyboardSplitter (*s));
+                    CHECK (again && again->zones == s->zones);
+                }
+            }
+            if (kind == lynx::vfx::Kind::envelope)
+            {
+                const auto s = lynx::vfx::parseEnvelope (*state);
+                CHECK (s.has_value());
+                if (s)
+                {
+                    const auto again = lynx::vfx::parseEnvelope (lynx::vfx::writeEnvelope (*s));
+                    CHECK (again && *again == *s);
+                }
+            }
+        }
+    }
+    CHECK (files >= 50);
+}
+
+TEST (vfx_envelope_moves_the_notes_it_matches)
+{
+    using namespace vfx164;
+    using E = lynx::vfx::EnvelopeSettings;
+    auto def = lynx::vfx::defaultEnvelope();
+    const auto again = lynx::vfx::parseEnvelope (lynx::vfx::writeEnvelope (def));
+    CHECK (again && *again == def);
+    auto p = lynx::vfx::makeProcessor (lynx::vfx::Kind::envelope, lynx::vfx::writeEnvelope (def));
+    lynx::vfx::EventList out;
+    lynx::vfx::Transport t;
+    t.sampleRate = 48000.0;
+    // colour 0: the volume envelope starts silent; colour 3 passes untouched
+    std::vector<lynx::vfx::Event> in { on (60, 0, 0, 0.78125f), on (64, 0, 3, 0.5f) };
+    p->process (in.data(), 2, 480, t, out);
+    out.sortByOffset();
+    CHECK (out.size() == 2 && out[0].voice.velocity < 0.01f && std::abs (out[1].voice.velocity - 0.5f) < 1e-5f);
+    // 0.75 s in: the peak (volume × 2)
+    float peak = 0.0f;
+    for (int b = 0; b < 75; ++b)
+    {
+        out.clear();
+        p->process (nullptr, 0, 480, t, out);
+        for (int k = 0; k < out.size(); ++k)
+            if (out[k].type == lynx::vfx::Event::Type::prop && out[k].prop == lynx::vfx::Prop::velocity)
+                peak = std::max (peak, out[k].value);
+    }
+    const auto twice = (float) (std::log (10.0 * 2.0 + 1.0) / std::log (11.0) / 1.28); // velocity of volume × 2
+    CHECK (std::abs (peak - twice) < 0.02f);
+    CHECK (p->busy());
+    // pitch: articulator 1's pitch envelope flat at the top, 100 %: +48 semitones
+    auto up = lynx::vfx::defaultEnvelope();
+    auto& pitch = up.articulators[0].parts[E::pitch];
+    pitch.env = 1.0f;
+    pitch.envelope.points = { { 0.0, 1.0 }, { 1.0, 1.0 } };
+    pitch.envelope.footer[1] = -1;
+    up.articulators[0].parts[E::velocity].envelope.footer[1] = 0; // (no volume envelope)
+    up.articulators[0].low = 61; // keys 60…71 only
+    up.articulators[0].high = 72;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::envelope, lynx::vfx::writeEnvelope (up));
+    const auto res = run (*p, { on (60), on (72) });
+    CHECK (res.size() == 2 && std::abs (res[0].voice.cents - 4800.0f) < 0.5f && res[1].voice.cents == 0.0f);
+    // the plugin off: everything passes
+    up.enabled = false;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::envelope, lynx::vfx::writeEnvelope (up));
+    const auto off = run (*p, { on (60) });
+    CHECK (off.size() == 1 && off[0].voice.cents == 0.0f);
+}

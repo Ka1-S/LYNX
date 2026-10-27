@@ -164,6 +164,83 @@ std::vector<std::uint8_t> writeLevelScaler (const LevelScalerSettings& s);
 // The curve: x in lo…hi → out in lo…hi; `random` 0…1 places it in the humanize range (FL's T(tab, x, lo, hi, rnd))
 double levelScale (const LevelScalerSettings& s, int tab, double x, double lo, double hi, double random) noexcept;
 
+// FL's mapping curve (TMMap): points at x 0…1 with a level 0…1; a point's tension bends the segment that ends at it,
+// curve type 2 holds the previous level up to it (a step). Kept as FL stores them, so the file writes back as read.
+struct MapCurve
+{
+    struct Point
+    {
+        double x = 0.0, y = 0.0; // x absolute (FL stores the distance from the previous point)
+        float tension = 0.0f;
+        std::uint8_t curve = 0, b13 = 0, b14 = 0, b15 = 2;
+        bool operator== (const Point&) const = default;
+    };
+    std::vector<Point> points;
+    std::array<std::int32_t, 5> footer { 0, -1, -1, -1, -1 };
+    bool operator== (const MapCurve&) const = default;
+    static MapCurve flat (double level);
+    double at (double x) const noexcept;       // the level at x (the ends hold outside)
+    bool isFlat (double level) const noexcept; // every point at that level
+};
+
+// VFX Keyboard Splitter: 16 zones, each a keyboard map (x = key / 132) and a velocity map; a note plays on every
+// zone whose level is above zero, on that zone's output
+struct KeyboardSplitterSettings
+{
+    struct Zone
+    {
+        MapCurve keyboard = MapCurve::flat (0.0), velocity = MapCurve::flat (1.0);
+        int transpose = 0; // semitones −48…48
+        bool absolute = false, random = false;
+        std::string name;  // empty: "Zone N"
+        bool operator== (const Zone&) const = default;
+        bool active() const noexcept { return ! (keyboard.isFlat (0.0) && velocity.isFlat (1.0)); }
+    };
+    std::uint32_t header = 0x100003;
+    int page = 0; // (the editor's: 0 keyboard, 1 velocity)
+    std::array<Zone, 16> zones;
+    bool operator== (const KeyboardSplitterSettings&) const = default;
+};
+KeyboardSplitterSettings defaultKeyboardSplitter();
+std::optional<KeyboardSplitterSettings> parseKeyboardSplitter (const std::vector<std::uint8_t>& fl);
+std::vector<std::uint8_t> writeKeyboardSplitter (const KeyboardSplitterSettings& s);
+// FL's map level → volume gain: (11^m − 1) / 10; volume ↔ velocity: vol = (11^(1.28 v) − 1) / 10
+double splitterGain (double mapLevel) noexcept;
+
+// VFX Envelope: 16 articulators, each for one note colour and key range, with five targets (velocity, pitch, pan,
+// Mod X, Mod Y), each an envelope and an LFO as in FL's Envelope Controller
+struct EnvelopeSettings
+{
+    enum Target { velocity, pitch, pan, modX, modY, targetCount };
+    struct Part
+    {
+        int version = 3;
+        float base = 0.5f, env = 1.0f, lfo = 1.0f;   // base 0…1, amounts −1…1
+        MapCurve envelope;                          // footer: flags (bit 0 tempo), enabled, decay, loop, sustain
+        std::array<std::int32_t, 4> adsr { 128, 128, 0, 128 };
+        MapCurve lfoAmp;                            // the LFO's amplitude over time (footer as above)
+        std::int32_t speed = 40898, tension = 0, skew = 0, pulseWidth = 0, phase = 0;
+        bool envOn() const noexcept { return envelope.footer[1] != 0; }
+        bool lfoOn() const noexcept { return lfoAmp.footer[1] != 0; }
+        bool operator== (const Part&) const = default;
+    };
+    struct Articulator
+    {
+        int colour = 0, low = 0, high = 132; // key range: note + 1 (FL)
+        std::array<Part, targetCount> parts;
+        bool operator== (const Articulator&) const = default;
+    };
+    std::uint32_t header = 0x10003;
+    bool enabled = true;
+    int shownArticulator = 0, shownTarget = 0, shownPart = 0; // (the editor's)
+    std::array<std::int32_t, 4> toggles {};
+    std::array<Articulator, 16> articulators;
+    bool operator== (const EnvelopeSettings&) const = default;
+};
+EnvelopeSettings defaultEnvelope();
+std::optional<EnvelopeSettings> parseEnvelope (const std::vector<std::uint8_t>& fl);
+std::vector<std::uint8_t> writeEnvelope (const EnvelopeSettings& s);
+
 // ---------------------------------------------------------------------------------------------------------------
 // Presets
 
