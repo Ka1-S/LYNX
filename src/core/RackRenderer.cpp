@@ -191,8 +191,8 @@ std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double s
     std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
     instrument->prepare (sampleRate);
     instrument->configure (channel, bpm);
-    if (kind == InstrumentKind::sampler && channel.sampler.keepPitch && channel.sampler.stretchBeats > 0.0f)
-        instrument->prepareKeyShift (sampleRate); // the keys transpose the stretched sample (round 162)
+    if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip) && channel.sampler.keepPitch)
+        instrument->prepareKeyShift (sampleRate); // transpositions keep the length (rounds 162, 163)
     return instrument;
 }
 
@@ -1429,7 +1429,10 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                     if (const auto victim = voiceOrders[(std::size_t) i].noteOn (e.key, limit); victim >= 0)
                         instrument.noteOff (victim);
                 const auto pan = tracking ? channelmisc::trackedPan (c.misc, e.key, e.velocity, e.pan) : e.pan;
-                instrument.setNextNoteExpression (pan, e.cents + c.misc.fineTune + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.porta);
+                // (an audio clip follows its fine tune, not the main pitch: LYNX never moved clips with it)
+                instrument.setNextNoteExpression (pan, e.cents + c.misc.fineTune
+                                                           + (c.misc.mainPitch && c.instrument != InstrumentKind::audioClip ? state.song.masterPitch : 0.0f),
+                                                  e.porta);
                 {
                     const auto [modX, modY] = modTracking ? channelmisc::trackedModulation (c.misc, e.key, e.velocity, e.modX, e.modY)
                                                           : std::pair<float, float> { e.modX, e.modY };

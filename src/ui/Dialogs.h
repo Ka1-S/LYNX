@@ -9,6 +9,12 @@
 
 namespace lynx
 {
+class AudioEngine;
+
+// "Pitch..." of a sample channel or an audio clip's channel (round 163): semitones + cents and "Keep length" (the
+// stretch engine, else resampling: the speed follows). OK applies it as one undo step (clipops::setChannelPitch).
+void showSamplePitchDialog (AudioEngine& engine, int channel);
+std::unique_ptr<juce::AlertWindow> makeSamplePitchDialog (float pitch, bool keepLength, bool audioClip);
 // FL's "Import MIDI data" window (File › Import › MIDI file..., REA rounds 143 / 146b): the project options, which
 // tracks / MIDI channels / controller to import, zero-velocity notes; `pianoRoll` (the piano roll's import into a
 // channel) shows "Blend with existing data" instead of the project options. `onAccept` gets the chosen options.

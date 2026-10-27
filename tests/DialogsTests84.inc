@@ -312,7 +312,8 @@ TEST (clipprops_read_apply_and_groups)
     CHECK (apply (song, 1, props));
     const auto& c1 = song.playlist[1];
     CHECK (c1.channel == vox && c1.gain == 4.0f && c1.fadeIn == c1.length && c1.fadeOut == 0);
-    CHECK (song.channels[(std::size_t) vox].sampler.pitch == 24.0f && ! song.channels[(std::size_t) vox].sampler.keepPitch);
+    // (round 163: "keep length" stays without a stretch — it keeps a pitched clip's length)
+    CHECK (song.channels[(std::size_t) vox].sampler.pitch == 24.0f && song.channels[(std::size_t) vox].sampler.keepPitch);
 
     changeMute (song, { 0, 1 }, MuteChange::muteAll);
     CHECK (song.playlist[0].muted && song.playlist[1].muted);

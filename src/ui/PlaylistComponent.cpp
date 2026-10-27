@@ -1146,7 +1146,7 @@ void PlaylistComponent::addSmallClip (SmallClips& batch, float physicalScale, co
         // the same mapping as paintAudioClip
         const auto wave = body.reduced (0.0f, body.getHeight() >= 14.0f ? 2.0f : 1.0f);
         const auto total = (double) summary->frames;
-        const auto perTick = clipops::framesPerTick (channel.sampler, total, summary->sampleRate, song.bpm);
+        const auto perTick = clipops::framesPerTick (channel, total, summary->sampleRate, song.bpm);
         const auto startTick = (double) c.offset + (double) (wave.getX() - r.getX()) / pixelsPerTick;
         const auto forward = ! channel.sampler.reverse;
         const auto startFrame = forward ? startTick * perTick : total - startTick * perTick;
@@ -1217,7 +1217,7 @@ void PlaylistComponent::paintAudioClip (juce::Graphics& g, const Clip& c, juce::
     {
         const auto wave = body.reduced (0.0f, body.getHeight() >= 14.0f ? 2.0f : 1.0f);
         const auto total = (double) summary->frames;
-        const auto perTick = clipops::framesPerTick (channel.sampler, total, summary->sampleRate, song.bpm);
+        const auto perTick = clipops::framesPerTick (channel, total, summary->sampleRate, song.bpm);
         // r's left edge is the clip start, i.e. tick `offset` of the audio (counted from the file's end when
         // the channel is reversed)
         const auto startTick = (double) c.offset + (double) (wave.getX() - r.getX()) / pixelsPerTick;
@@ -3110,10 +3110,12 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
         menu.addItem (tr ("Reverse"), sample != nullptr, channel.sampler.reverse, [this, index, frames, rate] {
             engine.editSong ([index, frames, rate] (Song& s) {
                 const auto ch = s.playlist[(std::size_t) index].channel;
-                clipops::reverseAudio (s, index, clipops::fileTicks (s.channels[(std::size_t) ch].sampler, frames, rate, s.bpm));
+                clipops::reverseAudio (s, index, clipops::fileTicks (s.channels[(std::size_t) ch], frames, rate, s.bpm));
             });
         });
 
+        menu.addItem (tr ("Pitch... (semitones, cents, keep length)"), sample != nullptr, false,
+                      [this, ch = clip.channel] { showSamplePitchDialog (engine, ch); });
         menu.addItem (tr ("Normalize"), [this, targets] { normalizeClips (targets); });
 
         juce::PopupMenu gains;
@@ -3137,25 +3139,14 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
         auto fitTo = [this, index, frames, rate] (float toBeats, bool keepPitch) {
             engine.editSong ([index, frames, rate, toBeats, keepPitch] (Song& s) {
                 const auto ch = s.playlist[(std::size_t) index].channel;
-                auto& sampler = s.channels[(std::size_t) ch].sampler;
-                const auto before = clipops::fileTicks (sampler, frames, rate, s.bpm);
+                auto& channel = s.channels[(std::size_t) ch];
+                auto& sampler = channel.sampler;
+                const auto before = clipops::fileTicks (channel, frames, rate, s.bpm);
                 sampler.stretchBeats = toBeats;
-                sampler.keepPitch = keepPitch && toBeats > 0.0f;
-                const auto after = clipops::fileTicks (sampler, frames, rate, s.bpm);
-                if (before <= 0 || after <= 0)
-                    return;
+                // "Original speed" keeps a pitched clip's "keep length" (round 163)
+                sampler.keepPitch = keepPitch && (toBeats > 0.0f || sampler.pitch != 0.0f || channel.misc.fineTune != 0.0f);
                 // every clip of the file keeps showing the same audio: offsets and lengths scale with it
-                const auto k = (double) after / (double) before;
-                for (auto& c : s.playlist)
-                    if (c.kind == ClipKind::audio && c.channel == ch)
-                    {
-                        const auto exact = ((double) c.offset + (double) c.offsetFraction) * k;
-                        c.offset = (std::int64_t) std::llround (exact);
-                        c.offsetFraction = (float) (exact - (double) c.offset);
-                        c.length = juce::jmax<std::int64_t> (1, (std::int64_t) std::llround ((double) c.length * k));
-                        c.fadeIn = (std::int64_t) std::llround ((double) c.fadeIn * k);
-                        c.fadeOut = (std::int64_t) std::llround ((double) c.fadeOut * k);
-                    }
+                clipops::rescaleClipsOf (s, ch, before, clipops::fileTicks (channel, frames, rate, s.bpm));
             });
             sortClips();
         };
@@ -3172,7 +3163,7 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
                          [fitTo, b = channel.sampler.stretchBeats, kp = channel.sampler.keepPitch] { fitTo (juce::jmin (1024.0f, b * 2.0f), kp); });
             fit.addSeparator();
         }
-        fit.addItem (tr ("Original speed (no stretch)"), true, channel.sampler.stretchBeats <= 0.0f, [fitTo] { fitTo (0.0f, false); });
+        fit.addItem (tr ("Original speed (no stretch)"), true, channel.sampler.stretchBeats <= 0.0f, [fitTo, kp = channel.sampler.keepPitch] { fitTo (0.0f, kp); });
         menu.addSubMenu (tr ("Fit to tempo"), fit, sample != nullptr);
 
         // FL's "Detect tempo" (REA round 153; LYNX's own detector, core/TempoDetect): a range to fold the result
@@ -3311,7 +3302,7 @@ void PlaylistComponent::normalizeClips (const std::vector<int>& targets)
             continue;
 
         const auto total = (double) sample->frames();
-        const auto perTick = clipops::framesPerTick (channel.sampler, total, sample->sampleRate, song.bpm);
+        const auto perTick = clipops::framesPerTick (channel, total, sample->sampleRate, song.bpm);
         auto from = juce::jlimit (0.0, total, (double) c.offset * perTick);
         auto to = juce::jlimit (from, total, (double) (c.offset + c.length) * perTick);
         if (channel.sampler.reverse) // the clip's offset counts from the file's end
@@ -3889,7 +3880,9 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
     {
         const auto onHeader = p.y < clipBounds (h.clip).getY() + (int) clipTitleHeight;
         if (h.target == gesture::Target::clipMenu)
-            hint.text = tr ("Clip menu: [LMB] or [RMB] opens it (make unique, rename and colour, chop, select source...)");
+            hint.text = song.playlist[(std::size_t) h.clip].kind == ClipKind::audio
+                            ? tr ("Clip menu: [LMB] or [RMB] opens it (pitch, fit to tempo, reverse, chop, make unique...)")
+                            : tr ("Clip menu: [LMB] or [RMB] opens it (make unique, rename and colour, chop, select source...)");
         else if (onHeader && ! m.ctrl)
             hint.text << "  " << tr ("The icon at the top left opens the clip menu (make unique, rename...)");
         else if (h.target == gesture::Target::item && ! m.ctrl)

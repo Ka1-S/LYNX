@@ -1730,6 +1730,10 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             break;
         case Area::name:
             h.text = name + " - " + tr ("[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu");
+            // sample channels: where the pitch is (round 163, "getting to the sample pitching")
+            if (row >= 0 && row < (int) song.channels.size()
+                && (song.channels[(std::size_t) row].instrument == InstrumentKind::sampler || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip))
+                h.text << "  " << tr ("(pitch: [RMB] › Pitch...)");
             h.hasMenu = true;
             // FL's hint bar names what the channel is ("Audio Clip", the plugin's name) on the right (REA round 143b)
             if (row >= 0 && row < (int) song.channels.size())
@@ -1885,6 +1889,8 @@ void ChannelRackComponent::showChannelMenu (int channel)
     {
         menu.addItem (tr ("Sampler settings (pitch, envelope, reverse)..."),
                       [this, channel] { openChannelSettings (engine, channel); });
+        menu.addItem (tr ("Pitch... (semitones, cents, keep length)"), ! c.samplePath.empty() || ! c.zones.empty(), false,
+                      [this, channel] { showSamplePitchDialog (engine, channel); });
         menu.addItem (tr ("Edit the sample in the audio editor..."), ! c.samplePath.empty(), false, [this, channel] { openAudioEditorForChannel (engine, channel); });
 
         if (c.sampler.slices.empty())
@@ -1894,6 +1900,9 @@ void ChannelRackComponent::showChannelMenu (int channel)
                 engine.editSong ([channel] (Song& s) { s.channels[(std::size_t) channel].sampler.slices.clear(); });
             });
     }
+    else if (c.instrument == InstrumentKind::audioClip)
+        menu.addItem (tr ("Pitch... (semitones, cents, keep length)"), ! c.samplePath.empty(), false,
+                      [this, channel] { showSamplePitchDialog (engine, channel); });
     else if (c.instrument == InstrumentKind::synth)
         menu.addItem (tr ("Synth settings (oscillators, envelope, filter)..."), [this, channel] { openChannelSettings (engine, channel); });
     else if (hasChannelSettings (c.instrument))
