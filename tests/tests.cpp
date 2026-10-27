@@ -5403,7 +5403,7 @@ TEST (rea165i_task_graph_matches_layers_with_sidechain_and_cycle)
     CHECK (layered == parallel);
     CHECK (*std::max_element (layered.begin(), layered.end()) > 0.02f);
 
-    song.setRoute (11, 3, true, 0.3f); // a cycle: 3 → 7 → 9 → 11 → 3
+    song.mixer[11].sends.push_back ({ 3, 0.3f }); // a cycle 3 → 7 → 9 → 11 → 3 (setRoute refuses it; an old project may hold one)
     const auto cycleLayered = render (song, false, unused);
     const auto cycleParallel = render (song, true, graph);
     CHECK (! graph);
