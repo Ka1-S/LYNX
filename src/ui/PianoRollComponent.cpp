@@ -1120,6 +1120,12 @@ int PianoRollComponent::ghostAt (int x, int y) const
     return -1;
 }
 
+float PianoRollComponent::keyVelocityAt (int x, int key) const
+{
+    // FL: a click near the left of a key plays it softly, at its right end at full velocity (black keys are shorter)
+    return gesture::keyClickVelocity ((double) x, (double) (isBlackKey (key) ? keyboardWidth * 3 / 5 : keyboardWidth - 1));
+}
+
 void PianoRollComponent::previewOn (int key, float velocity)
 {
     // one preview note at a time; it remembers its channel, so a channel switch meanwhile can't strand it
@@ -1322,7 +1328,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         if (e.mods.isLeftButtonDown())
         {
             drag = Drag::keyboard;
-            previewOn (yToKey (e.y), 0.8f);
+            previewOn (yToKey (e.y), keyVelocityAt (e.x, yToKey (e.y)));
         }
         return;
     }
@@ -1669,7 +1675,7 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
         {
             const auto key = yToKey (e.y);
             if (key != previewKey)
-                previewOn (key, 0.8f);
+                previewOn (key, keyVelocityAt (e.x, key));
             return;
         }
 
@@ -2033,8 +2039,11 @@ void PianoRollComponent::postDragHint (const juce::MouseEvent& e)
             break;
         }
         case Drag::keyZoom: hint.text = tr ("Key height"); hint.value = juce::String (rowHeight) + " px"; break;
-        case Drag::pan:
         case Drag::keyboard:
+            hint.text = tr ("Hearing the key: further right on a key = louder");
+            hint.value = keyName (previewKey) + "  " + tr ("vel {0}", { juce::String (juce::roundToInt (keyVelocityAt (e.x, previewKey) * 127.0f)) });
+            break;
+        case Drag::pan:
         case Drag::seek: hint.text = tr ("Position  [Alt] no snap"); break;
         case Drag::listen:
         case Drag::zoomRange:
@@ -2245,8 +2254,8 @@ ui::Hint PianoRollComponent::hintAt (juce::Point<int> p)
 
     if (p.x < keyboardWidth && p.y >= headerHeight && p.y < gridArea().getBottom())
     {
-        hint.text = tr ("Keyboard: [LMB] hear the key  [Ctrl][LMB] select its notes  [MMB] drag: taller / shorter keys");
-        hint.value = keyName (h.key);
+        hint.text = tr ("Keyboard: [LMB] hear the key (further right = louder)  [Ctrl][LMB] select its notes  [MMB] drag: taller / shorter keys");
+        hint.value = keyName (h.key) + "  " + tr ("vel {0}", { juce::String (juce::roundToInt (keyVelocityAt (p.x, h.key) * 127.0f)) });
         return hint;
     }
 

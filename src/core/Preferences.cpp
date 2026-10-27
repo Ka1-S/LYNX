@@ -540,4 +540,46 @@ std::string formatFavourites (const std::set<std::string>& ids)
         out += id + "\n";
     return out;
 }
+
+std::map<std::string, std::string> parsePluginNames (const std::string& text)
+{
+    std::map<std::string, std::string> out;
+    std::istringstream in (text);
+    std::string line;
+    while (std::getline (in, line))
+    {
+        const auto tab = line.find ('\t');
+        if (tab == std::string::npos)
+            continue;
+        const auto key = trim (line.substr (0, tab)), name = trim (line.substr (tab + 1));
+        if (! key.empty() && ! name.empty())
+            out[key] = name;
+    }
+    return out;
+}
+
+std::string formatPluginNames (const std::map<std::string, std::string>& names)
+{
+    std::string out;
+    for (const auto& [key, name] : names)
+        if (! key.empty() && ! name.empty() && key.find_first_of ("\t\n") == std::string::npos && name.find_first_of ("\t\n") == std::string::npos)
+            out += key + "\t" + name + "\n";
+    return out;
+}
+
+int uniqueTypeAhead (const std::vector<std::string>& labels, char typed)
+{
+    const auto lowerChar = [] (char c) { return (char) std::tolower ((unsigned char) c); };
+    if (typed == 0 || std::isspace ((unsigned char) typed))
+        return -1;
+    int found = -1;
+    for (int i = 0; i < (int) labels.size(); ++i)
+        if (! labels[(std::size_t) i].empty() && lowerChar (labels[(std::size_t) i][0]) == lowerChar (typed))
+        {
+            if (found >= 0)
+                return -1; // several: ambiguous
+            found = i;
+        }
+    return found;
+}
 } // namespace lynx::prefs

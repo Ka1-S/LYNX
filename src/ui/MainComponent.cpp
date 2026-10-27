@@ -1136,6 +1136,24 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("view.audioEditor")) openAudioEditorForSelection();
     else if (is ("view.tempoTapper")) openTempoTapper (engine);
     else if (is ("view.sampleBrowser")) toggleSampleBrowser();
+    else if (is ("view.pluginDatabase"))
+    {
+        showPanel (Panel::browser);
+        browser.showPluginDatabase();
+    }
+    else if (is ("view.midiSettings")) openSettings ((int) SettingsPage::midi);
+    else if (is ("view.projectInfo")) openSettings ((int) SettingsPage::info);
+    else if (is ("view.closePluginWindows") || is ("view.closeWindows"))
+    {
+        PluginWindows::closeAll();
+        ParametricEqWindows::closeAll(); // every native effect / controller editor
+        if (is ("view.closeWindows")) // FL's F12: the editors and tool windows too (LYNX's docked panels stay)
+        {
+            closeAutomationEditors();
+            closeChannelSettings();
+            closeAllToolWindows();
+        }
+    }
     else if (is ("rack.groupSelected")) rack.groupSelected();
     else if (is ("rack.rotateLeft")) rack.rotateSelected (-1);
     else if (is ("rack.rotateRight")) rack.rotateSelected (1);
@@ -1146,6 +1164,11 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("browser.load")) browser.loadSelected();
     else if (is ("browser.closeFolder")) browser.openFolder (false);
     else if (is ("browser.openFolder")) browser.openFolder (true);
+    else if (is ("browser.rename"))
+    {
+        if (! browser.renameSelectedPlugin()) // not a plugin: F2's global action (rename the pattern)
+            showRenamePattern (engine.getSong().currentPattern);
+    }
     else if (id.rfind ("pianoRoll.", 0) == 0) return pianoRoll.runAction (id);
     else if (id.rfind ("playlist.", 0) == 0) return playlist.runAction (id);
     else if (id.rfind ("mixer.", 0) == 0) return mixer.runAction (id);
@@ -1514,6 +1537,8 @@ void MainComponent::stopAndRewind (bool toStart)
     // "Remember seek time" sends the first Stop to the ruler mark (round 162, issue #9)
     const auto alreadyStopped = toStart || ! (engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn());
     engine.stop();
+    // FL: the transport's Stop also ends a Browser sample preview (issue #11)
+    browser.stopPreview(); // (the engine's one preview voice: the Sample browser window's preview stops too)
     const auto& globals = EditorGlobals::get();
     const auto back = transportedit::stopTarget (alreadyStopped, globals.rememberSeek && engine.getSong().mode == PlayMode::song, globals.seekMark);
 
@@ -1560,8 +1585,8 @@ void MainComponent::fitChannelRack (bool width)
     // compact like FL's rack: at most two bars of steps are shown, longer patterns scroll sideways, so the
     // rack does not cover the Playlist after a project with long patterns is opened
     const auto maxWidth = juce::jmin (juce::jmax (300, workspace.getWidth() - 2 * 16 - 260), rack.widthForSteps (32));
-    const auto contentWidth = juce::jmin (rack.getWidth(), maxWidth);
-    const auto needsHorizontal = rack.getWidth() > contentWidth;
+    const auto contentWidth = juce::jmin (rack.naturalWidth(), maxWidth); // the ghost steps only fill a wider rack
+    const auto needsHorizontal = rack.naturalWidth() > contentWidth;
     workspace.fitPanelContent (Panel::channelRack, width ? contentWidth + scrollbar : 0, rack.getHeight() + (needsHorizontal ? scrollbar : 0));
     fittedChannelCount = (int) engine.getSong().channels.size();
 }
@@ -3723,7 +3748,7 @@ void MainComponent::openSettings (int page)
         if (safe != nullptr)
             safe->showPluginManager();
     };
-    showSettings (engine, (SettingsPage) juce::jlimit (0, 5, page), std::move (hooks));
+    showSettings (engine, (SettingsPage) juce::jlimit (0, (int) SettingsPage::theme, page), std::move (hooks)); // (Theme was clamped to MIDI)
 }
 
 void MainComponent::showPluginManager()
@@ -4262,7 +4287,10 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addItem (tr ("Save layout as..."), [this] { saveLayoutAs(); });
         menu.addSubMenu (tr ("Load layout"), layoutsMenu());
         menu.addItem (tr ("Bring back off-screen panels"), [this] { workspace.bringBackOffscreen(); });
+        menu.addItem (tr ("Close all windows (plugins, channel settings, tools)") + shortcutText ("view.closeWindows"), [this] { runAction ("view.closeWindows"); });
+        menu.addItem (tr ("Close all plugin windows") + shortcutText ("view.closePluginWindows"), [this] { runAction ("view.closePluginWindows"); });
         menu.addSeparator();
+        menu.addItem (tr ("Plugin database (in the Browser)") + shortcutText ("view.pluginDatabase"), [this] { runAction ("view.pluginDatabase"); });
         menu.addItem (tr ("Audio editor") + shortcutText ("view.audioEditor"), [this] { openAudioEditorForSelection(); });
         menu.addItem (tr ("Tempo tapper") + shortcutText ("view.tempoTapper"), [this] { openTempoTapper (engine); });
         menu.addItem (tr ("Sample browser (separate window)") + shortcutText ("view.sampleBrowser"), true, findToolWindow ("sampleBrowser") != nullptr,
@@ -4285,12 +4313,12 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
     {
         // the Settings window's pages (Settings › General gathers the app options that were menu items here)
         menu.addItem (tr ("Audio settings..."), [this] { openSettings ((int) SettingsPage::audio); });
-        menu.addItem (tr ("MIDI settings..."), [this] { openSettings ((int) SettingsPage::midi); });
+        menu.addItem (tr ("MIDI settings...") + shortcutText ("view.midiSettings"), [this] { openSettings ((int) SettingsPage::midi); });
         menu.addItem (tr ("General settings..."), [this] { openSettings ((int) SettingsPage::general); });
         menu.addItem (tr ("Theme (colors, background)..."), [this] { openSettings ((int) SettingsPage::theme); });
         menu.addItem (tr ("File settings (search folders)..."), [this] { openSettings ((int) SettingsPage::files); });
         menu.addItem (tr ("Project settings (tempo, time signature)..."), [this] { openSettings ((int) SettingsPage::project); });
-        menu.addItem (tr ("Project info..."), [this] { openSettings ((int) SettingsPage::info); });
+        menu.addItem (tr ("Project info...") + shortcutText ("view.projectInfo"), [this] { openSettings ((int) SettingsPage::info); });
         {
             juce::PopupMenu mixerMenu; // round 163: clean mixer, inserts and Master chain of new projects
             mixeroptions::addItems (mixerMenu, engine, true);
