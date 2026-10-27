@@ -146,6 +146,7 @@ add_library(lynx_core STATIC
     src/core/NativeEngines.cpp
     src/core/Layer.cpp
     src/core/XyController.cpp
+    src/core/FlCurve.cpp
     src/core/ControlSurface.cpp
     src/core/VoltageController.cpp
     src/core/FabFilterStates.cpp

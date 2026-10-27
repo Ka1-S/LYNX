@@ -5,6 +5,7 @@
 #include <map>
 
 #include "core/ControlSurface.h"
+#include "core/FlCurve.h"
 #include "core/XyController.h"
 #include "ui/ControllerKnob.h"
 #include "ui/I18n.h"
@@ -69,6 +70,18 @@ public:
             k[1] = makeKnob (xy::minimum (a), tr ("Min"), tr ("{0} minimum: the output at the pad's low edge", { axis }), 0.0);
             k[2] = makeKnob (xy::maximum (a), tr ("Max"), tr ("{0} maximum: the output at the pad's high edge", { axis }), 1.0);
             k[3] = makeKnob (xy::tension (a), tr ("Tension"), tr ("{0} tension: bends the curve from the position to the output", { axis }), 0.5);
+        }
+        if (axes == 3) // round 165: the axis' output curve mode (FL's point modes)
+        {
+            for (int m = 0; m < flcurve::modeCount; ++m)
+                if (m != flcurve::smooth)
+                    curveBox.addItem (tr (flcurve::modeName (m)), m + 1);
+            curveBox.onChange = [this] {
+                if (const auto id = curveBox.getSelectedId(); id > 0)
+                    set (xy::curveMode (axis), xy::curveModeValue (id - 1));
+            };
+            ui::setHint (curveBox, tr ("Curve: the shape from the position to the output (FL's point modes: single curve, stairs, wave...); the Tension knob bends it"));
+            addAndMakeVisible (curveBox);
         }
         speedKnob = makeKnob (xy::speed (kind), tr ("Speed"), tr ("Speed: how fast the target follows the goal"), 0.5);
         accelKnob = makeKnob (xy::acceleration (kind), tr ("Accel"), tr ("Acceleration: how quickly the target reaches its speed"), 0.5);
@@ -144,16 +157,17 @@ public:
         const auto curve = curveArea().toFloat();
         fillRoundRect (g, curve, radius::md, colour::bg0);
         juce::Path path;
-        for (int i = 0; i <= 48; ++i)
+        const auto samples = axes == 3 ? (int) curve.getWidth() : 48;
+        for (int i = 0; i <= samples; ++i)
         {
-            const auto pos = (double) i / 48.0;
-            const auto out = xy::output (p, axis, pos);
+            const auto pos = (double) i / (double) samples;
+            const auto out = xy::output (kind, p, axis, pos);
             const auto pt = juce::Point<float> (curve.getX() + 4.0f + (curve.getWidth() - 8.0f) * (float) pos, curve.getBottom() - 4.0f - (curve.getHeight() - 8.0f) * out);
             i == 0 ? path.startNewSubPath (pt) : path.lineTo (pt);
         }
         g.setColour (colour::automation);
         g.strokePath (path, juce::PathStrokeType (1.6f));
-        const auto now = xy::output (p, axis, shown[(std::size_t) axis]);
+        const auto now = xy::output (kind, p, axis, shown[(std::size_t) axis]);
         g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ curve.getX() + 4.0f + (curve.getWidth() - 8.0f) * shown[(std::size_t) axis],
                                                                         curve.getBottom() - 4.0f - (curve.getHeight() - 8.0f) * now }));
 
@@ -172,6 +186,8 @@ public:
     {
         auto right = getLocalBounds().reduced (14).withTrimmedTop (32).withTrimmedLeft (padArea().getWidth() + (axes == 3 ? 44 : 14));
         auto tabs = right.removeFromTop (26);
+        if (axes == 3)
+            curveBox.setBounds (tabs.removeFromRight (juce::jmin (150, tabs.getWidth() - 130)).reduced (0, 2));
         for (int a = 0; a < axes; ++a)
             axisButtons[(std::size_t) a].setBounds (tabs.removeFromLeft (40).reduced (2, 0));
         right.removeFromTop (8);
@@ -262,6 +278,8 @@ private:
             for (auto& k : axisKnobs[(std::size_t) i])
                 k->setVisible (i == a);
         }
+        if (axes == 3)
+            curveBox.setSelectedId (xy::curveModeOf ((float) value (xy::curveMode (a))) + 1, juce::dontSendNotification);
         repaint();
     }
 
@@ -275,7 +293,7 @@ private:
         for (int a = 0; a < axes; ++a)
         {
             pos[(std::size_t) a] = running ? output (4 + a) : (fx != nullptr ? fx->params[(std::size_t) xy::level (a)] : 0.5f);
-            out[(std::size_t) a] = running ? output (a) : (fx != nullptr ? xy::output (fx->params, a, pos[(std::size_t) a]) : 0.0f);
+            out[(std::size_t) a] = running ? output (a) : (fx != nullptr ? xy::output (kind, fx->params, a, pos[(std::size_t) a]) : 0.0f);
         }
         if (pos != shown || out != outputs)
         {
@@ -285,7 +303,12 @@ private:
         }
     }
 
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        if (axes == 3)
+            curveBox.setSelectedId (xy::curveModeOf ((float) value (xy::curveMode (axis))) + 1, juce::dontSendNotification);
+        repaint();
+    }
 
     AudioEngine& engine;
     SlotLocator locate;
@@ -295,6 +318,7 @@ private:
     int axes = 2, axis = 0;
     bool draggingZ = false;
     std::array<juce::TextButton, 3> axisButtons;
+    juce::ComboBox curveBox;
     std::array<std::array<std::unique_ptr<ctlui::Knob>, 4>, 3> axisKnobs;
     std::unique_ptr<ctlui::Knob> speedKnob, accelKnob;
     std::array<float, 3> shown { 0.5f, 0.5f, 0.5f }, outputs {};
@@ -311,9 +335,25 @@ public:
     using Locate = std::function<const std::vector<SurfaceControl>* (const Song&)>;
     using Edit = std::function<void (std::function<void (std::vector<SurfaceControl>&)>)>;
 
-    SurfacePanel (AudioEngine& e, juce::String title, Locate l, Edit ed, std::function<std::optional<AutomationTarget> (int)> targetOf)
-        : engine (e), heading (std::move (title)), locate (std::move (l)), editControls (std::move (ed)), target (std::move (targetOf))
+    // A Dashboard's MIDI settings (round 165): read / write them (the channel's state); none for a Control Surface.
+    struct MidiAccess
     {
+        std::function<std::optional<surface::DashboardMidi> (const Song&)> get;
+        std::function<void (const surface::DashboardMidi&)> set;
+    };
+
+    SurfacePanel (AudioEngine& e, juce::String title, Locate l, Edit ed, std::function<std::optional<AutomationTarget> (int)> targetOf,
+                  int outputLimit, MidiAccess midiAccess = {})
+        : engine (e), heading (std::move (title)), locate (std::move (l)), editControls (std::move (ed)), target (std::move (targetOf)),
+          limit (outputLimit), midi (std::move (midiAccess))
+    {
+        if (midi.get)
+        {
+            midiButton.setButtonText ("MIDI");
+            ui::setHint (midiButton, tr ("MIDI: the port and channel the Dashboard sends on (its notes, the program and the controls set to send MIDI)"));
+            midiButton.onClick = [this] { editMidiSettings(); };
+            addAndMakeVisible (midiButton);
+        }
         editButton.setButtonText (tr ("Edit"));
         editButton.setClickingTogglesState (true);
         editButton.setColour (juce::TextButton::buttonOnColourId, theme::colour::accent);
@@ -369,7 +409,7 @@ public:
                 case SurfaceControl::Kind::knob:
                     drawKnob (g, r.withHeight (r.getWidth()).reduced (4.0f), c.value, false, arc, active);
                     g.setColour (colour::textSecondary);
-                    g.drawText (name, r.withTrimmedTop (r.getWidth()), juce::Justification::centred, true);
+                    drawLabel (g, name, r.withTrimmedTop (r.getWidth()), labelRoom (*controls, i, r), juce::Justification::centred);
                     break;
                 case SurfaceControl::Kind::slider:
                 {
@@ -379,13 +419,13 @@ public:
                     fillRoundRect (g, track.withTop (y), 3.0f, arc);
                     fillRoundRect (g, juce::Rectangle<float> (24.0f, 10.0f).withCentre ({ track.getCentreX(), y }), 3.0f, colour::textPrimary);
                     g.setColour (colour::textSecondary);
-                    g.drawText (name, r.withTop (r.getBottom() - 16.0f), juce::Justification::centred, true);
+                    drawLabel (g, name, r.withTop (r.getBottom() - 16.0f), labelRoom (*controls, i, r), juce::Justification::centred);
                     break;
                 }
                 case SurfaceControl::Kind::button:
                     fillRoundRect (g, r, 4.0f, c.value > 0.5f ? colour::accent : colour::bg4);
                     g.setColour (c.value > 0.5f ? colour::onAccent : colour::textPrimary);
-                    g.drawText (name, r, juce::Justification::centred, true);
+                    drawLabel (g, name, r.reduced (3.0f, 0.0f), r.getWidth() - 6.0f, juce::Justification::centred);
                     break;
                 case SurfaceControl::Kind::checkBox:
                 {
@@ -394,7 +434,7 @@ public:
                     if (c.value > 0.5f)
                         fillRoundRect (g, box.reduced (3.0f), 2.0f, colour::accent);
                     g.setColour (colour::textPrimary);
-                    g.drawText (name, r.withTrimmedLeft (26.0f), juce::Justification::centredLeft, true);
+                    drawLabel (g, name, r.withTrimmedLeft (26.0f), labelRoom (*controls, i, r) - 26.0f, juce::Justification::centredLeft);
                     break;
                 }
                 case SurfaceControl::Kind::xy:
@@ -408,7 +448,7 @@ public:
                     g.setColour (arc);
                     g.fillEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre (dot));
                     g.setColour (colour::textSecondary);
-                    g.drawText (name, r.withTop (pad.getBottom()), juce::Justification::centred, true);
+                    drawLabel (g, name, r.withTop (pad.getBottom()), labelRoom (*controls, i, r), juce::Justification::centred);
                     break;
                 }
             }
@@ -418,7 +458,7 @@ public:
                 g.drawRect (r.expanded (2.0f), 1.0f);
                 g.setColour (colour::textDisabled);
                 g.setFont (font (9.0f));
-                g.drawText (juce::String (output + 1), r.expanded (2.0f).withHeight (11.0f).translated (0.0f, -12.0f).toNearestInt(),
+                g.drawText (juce::String (output + 1) + midiBadge (c), r.expanded (2.0f).withWidth (juce::jmax (r.getWidth(), 80.0f)).withHeight (11.0f).translated (0.0f, -12.0f).toNearestInt(),
                             juce::Justification::centredLeft);
             }
             output += c.outputs();
@@ -431,6 +471,11 @@ public:
         addButton.setBounds (bar.removeFromRight (30));
         bar.removeFromRight (6);
         editButton.setBounds (bar.removeFromRight (60));
+        if (midi.get)
+        {
+            bar.removeFromRight (6);
+            midiButton.setBounds (bar.removeFromRight (56));
+        }
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -582,7 +627,7 @@ private:
             }
         for (const auto& [kind, name] : kinds)
             menu.addItem (tr (name), [this, kind = kind, english = juce::String (name), at] {
-                editControls ([kind, english, at] (std::vector<SurfaceControl>& cs) {
+                editControls ([kind, english, at, limit = limit] (std::vector<SurfaceControl>& cs) {
                     int same = 1;
                     for (const auto& c : cs)
                         same += c.kind == kind ? 1 : 0;
@@ -593,7 +638,7 @@ private:
                     c.valueY = 0.5f;
                     c.x = std::round (at.x / 10.0f) * 10.0f;
                     c.y = juce::jmax (0.0f, std::round ((at.y - (float) top) / 10.0f) * 10.0f);
-                    if (surface::firstOutput (cs, (int) cs.size()) + c.outputs() <= surface::maxOutputs)
+                    if (surface::firstOutput (cs, (int) cs.size()) + c.outputs() <= limit)
                         cs.push_back (c);
                 });
             });
@@ -624,6 +669,21 @@ private:
                               });
                           });
         menu.addSubMenu (tr ("Size"), size);
+        if (midi.get && (*controls)[(std::size_t) i].kind != SurfaceControl::Kind::xy)
+        {
+            juce::PopupMenu m;
+            const auto current = (*controls)[(std::size_t) i].midi;
+            m.addItem (tr ("Controller output only"), true, current == SurfaceControl::Midi::none, [this, i] { setMidi (i, SurfaceControl::Midi::none); });
+            m.addSeparator();
+            const std::pair<SurfaceControl::Midi, const char*> kinds[] = { { SurfaceControl::Midi::cc, TR_NOOP ("Control change (CC)...") },
+                                                                           { SurfaceControl::Midi::rpn, TR_NOOP ("RPN...") },
+                                                                           { SurfaceControl::Midi::nrpn, TR_NOOP ("NRPN...") },
+                                                                           { SurfaceControl::Midi::pressure, TR_NOOP ("Channel pressure...") },
+                                                                           { SurfaceControl::Midi::note, TR_NOOP ("Note...") } };
+            for (const auto& [kind, name] : kinds)
+                m.addItem (tr (name), true, current == kind, [this, i, kind = kind] { editControlMidi (i, kind); });
+            menu.addSubMenu (tr ("Send MIDI"), m);
+        }
         menu.addItem (tr ("Delete"), [this, i] {
             editControls ([i] (std::vector<SurfaceControl>& cs) {
                 if (i < (int) cs.size())
@@ -656,6 +716,143 @@ private:
                                  true);
     }
 
+    // The room a control's label may take: its own width, widened over the free space beside it up to the next
+    // control on the same rows (FL's captions also run past narrow skins), at most 3 × its width.
+    float labelRoom (const std::vector<SurfaceControl>& cs, int i, juce::Rectangle<float> r) const
+    {
+        auto left = r.getX() - 30.0f, right = r.getRight() + 30.0f;
+        left = juce::jmax (left, r.getCentreX() - r.getWidth() * 1.5f);
+        right = juce::jmin (right, r.getCentreX() + r.getWidth() * 1.5f);
+        for (int j = 0; j < (int) cs.size(); ++j)
+        {
+            if (j == i)
+                continue;
+            const auto o = bounds (cs[(std::size_t) j]);
+            if (o.getBottom() <= r.getY() || o.getY() >= r.getBottom())
+                continue;
+            if (o.getCentreX() >= r.getCentreX())
+                right = juce::jmin (right, o.getX() - 4.0f);
+            else
+                left = juce::jmax (left, o.getRight() + 4.0f);
+        }
+        return juce::jmax (r.getWidth(), 2.0f * juce::jmin (r.getCentreX() - left, right - r.getCentreX()));
+    }
+
+    // A label that fits: the caption font, smaller down to 8.5 px, then narrowed (never "…" while it can be read)
+    static void drawLabel (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area, float room, juce::Justification just)
+    {
+        using namespace theme;
+        auto f = font (type::caption);
+        room = juce::jmax (area.getWidth(), room);
+        auto width = juce::GlyphArrangement::getStringWidth (f, text);
+        for (auto h = f.getHeight(); width > room && h > 8.5f;)
+        {
+            h = juce::jmax (8.5f, h - 0.5f);
+            f = f.withHeight (h);
+            width = juce::GlyphArrangement::getStringWidth (f, text);
+        }
+        g.setFont (f);
+        auto box = area;
+        if (room > area.getWidth())
+            box = just.testFlags (juce::Justification::left) ? area.withWidth (room) : area.withSizeKeepingCentre (room, area.getHeight());
+        g.drawFittedText (text, box.toNearestInt(), just, 1, 0.6f);
+    }
+
+    static juce::String midiBadge (const SurfaceControl& c)
+    {
+        switch (c.midi)
+        {
+            case SurfaceControl::Midi::cc: return " CC" + juce::String (c.midiNumber);
+            case SurfaceControl::Midi::rpn: return " RPN" + juce::String (c.midiNumber);
+            case SurfaceControl::Midi::nrpn: return " NRPN" + juce::String (c.midiNumber);
+            case SurfaceControl::Midi::pressure: return " AT";
+            case SurfaceControl::Midi::note: return " " + juce::MidiMessage::getMidiNoteName (c.midiNumber, true, true, 4);
+            case SurfaceControl::Midi::none: break;
+        }
+        return {};
+    }
+
+    void setMidi (int i, SurfaceControl::Midi kind, int number = 0, int low = 0, int high = 127)
+    {
+        editControls ([i, kind, number, low, high] (std::vector<SurfaceControl>& cs) {
+            if (i >= (int) cs.size())
+                return;
+            auto& c = cs[(std::size_t) i];
+            c.midi = kind;
+            c.midiNumber = number;
+            c.midiLow = low;
+            c.midiHigh = high;
+        });
+    }
+
+    void editControlMidi (int i, SurfaceControl::Midi kind)
+    {
+        const auto* controls = locate (engine.getSong());
+        if (controls == nullptr || i >= (int) controls->size())
+            return;
+        const auto& c = (*controls)[(std::size_t) i];
+        const auto same = c.midi == kind;
+        const auto wide = kind == SurfaceControl::Midi::rpn || kind == SurfaceControl::Midi::nrpn;
+        auto* window = new juce::AlertWindow (tr ("Send MIDI"), {}, juce::MessageBoxIconType::NoIcon);
+        if (kind != SurfaceControl::Midi::pressure)
+            window->addTextEditor ("number", juce::String (same ? c.midiNumber : kind == SurfaceControl::Midi::note ? 60 : kind == SurfaceControl::Midi::cc ? 74 : 0),
+                                   kind == SurfaceControl::Midi::note ? tr ("Note number (0-127)")
+                                   : wide                             ? tr ("Parameter number (0-16383)")
+                                                                      : tr ("CC number (0-127)"));
+        window->addTextEditor ("low", juce::String (same ? c.midiLow : 0), tr ("Lowest value"));
+        window->addTextEditor ("high", juce::String (same ? c.midiHigh : 127), tr ("Highest value (above 127: 14-bit)"));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        juce::Component::SafePointer<SurfacePanel> safe (this);
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, window, i, kind, wide] (int result) {
+                                     if (result != 1 || safe == nullptr)
+                                         return;
+                                     const auto maxNumber = wide ? 16383 : 127;
+                                     const auto number = window->getTextEditor ("number") != nullptr
+                                                             ? juce::jlimit (0, maxNumber, window->getTextEditorContents ("number").getIntValue())
+                                                             : 0;
+                                     const auto low = juce::jlimit (0, 16383, window->getTextEditorContents ("low").getIntValue());
+                                     const auto high = juce::jlimit (0, 16383, window->getTextEditorContents ("high").getIntValue());
+                                     safe->setMidi (i, kind, number, low, high);
+                                 }),
+                                 true);
+    }
+
+    void editMidiSettings()
+    {
+        const auto current = midi.get ? midi.get (engine.getSong()) : std::nullopt;
+        if (! current)
+            return;
+        auto* window = new juce::AlertWindow (tr ("Dashboard MIDI"),
+                                              tr ("The Dashboard sends its notes, the program and the controls set to \"Send MIDI\" to the plugins "
+                                                  "whose MIDI input port is this port (Wrapper settings > MIDI)."),
+                                              juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("port", juce::String (current->port), tr ("Port (0-255)"));
+        window->addTextEditor ("channel", juce::String (current->channel + 1), tr ("MIDI channel (1-16)"));
+        window->addTextEditor ("program", current->program > 0 ? juce::String (current->program) : juce::String(), tr ("Program (1-128, empty = none)"));
+        window->addTextEditor ("msb", current->bankMsb >= 0 ? juce::String (current->bankMsb) : juce::String(), tr ("Bank MSB (empty = none)"));
+        window->addTextEditor ("lsb", current->bankLsb >= 0 ? juce::String (current->bankLsb) : juce::String(), tr ("Bank LSB (empty = none)"));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        juce::Component::SafePointer<SurfacePanel> safe (this);
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, window] (int result) {
+                                     if (result != 1 || safe == nullptr || ! safe->midi.set)
+                                         return;
+                                     auto optional = [&] (const char* name, int lo, int hi) {
+                                         const auto t = window->getTextEditorContents (name).trim();
+                                         return t.isEmpty() ? -1 : juce::jlimit (lo, hi, t.getIntValue());
+                                     };
+                                     surface::DashboardMidi m;
+                                     m.port = juce::jlimit (0, 255, window->getTextEditorContents ("port").getIntValue());
+                                     m.channel = juce::jlimit (1, 16, window->getTextEditorContents ("channel").getIntValue()) - 1;
+                                     m.program = juce::jmax (0, optional ("program", 1, 128));
+                                     m.bankMsb = optional ("msb", 0, 127);
+                                     m.bankLsb = optional ("lsb", 0, 127);
+                                     safe->midi.set (m);
+                                 }),
+                                 true);
+    }
+
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
 
     AudioEngine& engine;
@@ -663,7 +860,9 @@ private:
     Locate locate;
     Edit editControls;
     std::function<std::optional<AutomationTarget> (int)> target;
-    juce::TextButton editButton, addButton;
+    int limit = surface::maxOutputs;
+    MidiAccess midi;
+    juce::TextButton editButton, addButton, midiButton;
     int dragging = -1;
     bool moving = false;
     juce::Point<float> grab, grabAt;
@@ -746,11 +945,27 @@ std::unique_ptr<juce::Component> makeControlSurfaceEditor (AudioEngine& engine, 
             if (! target)
                 return std::nullopt;
             return AutomationTarget { target->kind, target->index, target->slot, output };
-        });
+        },
+        surface::maxSurfaceOutputs);
 }
 
-std::unique_ptr<juce::Component> makeDashboardEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate)
+namespace
 {
+std::unique_ptr<juce::Component> dashboardEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, int channel)
+{
+    SurfacePanel::MidiAccess midi;
+    midi.get = [locate] (const Song& s) -> std::optional<surface::DashboardMidi> {
+        const auto* c = locate (const_cast<Song&> (s));
+        if (c == nullptr || c->instrument != InstrumentKind::dashboard)
+            return std::nullopt;
+        return surface::dashboardMidi (c->pluginState);
+    };
+    midi.set = [&engine, locate] (const surface::DashboardMidi& m) {
+        engine.editSong ([locate, m] (Song& s) {
+            if (auto* c = locate (s); c != nullptr && c->instrument == InstrumentKind::dashboard)
+                surface::writeDashboardMidi (c->pluginState, m);
+        });
+    };
     return std::make_unique<SurfacePanel> (
         engine, "Dashboard",
         [locate] (const Song& s) -> const std::vector<SurfaceControl>* {
@@ -763,14 +978,26 @@ std::unique_ptr<juce::Component> makeDashboardEditor (AudioEngine& engine, std::
                     change (c->patcher.surface);
             });
         },
-        [] (int) -> std::optional<AutomationTarget> { return std::nullopt; });
+        // its controls' outputs as automation / link targets of the channel (round 165; not inside a Patcher)
+        [channel] (int output) -> std::optional<AutomationTarget> {
+            if (channel < 0)
+                return std::nullopt;
+            return AutomationTarget { AutomationTargetKind::channelParam, channel, 0, output };
+        },
+        surface::maxOutputs, std::move (midi));
+}
+} // namespace
+
+std::unique_ptr<juce::Component> makeDashboardEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate)
+{
+    return dashboardEditor (engine, std::move (locate), -1);
 }
 
 std::unique_ptr<juce::Component> makeDashboardEditor (AudioEngine& engine, int channel)
 {
-    return makeDashboardEditor (engine, [channel] (Song& s) -> ChannelDef* {
+    return dashboardEditor (engine, [channel] (Song& s) -> ChannelDef* {
         return channel >= 0 && channel < (int) s.channels.size() ? &s.channels[(std::size_t) channel] : nullptr;
-    });
+    }, channel);
 }
 
 namespace Controller164Windows

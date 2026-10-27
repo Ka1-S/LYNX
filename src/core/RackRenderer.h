@@ -163,6 +163,8 @@ struct RackState
     // VFX channels (round 164b): their notes go through their processor; output k goes out on MIDI port vfxPort + k
     std::vector<int> vfxChannels;
     std::vector<int> vfxPort; // [channel] (−1 = not a VFX channel)
+    // Dashboard channels (round 165): what their controls send in MIDI goes to the plugins on their port (midiTargets)
+    std::vector<int> dashboardChannels;
     void buildMidiRoutes();
 
     // Loads (or fetches from cache) a file's audio; nullptr on failure.

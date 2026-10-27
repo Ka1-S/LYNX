@@ -1,4 +1,7 @@
 #include "core/RackRenderer.h"
+
+#include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "core/FlSynths.h"
 #include "core/HardwareInsert.h"
 #include "core/Layer.h"
@@ -617,6 +620,7 @@ void RackState::buildMidiRoutes()
     midiSources.assign (count, {});
     midiOutChannel.assign (count, -1);
     vfxChannels.clear();
+    dashboardChannels.clear();
     vfxPort.assign (count, -1);
     hasMidiRoutes = false;
     midiOutTargets.assign (count, {});
@@ -719,6 +723,14 @@ void RackState::buildMidiRoutes()
             }
             continue;
         }
+        if (song.channels[c].instrument == InstrumentKind::dashboard) // its notes and controls' MIDI (round 165)
+        {
+            const auto settings = surface::dashboardMidi (song.channels[c].pluginState);
+            midiOutChannel[c] = settings.channel;
+            dashboardChannels.push_back ((int) c);
+            send (c, settings.port, settings.channel, 0);
+            continue;
+        }
         if (song.channels[c].instrument != InstrumentKind::midiOut)
             continue;
         const auto settings = midictl::parseMidiOut (song.channels[c].pluginState);
@@ -792,7 +804,12 @@ void RackState::buildAutomationTables()
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))
                                   // an Envelope Controller's global Mod X / Y (round 164f)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::controller
-                                      && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))))
+                                      && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
+                                  // a Dashboard's outputs, the Voltage Controller's offsets / scales (round 165)
+                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::dashboard && t.param >= 0
+                                      && t.param < surface::maxOutputs)
+                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0
+                                      && t.param < voltage::paramCount)))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
                 else
                     used = false;
@@ -1274,7 +1291,7 @@ void RackRenderer::applyPluginParams (const RackState& state, int firstSlot) noe
             if (b.channel < (int) state.instruments.size())
                 state.instruments[(std::size_t) b.channel]->setParameter (b.param, v);
             // a MIDI Out's controls reach the plugins on its port
-            if ((std::size_t) b.channel < state.midiTargets.size())
+            if ((std::size_t) b.channel < state.midiTargets.size() && midictl::isMidiParam (b.param)) // (a Dashboard's outputs stay its own)
                 for (const auto t : state.midiTargets[(std::size_t) b.channel])
                     if (t < (int) state.instruments.size())
                         state.instruments[(std::size_t) t]->setParameter (b.param, v);
@@ -1895,7 +1912,7 @@ void RackRenderer::process (const RackState* state,
     if (playing && ! wasPlaying && state->hasMidiRoutes)
         for (std::size_t c = 0; c < state->midiTargets.size(); ++c)
         {
-            if (state->midiTargets[c].empty())
+            if (state->midiTargets[c].empty() || state->song.channels[c].instrument != InstrumentKind::midiOut) // (a Dashboard sends its own)
                 continue;
             const auto s = midictl::parseMidiOut (state->song.channels[c].pluginState);
             const auto status = (std::uint8_t) (s.channel & 15);
@@ -2375,6 +2392,26 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
                 }
         }
         events.sortByOffset();
+    }
+
+    // Dashboards (round 165, FL's Dashboard): the MIDI their controls and patch send reaches the plugins on their port
+    for (const auto c : state.dashboardChannels)
+    {
+        if ((std::size_t) c >= state.instruments.size() || state.instruments[(std::size_t) c] == nullptr)
+            continue;
+        std::array<std::uint32_t, 192> sent;
+        const auto count = state.instruments[(std::size_t) c]->takeMidiMessages (sent.data(), (int) sent.size());
+        if (count <= 0 || (std::size_t) c >= state.midiTargets.size())
+            continue;
+        for (int k = 0; k < count; ++k)
+        {
+            const auto m = sent[(std::size_t) k];
+            const std::uint8_t bytes[3] { (std::uint8_t) (m & 0xff), (std::uint8_t) ((m >> 8) & 127), (std::uint8_t) ((m >> 16) & 127) };
+            const auto size = (bytes[0] & 0xE0) == 0xC0 ? 2 : 3; // (program change, channel pressure: one data byte)
+            for (const auto t : state.midiTargets[(std::size_t) c])
+                if (t >= 0 && t < (int) state.instruments.size() && state.instruments[(std::size_t) t] != nullptr)
+                    state.instruments[(std::size_t) t]->midiMessage (bytes, size);
+        }
     }
 
     // live-played notes routed through their channel's note path (round 149)

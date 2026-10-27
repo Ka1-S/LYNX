@@ -117,6 +117,24 @@ float pitchValue (const Settings& s, double key) noexcept
     return (float) (s.pitchFactor * (s.pitchStandard == 1 ? semitones * 0.1 : semitones / 120.0));
 }
 
+std::string paramName (int param)
+{
+    if (param < 0 || param >= paramCount)
+        return {};
+    return std::string (outputName (param % outputs)) + (param < outputs ? " offset" : " scale");
+}
+
+float paramValue (const Settings& s, int param) noexcept
+{
+    return param >= 0 && param < paramCount ? (float) s.params[(std::size_t) param] / 65536.0f : 0.0f;
+}
+
+void setParamValue (Settings& s, int param, float value) noexcept
+{
+    if (param >= 0 && param < paramCount && std::isfinite (value))
+        s.params[(std::size_t) param] = (std::int32_t) std::lround (std::clamp (value, 0.0f, 1.0f) * 65536.0f);
+}
+
 const char* sourceName (Source source) noexcept
 {
     static const char* names[] = { "Pitch", "Gate", "Trigger", "Velocity", "Volume", "Pan", "Mod X", "Mod Y", "Clock", "None" };
@@ -134,6 +152,12 @@ namespace
 class VoltageInstrument final : public Instrument
 {
 public:
+    VoltageInstrument()
+    {
+        for (auto& v : overrides)
+            v.store (-1.0f, std::memory_order_relaxed);
+    }
+
     void prepare (double sr) noexcept override
     {
         rate = sr > 0.0 ? sr : 44100.0;
@@ -202,6 +226,12 @@ public:
         nextModY = modY;
     }
     void pitchBend (float semitones) noexcept override { bend = semitones; }
+    // automation / a link on an offset or scale (round 165): overrides the setting until the next one
+    void setParameter (int index, float value) noexcept override
+    {
+        if (index >= 0 && index < paramCount && std::isfinite (value))
+            overrides[(std::size_t) index].store (std::clamp (value, 0.0f, 1.0f), std::memory_order_relaxed);
+    }
     void setSongPosition (double ticks) noexcept override { songTicks = ticks; }
     bool idle() const noexcept override { return ! settings.enabled; }
 
@@ -319,15 +349,19 @@ private:
             if (sequence.load (std::memory_order_acquire) == before)
             {
                 settings = copy;
-                return;
+                break;
             }
         }
+        for (int p = 0; p < paramCount; ++p)
+            if (const auto v = overrides[(std::size_t) p].load (std::memory_order_relaxed); v >= 0.0f)
+                setParamValue (settings, p, v);
     }
 
     double rate = 44100.0;
     std::atomic<std::uint32_t> sequence { 0 };
     Settings shared;   // written by configure (UI thread)
     Settings settings; // the audio thread's copy
+    std::array<std::atomic<float>, paramCount> overrides; // (−1: none)
     std::atomic<double> tempo { 120.0 };
     std::atomic<float> channelVolume { 0.78f };
 
