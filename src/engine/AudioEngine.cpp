@@ -254,6 +254,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
         deviceStateSaver = std::make_unique<DeviceStateSaver> (*this);
         midiPrefs = midiPrefsShared = prefs::MidiPrefs::fromText (midiSettingsFile().loadFileAsString().toStdString());
+        performanceMidiChannel.store (midiPrefs.performanceChannel);
         recordingSettings = loadRecordingSettings();
         saveGlobalLinks = true;
 
@@ -1594,6 +1595,16 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
 
     midiActivity.fetch_add (1, std::memory_order_relaxed); // the toolbar's MIDI input light
 
+    // FL's playlist live mode channel (round 165m): its notes launch the performance clips instead of playing
+    if (const auto pc = performanceMidiChannel.load (std::memory_order_relaxed);
+        pc != 0 && m.getChannel() == pc && m.isNoteOnOrOff() && performanceMidiOn.load (std::memory_order_relaxed))
+    {
+        perf::Command c;
+        if (performanceMidi.note (m.getNoteNumber(), m.isNoteOn(), c))
+            performanceLive->midiCommands.push (c);
+        return;
+    }
+
     if (device.midiChannel != 0 && m.getChannel() != device.midiChannel)
         return;
 
@@ -1736,6 +1747,7 @@ void AudioEngine::setMidiPrefs (const prefs::MidiPrefs& p, bool save)
         const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
         midiPrefsShared = p;
     }
+    performanceMidiChannel.store (p.performanceChannel);
     if (! p.pickup)
         pickups.clear();
     if (prefetcher != nullptr) // (only with an audio device: the real app)
@@ -2945,6 +2957,7 @@ void AudioEngine::timerCallback()
 void AudioEngine::updatePerformanceRecording()
 {
     auto& live = *performanceLive;
+    performanceMidiOn.store (song.performanceMode && song.mode == PlayMode::song && song.performanceZoneEnd() > 0, std::memory_order_relaxed);
     const auto on = transport.recording.load() && transport.playing.load() && song.performanceMode && song.mode == PlayMode::song
                     && recordOptions.recordClips;
     if (on && ! live.recording.load (std::memory_order_relaxed))

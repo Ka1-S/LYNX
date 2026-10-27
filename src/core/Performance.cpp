@@ -142,7 +142,7 @@ void Player::launch (const Song& song, const std::vector<int>& zone, TrackState&
     else if (! immediate && step > 0.0)
     {
         const auto below = std::floor (now / step) * step;
-        if (s.tolerant && now - below <= step / 8.0 && below >= lastClock - 1.0e-6)
+        if (s.tolerant && now - below <= step / 8.0)
             grid = below; // late but tolerated: plays as if launched on the grid point
         else
             grid = std::ceil (now / step - 1.0e-9) * step;
@@ -211,10 +211,20 @@ void Player::recordPartial (const Song& song, const std::vector<int>& zone, cons
         live->recorded.push ({ t.track, p.clipStart, p.songFrom, at - vs, vs - ws });
 }
 
-void Player::apply (const Song& song, const std::vector<int>& zone, const Command& c, double now, Live* live) noexcept
+void Player::apply (const Song& song, const std::vector<int>& zone, const Command& command, double now, Live* live) noexcept
 {
     using P = TrackPerformance::Press;
     (void) live;
+    auto c = command;
+    if (c.column >= 0 && (c.type == Command::Type::press || c.type == Command::Type::release))
+    {
+        // a controller's column: the track's column-th zone clip
+        std::array<std::int64_t, 256> clips {};
+        const auto n = trackZoneClips (song, zone, c.track, clips.data(), (int) clips.size());
+        if (c.column >= n)
+            return;
+        c.clipStart = clips[(std::size_t) c.column];
+    }
     switch (c.type)
     {
         case Command::Type::stopAll:
@@ -292,6 +302,7 @@ void Player::process (const Song& song, const std::vector<int>& zone, Live* live
         {
             Command c;
             while (live->commands.pop (c)) {} // launches while stopped are dropped (FL launches only while playing)
+            while (live->midiCommands.pop (c)) {}
             if (live->anyPlaying.load (std::memory_order_relaxed))
             {
                 for (auto& v : live->tracks)
@@ -314,6 +325,8 @@ void Player::process (const Song& song, const std::vector<int>& zone, Live* live
     {
         Command c;
         while (live->commands.pop (c))
+            apply (song, zone, c, clock, live);
+        while (live->midiCommands.pop (c))
             apply (song, zone, c, clock, live);
     }
 
@@ -482,6 +495,31 @@ void schedulePerformance (const Song& song, const Player& player, double clock, 
         scheduleSingleClip (song, v.clip, v.playlistIndex, clock, numSamples, tps, out, index);
     }
     out.sortByOffset();
+}
+
+bool MidiMapping::note (int key, bool on, Command& out) noexcept
+{
+    if (key < 0 || key > 127)
+        return false;
+    if (key >= 120)
+    {
+        if (on)
+            switch (key)
+            {
+                case 120: trackOffset = std::max (0, trackOffset - (bigSteps ? 10 : 1)); break;
+                case 121: trackOffset = std::min (maxTracks, trackOffset + (bigSteps ? 10 : 1)); break;
+                case 122: columnOffset = std::max (0, columnOffset - (bigSteps ? 12 : 1)); break;
+                case 123: columnOffset = std::min (255, columnOffset + (bigSteps ? 12 : 1)); break;
+                case 124: bigSteps = ! bigSteps; break;
+                default: break;
+            }
+        return false;
+    }
+    out = Command {};
+    out.type = on ? Command::Type::press : Command::Type::release;
+    out.track = key / 12 + trackOffset;
+    out.column = key % 12 + columnOffset;
+    return out.track < maxTracks;
 }
 
 bool recordedClip (const Song& song, const RecordedPass& pass, Clip& out)

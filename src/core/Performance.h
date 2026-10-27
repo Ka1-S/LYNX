@@ -40,6 +40,18 @@ struct Command
     int track = 0;
     std::int64_t clipStart = 0; // identifies the clip on its track (stable across edits that don't move it)
     std::int64_t columnStart = 0, columnEnd = 0; // launchColumn: every zone clip starting in [columnStart, columnEnd)
+    int column = -1; // press / release from a controller: the track's column-th zone clip (clipStart unused)
+};
+
+// FL's "MIDI channel used for playlist live mode" ([DECOMP] 0x1181be1): on that channel a note below 120 launches
+// track (note / 12 + trackOffset), column (note % 12 + columnOffset) — one octave per track, twelve clips each;
+// 120 / 121 move the track offset down / up (by 1, or 10), 122 / 123 the column offset (by 1, or 12), 124 switches
+// the big steps. False when the note is a navigation key (offsets changed, no command).
+struct MidiMapping
+{
+    int trackOffset = 0, columnOffset = 0;
+    bool bigSteps = false;
+    bool note (int key, bool on, Command& out) noexcept;
 };
 
 // A pass the recorder turns into a clip in the arrangement: zone clip (track, clipStart) played from song tick
@@ -53,7 +65,8 @@ struct RecordedPass
 
 struct Live
 {
-    SpscQueue<Command, 256> commands; // UI → audio (one producer: the message thread; MIDI goes through it)
+    SpscQueue<Command, 256> commands;     // UI → audio (one producer: the message thread)
+    SpscQueue<Command, 256> midiCommands; // MIDI input thread → audio (controller launching)
 
     // audio → UI, per Playlist track: the clip playing (its start tick, −1 = none), the one waiting to start, and the
     // playing pass's position within the clip (0..1)

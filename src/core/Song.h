@@ -1042,7 +1042,7 @@ struct PlaylistTrack
     PlaylistTrackMode mode = PlaylistTrackMode::unassigned;
     int mixerTrack = -1; // audio / instrument tracks: the linked mixer track (-1 = none)
     int channel = -1;    // instrument tracks: the channel
-    TrackPerformance performance; // FL's Performance settings (round 165m)
+    TrackPerformance performance {}; // FL's Performance settings (round 165m)
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.

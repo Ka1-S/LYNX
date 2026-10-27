@@ -275,7 +275,7 @@ TEST (perf165_position_sync_and_notes)
     r.command (T::press, 0, 4 * ppq);
     r.runTo (6.0 * ppq + 120.0); // starts on beat 3, at its third beat (the song position modulo 4 beats)
     CHECK (r.playing (0) == 4 * ppq);
-    CHECK (std::abs (r.live.tracks[0].progress.load() - (2.0f * ppq + 120.0f) / (4 * ppq)) < 0.02f);
+    CHECK (std::abs (r.live.tracks[0].progress.load() - 0.5f) < 0.01f); // (at the last block's start)
 
     // the launched clip's note sounds on the clip's first beat of each pass (bar 3)
     const auto tps = ticksPerSample (120.0, 48000.0);
@@ -296,7 +296,7 @@ TEST (perf165_position_sync_and_notes)
             }
         clock += n * tps;
     }
-    CHECK (ons.size() == 1 && ons.size() == 1 && std::abs (ons[0] - 8.0 * ppq) < 1.0);
+    CHECK (ons.size() == 2 && std::abs (ons[0] - 8.0 * ppq) < 1.0 && std::abs (ons[1] - 12.0 * ppq) < 1.0); // (Stay: it loops)
 }
 
 TEST (perf165_stop_and_recording)
@@ -505,4 +505,32 @@ TEST (perf165_patcherize_slots_null_and_follow_automation)
     std::printf ("  patcherize slot: max diff %.3g, all: %.3g\n", d1, d2);
     CHECK (d1 < 1.0e-6f);
     CHECK (d2 < 1.0e-6f);
+}
+
+TEST (perf165_midi_channel_launches_clips)
+{
+    using namespace lynx;
+    // [DECOMP] 0x1181be1: an octave per track, a note per column; 120…124 navigate
+    perf::MidiMapping m;
+    perf::Command c;
+    CHECK (m.note (13, true, c) && c.type == perf::Command::Type::press && c.track == 1 && c.column == 1);
+    CHECK (m.note (13, false, c) && c.type == perf::Command::Type::release);
+    CHECK (! m.note (121, true, c) && m.trackOffset == 1);
+    CHECK (! m.note (124, true, c) && m.bigSteps);
+    CHECK (! m.note (123, true, c) && m.columnOffset == 12);
+    CHECK (! m.note (120, true, c) && m.trackOffset == 0);
+    CHECK (m.note (2, true, c) && c.track == 0 && c.column == 14);
+
+    // a controller's column resolves to the track's n-th zone clip
+    perf165::Run r (perf165::zoneSong());
+    m = {};
+    CHECK (m.note (2, true, c));
+    r.live.midiCommands.push (c);
+    r.runTo (4.0 * ppq + 120.0);
+    CHECK (r.playing (0) == 8 * ppq);
+
+    prefs::MidiPrefs p;
+    p.performanceChannel = 16;
+    CHECK (prefs::MidiPrefs::fromText (p.toText()).performanceChannel == 16);
+    CHECK (prefs::MidiPrefs::fromText (prefs::MidiPrefs {}.toText()).performanceChannel == 0);
 }

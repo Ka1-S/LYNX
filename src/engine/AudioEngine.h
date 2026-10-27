@@ -666,6 +666,9 @@ private:
     juce::SpinLock takeLock;                       // the audio thread only tries (never waits)
     LiveInput liveInput;
     std::unique_ptr<perf::Live> performanceLive = std::make_unique<perf::Live>(); // Performance mode (round 165m)
+    std::atomic<int> performanceMidiChannel { 0 }; // MidiPrefs::performanceChannel (UI writes, MIDI thread reads)
+    std::atomic<bool> performanceMidiOn { false }; // Performance mode is on with a zone (UI writes, MIDI thread reads)
+    perf::MidiMapping performanceMidi;             // MIDI thread only
     HardwareOutput hwOutput;                              // inserts' hardware outputs (renderer -> callback)
     std::array<int, HardwareOutput::maxChannels> outputSlot {}; // device output channel -> callback output index (-1: closed)
     std::atomic<int> masterOutChannel { outputDefault };  // the Master's target (UI -> audio)
