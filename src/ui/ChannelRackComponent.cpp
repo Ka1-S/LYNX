@@ -3,6 +3,8 @@
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
 #include "ui/ChannelRackComponent.h"
+#include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 
 #include "core/MixerOps.h"
 
@@ -80,6 +82,9 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::midiOut: return "MIDI Out";
         case InstrumentKind::patcher: return "Patcher";
         case InstrumentKind::soundfont: return "LYNX Soundfont";
+        case InstrumentKind::layer: return "Layer";
+        case InstrumentKind::dashboard: return "Dashboard";
+        case InstrumentKind::voltage: return "Voltage Controller";
         case InstrumentKind::vfx: return "VFX";
     }
     return "?";
@@ -99,6 +104,9 @@ juce::String instrumentLabel (InstrumentKind k)
         case InstrumentKind::audioClip: return tr ("Audio clip");
         case InstrumentKind::controller: return tr ("Envelope Controller");
         case InstrumentKind::midiOut: return tr ("MIDI Out");
+        case InstrumentKind::layer: return tr ("Layer");
+        case InstrumentKind::dashboard: return "Dashboard";
+        case InstrumentKind::voltage: return "Voltage Controller";
         default: return instrumentName (k);
     }
 }
@@ -2100,6 +2108,32 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
             count += ch.instrument == InstrumentKind::midiOut;
         settings.channel = count % 15 >= 9 ? count % 15 + 1 : count % 15;
         midictl::writeMidiOut (c.pluginState, settings);
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Layer (round 164): plays its children (its settings open: select channels, then Set children)
+    menu.addItem (tr ("Layer"), [this, add] {
+        ChannelDef c;
+        c.name = tr ("Layer").toStdString();
+        c.instrument = InstrumentKind::layer;
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Dashboard (round 164): a panel of knobs / sliders / buttons, each an output to link to any knob
+    menu.addItem ("Dashboard", [this, add] {
+        ChannelDef c;
+        c.name = "Dashboard";
+        c.instrument = InstrumentKind::dashboard;
+        c.patcher.surface = surface::starterControls();
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Voltage Controller (round 164): its notes as control voltages for modular gear
+    menu.addItem ("Voltage Controller", [this, add] {
+        ChannelDef c;
+        c.name = "Voltage Controller";
+        c.instrument = InstrumentKind::voltage;
+        c.pluginState = voltage::write (voltage::Settings {});
         const auto added = add (c);
         openChannelSettings (engine, added);
     });

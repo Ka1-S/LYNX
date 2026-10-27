@@ -115,6 +115,9 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::midiOut: return "midiOut";
         case InstrumentKind::patcher: return "patcher";
         case InstrumentKind::soundfont: return "soundfont";
+        case InstrumentKind::layer: return "layer";
+        case InstrumentKind::dashboard: return "dashboard";
+        case InstrumentKind::voltage: return "voltage";
         case InstrumentKind::vfx: return "vfx";
     }
     return "synth";
@@ -130,7 +133,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
                     InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::flkeys,
-                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut, InstrumentKind::patcher, InstrumentKind::soundfont, InstrumentKind::vfx })
+                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut, InstrumentKind::patcher, InstrumentKind::soundfont, InstrumentKind::layer, InstrumentKind::dashboard, InstrumentKind::voltage, InstrumentKind::vfx })
         if (id == instrumentId (k))
             return k;
 
@@ -241,6 +244,9 @@ const char* effectId (EffectKind k)
         case EffectKind::flLowLifter: return "flLowLifter";
         case EffectKind::waveCandy: return "waveCandy";
         case EffectKind::visualizer: return "visualizer";
+        case EffectKind::xyController: return "xyController";
+        case EffectKind::xyzController: return "xyzController";
+        case EffectKind::controlSurface: return "controlSurface";
     }
     return "eq";
 }
@@ -404,11 +410,16 @@ juce::var patcherToVar (const PatcherDoc& doc)
         o->setProperty ("toMidiPorts", ports (doc.toMidiPorts));
     if (doc.fromNotesHidden)
         o->setProperty ("fromNotesHidden", true);
-    if (! doc.surface.empty()) // the Surface tab (round 151): [kind, name, value, value Y, x, y]
+    if (! doc.surface.empty()) // the Surface tab (round 151): [kind, name, value, value Y, x, y(, size: round 164)]
     {
         juce::Array<juce::var> controls;
         for (const auto& c : doc.surface)
-            controls.add (juce::Array<juce::var> { (int) c.kind, juce::String::fromUTF8 (c.name.c_str()), c.value, c.valueY, c.x, c.y });
+        {
+            juce::Array<juce::var> control { (int) c.kind, juce::String::fromUTF8 (c.name.c_str()), c.value, c.valueY, c.x, c.y };
+            if (c.size != 1.0f)
+                control.add (c.size);
+            controls.add (control);
+        }
         o->setProperty ("surface", controls);
         o->setProperty ("surfaceAt", juce::Array<juce::var> { doc.surfaceX, doc.surfaceY });
     }
@@ -507,6 +518,8 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
                 s.valueY = juce::jlimit (0.0f, 1.0f, (float) (double) c[3]);
                 s.x = (float) (double) c[4];
                 s.y = (float) (double) c[5];
+                if (c.size() >= 7)
+                    s.size = juce::jlimit (0.5f, 3.0f, (float) (double) c[6]);
                 doc.surface.push_back (std::move (s));
             }
     if (const auto& at = v["surfaceAt"]; at.isArray() && at.size() == 2)
@@ -559,7 +572,7 @@ juce::var effectToVar (const EffectSlot& slot)
     else if (slot.isSubstitute()) // a LYNX substitute: the original plugin travels with it, unchanged
         e->setProperty ("substituteFor", pluginToVar (slot.substituteFor));
 
-    if (slot.kind == EffectKind::patcher)
+    if (slot.kind == EffectKind::patcher || slot.kind == EffectKind::controlSurface) // (a Control Surface's controls: round 164)
         e->setProperty ("patcher", patcherToVar (slot.patcher));
 
     if (slot.kind == EffectKind::parallel) // container branches, each with its own chain
@@ -650,7 +663,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
                         branch.chain.push_back (std::move (*c)); // containers can be nested
             slot.branches.push_back (std::move (branch));
         }
-    if (*kind == EffectKind::patcher && e.hasProperty ("patcher"))
+    if ((*kind == EffectKind::patcher || *kind == EffectKind::controlSurface) && e.hasProperty ("patcher"))
         slot.patcher = patcherFromVar (e["patcher"], Song {});
     if (auto* links = e["links"].getArray())
         for (const auto& l : *links)
@@ -688,7 +701,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter, EffectKind::waveCandy, EffectKind::visualizer })
+                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter, EffectKind::waveCandy, EffectKind::visualizer,
+                    EffectKind::xyController, EffectKind::xyzController, EffectKind::controlSurface })
         if (id == effectId (k))
             return k;
 
@@ -892,6 +906,22 @@ juce::var channelToVar (const ChannelDef& c)
     }
     if (c.cutGroup != 0 || c.cutBy != 0)
         o->setProperty ("cut", juce::Array<juce::var> { c.cutGroup, c.cutBy });
+    // FL's key region and Layer channels (round 164)
+    if (c.hasKeyRegion())
+        o->setProperty ("keyRegion", juce::Array<juce::var> { c.keyLow, c.keyHigh });
+    if (c.instrument == InstrumentKind::layer)
+    {
+        auto l = std::make_unique<juce::DynamicObject>();
+        juce::Array<juce::var> kids;
+        for (const auto k : c.layer.children)
+            kids.add (k);
+        l->setProperty ("children", kids);
+        l->setProperty ("random", c.layer.random);
+        l->setProperty ("crossfade", c.layer.crossfade);
+        l->setProperty ("sequential", c.layer.sequential);
+        l->setProperty ("fade", c.layer.fade);
+        o->setProperty ("layer", juce::var (l.release()));
+    }
 
     if (! (c.synth == SynthSettings {}))
     {
@@ -1015,7 +1045,7 @@ juce::var channelToVar (const ChannelDef& c)
 
     if (c.instrument == InstrumentKind::plugin)
         o->setProperty ("plugin", pluginToVar (c.plugin));
-    if (c.instrument == InstrumentKind::patcher)
+    if (c.instrument == InstrumentKind::patcher || c.instrument == InstrumentKind::dashboard) // (a Dashboard's controls: round 164)
         o->setProperty ("patcher", patcherToVar (c.patcher));
 
     return juce::var (o.release());
@@ -1105,6 +1135,22 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
             def.arp.slide = (bool) fl.getProperty ("slide", false);
             def.arp.octaveRepeat = juce::jlimit (0, 16, (int) fl.getProperty ("octaveRepeat", 1));
         }
+    }
+    if (const auto& region = c["keyRegion"]; region.isArray() && region.size() >= 2)
+    {
+        def.keyLow = juce::jlimit (0, 127, (int) region[0]);
+        def.keyHigh = juce::jlimit (def.keyLow, 127, (int) region[1]);
+    }
+    if (const auto& l = c["layer"]; l.isObject())
+    {
+        if (const auto* kids = l["children"].getArray())
+            for (const auto& k : *kids)
+                if ((int) k >= 0)
+                    def.layer.children.push_back ((int) k);
+        def.layer.random = (bool) l.getProperty ("random", false);
+        def.layer.crossfade = (bool) l.getProperty ("crossfade", false);
+        def.layer.sequential = (bool) l.getProperty ("sequential", false);
+        def.layer.fade = juce::jlimit (0.0f, 1.0f, (float) (double) l.getProperty ("fade", 0.0));
     }
     if (const auto& misc = c["misc"]; misc.isObject())
     {
@@ -1264,7 +1310,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         readLfos (s, def.sampler.lfo);
     }
 
-    if (def.instrument == InstrumentKind::patcher && c.hasProperty ("patcher"))
+    if ((def.instrument == InstrumentKind::patcher || def.instrument == InstrumentKind::dashboard) && c.hasProperty ("patcher"))
         def.patcher = patcherFromVar (c["patcher"], song);
     return def;
 }
