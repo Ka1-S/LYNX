@@ -46,6 +46,9 @@ FlPathRoots findFlStudioRoots();
 // The user's FL installation as the native FL engines read it (round 142): its folders and this PC's file system
 const natives::FlAccess& flStudioAccess(); // (found once per session)
 
+// Start-up trace hook (round 165i): Main's LYNX_TRACE_STARTUP log receives the engine's own steps (null: off)
+inline void (*startupMark) (const char* step) = nullptr;
+
 class AudioEngine final : private juce::AudioIODeviceCallback,
                           private juce::MidiInputCallback,
                           public juce::ChangeBroadcaster,

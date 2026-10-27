@@ -27,6 +27,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <thread>
 
 namespace lynx
 {
@@ -520,6 +521,77 @@ void RackState::buildMixerGraph()
                                              [] (const EffectSlot& e) { return (e.kind == EffectKind::plugin && ! e.plugin.threaded) || e.kind == EffectKind::hardwareInsert; });
             (pinned ? audioThreadLayers : threadedLayers)[d].push_back (t);
         }
+
+    buildTaskGraph (depth);
+}
+
+void RackState::buildTaskGraph (const std::vector<int>& depth)
+{
+    const auto tracks = std::max<int> (1, (int) song.mixer.size());
+    graphChannels = std::min<int> ((int) song.channels.size(), RackRenderer::maxChannels);
+    trackChannels.assign ((std::size_t) tracks, {});
+    for (int c = 0; c < graphChannels; ++c)
+        trackChannels[(std::size_t) std::clamp (song.channels[(std::size_t) c].mixerTrack, 0, tracks - 1)].push_back (c);
+
+    graphOk = false;
+    graphIndegree.clear();
+    graphNextStart.clear();
+    graphNext.clear();
+    graphRoots.clear();
+
+    const auto pinned = ! audioThreadChannels.empty()
+                     || std::any_of (audioThreadLayers.begin(), audioThreadLayers.end(), [] (const std::vector<int>& l) { return ! l.empty(); });
+    if (pinned)
+        return;
+
+    const auto tasks = graphChannels + tracks - 1;
+    const auto trackTask = [this] (int t) { return graphChannels + t - 1; };
+    std::vector<std::vector<int>> next ((std::size_t) tasks);
+    auto ok = true;
+    auto edge = [&] (int from, int to) {
+        // the layers run a source in an earlier layer than its destination; a cycle breaks that (the layered path
+        // then reads the source before it ran): keep the layers for such a mixer
+        if (depth[(std::size_t) to] <= depth[(std::size_t) from])
+            ok = false;
+        next[(std::size_t) trackTask (from)].push_back (trackTask (to));
+    };
+
+    for (int c = 0; c < graphChannels; ++c)
+        if (const auto t = std::clamp (song.channels[(std::size_t) c].mixerTrack, 0, tracks - 1); t > 0)
+            next[(std::size_t) c].push_back (trackTask (t));
+    for (int t = 1; t < tracks; ++t)
+    {
+        for (const auto& in : mixerInputs[(std::size_t) t])
+            if (in.source > 0 && in.source < tracks && in.source != t)
+                edge (in.source, t);
+        for (const auto& fx : song.mixer[(std::size_t) t].effects)
+            for (const auto source : { fx.sidechain, fx.sidechain2 })
+                if (source > 0 && source < tracks && source != t)
+                    edge (source, t);
+    }
+    if (! ok)
+        return;
+
+    graphIndegree.assign ((std::size_t) tasks, 0);
+    graphNextStart.assign ((std::size_t) tasks + 1, 0);
+    for (int i = 0; i < tasks; ++i)
+    {
+        auto& n = next[(std::size_t) i];
+        std::sort (n.begin(), n.end());
+        n.erase (std::unique (n.begin(), n.end()), n.end());
+        graphNextStart[(std::size_t) i + 1] = graphNextStart[(std::size_t) i] + (int) n.size();
+        for (const auto j : n)
+        {
+            graphNext.push_back (j);
+            ++graphIndegree[(std::size_t) j];
+        }
+    }
+    // the channels first (they are most of the work and every insert waits for some of them), then the inserts
+    // nothing feeds
+    for (int i = 0; i < tasks; ++i)
+        if (graphIndegree[(std::size_t) i] == 0)
+            graphRoots.push_back (i);
+    graphOk = true;
 }
 
 std::vector<int> RackState::currentLatencies() const
@@ -2436,85 +2508,89 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         times->channelNs[(std::size_t) c].fetch_add (ProcessTimes::now() - before, std::memory_order_relaxed);
     };
 
-    if (workers != nullptr && state.parallel && state.audioThreadChannels.empty())
-        workers->parallelFor (channels, channel);
-    else if (workers != nullptr && state.parallel)
+    // the task graph (round 165i): channels and inserts by readiness; else the channel pass, then the inserts by layers
+    if (! runTaskGraph (state, playing, channels, numSamples, meters))
     {
-        // "Allow threaded processing" off: those channels on this thread, the rest in parallel
-        auto threaded = [&state, &channel, channels] (int i) {
-            if (const auto c = state.threadedChannels[(std::size_t) i]; c < channels)
-                channel (c);
-        };
-        workers->parallelFor ((int) state.threadedChannels.size(), threaded);
-        for (const auto c : state.audioThreadChannels)
-            if (c < channels)
-                channel (c);
-    }
-    else
-        for (int c = 0; c < channels; ++c)
-            channel (c);
-
-    for (int c = 0; c < channels; ++c)
-    {
-        if (channelSilent[(std::size_t) c])
-            continue;
-        const auto t = std::clamp (song.channels[(std::size_t) c].mixerTrack, 0, tracks - 1);
-        auto* dl = trackBuffer (t, 0);
-        auto* dr = trackBuffer (t, 1);
-        const auto* sl = channelBuffer (c, 0);
-        const auto* sr = channelBuffer (c, 1);
-
-        for (int k = 0; k < numSamples; ++k)
+        if (workers != nullptr && state.parallel && state.audioThreadChannels.empty())
+            workers->parallelFor (channels, channel);
+        else if (workers != nullptr && state.parallel)
         {
-            dl[k] += sl[k];
-            dr[k] += sr[k];
+            // "Allow threaded processing" off: those channels on this thread, the rest in parallel
+            auto threaded = [&state, &channel, channels] (int i) {
+                if (const auto c = state.threadedChannels[(std::size_t) i]; c < channels)
+                    channel (c);
+            };
+            workers->parallelFor ((int) state.threadedChannels.size(), threaded);
+            for (const auto c : state.audioThreadChannels)
+                if (c < channels)
+                    channel (c);
         }
+        else
+            for (int c = 0; c < channels; ++c)
+                channel (c);
 
-        // extra outputs to other inserts (a generator Patcher's, REA_rodada141)
-        if ((std::size_t) c < state.instruments.size() && state.instruments[(std::size_t) c] != nullptr)
+        for (int c = 0; c < channels; ++c)
         {
-            const auto& instrument = *state.instruments[(std::size_t) c];
-            for (int k = 0; k < instrument.auxOutputCount(); ++k)
+            if (channelSilent[(std::size_t) c])
+                continue;
+            const auto t = std::clamp (song.channels[(std::size_t) c].mixerTrack, 0, tracks - 1);
+            auto* dl = trackBuffer (t, 0);
+            auto* dr = trackBuffer (t, 1);
+            const auto* sl = channelBuffer (c, 0);
+            const auto* sr = channelBuffer (c, 1);
+
+            for (int k = 0; k < numSamples; ++k)
             {
-                const auto target = instrument.auxOutputTrack (k);
-                const auto* al = instrument.auxOutputData (k, 0);
-                const auto* ar = instrument.auxOutputData (k, 1);
-                if (target < 0 || target >= tracks || al == nullptr || ar == nullptr)
-                    continue;
-                auto* tl = trackBuffer (target, 0);
-                auto* tr = trackBuffer (target, 1);
-                for (int x = 0; x < numSamples; ++x)
+                dl[k] += sl[k];
+                dr[k] += sr[k];
+            }
+
+            // extra outputs to other inserts (a generator Patcher's, REA_rodada141)
+            if ((std::size_t) c < state.instruments.size() && state.instruments[(std::size_t) c] != nullptr)
+            {
+                const auto& instrument = *state.instruments[(std::size_t) c];
+                for (int k = 0; k < instrument.auxOutputCount(); ++k)
                 {
-                    tl[x] += al[x];
-                    tr[x] += ar[x];
+                    const auto target = instrument.auxOutputTrack (k);
+                    const auto* al = instrument.auxOutputData (k, 0);
+                    const auto* ar = instrument.auxOutputData (k, 1);
+                    if (target < 0 || target >= tracks || al == nullptr || ar == nullptr)
+                        continue;
+                    auto* tl = trackBuffer (target, 0);
+                    auto* tr = trackBuffer (target, 1);
+                    for (int x = 0; x < numSamples; ++x)
+                    {
+                        tl[x] += al[x];
+                        tr[x] += ar[x];
+                    }
                 }
             }
         }
-    }
 
-    if (liveInput != nullptr && liveInput->numChannels > 0)
-        mixLiveInput (state, playing, numSamples);
+        if (liveInput != nullptr && liveInput->numChannels > 0)
+            mixLiveInput (state, playing, numSamples);
 
-    // 2) inserts by layers: within a layer nothing depends on anything else; each track pulls the
-    //    outputs of the tracks that send to it (without writing into others' buffers)
-    trackActive.fill (0);
-    tapActive.fill (0);
+        // 2) inserts by layers: within a layer nothing depends on anything else; each track pulls the
+        //    outputs of the tracks that send to it (without writing into others' buffers)
+        trackActive.fill (0);
+        tapActive.fill (0);
 
-    for (std::size_t d = 0; d < state.mixerLayers.size(); ++d)
-    {
-        const auto split = d < state.audioThreadLayers.size() && ! state.audioThreadLayers[d].empty();
-        const auto& layer = split ? state.threadedLayers[d] : state.mixerLayers[d];
-        auto track = [this, &state, &layer, numSamples, meters] (int i) { processTrack (state, layer[(std::size_t) i], numSamples, meters); };
+        for (std::size_t d = 0; d < state.mixerLayers.size(); ++d)
+        {
+            const auto split = d < state.audioThreadLayers.size() && ! state.audioThreadLayers[d].empty();
+            const auto& layer = split ? state.threadedLayers[d] : state.mixerLayers[d];
+            auto track = [this, &state, &layer, numSamples, meters] (int i) { processTrack (state, layer[(std::size_t) i], numSamples, meters); };
 
-        if (workers != nullptr && state.parallel && layer.size() > 1)
-            workers->parallelFor ((int) layer.size(), track);
-        else
-            for (int i = 0; i < (int) layer.size(); ++i)
-                track (i);
+            if (workers != nullptr && state.parallel && layer.size() > 1)
+                workers->parallelFor ((int) layer.size(), track);
+            else
+                for (int i = 0; i < (int) layer.size(); ++i)
+                    track (i);
 
-        if (split) // inserts with a plugin whose "Allow threaded processing" is off
-            for (const auto t : state.audioThreadLayers[d])
-                processTrack (state, t, numSamples, meters);
+            if (split) // inserts with a plugin whose "Allow threaded processing" is off
+                for (const auto t : state.audioThreadLayers[d])
+                    processTrack (state, t, numSamples, meters);
+        }
     }
 
     // 3) Master: inputs, effects, fader. Without a configured mixer, it stays at 0 dB.
@@ -2633,40 +2709,139 @@ void RackRenderer::applyStereo (const MixerTrack& track, float* l, float* r, int
 
 void RackRenderer::mixLiveInput (const RackState& state, bool playing, int n) noexcept
 {
-    const auto& mixer = state.song.mixer;
     const auto recording = liveInput->recording.load (std::memory_order_relaxed);
 
     // the Master too (FL's slot panel has its audio input selector; REA round 143): it plays whenever its
     // monitoring is not off (it has no record arm)
-    for (int t = 0; t < (int) mixer.size() && t < maxMixerTracks; ++t)
+    for (int t = 0; t < (int) state.song.mixer.size() && t < maxMixerTracks; ++t)
+        mixLiveInputTrack (state, t, recording, playing, n);
+}
+
+void RackRenderer::mixLiveInputTrack (const RackState& state, int t, bool recording, bool playing, int n) noexcept
+{
+    if (t >= (int) state.song.mixer.size() || t >= maxMixerTracks)
+        return;
+    const auto& track = state.song.mixer[(std::size_t) t];
+    const auto [first, count] = inputChannelsOf (track, liveInput->numChannels);
+
+    if (count == 0)
+        return;
+
+    const auto* a = liveInput->channel (first, liveInputOffset);
+    const auto* b = count > 1 ? liveInput->channel (first + 1, liveInputOffset) : a;
+
+    if (a == nullptr || b == nullptr)
+        return;
+
+    liveInput->meters.accumulate (t, peakOf (a, n), peakOf (b, n));
+
+    if (t == 0 ? track.monitor == InputMonitor::off
+               : ! inputMonitored (track.monitor, liveInput->armed[(std::size_t) t].load (std::memory_order_relaxed), playing, recording))
+        return;
+
+    auto* dl = trackBuffer (t, 0);
+    auto* dr = trackBuffer (t, 1);
+
+    for (int i = 0; i < n; ++i)
     {
-        const auto& track = mixer[(std::size_t) t];
-        const auto [first, count] = inputChannelsOf (track, liveInput->numChannels);
+        dl[i] += a[i];
+        dr[i] += b[i];
+    }
+}
 
-        if (count == 0)
+void RackRenderer::sumChannelsInto (const RackState& state, int t, int channels, int n) noexcept
+{
+    if ((std::size_t) t >= state.trackChannels.size())
+        return;
+    auto* dl = trackBuffer (t, 0);
+    auto* dr = trackBuffer (t, 1);
+    for (const auto c : state.trackChannels[(std::size_t) t])
+    {
+        if (c >= channels || channelSilent[(std::size_t) c])
             continue;
-
-        const auto* a = liveInput->channel (first, liveInputOffset);
-        const auto* b = count > 1 ? liveInput->channel (first + 1, liveInputOffset) : a;
-
-        if (a == nullptr || b == nullptr)
-            continue;
-
-        liveInput->meters.accumulate (t, peakOf (a, n), peakOf (b, n));
-
-        if (t == 0 ? track.monitor == InputMonitor::off
-                   : ! inputMonitored (track.monitor, liveInput->armed[(std::size_t) t].load (std::memory_order_relaxed), playing, recording))
-            continue;
-
-        auto* dl = trackBuffer (t, 0);
-        auto* dr = trackBuffer (t, 1);
-
-        for (int i = 0; i < n; ++i)
+        const auto* sl = channelBuffer (c, 0);
+        const auto* sr = channelBuffer (c, 1);
+        for (int k = 0; k < n; ++k)
         {
-            dl[i] += a[i];
-            dr[i] += b[i];
+            dl[k] += sl[k];
+            dr[k] += sr[k];
         }
     }
+}
+
+bool RackRenderer::runTaskGraph (const RackState& state, bool playing, int channels, int n, MeterBank* meters) noexcept
+{
+    // LYNX_TASKGRAPH=0: the layers only (A/B measurements)
+    static const bool enabled = [] { const char* e = std::getenv ("LYNX_TASKGRAPH"); return e == nullptr || std::atoi (e) != 0; }();
+    if (! enabled || ! state.graphOk || workers == nullptr || ! state.parallel || state.graphChannels != channels)
+        return false;
+    const auto tracks = std::max<int> (1, (int) state.song.mixer.size());
+    const auto tasks = channels + tracks - 1;
+    if (tasks <= 0 || tasks > graphCapacity || (int) state.graphIndegree.size() != tasks)
+        return false;
+    // extra outputs of an instrument (a generator Patcher's) go to inserts known only now: the layers then
+    for (int c = 0; c < channels; ++c)
+        if (state.instruments[(std::size_t) c] != nullptr && state.instruments[(std::size_t) c]->auxOutputCount() > 0)
+            return false;
+
+    trackActive.fill (0);
+    tapActive.fill (0);
+    const auto live = liveInput != nullptr && liveInput->numChannels > 0;
+    const auto recording = live && liveInput->recording.load (std::memory_order_relaxed);
+
+    for (int i = 0; i < tasks; ++i)
+    {
+        graphPending[(std::size_t) i].store (state.graphIndegree[(std::size_t) i], std::memory_order_relaxed);
+        graphSlots[(std::size_t) i].store (0, std::memory_order_relaxed);
+    }
+    auto pushed = 0;
+    for (const auto r : state.graphRoots)
+        graphSlots[(std::size_t) pushed++].store (r + 1, std::memory_order_relaxed);
+    graphPushed.store (pushed, std::memory_order_release); // (the pool publishes its work after this: seq_cst)
+
+    const auto timing = times->enabled.load (std::memory_order_relaxed);
+    auto task = [&] (int position) {
+        int id;
+        for (int spins = 0; (id = graphSlots[(std::size_t) position].load (std::memory_order_acquire)) == 0; ++spins)
+        {
+            WorkerPool::relax();
+            if ((spins & 1023) == 1023)
+                std::this_thread::yield();
+        }
+        --id;
+        if (id < channels)
+        {
+            if (! timing || id >= ProcessTimes::channels)
+                renderChannel (state, id, n);
+            else
+            {
+                const auto before = ProcessTimes::now();
+                renderChannel (state, id, n);
+                times->channelNs[(std::size_t) id].fetch_add (ProcessTimes::now() - before, std::memory_order_relaxed);
+            }
+        }
+        else
+        {
+            const auto t = id - channels + 1;
+            sumChannelsInto (state, t, channels, n);
+            if (live)
+                mixLiveInputTrack (state, t, recording, playing, n);
+            processTrack (state, t, n, meters);
+        }
+        for (auto k = state.graphNextStart[(std::size_t) id]; k < state.graphNextStart[(std::size_t) id + 1]; ++k)
+        {
+            const auto j = state.graphNext[(std::size_t) k];
+            if (graphPending[(std::size_t) j].fetch_sub (1, std::memory_order_acq_rel) == 1)
+                graphSlots[(std::size_t) graphPushed.fetch_add (1, std::memory_order_acq_rel)].store (j + 1, std::memory_order_release);
+        }
+    };
+    workers->parallelFor (tasks, task);
+
+    // the Master's own channels and input (its effects run after, as before)
+    sumChannelsInto (state, 0, channels, n);
+    if (live)
+        mixLiveInputTrack (state, 0, recording, playing, n);
+    return true;
 }
 
 void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
