@@ -21,6 +21,13 @@ Evidence markers: **[DOC]** Microsoft Learn (MSIX docs), **[CODE]** LYNX source,
   RELEASE.md notes. Website change on origin/wip/store165-site (not landed, not deployed).
 - Waiting: GitHub Actions backlog (every repo run queued since ~21:40 UTC) for the Release run 40592904988 on
   wip/store165; local Windows build (build-win-store165) queued in buildslot.
+- 20:15 coordinator: Store name **LYNX SHARE** reserved ("LYNX" taken); repo variables set to the real identity
+  (KA1WARE.LYNXSHARE, CN=BACBB786-…, KA1WARE; family KA1WARE.LYNXSHARE_sj8hjwabzpdr8, Store ID 9NQRFBFDCX6N). Done:
+  Properties/DisplayName from MSIX_DISPLAY_NAME (default LYNX SHARE), Start-menu name stays LYNX; layout script defaults
+  = the real identity; docs/checklist updated; website branch points at 9NQRFBFDCX6N.
+- Still waiting (20:20): Release run 40592904988 queued (Actions backlog, ~2 runners for the whole repo); local
+  Windows build queued behind 4 others on the winbuild lock. Next: local --packageinfo check with
+  LYNX_SIMULATE_PACKAGE_FAMILY, CI evidence, land.
 
 ## 1. Facts that shaped the design
 
