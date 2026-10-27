@@ -1,5 +1,6 @@
 #include "core/Templates.h"
 
+#include "core/Effects.h"
 #include "core/SynthPresets.h"
 
 #include <algorithm>
@@ -159,5 +160,87 @@ std::string templateDisplayName (const std::string& fileName)
     if (dot != std::string::npos && dot > 0)
         name.erase (dot);
     return name;
+}
+
+std::string NewProjectDefaults::toText() const
+{
+    const char* chain = master == MasterChain::empty ? "empty" : master == MasterChain::clipper ? "clipper" : "default";
+    return "newInserts=" + std::to_string (inserts) + "\nnewMasterChain=" + chain + "\nnewCleanMixer=" + (cleanMixer ? "1" : "0")
+           + "\nplaylistTracks=" + std::to_string (playlistTracks) + "\n";
+}
+
+void NewProjectDefaults::readKey (const std::string& key, const std::string& value)
+{
+    auto number = [&value] (int fallback) {
+        try
+        {
+            return std::stoi (value);
+        }
+        catch (...)
+        {
+            return fallback;
+        }
+    };
+
+    if (key == "newInserts")
+        inserts = std::clamp (number (defaultInserts), 0, maxMixerTracks - 1);
+    else if (key == "newMasterChain")
+        master = value == "empty" ? MasterChain::empty : value == "clipper" ? MasterChain::clipper : MasterChain::lynxDefault;
+    else if (key == "newCleanMixer")
+        cleanMixer = value == "1";
+    else if (key == "playlistTracks")
+        playlistTracks = std::clamp (number (16), 1, 500);
+}
+
+void applyNewProjectDefaults (Song& song, const NewProjectDefaults& defaults)
+{
+    const auto inserts = std::clamp (defaults.inserts, 0, maxMixerTracks - 1);
+    if (song.mixer.empty())
+        song.mixer = Song::defaultMixer (inserts);
+    else if ((int) song.mixer.size() > inserts + 1)
+        song.mixer.resize ((std::size_t) inserts + 1);
+    else
+        while ((int) song.mixer.size() < inserts + 1)
+        {
+            MixerTrack track;
+            track.name = "Insert " + std::to_string (song.mixer.size());
+            song.mixer.push_back (std::move (track));
+        }
+
+    // nothing may point past the last insert
+    for (auto& c : song.channels)
+        if (c.mixerTrack > inserts)
+            c.mixerTrack = 0;
+    for (auto& m : song.mixer)
+        m.sends.erase (std::remove_if (m.sends.begin(), m.sends.end(), [inserts] (const MixerSend& s) { return s.target > inserts; }), m.sends.end());
+    for (auto& p : song.playlistTracks)
+        if (p.mixerTrack > inserts)
+            p.mixerTrack = -1;
+
+    auto& master = song.mixer[0].effects;
+    switch (defaults.master)
+    {
+        case MasterChain::empty: master.clear(); break;
+        case MasterChain::clipper:
+            master.clear();
+            master.push_back (makeEffectSlot (EffectKind::fruitySoftClipper));
+            break;
+        case MasterChain::lynxDefault: break; // the template's own chain
+    }
+
+    song.cleanMixer = defaults.cleanMixer;
+}
+
+NewProjectDefaults& newProjectDefaults()
+{
+    static NewProjectDefaults defaults;
+    return defaults;
+}
+
+Song makeNewProject (int templateIndex)
+{
+    auto song = templateIndex < 0 ? Song::makeDefault() : makeTemplate (templateIndex);
+    applyNewProjectDefaults (song, newProjectDefaults());
+    return song;
 }
 } // namespace lynx

@@ -130,12 +130,14 @@ std::vector<MixerTrack> Song::defaultMixer (int inserts)
     return mixer;
 }
 
-int Song::nextFreeInsert() const
+bool Song::insertInUse (int t) const
 {
     // free = nothing uses it: no channel plays into it, no insert sends to it, no effects, input or Playlist track
     // link, the default name and routing. Round 157b: an FL project's effect buses (a vocal reverb/delay insert fed only
     // by sends) have no channel, and a sample added to the rack was routed into one (her beat through the vocal
     // H-Delay, reverb and Decapitator: "it sounds terrible").
+    if (t <= 0 || t >= (int) mixer.size())
+        return t == 0 && ! mixer.empty();
     auto used = [this] (int t) {
         const auto& m = mixer[(std::size_t) t];
         if (! m.effects.empty() || ! m.toMaster || m.inputChannel >= 0 || ! m.sends.empty()
@@ -149,9 +151,28 @@ int Song::nextFreeInsert() const
             return true;
         return std::any_of (playlistTracks.begin(), playlistTracks.end(), [t] (const PlaylistTrack& p) { return p.mixerTrack == t; });
     };
+    if (used (t))
+        return true;
+    // round 163 (hiding unused inserts): a fader, pan, mute or colour moved by hand, or automation on it, counts too
+    const auto& m = mixer[(std::size_t) t];
+    if (m.volume != unityFader || m.pan != 0.0f || m.muted || m.solo || m.colour != 0 || m.stereo != 0.0f || m.eq.active()
+        || m.outputChannel != outputDefault)
+        return true;
+    if (std::any_of (mixer.begin(), mixer.end(), [t] (const MixerTrack& o) {
+            return std::any_of (o.effects.begin(), o.effects.end(), [t] (const EffectSlot& e) { return e.sidechain == t || e.sidechain2 == t; });
+        }))
+        return true;
+    return std::any_of (automations.begin(), automations.end(), [t] (const Automation& a) {
+        return a.source.track == t || (a.target.kind == AutomationTargetKind::mixerVolume || a.target.kind == AutomationTargetKind::mixerPan
+                || a.target.kind == AutomationTargetKind::effectParam || a.target.kind == AutomationTargetKind::effectMix)
+               && a.target.index == t;
+    });
+}
 
+int Song::nextFreeInsert() const
+{
     for (int t = 1; t < (int) mixer.size(); ++t)
-        if (! used (t))
+        if (! insertInUse (t))
             return t;
 
     return 0; // every insert is in use: Master (FL's default for a new channel)

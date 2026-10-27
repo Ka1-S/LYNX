@@ -374,7 +374,7 @@ private:
     std::vector<TrackEqState> trackEqs; // built-in EQ of each track
     double chunkTick = 0.0;             // start of the block (for the global LFOs)
     bool chunkPlaying = false;          // the song plays during the block (effects that follow the transport)
-    void applyTrackEq (const MixerTrack& track, int t, float* l, float* r, int n) noexcept;
+    void applyTrackEq (const MixerTrack& track, int t, bool bypassed, float* l, float* r, int n) noexcept;
     static constexpr float silenceLevel = 1.5849e-5f;  // -96 dBFS
     int blockCapacity = 0;
 };

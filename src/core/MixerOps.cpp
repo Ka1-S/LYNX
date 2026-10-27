@@ -125,6 +125,18 @@ bool insertTrack (Song& song, int at)
     return true;
 }
 
+int removeUnusedTrailingInserts (Song& song, int keep)
+{
+    int removed = 0;
+    while ((int) song.mixer.size() - 1 > std::max (0, keep) && ! song.insertInUse ((int) song.mixer.size() - 1))
+    {
+        if (! deleteTrack (song, (int) song.mixer.size() - 1))
+            break;
+        ++removed;
+    }
+    return removed;
+}
+
 bool deleteTrack (Song& song, int t)
 {
     const auto count = (int) song.mixer.size();

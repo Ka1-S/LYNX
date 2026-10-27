@@ -9,6 +9,7 @@
 #include "core/LiveInput.h"
 #include "core/HardwareOutput.h"
 #include "core/MixerOps.h"
+#include "core/Templates.h"
 #include "core/RackOps.h"
 #include "ui/AutomationUi.h"
 #include "ui/BrowserComponent.h"
@@ -145,6 +146,12 @@ void MixerStrips::layoutStrips()
     const auto& song = engine.getSong();
     const auto tracks = (int) song.mixer.size();
     stripXs.assign ((std::size_t) tracks + 1, 0);
+    // "Show only used inserts" (round 163): unused inserts take no room, except those brought back with "+" (so a new
+    // insert shows; selecting another strip doesn't move the strips under the mouse)
+    hidden.assign ((std::size_t) tracks + 1, false);
+    if (showUsedOnly)
+        for (int t = 1; t < tracks; ++t)
+            hidden[(std::size_t) t] = revealed.count (t) == 0 && ! song.insertInUse (t);
     dockGaps.clear();
     separatorLines.clear();
 
@@ -160,6 +167,11 @@ void MixerStrips::layoutStrips()
             const auto& track = song.mixer[(std::size_t) t];
             if (track.dock != dock)
                 continue;
+            if (hidden[(std::size_t) t])
+            {
+                stripXs[(std::size_t) t] = hiddenX;
+                continue;
+            }
             if (any && first && dock == MixerDock::right)
             {
                 // the gap between two blocks belongs to the pinned block: the right block's is before its strips,
@@ -477,7 +489,7 @@ void MixerStrips::paint (juce::Graphics& g)
 
     for (int t = 0; t < tracks; ++t)
     {
-        if (song.mixer[(std::size_t) t].dock != pass)
+        if (song.mixer[(std::size_t) t].dock != pass || isHidden (t))
             continue;
 
         const auto x = stripX (t);
@@ -794,13 +806,30 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
 
     if (part == Part::add)
     {
+        if (showUsedOnly) // the first unused insert (hidden) comes back before a new one is added
+            if (const auto free = engine.getSong().nextFreeInsert(); free > 0 && isHidden (free))
+            {
+                revealed.insert (free);
+                updateSize();
+                selectTrack (free);
+                return;
+            }
+        const auto added = (int) engine.getSong().mixer.size();
         engine.editSong ([] (Song& s) {
             if (s.mixer.empty())
                 s.mixer = Song::defaultMixer (0);
 
+            if ((int) s.mixer.size() >= maxMixerTracks)
+                return;
             auto& track = s.mixer.emplace_back();
             track.name = "Insert " + std::to_string (s.mixer.size() - 1);
         });
+        if (added < (int) engine.getSong().mixer.size())
+        {
+            revealed.insert (added); // shown even while unused
+            updateSize();
+            selectTrack (added);
+        }
         return;
     }
 
@@ -1675,7 +1704,8 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
                             [this, t, v = value] { engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].stereo = v; }); });
 
         menu.addSubMenu (tr ("Stereo separation"), stereo);
-        menu.addItem (tr ("Track EQ..."), [this, t] { showTrackEq (t); });
+        if (! song.cleanMixer)
+            menu.addItem (tr ("Track EQ..."), [this, t] { showTrackEq (t); });
         menu.addItem (tr ("Invert phase"), true, track.invertPhase, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].invertPhase = ! s.mixer[(std::size_t) t].invertPhase; });
         });
@@ -1756,6 +1786,9 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].threaded = ! s.mixer[(std::size_t) t].threaded; });
         });
     }
+
+    menu.addSectionHeader (tr ("Mixer"));
+    mixeroptions::addItems (menu, engine, false);
 
     return menu;
 }
@@ -2006,9 +2039,14 @@ float eqResponseDb (const TrackEq& eq, double hz, double sampleRate)
 }
 } // namespace
 
+bool EffectsPanel::eqShown() const
+{
+    return ! engine.getSong().cleanMixer; // clean mixer (round 163): no built-in EQ to show
+}
+
 int EffectsPanel::bottomTop() const
 {
-    return getHeight() - (eqGraphHeight + eqKnobsHeight + outputRowHeight + 22);
+    return getHeight() - ((eqShown() ? eqGraphHeight + eqKnobsHeight : 0) + outputRowHeight + 22);
 }
 
 juce::Rectangle<int> EffectsPanel::eqGraphBounds() const
@@ -2045,7 +2083,7 @@ juce::Point<float> EffectsPanel::eqHandle (int band) const
 
 int EffectsPanel::eqControlAt (juce::Point<int> p) const
 {
-    if (slots() == nullptr)
+    if (slots() == nullptr || ! eqShown())
         return 0;
     for (int b = 0; b < 3; ++b)
     {
@@ -2097,72 +2135,75 @@ void EffectsPanel::paintEq (juce::Graphics& g)
     g.setColour (colour::border);
     g.fillRect (8, top, getWidth() - 16, 1);
 
-    // the response graph: frequency (log) across, ±18 dB up and down
-    const auto graph = eqGraphBounds().toFloat();
-    theme::fillRoundRect (g, graph, radius::sm, colour::bg1);
-    g.setColour (colour::border);
-    g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
-    const auto inner = graph.reduced (4.0f);
-    g.setColour (colour::gridBeat);
-    for (float hz : { 100.0f, 1000.0f, 10000.0f })
+    if (eqShown())
     {
-        const auto x = inner.getX() + inner.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
-        g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
-    }
-    g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
-
-    juce::Path curve;
-    const auto sampleRate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
-    for (int i = 0; i <= (int) inner.getWidth(); i += 2)
-    {
-        const auto hz = eqMinHz * std::pow (eqMaxHz / eqMinHz, (float) i / inner.getWidth());
-        const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, eqResponseDb (eq, hz, sampleRate));
-        const auto y = inner.getCentreY() - inner.getHeight() * 0.5f * db / eqRangeDb;
-        if (i == 0)
-            curve.startNewSubPath (inner.getX(), y);
-        else
-            curve.lineTo (inner.getX() + (float) i, y);
-    }
-    g.setColour (eq.active() ? colour::accent : colour::textSecondary.withAlpha (0.6f));
-    g.strokePath (curve, juce::PathStrokeType (1.5f));
-
-    for (int b = 0; b < 3; ++b)
-    {
-        const auto hot = hoverEq == eqPointBase - b || dragParam == eqPointBase - b;
-        const auto handle = eqHandle (b);
-        g.setColour (eqBandColour (b).withAlpha (hot ? 1.0f : 0.8f));
-        g.fillEllipse (juce::Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (handle));
-    }
-
-    // the gain faders (one per band) and the frequency / width knobs under them
-    for (int b = 0; b < 3; ++b)
-    {
-        const auto fader = eqFaderBounds (b).toFloat();
-        const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
-        theme::fillRoundRect (g, fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f, colour::bg0);
+        // the response graph: frequency (log) across, ±18 dB up and down
+        const auto graph = eqGraphBounds().toFloat();
+        theme::fillRoundRect (g, graph, radius::sm, colour::bg1);
         g.setColour (colour::border);
-        g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
-        const auto v = eqToValue (eq, b, 0);
-        const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
-        theme::fillRoundRect (g, juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f, hot ? colour::textPrimary : colour::textSecondary);
-        g.setColour (eqBandColour (b));
-        g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
-
-        for (int what = 1; what <= 2; ++what)
+        g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
+        const auto inner = graph.reduced (4.0f);
+        g.setColour (colour::gridBeat);
+        for (float hz : { 100.0f, 1000.0f, 10000.0f })
         {
-            const auto code = eqParamBase - b * 3 - what;
-            drawKnob (g, eqKnobBounds (b, what).toFloat().reduced (2.0f), eqToValue (eq, b, what), false, eqBandColour (b),
-                      hoverEq == code || dragParam == code);
+            const auto x = inner.getX() + inner.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
+            g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
         }
-    }
+        g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
 
-    g.setColour (colour::textSecondary);
-    g.setFont (font (type::title));
-    textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
-    g.setFont (font (type::caption));
-    g.setColour (colour::textDisabled);
-    textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
-    textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+        juce::Path curve;
+        const auto sampleRate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
+        for (int i = 0; i <= (int) inner.getWidth(); i += 2)
+        {
+            const auto hz = eqMinHz * std::pow (eqMaxHz / eqMinHz, (float) i / inner.getWidth());
+            const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, eqResponseDb (eq, hz, sampleRate));
+            const auto y = inner.getCentreY() - inner.getHeight() * 0.5f * db / eqRangeDb;
+            if (i == 0)
+                curve.startNewSubPath (inner.getX(), y);
+            else
+                curve.lineTo (inner.getX() + (float) i, y);
+        }
+        g.setColour (eq.active() ? colour::accent : colour::textSecondary.withAlpha (0.6f));
+        g.strokePath (curve, juce::PathStrokeType (1.5f));
+
+        for (int b = 0; b < 3; ++b)
+        {
+            const auto hot = hoverEq == eqPointBase - b || dragParam == eqPointBase - b;
+            const auto handle = eqHandle (b);
+            g.setColour (eqBandColour (b).withAlpha (hot ? 1.0f : 0.8f));
+            g.fillEllipse (juce::Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (handle));
+        }
+
+        // the gain faders (one per band) and the frequency / width knobs under them
+        for (int b = 0; b < 3; ++b)
+        {
+            const auto fader = eqFaderBounds (b).toFloat();
+            const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
+            theme::fillRoundRect (g, fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f, colour::bg0);
+            g.setColour (colour::border);
+            g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
+            const auto v = eqToValue (eq, b, 0);
+            const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
+            theme::fillRoundRect (g, juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f, hot ? colour::textPrimary : colour::textSecondary);
+            g.setColour (eqBandColour (b));
+            g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
+
+            for (int what = 1; what <= 2; ++what)
+            {
+                const auto code = eqParamBase - b * 3 - what;
+                drawKnob (g, eqKnobBounds (b, what).toFloat().reduced (2.0f), eqToValue (eq, b, what), false, eqBandColour (b),
+                          hoverEq == code || dragParam == code);
+            }
+        }
+
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::title));
+        textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
+        g.setFont (font (type::caption));
+        g.setColour (colour::textDisabled);
+        textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
+        textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+    }
 
     // the audio output target
     auto box = outputBounds().toFloat();
@@ -2190,6 +2231,111 @@ void EffectsPanel::showOutputMenu()
 {
     mixeroutput::showMenu (engine, track, this, localAreaToGlobal (outputBounds()));
 }
+
+namespace mixeroptions
+{
+std::function<void()> changed;
+std::function<void (bool)> setShowUsedOnly;
+
+namespace
+{
+void notifyChanged()
+{
+    if (changed)
+        changed();
+}
+
+void askNumber (const juce::String& title, const juce::String& text, int value, int lo, int hi, std::function<void (int)> done)
+{
+    auto* w = new juce::AlertWindow (title, text, juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("n", juce::String (value));
+    w->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, lo, hi, done = std::move (done)] (int result) {
+        if (result == 1)
+            done (juce::jlimit (lo, hi, w->getTextEditorContents ("n").trim().getIntValue()));
+    }), true);
+}
+} // namespace
+
+void addItems (juce::PopupMenu& menu, AudioEngine& engine, bool newProjects)
+{
+    const auto& song = engine.getSong();
+    menu.addItem (tr ("Clean mixer: no built-in EQ on the inserts (this project)"), true, song.cleanMixer, [&engine] {
+        const auto on = ! engine.getSong().cleanMixer;
+        engine.editSong ([on] (Song& s) { s.cleanMixer = on; });
+        const auto& mixer = engine.getSong().mixer;
+        const auto withEq = std::count_if (mixer.begin(), mixer.end(), [] (const MixerTrack& t) { return t.eq.active(); });
+        if (on && withEq > 0) // nothing is lost: switching it off brings the EQ back as it was
+            ui::postHint ({ tr ("Clean mixer: the EQ of {0} insert(s) is bypassed and hidden (kept in the project)", { juce::String ((int) withEq) }), {}, false, false }, 5000);
+    });
+    menu.addItem (tr ("Show only used inserts"), true, MixerStrips::showUsedOnly, [] {
+        const auto on = ! MixerStrips::showUsedOnly;
+        if (setShowUsedOnly)
+            setShowUsedOnly (on);
+        else
+            MixerStrips::showUsedOnly = on;
+        notifyChanged();
+    });
+    menu.addItem (tr ("Remove unused inserts at the end"), song.mixer.size() > 1 && ! song.insertInUse ((int) song.mixer.size() - 1), false, [&engine] {
+        int removed = 0;
+        engine.editSong ([&removed] (Song& s) { removed = mixerops::removeUnusedTrailingInserts (s); });
+        ui::postHint ({ tr ("Removed {0} unused insert(s)", { juce::String (removed) }), {}, false, false }, 3000);
+    });
+
+    if (! newProjects)
+        return;
+
+    auto& d = newProjectDefaults();
+    menu.addSectionHeader (tr ("New projects"));
+    {
+        juce::PopupMenu inserts;
+        bool listed = false;
+        for (int n : { 0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 100, 125 })
+        {
+            listed = listed || n == d.inserts;
+            inserts.addItem (n == NewProjectDefaults::defaultInserts ? tr ("{0} (default)", { juce::String (n) }) : juce::String (n), true, n == d.inserts, [n] {
+                newProjectDefaults().inserts = n;
+                notifyChanged();
+            });
+        }
+        inserts.addItem (listed ? tr ("Other...") : tr ("Other ({0})...", { juce::String (d.inserts) }), true, ! listed, [] {
+            askNumber (tr ("Inserts in new projects"),
+                       tr ("How many mixer inserts a new project starts with (0 to {0}). More are added when you need them.", { juce::String (maxMixerTracks - 1) }),
+                       newProjectDefaults().inserts, 0, maxMixerTracks - 1, [] (int n) {
+                           newProjectDefaults().inserts = n;
+                           notifyChanged();
+                       });
+        });
+        menu.addSubMenu (tr ("Inserts in new projects ({0})", { juce::String (d.inserts) }), inserts);
+    }
+    {
+        juce::PopupMenu chain;
+        const std::pair<const char*, MasterChain> chains[] = { { TR_NOOP ("Empty (nothing on the Master)"), MasterChain::empty },
+                                                               { TR_NOOP ("Soft clipper only"), MasterChain::clipper },
+                                                               { TR_NOOP ("LYNX default (limiter)"), MasterChain::lynxDefault } };
+        for (const auto& [label, c] : chains)
+            chain.addItem (tr (label), true, d.master == c, [c = c] {
+                newProjectDefaults().master = c;
+                notifyChanged();
+            });
+        menu.addSubMenu (tr ("Master chain in new projects"), chain);
+    }
+    menu.addItem (tr ("Clean mixer in new projects (no built-in EQ)"), true, d.cleanMixer, [] {
+        newProjectDefaults().cleanMixer = ! newProjectDefaults().cleanMixer;
+        notifyChanged();
+    });
+    {
+        juce::PopupMenu tracks;
+        for (int n : { 4, 8, 16, 24, 32, 64, 100 })
+            tracks.addItem (n == 16 ? tr ("{0} (default)", { juce::String (n) }) : juce::String (n), true, n == d.playlistTracks, [n] {
+                newProjectDefaults().playlistTracks = n;
+                notifyChanged();
+            });
+        menu.addSubMenu (tr ("Playlist tracks shown ({0})", { juce::String (d.playlistTracks) }), tracks);
+    }
+}
+} // namespace mixeroptions
 
 namespace mixeroutput
 {
