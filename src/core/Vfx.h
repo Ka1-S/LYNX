@@ -241,6 +241,65 @@ EnvelopeSettings defaultEnvelope();
 std::optional<EnvelopeSettings> parseEnvelope (const std::vector<std::uint8_t>& fl);
 std::vector<std::uint8_t> writeEnvelope (const EnvelopeSettings& s);
 
+// VFX Sequencer (FL's port of BlueARP): a bank of 128 step programs (six lanes of 64 steps each) and the
+// parameters that turn held notes into arpeggios / sequences. Kept as FL stores it, so a bank writes back as read.
+struct SequencerSettings
+{
+    enum Lane { scaleStep, octave, stepType, keySelect, velocity, gateStep, laneCount };
+    enum StepType { off, normal, rest, tie, chord, random };
+    struct Program
+    {
+        std::vector<std::int8_t> params;                         // FL param 39 + i (prgp), 42 or 43 bytes
+        std::array<std::uint8_t, 48> name {};                    // NUL-padded Latin-1
+        std::array<std::array<std::int8_t, 64>, laneCount> lanes {};
+        std::vector<std::vector<std::uint8_t>> extra;            // unknown chunks (tag, size, data) kept as they are
+        std::string nameText() const;
+        void setName (const std::string& n);
+        bool operator== (const Program&) const = default;
+    };
+    struct Chain
+    {
+        std::vector<std::uint8_t> head { 0, 0xff, 0xff, 0xff, 0xff }; // chnp (meaning unknown)
+        std::array<std::int8_t, 8> slots { -1, -1, -1, -1, -1, -1, -1, -1 };
+        std::array<std::uint8_t, 48> name {};
+        bool operator== (const Chain&) const = default;
+    };
+    std::uint32_t version = 2, engineVersion = 1;
+    std::vector<std::int8_t> fixp;   // FL params 0…19
+    std::vector<std::int8_t> fpgp;   // the program-level params that are global (FL param 39 + i)
+    std::vector<Chain> chains;
+    std::vector<Program> programs;
+    std::vector<std::vector<std::uint8_t>> extra;                // unknown bank chunks
+    std::vector<std::uint8_t> gui { 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0 }; // record 2 (the editor's combos)
+    std::vector<std::uint8_t> options;                           // record 3 (absent in FL's default state)
+    bool operator== (const SequencerSettings&) const = default;
+
+    // FL's parameter numbers
+    enum Param
+    {
+        midiIn = 1, arpMode = 5, currentProgram = 8, steps = 40, gate = 41, sync = 42, latch = 43, missingKeys = 44,
+        inputLow = 45, inputHigh = 46, outputLow = 47, outputHigh = 48, order = 49, fixedKey = 50, transposeOctaves = 51,
+        inputQuantize = 52, transposeSemitones = 53, swing = 55, restartOn = 56, forceKey = 57, forceScale = 58,
+        forceMode = 59, pageLock = 60, page = 61, patternShift = 62, inputWrapLow = 63, inputWrapHigh = 64, polyOctave = 65,
+        polyKeys = 66, missingOctave = 67, gateLaneMode = 69, randomVelocity = 70, randomGate = 71, randomStart = 72,
+        smartBend = 80, programMode = 81, inputRangeMode = 16, velocityMode = 17, selectedLayer = 68
+    };
+    // A parameter's value as the plugin uses it (FL's lookup: per program or global); 0 when it does not exist
+    int get (int param) const noexcept;
+    void set (int param, int value);
+    static bool perProgram (int param) noexcept;
+    static int minimum (int param) noexcept;
+    static int maximum (int param) noexcept;
+    int program() const noexcept; // the current program 0…
+    Program& current();
+    const Program& current() const;
+};
+SequencerSettings defaultSequencer();
+std::optional<SequencerSettings> parseSequencer (const std::vector<std::uint8_t>& fl);
+std::vector<std::uint8_t> writeSequencer (const SequencerSettings& s);
+// Rotates all six lanes of the current program by `delta` steps (FL's Pattern shift)
+void shiftPattern (SequencerSettings& s, int delta);
+
 // ---------------------------------------------------------------------------------------------------------------
 // Presets
 
@@ -298,5 +357,6 @@ protected:
     double rate = 44100.0;
 };
 std::unique_ptr<Processor> makeProcessor (Kind kind, const std::vector<std::uint8_t>& flState);
+std::unique_ptr<Processor> makeSequencer (const std::vector<std::uint8_t>& flState); // (VfxSequencer.cpp)
 } // namespace vfx
 } // namespace lynx

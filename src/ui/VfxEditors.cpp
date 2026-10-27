@@ -1322,6 +1322,507 @@ private:
     CurveEditor editor;
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// VFX Sequencer: the program (sequence) and its parameters on top, the note matrix (which key each step plays) and
+// one lane (velocity, octave, gate, step type or scale step) below, 16 steps per page
+
+class SequencerBody final : public Body
+{
+public:
+    using S = vfx::SequencerSettings;
+
+    SequencerBody()
+    {
+        program.onClick = [this] { showProgramMenu(); };
+        ui::setHint (program, tr ("The sequence (program) of the bank that plays; the bank keeps 128"));
+        addAndMakeVisible (program);
+        for (auto* b : { &prevProgram, &nextProgram, &dice })
+        {
+            b->setWantsKeyboardFocus (false);
+            addAndMakeVisible (b);
+        }
+        prevProgram.onClick = [this] { stepProgram (-1); };
+        nextProgram.onClick = [this] { stepProgram (1); };
+        dice.onClick = [this] {
+            // a random sequence of those that differ from the first (the bank's empty slots are copies of it)
+            std::vector<int> candidates;
+            for (int p = 1; p < (int) settings.programs.size(); ++p)
+                if (settings.programs[(std::size_t) p].lanes != settings.programs[0].lanes || settings.programs[(std::size_t) p].params != settings.programs[0].params)
+                    candidates.push_back (p);
+            if (! candidates.empty())
+                change ([n = candidates[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) candidates.size())]] (S& s) { s.set (S::currentProgram, n); });
+        };
+        ui::setHint (dice, tr ("A random sequence"));
+        for (int p = 0; p < 4; ++p)
+        {
+            auto& b = pages[(std::size_t) p];
+            b.setButtonText (juce::String (p + 1));
+            b.setClickingTogglesState (false);
+            b.setColour (juce::TextButton::buttonOnColourId, theme::colour::accentMuted);
+            b.onClick = [this, p] { change ([p] (S& s) { s.set (S::page, p); }); };
+            ui::setHint (b, tr ("Steps {0} to {1}", { juce::String (p * 16 + 1), juce::String (p * 16 + 16) }));
+            addAndMakeVisible (b);
+        }
+        toggle (pageLock, tr ("Page lock"), S::pageLock, tr ("Plays only the page shown"));
+        toggle (latch, tr ("Latch"), S::latch, tr ("Latch: the notes keep playing after the keys are released, until a new chord"));
+        toggle (polyOctave, tr ("Poly"), S::polyOctave, tr ("Several octaves per step (else one)"));
+        toggle (polyKeys, tr ("Poly"), S::polyKeys, tr ("Several keys per step (else one)"));
+        toggle (gateLaneMode, tr ("Channels"), S::gateLaneMode, tr ("The gate lane sets each step's output channel instead of its length"));
+        shiftLeft.onClick = [this] { change ([] (S& s) { vfx::shiftPattern (s, -1); }); };
+        shiftRight.onClick = [this] { change ([] (S& s) { vfx::shiftPattern (s, 1); }); };
+        ui::setHint (shiftLeft, tr ("Shift the pattern one step earlier"));
+        ui::setHint (shiftRight, tr ("Shift the pattern one step later"));
+        for (auto* b : { &shiftLeft, &shiftRight })
+            addAndMakeVisible (b);
+
+        combo (arpMode, tr ("Mode"), S::arpMode, { tr ("Off"), tr ("On"), tr ("Thru"), tr ("On from 2 keys, else off"), tr ("On from 2 keys, else thru"),
+                                                    tr ("On from 3 keys, else off"), tr ("On from 3 keys, else thru") });
+        combo (sync, tr ("Step"), S::sync, { "1/64", "1/48", "1/32", "1/24", "1/16", "1/12", "1/8", "1/6", "1/4", "3/64", "3/32", "3/16", "3/8" });
+        combo (order, tr ("Order"), S::order, { tr ("By pitch"), tr ("By pitch, descending"), tr ("As played"), tr ("As played, reversed"),
+                                                 tr ("By velocity"), tr ("By velocity, descending"), tr ("Chord, normalized"), tr ("Chord, as played") });
+        combo (missing, tr ("Missing keys"), S::missingKeys, { tr ("Not played"), tr ("Cyclic"), tr ("First key"), tr ("Last key"), tr ("Fixed key") });
+        combo (missingOctave, tr ("Missing octave"), S::missingOctave, { tr ("Same"), "-1", "+1" });
+        combo (restart, tr ("Restart on"), S::restartOn, { tr ("Beat"), tr ("Key"), tr ("First key"), tr ("Play") });
+        juce::StringArray keysList { tr ("Off"), tr ("Detect") };
+        for (int k = 0; k < 12; ++k)
+            keysList.add (pitchClassName (k));
+        combo (forceKey, tr ("Scale key"), S::forceKey, keysList);
+        combo (forceScale, tr ("Scale"), S::forceScale, { tr ("Chromatic"), tr ("Detect"), tr ("Major"), tr ("Minor"), tr ("Harmonic minor"), tr ("Melodic minor"),
+                                                          tr ("Pentatonic major"), tr ("Pentatonic minor"), tr ("Pentatonic neutral"), tr ("Blues"),
+                                                          tr ("Dorian"), tr ("Phrygian"), tr ("Lydian"), tr ("Mixolydian"), tr ("Locrian") });
+        combo (forceMode, tr ("Scale mode"), S::forceMode, { tr ("All notes"), tr ("Scale steps only") });
+        combo (velocityMode, tr ("Velocity"), S::velocityMode, { tr ("From the lane"), tr ("From the keys"), tr ("Keys + lane") });
+        combo (quantize, tr ("Input quantize"), S::inputQuantize, { tr ("None"), "1/16", "1/12", "1/8", "1/6", "1/4", "1/2", tr ("1 bar"), tr ("2 bars") });
+        combo (programMode, tr ("Input"), S::programMode, { tr ("The held keys"), tr ("The fixed key") });
+        ui::setHint (arpMode, tr ("Mode: Thru passes the notes (transposed); the auto modes play only while enough keys are held"));
+        ui::setHint (order, tr ("Order: how the held keys are numbered N1, N2…"));
+        ui::setHint (missing, tr ("What the steps of a key that is not held play"));
+        ui::setHint (restart, tr ("Where the sequence starts: on the song's beats, at each new key, at the first key, at play"));
+        ui::setHint (forceKey, tr ("Scale key: Detect takes the held chord's root"));
+        ui::setHint (forceScale, tr ("Scale: the notes snap to it and the scale-step lane moves along it"));
+        ui::setHint (quantize, tr ("Input quantize: chord changes wait for this grid"));
+
+        knob (steps, tr ("Steps"), S::steps);
+        knob (gate, tr ("Gate"), S::gate, [] (double v) { return juce::String ((int) v) + " %"; });
+        knob (swing, tr ("Swing"), S::swing);
+        knob (transpose, tr ("Transpose"), S::transposeSemitones);
+        knob (octaves, tr ("Octave"), S::transposeOctaves);
+        knob (fixedKey, tr ("Fixed key"), S::fixedKey, [] (double v) { return keyName ((int) v); });
+        knob (randomVelocity, tr ("Rand. vel."), S::randomVelocity, [] (double v) { return juce::String ((int) v) + " %"; });
+        knob (randomGate, tr ("Rand. gate"), S::randomGate, [] (double v) { return juce::String ((int) v) + " %"; });
+        knob (randomStart, tr ("Rand. start"), S::randomStart, [] (double v) { return juce::String ((int) v) + " %"; });
+        knob (smartBend, tr ("Smart bend"), S::smartBend);
+        knob (outLow, tr ("Out low"), S::outputLow, [] (double v) { return keyName ((int) v); });
+        knob (outHigh, tr ("Out high"), S::outputHigh, [] (double v) { return keyName ((int) v); });
+
+        static const char* laneNames[] = { TR_NOOP ("Velocity"), TR_NOOP ("Octave"), TR_NOOP ("Gate"), TR_NOOP ("Step type"), TR_NOOP ("Scale step") };
+        for (int l = 0; l < 5; ++l)
+        {
+            auto& b = laneTabs[(std::size_t) l];
+            b.setButtonText (tr (laneNames[l]));
+            b.setClickingTogglesState (false);
+            b.setColour (juce::TextButton::buttonOnColourId, theme::colour::accentMuted);
+            b.onClick = [this, l] { change ([l] (S& s) { s.set (S::selectedLayer, l); }); };
+            addAndMakeVisible (b);
+        }
+        matrix.owner = lane.owner = this;
+        lane.isMatrix = false;
+        addAndMakeVisible (matrix);
+        addAndMakeVisible (lane);
+    }
+
+    void refresh (const std::vector<std::uint8_t>& fl) override
+    {
+        settings = vfx::parseSequencer (fl).value_or (vfx::defaultSequencer());
+        const auto p = settings.program();
+        program.setButtonText (juce::String (p + 1) + "  " + juce::String (settings.current().nameText()));
+        for (int k = 0; k < 4; ++k)
+            pages[(std::size_t) k].setToggleState (k == settings.get (S::page), juce::dontSendNotification);
+        for (int k = 0; k < 5; ++k)
+            laneTabs[(std::size_t) k].setToggleState (k == layer(), juce::dontSendNotification);
+        for (auto& [b, param] : toggles)
+            b->setToggleState (settings.get (param) != 0, juce::dontSendNotification);
+        for (auto& [c, param] : combos)
+            c->setSelectedItemIndex (settings.get (param) - S::minimum (param), juce::dontSendNotification);
+        polyOctave.setVisible (layer() == 1);
+        gateLaneMode.setVisible (layer() == 2);
+        for (auto* c : getChildren())
+            if (dynamic_cast<Knob*> (c) != nullptr)
+                c->repaint();
+        matrix.repaint();
+        lane.repaint();
+        repaint();
+    }
+
+    int preferredWidth() const override { return 940; }
+    int preferredHeight() const override { return 610; }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (12, 4);
+        auto top = area.removeFromTop (30);
+        prevProgram.setBounds (top.removeFromLeft (26));
+        program.setBounds (top.removeFromLeft (300));
+        nextProgram.setBounds (top.removeFromLeft (26));
+        top.removeFromLeft (4);
+        dice.setBounds (top.removeFromLeft (30));
+        top.removeFromLeft (14);
+        latch.setBounds (top.removeFromLeft (80));
+        shiftRight.setBounds (top.removeFromRight (26));
+        shiftLeft.setBounds (top.removeFromRight (26));
+        top.removeFromRight (12);
+        pageLock.setBounds (top.removeFromRight (100));
+        for (int k = 3; k >= 0; --k)
+            pages[(std::size_t) k].setBounds (top.removeFromRight (30).reduced (1, 0));
+        area.removeFromTop (6);
+
+        // two rows of combos and knobs
+        auto layoutRow = [] (juce::Rectangle<int> row, std::initializer_list<juce::Component*> items, std::initializer_list<int> widths) {
+            auto w = widths.begin();
+            for (auto* c : items)
+            {
+                c->setBounds (row.removeFromLeft (*w++).reduced (3, 0));
+            }
+        };
+        auto row1 = area.removeFromTop (64);
+        layoutRow (row1.withTrimmedTop (18).withHeight (26), { &arpMode, &sync, &order, &missing, &missingOctave, &restart },
+                   { 150, 80, 160, 110, 80, 100 });
+        row1.removeFromLeft (680);
+        for (auto* k : { steps.get(), gate.get(), swing.get(), transpose.get() })
+            k->setBounds (row1.removeFromLeft (60));
+        auto row2 = area.removeFromTop (64);
+        layoutRow (row2.withTrimmedTop (18).withHeight (26), { &forceKey, &forceScale, &forceMode, &velocityMode, &quantize, &programMode },
+                   { 80, 150, 130, 120, 100, 100 });
+        row2.removeFromLeft (680);
+        for (auto* k : { octaves.get(), fixedKey.get(), outLow.get(), outHigh.get() })
+            k->setBounds (row2.removeFromLeft (60));
+        area.removeFromTop (8);
+
+        matrix.setBounds (area.removeFromTop (7 * 17 + 18));
+        area.removeFromTop (8);
+        auto tabs = area.removeFromTop (26);
+        for (auto& b : laneTabs)
+            b.setBounds (tabs.removeFromLeft (96).reduced (1, 0));
+        tabs.removeFromLeft (10);
+        polyOctave.setBounds (tabs.withWidth (80));
+        gateLaneMode.setBounds (tabs.withWidth (110));
+        polyKeys.setBounds (getLocalBounds().reduced (12, 0).getRight() - 70, matrix.getY(), 70, 18);
+        area.removeFromTop (4);
+        auto bottom = area.removeFromBottom (64);
+        for (auto* k : { randomVelocity.get(), randomGate.get(), randomStart.get(), smartBend.get() })
+            k->setBounds (bottom.removeFromLeft (70));
+        lane.setBounds (area);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setFont (theme::font (theme::type::caption));
+        g.setColour (theme::colour::textSecondary);
+        for (auto& [c, param] : combos)
+            g.drawText (theme::caps (c->getName()), c->getBounds().translated (0, -18).withHeight (16), juce::Justification::centredLeft);
+    }
+
+    // the step grid: the note matrix (rows Fixed, Root, N5…N1) or one lane
+    struct Grid final : juce::Component
+    {
+        SequencerBody* owner = nullptr;
+        bool isMatrix = true;
+
+        static constexpr int labelWidth = 70;
+
+        int laneKind() const { return isMatrix ? -1 : owner->layer(); }
+        int rows() const
+        {
+            switch (laneKind())
+            {
+                case -1: return 7;
+                case 1: return 7;  // octave −3…+3
+                case 2: return owner->settings.get (S::gateLaneMode) != 0 ? 0 : 9;
+                case 3: return 6;  // step type
+                default: return 0; // bars
+            }
+        }
+        juce::String rowName (int row) const
+        {
+            switch (laneKind())
+            {
+                case -1:
+                {
+                    static const char* names[] = { "Fixed", "Root", "N5", "N4", "N3", "N2", "N1" };
+                    return row < 2 ? tr (names[row]) : names[row];
+                }
+                case 1: return row == 3 ? "0" : (row < 3 ? "+" : "") + juce::String (3 - row);
+                case 2:
+                {
+                    static const char* names[] = { "32x", "16x", "8x", "4x", "2x", "1x", "1/2", "1/4", "1/8" };
+                    return names[row];
+                }
+                case 3:
+                {
+                    static const char* names[] = { TR_NOOP ("Random"), TR_NOOP ("Chord"), TR_NOOP ("Tie"), TR_NOOP ("Rest"), TR_NOOP ("Note"), TR_NOOP ("Off") };
+                    return tr (names[row]);
+                }
+                default: return {};
+            }
+        }
+        // the lane and its value range
+        int laneIndex() const
+        {
+            switch (laneKind())
+            {
+                case -1: return S::keySelect;
+                case 0: return S::velocity;
+                case 1: return S::octave;
+                case 2: return S::gateStep;
+                case 3: return S::stepType;
+                default: return S::scaleStep;
+            }
+        }
+        juce::Rectangle<int> cells() const { return getLocalBounds().withTrimmedLeft (labelWidth).withTrimmedBottom (18); }
+        int firstStep() const { return owner->settings.get (S::page) * 16; }
+        int stepAt (int x) const
+        {
+            const auto c = cells();
+            return firstStep() + juce::jlimit (0, 15, (x - c.getX()) * 16 / std::max (1, c.getWidth()));
+        }
+        int rowAt (int y) const
+        {
+            const auto c = cells();
+            return juce::jlimit (0, rows() - 1, (y - c.getY()) * rows() / std::max (1, c.getHeight()));
+        }
+        bool rowSet (int value, int row) const
+        {
+            switch (laneKind())
+            {
+                case -1: return (value & (1 << (row < 2 ? row : 8 - row))) != 0;
+                case 1: return (value & (1 << (6 - row))) != 0;
+                case 2: return value == 5 - row;
+                default: return value == 5 - row; // step type: row 0 = Random (5) … row 5 = Off (0)
+            }
+        }
+        int barMin() const { return laneKind() == 4 ? -12 : 0; }
+        int barMax() const { return laneKind() == 4 ? 12 : laneKind() == 2 ? 16 : 127; }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto& s = owner->settings;
+            const auto c = cells();
+            const auto steps = s.get (S::steps);
+            const auto lane = laneIndex();
+            const auto w = c.getWidth() / 16.0f;
+            g.setColour (theme::colour::bg0);
+            g.fillRect (c);
+            for (int k = 0; k < 16; ++k)
+            {
+                const auto step = firstStep() + k;
+                const auto x = c.getX() + k * w;
+                const auto used = step < steps;
+                if (k % 4 == 0)
+                {
+                    g.setColour (theme::colour::bg3.withAlpha (0.5f));
+                    g.fillRect (juce::Rectangle<float> (x, (float) c.getY(), w * 4.0f, (float) c.getHeight()).withWidth (w));
+                }
+                g.setColour (theme::colour::textSecondary);
+                g.setFont (theme::font (theme::type::caption));
+                g.drawText (juce::String (step + 1), juce::Rectangle<float> (x, (float) c.getBottom() + 2.0f, w, 14.0f), juce::Justification::centred);
+                const auto value = (int) s.programs[(std::size_t) s.program()].lanes[(std::size_t) lane][(std::size_t) step];
+                const auto type = (int) s.current().lanes[S::stepType][(std::size_t) step];
+                const auto silent = type == S::off || type == S::rest;
+                auto colour = used ? theme::colour::accent : theme::colour::textDisabled;
+                if (rows() > 0)
+                {
+                    const auto h = c.getHeight() / (float) rows();
+                    for (int r = 0; r < rows(); ++r)
+                    {
+                        const auto cell = juce::Rectangle<float> (x, c.getY() + r * h, w, h).reduced (1.5f);
+                        g.setColour (theme::colour::bg4.withAlpha (used ? 1.0f : 0.4f));
+                        g.fillRoundedRectangle (cell, 2.0f);
+                        if (rowSet (value, r))
+                        {
+                            auto col = colour;
+                            if (isMatrix && (silent || type == S::chord || type == S::random))
+                                col = col.withAlpha (0.35f); // (those steps do not use the matrix)
+                            g.setColour (col);
+                            g.fillRoundedRectangle (cell, 2.0f);
+                        }
+                    }
+                }
+                else
+                {
+                    const auto lo = barMin(), hi = barMax();
+                    auto zero = (float) c.getBottom();
+                    if (lo < 0)
+                        zero = c.getY() + c.getHeight() * (float) hi / (float) (hi - lo);
+                    const auto y = c.getY() + c.getHeight() * (float) (hi - value) / (float) (hi - lo);
+                    auto bar = juce::Rectangle<float>::leftTopRightBottom (x + 2.0f, std::min (y, zero), x + w - 2.0f, std::max (y, zero));
+                    g.setColour (colour.withAlpha (silent ? 0.35f : 1.0f));
+                    g.fillRect (bar.withHeight (std::max (2.0f, bar.getHeight())));
+                    g.setColour (theme::colour::textPrimary);
+                    g.setFont (theme::font (theme::type::caption));
+                    const auto text = laneKind() == 2 ? (value == 0 ? juce::String ("-") : juce::String (value)) : juce::String (value);
+                    g.drawText (text, juce::Rectangle<float> (x, (float) c.getY() + 2.0f, w, 12.0f), juce::Justification::centred);
+                    if (lo < 0)
+                    {
+                        g.setColour (theme::colour::borderStrong);
+                        g.drawHorizontalLine ((int) zero, x, x + w);
+                    }
+                }
+            }
+            // row labels
+            g.setFont (theme::font (theme::type::caption));
+            g.setColour (theme::colour::textSecondary);
+            if (rows() > 0)
+            {
+                const auto h = c.getHeight() / (float) rows();
+                for (int r = 0; r < rows(); ++r)
+                    g.drawText (rowName (r), juce::Rectangle<float> (0.0f, c.getY() + r * h, labelWidth - 6.0f, h), juce::Justification::centredRight);
+            }
+            else
+                g.drawText (laneKind() == 4 ? tr ("Semitones / scale steps") : laneKind() == 2 ? tr ("Channel") : tr ("Velocity"),
+                            juce::Rectangle<int> (0, c.getY(), labelWidth - 6, c.getHeight()), juce::Justification::centredRight, true);
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            lastStep = -1;
+            if (rows() > 0)
+            {
+                const auto step = stepAt (e.x);
+                const auto row = rowAt (e.y);
+                const auto& s = owner->settings;
+                const auto value = (int) s.current().lanes[(std::size_t) laneIndex()][(std::size_t) step];
+                // a click sets the row; in a poly lane it toggles it
+                painting = ! rowSet (value, row);
+                paintRow = row;
+            }
+            mouseDrag (e);
+        }
+
+        void mouseDrag (const juce::MouseEvent& e) override
+        {
+            const auto step = stepAt (e.x);
+            const auto lane = laneIndex();
+            const auto right = e.mods.isPopupMenu();
+            if (rows() > 0)
+            {
+                if (step == lastStep)
+                    return;
+                lastStep = step;
+                const auto kind = laneKind();
+                const auto row = paintRow;
+                const auto set = painting;
+                const auto poly = (kind == -1 && owner->settings.get (S::polyKeys) != 0) || (kind == 1 && owner->settings.get (S::polyOctave) != 0);
+                owner->change ([=] (S& s) {
+                    auto& v = s.current().lanes[(std::size_t) lane][(std::size_t) step];
+                    if (kind == -1 || kind == 1)
+                    {
+                        const auto bit = kind == -1 ? (row < 2 ? row : 8 - row) : 6 - row;
+                        if (right)
+                            v = 0; // (right-click: the step plays nothing)
+                        else if (poly)
+                            v = (std::int8_t) (set ? (v | (1 << bit)) : (v & ~(1 << bit)));
+                        else
+                            v = (std::int8_t) (1 << bit);
+                    }
+                    else
+                        v = (std::int8_t) (5 - row);
+                });
+                return;
+            }
+            const auto c = cells();
+            const auto lo = barMin(), hi = barMax();
+            const auto value = right ? (laneKind() == 0 ? 96 : 0)
+                                     : juce::jlimit (lo, hi, (int) std::lround (hi - (e.y - c.getY()) * (double) (hi - lo) / std::max (1, c.getHeight())));
+            owner->change ([=] (S& s) { s.current().lanes[(std::size_t) lane][(std::size_t) step] = (std::int8_t) value; });
+        }
+
+        int lastStep = -1, paintRow = 0;
+        bool painting = true;
+    };
+
+private:
+    int layer() const { return juce::jlimit (0, 4, settings.get (S::selectedLayer)); }
+
+    void change (std::function<void (S&)> f)
+    {
+        if (edit)
+            edit ([f] (std::vector<std::uint8_t>& fl) {
+                auto s = vfx::parseSequencer (fl).value_or (vfx::defaultSequencer());
+                f (s);
+                fl = vfx::writeSequencer (s);
+            });
+    }
+
+    void toggle (juce::ToggleButton& b, const juce::String& text, int param, const juce::String& hint)
+    {
+        b.setButtonText (text);
+        b.onClick = [this, &b, param] { change ([param, on = b.getToggleState()] (S& s) { s.set (param, on ? 1 : 0); }); };
+        ui::setHint (b, hint);
+        addAndMakeVisible (b);
+        toggles.push_back ({ &b, param });
+    }
+
+    void combo (juce::ComboBox& c, const juce::String& name, int param, const juce::StringArray& items)
+    {
+        c.setName (name);
+        c.addItemList (items, 1);
+        c.onChange = [this, &c, param] { change ([param, v = c.getSelectedItemIndex() + S::minimum (param)] (S& s) { s.set (param, v); }); };
+        ui::setHint (c, name);
+        addAndMakeVisible (c);
+        combos.push_back ({ &c, param });
+    }
+
+    void knob (std::unique_ptr<Knob>& k, const juce::String& name, int param, std::function<juce::String (double)> text = nullptr)
+    {
+        const auto lo = S::minimum (param), hi = S::maximum (param);
+        k = std::make_unique<Knob> (intSpec (name, lo, hi, defaultOf (param), std::move (text)), [this, param] { return (double) settings.get (param); },
+                                    [this, param] (double v) { change ([param, v] (S& s) { s.set (param, (int) std::lround (v)); }); });
+        k->caption = name;
+        addAndMakeVisible (*k);
+    }
+
+    static int defaultOf (int param)
+    {
+        static const auto blank = [] {
+            auto s = vfx::defaultSequencer();
+            s.set (S::currentProgram, 0);
+            return s;
+        }();
+        return blank.get (param);
+    }
+
+    void showProgramMenu()
+    {
+        juce::PopupMenu menu;
+        for (int group = 0; group < (int) settings.programs.size(); group += 16)
+        {
+            juce::PopupMenu sub;
+            for (int p = group; p < std::min (group + 16, (int) settings.programs.size()); ++p)
+                sub.addItem (juce::String (p + 1) + "  " + juce::String (settings.programs[(std::size_t) p].nameText()), true, p == settings.program(),
+                             [this, p] { change ([p] (S& s) { s.set (S::currentProgram, p); }); });
+            menu.addSubMenu (juce::String (group + 1) + "-" + juce::String (group + 16), sub, true, nullptr, settings.program() / 16 == group / 16);
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&program));
+    }
+
+    void stepProgram (int delta)
+    {
+        const auto n = std::max (1, (int) settings.programs.size());
+        change ([delta, n] (S& s) { s.set (S::currentProgram, (s.program() + delta + n) % n); });
+    }
+
+    S settings = vfx::defaultSequencer();
+    juce::TextButton program, prevProgram { "<" }, nextProgram { ">" }, dice { "?" }, shiftLeft { "<<" }, shiftRight { ">>" };
+    std::array<juce::TextButton, 4> pages;
+    std::array<juce::TextButton, 5> laneTabs;
+    juce::ToggleButton pageLock, latch, polyOctave, polyKeys, gateLaneMode;
+    juce::ComboBox arpMode, sync, order, missing, missingOctave, restart, forceKey, forceScale, forceMode, velocityMode, quantize, programMode;
+    std::unique_ptr<Knob> steps, gate, swing, transpose, octaves, fixedKey, randomVelocity, randomGate, randomStart, smartBend, outLow, outHigh;
+    std::vector<std::pair<juce::ToggleButton*, int>> toggles;
+    std::vector<std::pair<juce::ComboBox*, int>> combos;
+    Grid matrix, lane;
+};
+
 // A kind LYNX does not edit yet: says so (its notes pass through)
 class PendingBody final : public Body
 {
@@ -1346,6 +1847,7 @@ std::unique_ptr<Body> makeBody (vfx::Kind kind)
         case vfx::Kind::levelScaler: return std::make_unique<LevelScalerBody>();
         case vfx::Kind::keyboardSplitter: return std::make_unique<KeyboardSplitterBody>();
         case vfx::Kind::envelope: return std::make_unique<EnvelopeBody>();
+        case vfx::Kind::sequencer: return std::make_unique<SequencerBody>();
         default: break;
     }
     return std::make_unique<PendingBody>();
@@ -1492,6 +1994,10 @@ private:
                 const auto folder = f.getParentDirectory() == base ? juce::String() : f.getParentDirectory().getFileName();
                 out.push_back ({ "FL Studio" + (folder.isEmpty() ? juce::String() : " / " + folder), f.getFileNameWithoutExtension(), {}, f });
             }
+            // the Sequencer's factory programs are one bank: the state of FL's plugin database entry
+            const auto bank = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects/Patcher/VFX Sequencer.fst");
+            if (kind == vfx::Kind::sequencer && bank.existsAsFile())
+                out.push_back ({ "FL Studio", tr ("Factory bank"), {}, bank });
         }
         return out;
     }

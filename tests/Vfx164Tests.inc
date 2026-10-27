@@ -526,3 +526,273 @@ TEST (vfx_envelope_moves_the_notes_it_matches)
     const auto off = run (*p, { on (60) });
     CHECK (off.size() == 1 && off[0].voice.cents == 0.0f);
 }
+
+namespace vfx164
+{
+// A sequencer note heard: its key, start and length in seconds, velocity (FL's 0…127, the volume × 100)
+struct SeqNote
+{
+    int key = 0;
+    double start = 0.0, length = -1.0;
+    int velocity = 0;
+};
+
+// Plays `input` (seconds, key, on / off) through the processor at 120 bpm / 48 kHz with the song playing from 0
+// (or stopped), and returns the notes it sent out
+std::vector<SeqNote> sequence (lynx::vfx::Processor& p, std::vector<std::tuple<double, int, bool>> input, double seconds,
+                               bool playing = true, float velocity = 100.0f / 128.0f)
+{
+    constexpr int block = 480;
+    constexpr double rate = 48000.0;
+    std::vector<SeqNote> notes;
+    std::map<int, std::size_t> open;
+    lynx::vfx::EventList out;
+    lynx::vfx::Transport t;
+    t.sampleRate = rate;
+    t.bpm = 120.0;
+    t.playing = playing;
+    for (long long at = 0; at < (long long) (seconds * rate); at += block)
+    {
+        std::vector<lynx::vfx::Event> in;
+        for (const auto& [time, key, down] : input)
+        {
+            const auto sample = (long long) std::llround (time * rate);
+            if (sample >= at && sample < at + block)
+            {
+                auto e = down ? on (key, (int) (sample - at), 0, velocity) : off (key, (int) (sample - at));
+                in.push_back (e);
+            }
+        }
+        t.ticks = playing ? (double) at / rate * 2.0 * 960.0 : 0.0;
+        out.clear();
+        p.process (in.data(), (int) in.size(), block, t, out);
+        out.sortByOffset();
+        for (int k = 0; k < out.size(); ++k)
+        {
+            const auto& e = out[k];
+            const auto time = (double) (at + e.offset) / rate;
+            if (e.type == lynx::vfx::Event::Type::on)
+            {
+                const auto volume = (std::pow (11.0, 1.28 * (double) e.voice.velocity) - 1.0) / 10.0;
+                open[e.id] = notes.size();
+                notes.push_back ({ e.voice.key, time, -1.0, (int) std::lround (volume * 100.0) });
+            }
+            else if (e.type == lynx::vfx::Event::Type::off && open.count (e.id))
+                notes[open[e.id]].length = time - notes[open[e.id]].start;
+        }
+    }
+    return notes;
+}
+
+lynx::vfx::SequencerSettings blankProgram()
+{
+    auto s = lynx::vfx::defaultSequencer();
+    s.set (lynx::vfx::SequencerSettings::currentProgram, 0); // "Initial": 16 × N1, gate 90 %, 1/16
+    return s;
+}
+
+std::unique_ptr<lynx::vfx::Processor> sequencer (const lynx::vfx::SequencerSettings& s)
+{
+    return lynx::vfx::makeProcessor (lynx::vfx::Kind::sequencer, lynx::vfx::writeSequencer (s));
+}
+} // namespace vfx164
+
+TEST (vfx_sequencer_state_round_trips_and_resolves_fl_params)
+{
+    using namespace lynx::vfx;
+    using S = SequencerSettings;
+    auto s = defaultSequencer();
+    const auto bytes = writeSequencer (s);
+    const auto back = parseSequencer (bytes);
+    CHECK (back && *back == s && writeSequencer (*back) == bytes);
+    CHECK (s.programs.size() == 128 && s.chains.size() == 16);
+    // per program: Steps; global: Transpose
+    s.set (S::currentProgram, 4);
+    s.set (S::steps, 12);
+    s.set (S::transposeSemitones, 5);
+    s.set (S::currentProgram, 6);
+    CHECK (s.get (S::steps) != 12 && s.get (S::transposeSemitones) == 5);
+    s.set (S::currentProgram, 4);
+    CHECK (s.get (S::steps) == 12);
+    // lanes: FL params 0x80 + 64 · lane + step
+    s.set (0x100 + 3, S::tie);
+    CHECK (s.current().lanes[S::stepType][3] == S::tie && s.get (0x100 + 3) == S::tie);
+    s.set (S::gate, 500);
+    CHECK (s.get (S::gate) == 125);
+    // pattern shift rotates the lanes of the steps in use
+    s.set (S::steps, 16);
+    s.current().lanes[S::velocity][0] = 127;
+    shiftPattern (s, 1);
+    CHECK (s.current().lanes[S::velocity][1] == 127);
+    shiftPattern (s, -2);
+    CHECK (s.current().lanes[S::velocity][15] == 127);
+    CHECK (! parseSequencer ({ 1, 0, 0, 0 }));
+    CHECK (defaultState (Kind::sequencer) == writeSequencer (defaultSequencer()));
+}
+
+TEST (vfx_sequencer_reads_fl_factory_bank)
+{
+    if (realFlpDir.empty())
+        return;
+    namespace fs = std::filesystem;
+    const auto file = fs::path (realFlpDir) / "Patches" / "Plugin database" / "Effects" / "Patcher" / "VFX Sequencer.fst";
+    if (! fs::exists (file))
+        return;
+    std::ifstream in (file, std::ios::binary);
+    const std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (in)), {});
+    const auto state = lynx::vfx::stateFromFlPreset (bytes, lynx::vfx::Kind::sequencer);
+    CHECK (state.has_value());
+    if (! state)
+        return;
+    const auto s = lynx::vfx::parseSequencer (*state);
+    CHECK (s.has_value());
+    if (! s)
+        return;
+    CHECK (lynx::vfx::writeSequencer (*s) == *state); // (byte for byte)
+    CHECK (s->programs.size() == 128 && s->program() == 3);
+    CHECK (s->current().nameText() == "Simple 4k Up 4 beats");
+    using S = lynx::vfx::SequencerSettings;
+    CHECK (s->get (S::steps) == 16 && s->get (S::gate) == 50 && s->get (S::missingKeys) == 3 && s->get (S::arpMode) == 1);
+    // T1: C4 E4 G4 held → 60 64 67 67 (N4 missing: the last key) on every 1/16, velocity 96, half a step long
+    auto p = lynx::vfx::makeProcessor (lynx::vfx::Kind::sequencer, *state);
+    const auto notes = vfx164::sequence (*p, { { 0.0, 60, true }, { 0.0, 64, true }, { 0.0, 67, true } }, 1.0);
+    CHECK (notes.size() >= 8);
+    const int expected[8] = { 60, 64, 67, 67, 60, 64, 67, 67 };
+    for (int i = 0; i < 8 && i < (int) notes.size(); ++i)
+    {
+        CHECK (notes[(std::size_t) i].key == expected[i]);
+        CHECK (std::abs (notes[(std::size_t) i].start - 0.125 * i) < 1e-4);
+        CHECK (notes[(std::size_t) i].velocity == 96);
+        CHECK (std::abs (notes[(std::size_t) i].length - 0.0625) < 1e-3);
+    }
+    // T2: output velocity = the key's
+    auto s2 = *s;
+    s2.set (S::velocityMode, 1);
+    auto p2 = vfx164::sequencer (s2);
+    const auto loud = vfx164::sequence (*p2, { { 0.0, 60, true }, { 0.0, 64, true } }, 0.3);
+    CHECK (! loud.empty() && loud[0].velocity == 100);
+    // T3 / T4: missing keys cyclic / not played
+    s2.set (S::velocityMode, 0);
+    s2.set (S::missingKeys, 1);
+    p2 = vfx164::sequencer (s2);
+    auto two = vfx164::sequence (*p2, { { 0.0, 60, true }, { 0.0, 64, true } }, 0.49);
+    CHECK (two.size() == 4 && two[2].key == 60 && two[3].key == 64);
+    s2.set (S::missingKeys, 0);
+    p2 = vfx164::sequencer (s2);
+    two = vfx164::sequence (*p2, { { 0.0, 60, true }, { 0.0, 64, true } }, 0.99);
+    CHECK (two.size() == 4 && two[2].key == 60 && std::abs (two[2].start - 0.5) < 1e-4);
+}
+
+TEST (vfx_sequencer_plays_fl_test_vectors)
+{
+    using namespace vfx164;
+    using S = lynx::vfx::SequencerSettings;
+    // T5: steps 0 = thru, transpose +2: the note passes at once and ends with its key
+    auto s = blankProgram();
+    s.set (S::steps, 0);
+    s.set (S::transposeSemitones, 2);
+    auto p = sequencer (s);
+    auto notes = sequence (*p, { { 0.0, 60, true }, { 1.0, 60, false } }, 1.5);
+    CHECK (notes.size() == 1 && notes[0].key == 62 && notes[0].start == 0.0 && std::abs (notes[0].length - 1.0) < 1e-3
+           && notes[0].velocity == 100);
+    // T6 / T7: C major forced, every scale step +1: D → E, C# snaps down to C → D; 0.9 of a step long
+    s = blankProgram();
+    s.set (S::forceKey, 2);
+    s.set (S::forceScale, 2);
+    for (int i = 0; i < 64; ++i)
+        s.set (0x80 + i, 1);
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 62, true } }, 0.49);
+    CHECK (notes.size() == 4 && notes[0].key == 64 && notes[3].key == 64 && std::abs (notes[0].length - 0.1125) < 1e-3);
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 61, true } }, 0.2);
+    CHECK (! notes.empty() && notes[0].key == 62);
+    // T8: swing +50: odd steps half a step late
+    s = blankProgram();
+    s.set (S::swing, 50);
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 60, true } }, 0.55);
+    CHECK (notes.size() == 5);
+    const double swung[5] = { 0.0, 0.1875, 0.25, 0.4375, 0.5 };
+    for (int i = 0; i < 5 && i < (int) notes.size(); ++i)
+        CHECK (std::abs (notes[(std::size_t) i].start - swung[i]) < 1e-3);
+    // T9: output wrap 48…59: E4 plays E3
+    s = blankProgram();
+    s.set (S::outputLow, 48);
+    s.set (S::outputHigh, 59);
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 64, true } }, 0.2);
+    CHECK (! notes.empty() && notes[0].key == 52);
+    // T10: a rest after a step lengthens it by a step; a tie makes it overlap the next (legato)
+    s = blankProgram();
+    s.set (0x100 + 1, S::rest);
+    s.set (0x100 + 2, S::tie);
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 60, true } }, 0.3);
+    CHECK (notes.size() == 2 && std::abs (notes[0].length - 1.9 * 0.125) < 1e-3 && std::abs (notes[1].start - 0.25) < 1e-4);
+    s.set (0x100 + 1, S::tie);
+    s.set (0x140 + 1, 0x08); // (N2: another key, so the tie overlaps it)
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 60, true }, { 0.0, 64, true } }, 0.2);
+    CHECK (notes.size() == 2 && notes[1].key == 64 && std::abs (notes[0].length - 1.25 * 0.125) < 1e-3);
+    // T11: chord normalized, every step a chord: G3 C4 E4 → C major in root position
+    s = blankProgram();
+    s.set (S::order, 6);
+    for (int i = 0; i < 64; ++i)
+        s.set (0x100 + i, S::chord);
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 55, true }, { 0.0, 60, true }, { 0.0, 64, true } }, 0.1);
+    std::vector<int> keys;
+    for (const auto& n : notes)
+        keys.push_back (n.key);
+    std::sort (keys.begin(), keys.end());
+    CHECK ((keys == std::vector<int> { 60, 64, 67 }));
+    // T12: stopped: the sequencer runs on its own clock while the key is held
+    s = blankProgram();
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 60, true }, { 0.3, 60, false } }, 1.5, false);
+    CHECK (notes.size() == 3 && std::abs (notes[2].start - 0.25) < 1e-3);
+    CHECK (! p->busy());
+    // octaves lane: bit 4 = +1 octave; key select: Fixed / Root
+    s = blankProgram();
+    s.set (0xC0, 0x10);
+    s.set (0x140 + 1, 0x01);
+    p = sequencer (s);
+    notes = sequence (*p, { { 0.0, 60, true } }, 0.2);
+    CHECK (notes.size() == 2 && notes[0].key == 72 && notes[1].key == 64);
+    // Arp mode off: nothing; a stop releases what sounds
+    s = blankProgram();
+    s.set (S::arpMode, 0);
+    p = sequencer (s);
+    CHECK (sequence (*p, { { 0.0, 60, true } }, 0.3).empty());
+}
+
+TEST (vfx_sequencer_cost_per_block)
+{
+    // the audio-thread cost: 4 held keys, 16 steps of chords, 1 s of 128-sample blocks
+    using namespace vfx164;
+    using S = lynx::vfx::SequencerSettings;
+    auto s = blankProgram();
+    for (int i = 0; i < 64; ++i)
+        s.set (0x100 + i, S::chord);
+    auto p = sequencer (s);
+    lynx::vfx::EventList out;
+    lynx::vfx::Transport t;
+    t.sampleRate = 48000.0;
+    t.bpm = 140.0;
+    t.playing = true;
+    std::vector<lynx::vfx::Event> in { on (60), on (64), on (67), on (71) };
+    const auto begin = std::chrono::steady_clock::now();
+    int notes = 0;
+    for (int b = 0; b < 375; ++b)
+    {
+        out.clear();
+        t.ticks = b * 128.0 / 48000.0 * (140.0 / 60.0) * 960.0;
+        p->process (b == 0 ? in.data() : nullptr, b == 0 ? 4 : 0, 128, t, out);
+        for (int k = 0; k < out.size(); ++k)
+            notes += out[k].type == lynx::vfx::Event::Type::on;
+    }
+    const auto ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - begin).count();
+    std::printf ("  sequencer: 1 s of audio in %.3f ms (%d notes)\n", ms, notes);
+    CHECK (notes > 30 && ms < 20.0);
+}

@@ -128,6 +128,7 @@ add_library(lynx_core STATIC
     src/core/FlPatcher.cpp
     src/core/Patcher.cpp
     src/core/Vfx.cpp
+    src/core/VfxSequencer.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
     src/core/SoundFont.cpp
