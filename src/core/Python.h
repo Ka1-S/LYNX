@@ -14,6 +14,10 @@
 //  - LYNX's additions to pocketpy's standard library, for scripts written for CPython 3.12: `re` (sub, match,
 //    search, fullmatch, findall, split, compile, escape), the 3-argument pow(), sys.float_info, random.gauss(),
 //    random.seed() with any value.
+//
+// Using it for other scripts (e.g. Piano Roll scripts): inside runSync(), acquireVm() a VM, install your module with
+// pocketpy's C API (pocketpy.h: py_newmodule, py_bindfunc, py_exec…), setTimeLimit() around every call into the
+// script, takeError() after a failed call, use (0) + releaseVm() when done. core/VfxScript.cpp is the example.
 
 #include <functional>
 #include <string>

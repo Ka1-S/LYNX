@@ -16113,7 +16113,16 @@ static Error* eat_name(Lexer* self) {
     c11__lower_bound(const char*, KW_BEGIN, KW_COUNT, name, less, &out);
 #undef less
 
-    if(out != KW_COUNT && c11__sveq2(name, KW_BEGIN[out])) {
+    if(out != KW_COUNT && c11__sveq2(name, KW_BEGIN[out]) && (out + TK_FALSE) == TK_MATCH) {
+        // LYNX: "match" is a soft keyword (CPython): a name unless it starts a statement and is not followed by
+        // ".", "=", "(", ")", ",", ":" or "]" (re.match(...), match = ..., def match(...))
+        TokenIndex prev = self->nexts.length > 0 ? c11_vector__back(Token, &self->nexts).type : TK_SOF;
+        const char* p = self->curr_char;
+        while(*p == ' ' || *p == '\t') p++;
+        bool at_start = prev == TK_EOL || prev == TK_SOF || prev == TK_INDENT || prev == TK_DEDENT;
+        bool name_like = *p == '.' || *p == '=' || *p == '(' || *p == ')' || *p == ',' || *p == ':' || *p == ']';
+        add_token(self, at_start && !name_like ? TK_MATCH : TK_ID);
+    } else if(out != KW_COUNT && c11__sveq2(name, KW_BEGIN[out])) {
         add_token(self, (TokenIndex)(out + TK_FALSE));
     } else {
         add_token(self, TK_ID);
@@ -19013,7 +19022,13 @@ __ERROR_RE_RAISE:
         self->curr_function = NULL;
     } while(0);
 
+#if PK_ENABLE_WATCHDOG
+    // LYNX: a script stopped for running too long is not given to its own `except:` / `finally:` handlers (an
+    // `except:` in a loop would catch the TimeoutError of every opcode again and again, growing without end)
+    int target = py_lynx_interrupt ? -1 : Frame__goto_exception_handler(frame, &self->stack, &self->unhandled_exc);
+#else
     int target = Frame__goto_exception_handler(frame, &self->stack, &self->unhandled_exc);
+#endif
     if(target >= 0) {
         // 1. Exception can be handled inside the current frame
         DISPATCH_JUMP_ABSOLUTE(target);
