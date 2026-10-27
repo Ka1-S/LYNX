@@ -67,5 +67,17 @@ REA_rodada164e-clippitch.md (misc164p). Evidence markers: [CODE] LYNX source; [T
   subtracts such a shadow on Linux (a frame side ≥ 16 px) and allows 4 px. The fit itself treats the shadow as frame,
   which only makes windows a little smaller than necessary there.
 
+## Verification
+- build-local with FL Data: 0 failures (tests above). Linux GUI build in WSL (build-linux, WSLg) and Windows build
+  (build-win-misc164).
+- [WIN] `--fittest` at 150 % and 200 % on the real 1920x1080 desktop: all OK (the fixed-size tool window lands at
+  548x688 at 150 %, i.e. the whole work area, with its content in a viewport). `--snapshot`:
+  D:\lynx-work\misc164\win\snap\w-browser-folders.png, w-browser164-*.png, w-mixer163-*.png.
+- [LIN] `--fittest` at 100 / 150 % OK; at 200 % the check still says FAIL by a few px while the screenshot
+  (D:\lynx-work\misc164\lin200-fixed.png) shows title bar, close button and bottom on the screen — WSLg's frame
+  extents don't follow JUCE's scale; a measurement artifact, noted. Snapshots in D:\lynx-work\misc164\linsnap.
+
 ## Where I stopped
-- (updated at landing)
+- All five items done (1–4 here, mod wheel and clip pitch in their sub-round docs). Landing as misc164.
+- Not done: the fixed-size windows are fitted when they open (and when their content changes size), not again when
+  the UI zoom changes while they are open (close and reopen them).

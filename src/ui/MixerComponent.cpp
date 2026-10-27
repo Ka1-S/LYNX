@@ -2643,7 +2643,7 @@ int EffectsPanel::selectedEffectBottom() const
     const auto count = gateSelected() ? 35 : shownParams (slot);
     for (int p = 0; p < count; ++p)
         if (const auto r = knobBoundsIn (p, 0); ! r.isEmpty()) // (tight grids at their shortest rows)
-            bottom = juce::jmax (bottom, r.getBottom());
+            bottom = juce::jmax (bottom, r.getY() + juce::jlimit (30, 44, r.getHeight() - 30) + 32); // knob, name, value
     return bottom;
 }
 
