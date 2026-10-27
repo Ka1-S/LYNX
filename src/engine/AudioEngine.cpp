@@ -2113,6 +2113,13 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
                 decoded->push_back (sample); // kept: the rack uses it next (it was decoded twice before)
             return sample != nullptr ? (std::int64_t) sample->frames() : 0;
         };
+        options.sampleSeconds = [&library, decoded] (const std::string& path) -> double {
+            const auto sample = library.load (juce::String::fromUTF8 (path.c_str()));
+            if (sample == nullptr || sample->sampleRate <= 0.0)
+                return 0.0;
+            decoded->push_back (sample);
+            return (double) sample->frames() / sample->sampleRate;
+        };
         // WAV that only exists inside the .flp (Slicex): goes to %APPDATA%\LYNX\flp-embedded, keyed by content
         options.saveEmbedded = [] (const std::vector<std::uint8_t>& wav, const std::string& name) -> std::string {
             const auto folder = PluginHost::settingsFolder().getChildFile ("flp-embedded");

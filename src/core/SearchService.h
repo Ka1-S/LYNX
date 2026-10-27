@@ -19,6 +19,8 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -77,6 +79,11 @@ public:
 
     IndexStatus status() const;
 
+    // Which folders hold a file `accept` takes (round 164: the Browser's content filter), worked out from the index
+    // and kept per `key` until the index changes. Never waits for the worker: while it holds the index, the last
+    // answer for `key` (or nullptr) is returned. Call from one thread (the message thread).
+    std::shared_ptr<const FolderMatches> folderMatches (int key, const std::function<bool (const std::string&)>& accept);
+
     // Waits until the worker has nothing to do (tests, --snapshot); false on time-out.
     bool waitIdle (int timeoutMs);
 
@@ -115,6 +122,8 @@ private:
 
     mutable std::mutex indexLock; // guards `index`
     Index index;
+
+    std::map<int, std::shared_ptr<const FolderMatches>> matchCache; // (the caller's thread)
 
     mutable std::mutex lock; // guards everything below
     std::condition_variable wake;

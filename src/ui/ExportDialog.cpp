@@ -730,7 +730,7 @@ std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int forma
 void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName, int format)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (new ExportPanel (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX", true, format));
+    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX", true, format)).release());
     options.dialogTitle = tr ("Export audio");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;

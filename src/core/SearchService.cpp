@@ -189,6 +189,17 @@ void Service::loadIndex()
     setStatus ([] (IndexStatus& s) { s.loaded = true; });
 }
 
+std::shared_ptr<const FolderMatches> Service::folderMatches (int key, const std::function<bool (const std::string&)>& accept)
+{
+    auto& cached = matchCache[key];
+    std::unique_lock<std::mutex> guard (indexLock, std::try_to_lock);
+    if (! guard.owns_lock())
+        return cached;
+    if (cached == nullptr || cached->generation != index.generation())
+        cached = std::make_shared<const FolderMatches> (index.folderMatches (accept));
+    return cached;
+}
+
 void Service::saveIndex()
 {
     if (! callbacks.save)

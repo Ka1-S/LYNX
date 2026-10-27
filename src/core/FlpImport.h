@@ -49,6 +49,8 @@ struct FlpImportOptions
     // frames (0 = unknown) and saving of a WAV embedded in the project (returns the path).
     std::function<std::vector<std::uint8_t> (const std::string& path)> readFile;
     std::function<std::int64_t (const std::string& path)> sampleFrames;
+    // Optional: a sample's length in seconds (0 = unknown) — FL's time-stretch MUL without a TIME stretches it by a factor
+    std::function<double (const std::string& path)> sampleSeconds;
     std::function<std::string (const std::vector<std::uint8_t>& wav, const std::string& name)> saveEmbedded;
 
     FlpImportReport* report = nullptr; // optional
@@ -93,6 +95,11 @@ struct DrumPad
 // and moves notes by key: a pad's note goes to its channel, at key 60. Notes on keys without a
 // pad are dropped. Channel indices of patterns, automations and clips are adjusted.
 void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads);
+
+// FL's Time stretching panel (0xD7) on a sample channel or an audio clip, as FL plays it (REA_rodada164e-clippitch):
+// every mode but Resample (0) keeps the length and adds the PITCH knob (cents); MUL without a TIME stretches the
+// sample (sampleSeconds long) by 2^(mul/10000), turned into beats at `bpm`.
+void applyFlStretchPanel (SamplerSettings& s, int mode, int pitchCents, int mul, float timeTicks, double sampleSeconds, double bpm);
 
 // FL channel/plugin preset (.fst) of a synthesizer the import converts (3x Osc, Sytrus,
 // Harmor, GMS, Harmless...) or native GMS preset (.gmsynth), as internal synth settings.
