@@ -213,6 +213,22 @@ void matchSpectrum (Document& doc, Range r, const Audio& reference, double amoun
                     Progress* progress = nullptr);
 
 // --- time ---------------------------------------------------------------------------------------------------------
+struct StretchSettings
+{
+    double semitones = 0.0;       // pitch: coarse + fine
+    double lengthRatio = 1.0;     // new length / old length
+    bool resample = false;        // resample: pitch follows the speed (lengthRatio and pitch tied); else stretch
+    bool insert = true;           // the new length pushes the rest (off: the result keeps the old length, cut or padded)
+    bool preserveFormants = false; // keep the voice's formants where they were when the pitch moves
+    double formantSemitones = 0.0; // formant shift on top (with preserveFormants)
+    int formantOrder = 128;       // 8..512: the detail of the spectral envelope that is kept (more = finer)
+};
+// Edison's Time stretcher / pitch shifter.
+void stretchTool (Document& doc, Range r, const StretchSettings& s, Progress* progress = nullptr);
+// The spectral envelope (formants) of `processed` replaced by the one of `original` at the same moment (time scaled by
+// timeRatio = processed length / original length), moved by formantSemitones. Mono-per-channel, same channel count.
+void correctFormants (const Audio& original, Audio& processed, double timeRatio, double formantSemitones, int order, Progress* progress = nullptr);
+
 struct ClawSettings
 {
     double periodBeats = 1.0;    // 1/4 .. 16 beats

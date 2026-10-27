@@ -302,7 +302,7 @@ public:
             { TR_NOOP ("Reverse"), TR_NOOP ("Reverse the selection (or everything)"), [this] { edit (tr ("Reverse"), [] (ae::Document& d, ae::Range r) { ae::reverse (d, r); }); } },
             { TR_NOOP ("Invert"), TR_NOOP ("Reverse the polarity"), [this] { edit (tr ("Reverse polarity"), [] (ae::Document& d, ae::Range r) { ae::invert (d, r); }); } },
             { TR_NOOP ("Center"), TR_NOOP ("Remove the DC offset"), [this] { edit (tr ("Remove DC offset"), [] (ae::Document& d, ae::Range r) { ae::removeDc (d, r); }); } },
-            { TR_NOOP ("Stretch..."), TR_NOOP ("Time stretch / pitch shift"), [this] { showStretch(); } },
+            { TR_NOOP ("Stretch..."), TR_NOOP ("Time stretch / pitch shift"), [this] { openEdisonTool (audiotools::Tool::stretch); } },
             { TR_NOOP ("Resample..."), TR_NOOP ("Change the sample rate"), [this] { showResample(); } },
             { TR_NOOP ("Marker"), TR_NOOP ("Add a marker at the cursor (M)"), [this] { addMarkerAtCursor(); } },
             { TR_NOOP ("Region"), TR_NOOP ("Make the selection a region"), [this] { addRegionFromSelection(); } },
@@ -1572,41 +1572,6 @@ private:
 
     void showAmp() { openEdisonTool (audiotools::Tool::amp); } // Edison's Amp form (round 165l)
 
-    void showStretch()
-    {
-        if (doc.audio.empty())
-            return;
-        juce::Component::SafePointer<AudioEditor> self (this);
-        // v: time (%), pitch (semitones), fine (cents); choice 0 = stretch (pitch kept), 1 = resample (speed)
-        auto run = [] (ae::Document& d, ae::Range r, const std::vector<double>& v, int method) {
-            const auto ratio = v[0] / 100.0;
-            const auto semitones = v[1] + v[2] / 100.0;
-            if (method == 1)
-                ae::changeSpeed (d, r, ratio * std::pow (2.0, -semitones / 12.0));
-            else
-            {
-                const auto start = ae::orAll (d, r).start;
-                const auto length = ae::orAll (d, r).length();
-                ae::timeStretch (d, r, ratio);
-                ae::pitchShift (d, { start, start + (std::int64_t) std::llround ((double) length * ratio) }, semitones);
-            }
-        };
-        openTool (std::make_unique<ToolPanel> (
-                      std::vector<ToolPanel::Param> { { tr ("Length"), 25.0, 400.0, 100.0, 0.1, "%" },
-                                                      { tr ("Pitch"), -24.0, 24.0, 0.0, 1.0, " st" },
-                                                      { tr ("Fine"), -100.0, 100.0, 0.0, 1.0, " ct" } },
-                      juce::StringArray { tr ("Stretch (keep pitch and length apart)"), tr ("Resample (pitch follows the speed)") }, tr ("Method"), 0,
-                      [self, run] (const std::vector<double>& v, int m) {
-                          if (self != nullptr)
-                              self->edit (tr ("Time stretch / pitch shift"), [run, v, m] (ae::Document& d, ae::Range r) { run (d, r, v, m); });
-                      },
-                      [self, run] (const std::vector<double>& v, int m) {
-                          if (self != nullptr)
-                              self->previewProcessed ([run, v, m] (ae::Document& d) { run (d, {}, v, m); });
-                      }),
-                  tr ("Time stretch / pitch shift"));
-    }
-
     void showResample()
     {
         if (doc.audio.empty())
@@ -2815,7 +2780,7 @@ juce::PopupMenu AudioEditor::mainMenu()
     tools.addItem (tr ("Remove DC offset (center)"), has, false, [this] { edit (tr ("Remove DC offset"), [] (ae::Document& d, ae::Range r) { ae::removeDc (d, r); }); });
     tools.addSectionHeader (tr ("Time"));
     tools.addItem (tr ("Reverse"), has, false, [this] { edit (tr ("Reverse"), [] (ae::Document& d, ae::Range r) { ae::reverse (d, r); }); });
-    tools.addItem (tr ("Time stretch / pitch shift..."), has, false, [this] { showStretch(); });
+    tools.addItem (tr ("Time stretch / pitch shift..."), has, false, [this] { openEdisonTool (T::stretch); });
     tools.addItem (tr ("Drum(loop) stretch..."), has, false, [this] { openEdisonTool (T::drumStretch); });
     tools.addItem (tr ("Claw machine..."), has, false, [this] { openEdisonTool (T::claw); });
     tools.addItem (envMode == EnvMode::scratch ? tr ("Scratch (envelope): apply") : tr ("Scratch (envelope)"), has, false, [this] { scratchWithEnvelope(); });
@@ -3020,7 +2985,7 @@ std::unique_ptr<juce::Component> makeAudioEditorForSnapshot (AudioEngine& engine
 std::unique_ptr<juce::Component> makeAudioToolPanelForSnapshot (juce::Component& editor, int tool, int envelopeMode)
 {
     auto* e = dynamic_cast<AudioEditor*> (&editor);
-    if (e == nullptr || tool < 0 || tool > (int) audiotools::Tool::pasteSpectral)
+    if (e == nullptr || tool < 0 || tool > (int) audiotools::Tool::stretch)
         return {};
     e->setEnvModeForSnapshot (envelopeMode);
     return audiotools::makeToolPanel (*e, (audiotools::Tool) tool);
@@ -3028,7 +2993,7 @@ std::unique_ptr<juce::Component> makeAudioToolPanelForSnapshot (juce::Component&
 
 const char* audioToolNameForSnapshot (int tool)
 {
-    if (tool < 0 || tool > (int) audiotools::Tool::pasteSpectral)
+    if (tool < 0 || tool > (int) audiotools::Tool::stretch)
         return nullptr;
     return audiotools::toolTitle ((audiotools::Tool) tool);
 }

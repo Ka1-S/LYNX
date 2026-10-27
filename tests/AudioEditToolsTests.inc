@@ -471,3 +471,58 @@ TEST (audioedittools_scratch_envelope_round165l)
     ae::scratch (f, fast);
     CHECK (std::abs (f.audio.channels[0][900] - original.back()) < 0.01);
 }
+
+TEST (audioedittools_stretch_tool_formants_round165l)
+{
+    const double sr = 44100.0;
+    // stretch x1.5 with insert: longer; without insert: same length
+    auto d = sineDoc (440.0, 1.0, sr, 0.5f);
+    ae::StretchSettings s;
+    s.lengthRatio = 1.5;
+    ae::stretchTool (d, {}, s);
+    CHECK (std::abs (d.audio.seconds() - 1.5) < 0.02);
+    auto e = sineDoc (440.0, 1.0, sr, 0.5f);
+    s.insert = false;
+    ae::stretchTool (e, {}, s);
+    CHECK (e.audio.frames() == (std::int64_t) sr);
+    // resample: +12 st = half as long
+    auto f = sineDoc (440.0, 1.0, sr, 0.5f);
+    ae::StretchSettings rs;
+    rs.resample = true;
+    rs.semitones = 12.0;
+    ae::stretchTool (f, {}, rs);
+    CHECK (std::abs (f.audio.seconds() - 0.5) < 0.01);
+
+    // formants: a buzz through a fixed resonance at 1.5 kHz, shifted up 5 st: with preservation the energy near
+    // 1.5 kHz stays higher than at 1.5 kHz * 2^(5/12) (where the plain shift moves the resonance)
+    ae::Document v;
+    v.audio = ae::silence (1, sr, (std::int64_t) sr);
+    {
+        double y1 = 0.0, y2 = 0.0;
+        const auto w = 2.0 * 3.141592653589793 * 1500.0 / sr, rr = 0.995;
+        for (std::size_t i = 0; i < v.audio.channels[0].size(); ++i)
+        {
+            const auto x = i % 200 == 0 ? 1.0 : 0.0; // 220.5 Hz pulses
+            const auto y = x + 2.0 * rr * std::cos (w) * y1 - rr * rr * y2;
+            y2 = y1;
+            y1 = y;
+            v.audio.channels[0][i] = (float) (y * 0.02);
+        }
+    }
+    auto plain = v, kept = v;
+    ae::StretchSettings ps;
+    ps.semitones = 5.0;
+    ae::stretchTool (plain, {}, ps);
+    ps.preserveFormants = true;
+    ae::stretchTool (kept, {}, ps);
+    auto band = [&] (const ae::Document& doc, double lo, double hi) {
+        double e2 = 0.0;
+        for (double hz = lo; hz <= hi; hz += 25.0)
+            e2 += std::pow (toneLevel (doc.audio.channels[0], 8820, 35280, hz, sr), 2.0);
+        return e2;
+    };
+    const auto shifted = 1500.0 * std::pow (2.0, 5.0 / 12.0);
+    const auto plainRatio = band (plain, 1300, 1700) / std::max (1e-12, band (plain, shifted - 200, shifted + 200));
+    const auto keptRatio = band (kept, 1300, 1700) / std::max (1e-12, band (kept, shifted - 200, shifted + 200));
+    CHECK (keptRatio > 2.0 * plainRatio);
+}

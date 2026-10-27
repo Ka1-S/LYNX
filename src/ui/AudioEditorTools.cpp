@@ -36,6 +36,7 @@ const char* toolTitle (Tool tool)
         case Tool::smoothUp: return TR_NOOP ("Smooth up");
         case Tool::createSequence: return TR_NOOP ("Create sequence");
         case Tool::pasteSpectral: return TR_NOOP ("Paste mix (spectral)");
+        case Tool::stretch: return TR_NOOP ("Time stretcher / pitch shifter");
     }
     return "";
 }
@@ -1007,6 +1008,61 @@ private:
                     s.tailSlope = value (slope) / 100.0;
                     s.tailSmoothing = value (smoothing) / 100.0;
                     return Process ([s] (ae::Document& d, ae::Range r, ae::Progress& p) { ae::drumloopStretch (d, r, s, &p); });
+                };
+                break;
+            }
+            case Tool::stretch:
+            {
+                // FL's Time stretcher / pitch shifter form: pitch, time, method, insert, formant preservation
+                header (tr ("Pitch"));
+                const auto coarse = slider (tr ("Coarse"), -24, 24, 1, 0, [] (double v) { return juce::String ((int) v) + " st"; }, 1);
+                const auto fine = slider (tr ("fine"), -100, 100, 1, 0, [] (double v) { return juce::String ((int) v) + " ct"; }, 1);
+                header (tr ("Time"));
+                const auto bpm = host.toolBpm();
+                const auto time = slider (tr ("Time mul"), 25, 400, 0.1, 100, [] (double v) { return juce::String (v, 1) + "%"; });
+                const auto seconds = slider (tr ("Length"), 0.01, std::max (0.02, (double) range.length() / sr * 4.0), 0.001, (double) range.length() / sr,
+                                             [] (double v) { return juce::String (v, 3) + " s"; });
+                const auto tempo = slider (tr ("Target tempo"), 20, 400, 0.01, bpm, [] (double v) { return juce::String (v, 2) + " BPM"; });
+                auto* timeSlider = static_cast<juce::Slider*> (editors[time].get());
+                auto* secondsSlider = static_cast<juce::Slider*> (editors[seconds].get());
+                auto* tempoSlider = static_cast<juce::Slider*> (editors[tempo].get());
+                const auto baseSeconds = std::max (1.0e-6, (double) range.length() / sr);
+                // the multiplier, the new length and the target tempo are one setting seen three ways
+                auto sync = [=] (double mul) {
+                    timeSlider->setValue (mul, juce::dontSendNotification);
+                    secondsSlider->setValue (baseSeconds * mul / 100.0, juce::dontSendNotification);
+                    tempoSlider->setValue (bpm * 100.0 / mul, juce::dontSendNotification);
+                };
+                timeSlider->onValueChange = [this, sync, timeSlider] { sync (timeSlider->getValue()); controlChanged(); };
+                secondsSlider->onValueChange = [this, sync, secondsSlider, baseSeconds] { sync (juce::jlimit (25.0, 400.0, secondsSlider->getValue() / baseSeconds * 100.0)); controlChanged(); };
+                tempoSlider->onValueChange = [this, sync, tempoSlider, bpm] { sync (juce::jlimit (25.0, 400.0, bpm * 100.0 / tempoSlider->getValue())); controlChanged(); };
+                const auto method = choice (tr ("Method"), { tr ("Stretch (keep the pitch)"), tr ("Resample (pitch follows the speed)") }, 0, 2);
+                const auto insertIt = toggle (tr ("Insert"), true, 2);
+                header (tr ("Formant preservation"));
+                const auto formants = toggle (tr ("Preserve formants"), false, 3);
+                const auto fCoarse = slider (tr ("Formant shift"), -24, 24, 1, 0, [] (double v) { return juce::String ((int) v) + " st"; }, 4);
+                const auto fFine = slider (tr ("fine"), -100, 100, 1, 0, [] (double v) { return juce::String ((int) v) + " ct"; }, 4);
+                const auto order = slider (tr ("Order"), 8, 512, 1, 128, [] (double v) { return juce::String ((int) v); });
+                extra (tr ("Copy from pitch"), [this, coarse, fine, fCoarse, fFine] {
+                    // the formants move with the pitch (as if not preserved, but with the other options)
+                    static_cast<juce::Slider*> (editors[fCoarse].get())->setValue (value (coarse), juce::dontSendNotification);
+                    static_cast<juce::Slider*> (editors[fFine].get())->setValue (value (fine), juce::dontSendNotification);
+                    controlChanged();
+                });
+                describe = [this, where, time, range, sr] {
+                    return where + "\n" + tr ("New length: {0} s. With formant preservation a voice keeps its character when the pitch moves.",
+                                              { juce::String ((double) range.length() / sr * value (time) / 100.0, 3) });
+                };
+                makeProcess = [=, this] {
+                    ae::StretchSettings s;
+                    s.semitones = value (coarse) + value (fine) / 100.0;
+                    s.lengthRatio = value (time) / 100.0;
+                    s.resample = chosen (method) == 1;
+                    s.insert = on (insertIt);
+                    s.preserveFormants = on (formants);
+                    s.formantSemitones = value (fCoarse) + value (fFine) / 100.0;
+                    s.formantOrder = (int) value (order);
+                    return Process ([s] (ae::Document& d, ae::Range r, ae::Progress& p) { ae::stretchTool (d, r, s, &p); });
                 };
                 break;
             }

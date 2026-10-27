@@ -1828,6 +1828,121 @@ void clawMachine (Document& doc, Range r, const ClawSettings& s, double bpm, Pro
     report (progress, 1.0);
 }
 
+// --- time stretch / pitch shift ---------------------------------------------------------------------------------------
+namespace
+{
+// a cepstrally smoothed log-magnitude envelope of one spectrum (bins 0..size/2), `order` cepstral coefficients kept
+void cepstralEnvelope (const std::vector<double>& re, const std::vector<double>& im, int size, int order, std::vector<double>& env)
+{
+    std::vector<double> cr ((std::size_t) size), ci ((std::size_t) size, 0.0);
+    const auto half = size / 2;
+    for (int b = 0; b <= half; ++b)
+    {
+        const auto m = std::log (std::hypot (re[(std::size_t) b], im[(std::size_t) b]) + 1.0e-9);
+        cr[(std::size_t) b] = m;
+        if (b > 0 && b < half)
+            cr[(std::size_t) (size - b)] = m;
+    }
+    fftInPlace (cr, ci, true);
+    const auto keep = std::clamp (order, 2, half - 1);
+    for (int k = 0; k < size; ++k)
+    {
+        const auto q = std::min (k, size - k);
+        if (q >= keep)
+            cr[(std::size_t) k] = ci[(std::size_t) k] = 0.0;
+        else
+        {
+            cr[(std::size_t) k] /= size;
+            ci[(std::size_t) k] = 0.0;
+        }
+    }
+    fftInPlace (cr, ci, false);
+    env.resize ((std::size_t) half + 1);
+    for (int b = 0; b <= half; ++b)
+        env[(std::size_t) b] = cr[(std::size_t) b]; // log magnitude
+}
+} // namespace
+
+void correctFormants (const Audio& original, Audio& processed, double timeRatio, double formantSemitones, int order, Progress* progress)
+{
+    constexpr int size = 2048;
+    const auto half = size / 2;
+    const auto window = sqrtHann (size);
+    const auto shift = std::pow (2.0, formantSemitones / 12.0);
+    const auto lifter = std::clamp (order, 8, 512) / 4; // FL's order is over a larger frame; ~1/4 of it here
+    const auto channels = std::min (original.channels.size(), processed.channels.size());
+    for (std::size_t c = 0; c < channels; ++c)
+    {
+        const auto& src = original.channels[c];
+        const auto srcN = (std::int64_t) src.size();
+        std::vector<double> ore ((std::size_t) size), oim ((std::size_t) size), want, have;
+        processed.channels[c] = stftProcess (processed.channels[c], size, [&] (std::vector<double>& re, std::vector<double>& im, std::int64_t f) {
+            // the original's frame at the same moment
+            const auto centre = (double) (f * (size / 4) - size / 2);
+            const auto first = (std::int64_t) std::llround (centre / std::max (1.0e-6, timeRatio)) - size / 2;
+            for (int i = 0; i < size; ++i)
+            {
+                const auto k = first + i;
+                ore[(std::size_t) i] = (k >= 0 && k < srcN ? (double) src[(std::size_t) k] : 0.0) * window[(std::size_t) i];
+                oim[(std::size_t) i] = 0.0;
+            }
+            fftInPlace (ore, oim, false);
+            cepstralEnvelope (ore, oim, size, lifter, want);
+            cepstralEnvelope (re, im, size, lifter, have);
+            for (int b = 0; b <= half; ++b)
+            {
+                // the wanted envelope at this bin: the original's, read at b / shift (formants moved up by `shift`)
+                const auto x = (double) b / shift;
+                const auto k = std::min (half - 1, (int) x);
+                const auto t = std::clamp (x - k, 0.0, 1.0);
+                const auto w = x >= half ? want[(std::size_t) half] - 4.0 : want[(std::size_t) k] * (1.0 - t) + want[(std::size_t) k + 1] * t;
+                const auto g = std::exp (std::clamp (w - have[(std::size_t) b], -4.0, 4.0)); // at most about +-35 dB
+                re[(std::size_t) b] *= g;
+                im[(std::size_t) b] *= g;
+            }
+        }, progress, (double) c / (double) channels, 1.0 / (double) channels);
+    }
+}
+
+void stretchTool (Document& doc, Range r, const StretchSettings& s, Progress* progress)
+{
+    r = orAll (doc, r);
+    if (r.empty() || ! (s.lengthRatio > 0.0))
+        return;
+    Document part;
+    part.audio = copy (doc.audio, r);
+    const auto original = part.audio;
+    double ratio = s.lengthRatio;
+    if (s.resample)
+    {
+        // the speed sets both: semitones up = shorter
+        const auto speed = std::pow (2.0, s.semitones / 12.0) / std::max (1.0e-6, s.lengthRatio);
+        changeSpeed (part, {}, 1.0 / speed);
+        ratio = (double) part.audio.frames() / (double) std::max<std::int64_t> (1, original.frames());
+    }
+    else
+    {
+        if (std::abs (s.lengthRatio - 1.0) > 1.0e-9)
+            timeStretch (part, {}, s.lengthRatio);
+        report (progress, 0.3);
+        if (std::abs (s.semitones) > 1.0e-9)
+            pitchShift (part, {}, s.semitones);
+    }
+    report (progress, 0.5);
+    if (stop (progress))
+        return;
+    if (s.preserveFormants && (std::abs (s.semitones) > 1.0e-9 || std::abs (s.formantSemitones) > 1.0e-9))
+        correctFormants (original, part.audio, ratio, s.formantSemitones, s.formantOrder, progress);
+    if (stop (progress))
+        return;
+    if (! s.insert)
+        for (auto& ch : part.audio.channels)
+            ch.resize ((std::size_t) r.length(), 0.0f); // the old length: cut, or padded with silence
+    erase (doc, r);
+    insert (doc, r.start, part.audio);
+    report (progress, 1.0);
+}
+
 // --- drum(loop) stretch -----------------------------------------------------------------------------------------------
 // Slices (markers inside the range, or onsets) keep their own speed and move to their stretched start; what is
 // missing after a slice (stretching longer) is filled per the fill method, what is too long (shorter) is cut with a
