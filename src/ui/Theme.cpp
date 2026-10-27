@@ -620,6 +620,19 @@ void LookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int width, int hei
     g.drawRect (bounds, 1.0f);
 }
 
+namespace menus
+{
+namespace
+{
+bool compactMenus = true;
+}
+void setCompact (bool c) { compactMenus = c; }
+bool compact() { return compactMenus; }
+int itemHeight() { return compactMenus ? 21 : 26; }
+int headerHeight() { return compactMenus ? 19 : 39; }
+int separatorHeight() { return compactMenus ? 5 : 9; }
+} // namespace menus
+
 juce::Font LookAndFeel::getPopupMenuFont()
 {
     return uiFont (type::body);
@@ -631,13 +644,21 @@ void LookAndFeel::getIdealPopupMenuItemSize (const juce::String& text, bool isSe
     if (isSeparator)
     {
         idealWidth = 50;
-        idealHeight = 9;
+        idealHeight = menus::separatorHeight();
         return;
     }
 
     const auto font = getPopupMenuFont();
-    idealHeight = standardMenuItemHeight > 0 ? standardMenuItemHeight : 26;
-    idealWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, text)) + idealHeight * 2 + 8;
+    if (standardMenuItemHeight < 0)
+    {
+        // JUCE asks with -1 for a section header and then adds half of the answer: hand back 2/3 of the wanted height
+        idealHeight = (menus::headerHeight() * 2 + 2) / 3;
+        idealWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (uiFont (type::small, true), caps (text)) * 0.8f) + 24;
+        return;
+    }
+    idealHeight = standardMenuItemHeight > 0 ? standardMenuItemHeight : menus::itemHeight();
+    const auto iconWidth = juce::roundToInt ((float) idealHeight * 0.8f);
+    idealWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, text)) + iconWidth + (menus::compact() ? 36 : idealHeight + 30);
 }
 
 void LookAndFeel::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive, bool isHighlighted,
@@ -701,7 +722,7 @@ void LookAndFeel::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rec
 {
     g.setFont (uiFont (type::small, true));
     g.setColour (textSecondary);
-    g.drawFittedText (caps (sectionName), area.reduced (14, 0).withTrimmedTop (4), juce::Justification::centredLeft, 1);
+    g.drawFittedText (caps (sectionName), area.reduced (14, 0).withTrimmedTop (menus::compact() ? 2 : 4), juce::Justification::centredLeft, 1);
 }
 
 void LookAndFeel::drawMenuBarBackground (juce::Graphics&, int, int, bool, juce::MenuBarComponent&)

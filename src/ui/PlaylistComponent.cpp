@@ -1431,9 +1431,9 @@ int PlaylistComponent::clipAt (int x, int y, bool& onRightEdge, bool& onLeftEdge
     return -1;
 }
 
-void PlaylistComponent::seekTo (int x)
+void PlaylistComponent::seekTo (int x, bool snapOn)
 {
-    const auto tick = juce::jmax (0.0, (double) snap (xToTick (x), true));
+    const auto tick = juce::jmax (0.0, snapOn ? (double) snap (xToTick (x), true) : xToTick (x));
 
     if (engine.getSong().mode != PlayMode::song)
         engine.editSong ([] (Song& s) { s.mode = PlayMode::song; }, false);
@@ -1642,8 +1642,8 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         }
 
         drag = Drag::seek;
-        seekTo (e.x);
-        EditorGlobals::get().seekMark = (std::int64_t) juce::jmax (0.0, (double) snap (xToTick (e.x), true));
+        seekTo (e.x, ! e.mods.isAltDown());
+        EditorGlobals::get().seekMark = (std::int64_t) juce::jmax (0.0, (double) snap (xToTick (e.x), ! e.mods.isAltDown()));
         return;
     }
 
@@ -1821,7 +1821,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
         case EditTool::listen:
             drag = Drag::listen;
-            seekTo (e.x);
+            seekTo (e.x, ! e.mods.isAltDown());
             engine.play();
             return;
 
@@ -2073,7 +2073,7 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 
         case Drag::seek:
         case Drag::listen:
-            seekTo (e.x);
+            seekTo (e.x, snapOn);
             return;
 
         case Drag::loop:
@@ -2346,15 +2346,18 @@ void PlaylistComponent::postDragHint()
             hint.value = tr ("{0} selected", { juce::String ((int) selection.size()) });
             break;
         case Drag::loop:
-            hint.text = tr ("Time selection");
+            hint.text = tr ("Time selection  [Alt] no snap");
             hint.value = position (song.loopStart) + " - " + position (song.loopEnd);
             break;
         case Drag::erase: hint.text = tr ("Deleting what the mouse crosses"); break;
         case Drag::muting: hint.text = tr ("Muting / unmuting what the mouse crosses"); break;
         case Drag::knife: hint.text = tr ("Cutting along the line  [Alt] no snap"); break;
         case Drag::paint: hint.text = tr ("Painting clips  [Alt] no snap"); break;
-        case Drag::timeMove: hint.text = tr ("Moving the time selection with its clips"); break;
+        case Drag::timeMove: hint.text = tr ("Moving the time selection with its clips  [Alt] no snap"); break;
         case Drag::seek:
+            hint.text = tr ("Song position  [Alt] no snap");
+            hint.value = position ((std::int64_t) playheadTick);
+            break;
         case Drag::listen:
         case Drag::pan:
         case Drag::zoomRange:
@@ -3871,7 +3874,7 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
     if (p.y >= rulerTop && p.y < headerHeight && p.x >= headerWidth)
     {
-        hint.text = tr ("Ruler: [LMB] song position  [Ctrl][LMB] drag: time selection (loop)  [Shift][LMB] drag in it: move  [2xLMB] clear  [RMB] markers");
+        hint.text = tr ("Ruler: [LMB] song position  [Ctrl][LMB] drag: time selection (loop)  [Shift][LMB] drag in it: move  [2xLMB] clear  [RMB] markers  [Alt] no snap");
         hint.hasMenu = true;
         return hint;
     }

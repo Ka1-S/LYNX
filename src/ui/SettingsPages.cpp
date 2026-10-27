@@ -22,9 +22,9 @@ juce::File autosaveFolder()
 namespace
 {
 constexpr int labelWidth = 190;
-constexpr int rowHeight = 28;
-constexpr int rowGap = 8;
-constexpr int sectionHeight = 28;
+constexpr int rowHeight = 26;
+constexpr int rowGap = 5; // round 163: tighter (was 8)
+constexpr int sectionHeight = 24;
 
 void styleCombo (juce::ComboBox& box)
 {
@@ -92,7 +92,7 @@ public:
             options.language = "en";
 
         for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
-                                                                 &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox,
+                                                                 &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox, &menuLabel, &menuBox,
                                                                  &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &gpuRendering, &splash, &startupSound, &scanAtStart, &menuEntry,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups, &unusedTakes,
@@ -121,6 +121,12 @@ public:
             scaleBox.addItem (juce::String (percent) + "%", percent);
         scaleBox.setSelectedId (options.uiScale, juce::dontSendNotification);
         scaleBox.onChange = [this] { change ([&] { options.uiScale = scaleBox.getSelectedId(); }); };
+
+        styleLabel (menuLabel, tr ("Menu density"));
+        menuBox.addItem (tr ("Compact"), 1);
+        menuBox.addItem (tr ("Comfortable"), 2);
+        menuBox.setSelectedId (options.compactMenus ? 1 : 2, juce::dontSendNotification);
+        menuBox.onChange = [this] { change ([&] { options.compactMenus = menuBox.getSelectedId() == 1; }); };
 
         styleLabel (wavesLabel, tr ("Waveforms"));
         wavesBox.addItem (tr ("Clean (the clip colour)"), 1);
@@ -222,7 +228,7 @@ public:
                                   "your name, file names or projects. It goes to lynx-share.com only with your consent (Help > Report a problem... "
                                   "sends one by hand)."));
 
-        for (auto* b : { &languageBox, &scaleBox, &wavesBox, &pluginStyleBox, &editInBox, &undoBox, &autosaveBox, &keepBox, &crashBox })
+        for (auto* b : { &languageBox, &scaleBox, &menuBox, &wavesBox, &pluginStyleBox, &editInBox, &undoBox, &autosaveBox, &keepBox, &crashBox })
             styleCombo (*b);
         juce::ignoreUnused (engine, persistent);
     }
@@ -233,8 +239,9 @@ private:
         Rows r (width);
         r.section (languageTitle, true);
         languageBox.setBounds (r.row (languageLabel, 220));
-        languageNote.setBounds (r.indented (16).translated (0, -6));
+        languageNote.setBounds (r.indented (16).translated (0, -3));
         scaleBox.setBounds (r.row (scaleLabel, 120));
+        menuBox.setBounds (r.row (menuLabel, 160));
         wavesBox.setBounds (r.row (wavesLabel, 0));
         stereoWaves.setBounds (r.indented (24));
         pluginStyleBox.setBounds (r.row (pluginStyleLabel, 300));
@@ -267,9 +274,9 @@ private:
 
         r.section (pluginsTitle);
         sandbox.setBounds (r.full (24));
-        sandboxNote.setBounds (r.full (16).translated (0, -6));
+        sandboxNote.setBounds (r.full (16).translated (0, -3));
         substitutes.setBounds (r.full (24));
-        substitutesNote.setBounds (r.full (16).translated (0, -6));
+        substitutesNote.setBounds (r.full (16).translated (0, -3));
         {
             auto row = r.full();
             managePlugins.setBounds (row.removeFromLeft (180));
@@ -281,7 +288,7 @@ private:
 
         r.section (reportsTitle);
         crashBox.setBounds (r.row (crashLabel, 260));
-        crashNote.setBounds (r.full (46).translated (0, -6));
+        crashNote.setBounds (r.full (46).translated (0, -3));
         displayTitle.setVisible (false);
         return r.bottom();
     }
@@ -315,8 +322,8 @@ private:
     GeneralOptions options;
     SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") };
-    juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
-    juce::ComboBox crashBox, languageBox, scaleBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
+    juce::Label languageLabel, languageNote, scaleLabel, menuLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
+    juce::ComboBox crashBox, languageBox, scaleBox, menuBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
     juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, menuEntry, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };
@@ -424,12 +431,12 @@ private:
         Rows r (width);
         r.section (deviceTitle, true);
         driverBox.setBounds (r.row (driverLabel, 320));
-        driverNote.setBounds (r.indented (46).translated (0, -6));
+        driverNote.setBounds (r.indented (46).translated (0, -3));
         outputBox.setBounds (r.row (outputLabel, 0));
         inputBox.setBounds (r.row (inputLabel, 0));
         rateBox.setBounds (r.row (rateLabel, 160));
         bufferBox.setBounds (r.row (bufferLabel, 260));
-        bufferNote.setBounds (r.indented (18).translated (0, -6));
+        bufferNote.setBounds (r.indented (18).translated (0, -3));
         {
             auto row = r.indented();
             panelButton.setBounds (row.removeFromLeft (170));
@@ -446,7 +453,7 @@ private:
         r.section (recordTitle);
         inputChannels.setBounds (r.full (34));
         recordInput.setBounds (r.full (24));
-        recordNote.setBounds (r.full (32).translated (0, -6));
+        recordNote.setBounds (r.full (32).translated (0, -3));
         formatBox.setBounds (r.row (formatLabel, 320));
         takeNames.setBounds (r.full (24));
         r.section (latencyTitle);
@@ -454,10 +461,10 @@ private:
         pingOutBox.setBounds (r.row (pingOutLabel, 260));
         pingInBox.setBounds (r.row (pingInLabel, 260));
         measureButton.setBounds (r.indented().withWidth (240));
-        pingNote.setBounds (r.full (48).translated (0, -4));
+        pingNote.setBounds (r.full (48).translated (0, -2));
         useMeasured.setBounds (r.full (24));
         offsetSlider.setBounds (r.row (offsetLabel, 200));
-        offsetNote.setBounds (r.full (32).translated (0, -6));
+        offsetNote.setBounds (r.full (32).translated (0, -3));
         return r.bottom();
     }
 
@@ -1029,7 +1036,7 @@ private:
 
         r.section (notesTitle);
         velocityBox.setBounds (r.row (velocityLabel, 300));
-        velocityNote.setBounds (r.indented (16).translated (0, -6));
+        velocityNote.setBounds (r.indented (16).translated (0, -3));
 
         r.section (controllersTitle);
         {
@@ -1038,7 +1045,7 @@ private:
             typeValue.setBounds (row.withTrimmedTop (6));
         }
         pickup.setBounds (r.full (24));
-        pickupNote.setBounds (r.full (16).translated (0, -6));
+        pickupNote.setBounds (r.full (16).translated (0, -3));
         {
             auto row = r.row (linksLabel, 0, 110);
             linksLabel.setBounds (linksLabel.getBounds().withTrimmedTop (4));
