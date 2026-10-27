@@ -135,7 +135,7 @@ TEST (audioedittools_amp_mixdown_and_levels_round165l)
     ae::normalize (plain, {}, 0.0f);
     CHECK (ae::lossyNormalize (ln, {}) > 1.5f);
     CHECK (rmsOf (ln.audio.channels[0], 0, ln.audio.frames()) > 1.5 * rmsOf (plain.audio.channels[0], 0, plain.audio.frames()));
-    CHECK (ae::peak (ln.audio, {}) <= 1.0f);
+    CHECK (ae::peak (ln.audio, { 0, ln.audio.frames() }) <= 1.0f);
 
     auto mono = sineDoc (440.0, 0.05);
     CHECK (ae::monoIfMono (mono) && mono.audio.numChannels() == 1);
@@ -278,7 +278,7 @@ TEST (audioedittools_denoise_round165l)
         for (auto& v : ch)
             v = std::clamp (v, -0.7f, 0.7f);
     CHECK (ae::declip (c.audio, {}, 0.99) > 0);
-    CHECK (ae::peak (c.audio, {}) > 0.85f);
+    CHECK (ae::peak (c.audio, { 0, c.audio.frames() }) > 0.85f);
     // safe mode: a sine clipped near full scale is rebuilt without going over it; vocal: at most +3 dB
     auto loud = sineDoc (100.0, 0.1, sr, 1.5f);
     for (auto& ch : loud.audio.channels)
@@ -286,9 +286,9 @@ TEST (audioedittools_denoise_round165l)
             v = std::clamp (v, -0.95f, 0.95f);
     auto vocal = loud;
     CHECK (ae::declip (loud.audio, {}, 0.99, false, true) > 0);
-    CHECK (ae::peak (loud.audio, {}) <= 1.0f && ae::peak (loud.audio, {}) > 0.96f);
+    CHECK (ae::peak (loud.audio, { 0, loud.audio.frames() }) <= 1.0f && ae::peak (loud.audio, { 0, loud.audio.frames() }) > 0.96f);
     CHECK (ae::declip (vocal.audio, {}, 0.99, true, false) > 0);
-    CHECK (ae::peak (vocal.audio, {}) <= 0.95f * 0.99f * 1.42f);
+    CHECK (ae::peak (vocal.audio, { 0, vocal.audio.frames() }) <= 0.95f * 0.99f * 1.42f);
 
     // declicker: a single spike in a sine is removed
     auto k = sineDoc (200.0, 0.2, sr, 0.3f);
@@ -458,12 +458,12 @@ TEST (audioedittools_scratch_envelope_round165l)
     double err = 0.0;
     for (std::size_t i = 0; i < original.size(); ++i)
         err = std::max (err, (double) std::abs (d.audio.channels[0][i] - original[i]));
-    CHECK (err < 1e-4);
+    CHECK (err < 0.01); // (the ramp goes up to 999)
     ae::Envelope backwards;
     backwards.points = { { 0.0, 1.0, 0.0f }, { 1.0, 0.0, 0.0f } };
     ae::scratch (d, backwards);
-    CHECK (std::abs (d.audio.channels[0].front() - original.back()) < 1e-4);
-    CHECK (std::abs (d.audio.channels[0].back() - original.front()) < 1e-4);
+    CHECK (std::abs (d.audio.channels[0].front() - original.back()) < 0.01);
+    CHECK (std::abs (d.audio.channels[0].back() - original.front()) < 0.01);
     // twice as fast: the average of each pair (no aliasing), then held at the end
     auto f = rampDoc (1000);
     ae::Envelope fast;

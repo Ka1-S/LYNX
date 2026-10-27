@@ -43,7 +43,7 @@ bool stop (Progress* p) { return p != nullptr && p->cancelled(); }
 
 // --- STFT -------------------------------------------------------------------------------------------------------
 // Overlap-add STFT with a periodic sqrt-Hann window on analysis and synthesis (hop = size / 4: the summed
-// window^2 is constant = 1.5, divided out). `fn` gets the spectrum of each frame (bins 0..size/2, the rest is
+// window^2 (a Hann) is constant = 2, divided out). `fn` gets the spectrum of each frame (bins 0..size/2, the rest is
 // rebuilt as the conjugate mirror) and may change it. Frames are centred so the whole input is covered.
 using SpectrumFn = std::function<void (std::vector<double>& re, std::vector<double>& im, std::int64_t frame)>;
 
@@ -100,7 +100,7 @@ std::vector<float> stftProcess (const std::vector<float>& in, int size, const Sp
     }
     std::vector<float> out ((std::size_t) n);
     for (std::int64_t i = 0; i < n; ++i)
-        out[(std::size_t) i] = (float) (acc[(std::size_t) (i + size)] / 1.5);
+        out[(std::size_t) i] = (float) (acc[(std::size_t) (i + size)] / 2.0);
     return out;
 }
 
@@ -687,10 +687,10 @@ void generateNoise (Document& doc, Range r, float level, std::uint32_t seed, std
         doc.audio = silence (2, doc.audio.sampleRate > 0.0 ? doc.audio.sampleRate : 44100.0, 0);
     }
     r = clamp (doc, r);
-    if (r.empty())
+    if (r.empty() && framesIfEmpty <= 0)
+        r = { 0, doc.audio.frames() }; // no selection: all of it
+    else if (r.empty())
     {
-        if (framesIfEmpty <= 0)
-            return;
         insertSilence (doc, r.start, framesIfEmpty);
         r = { r.start, r.start + framesIfEmpty };
     }
@@ -1041,17 +1041,20 @@ void scratch (Document& doc, const Envelope& position, Progress* progress)
         if (stop (progress))
             return;
         const auto src = doc.audio.channels[c];
-        std::vector<double> integral ((std::size_t) n + 1, 0.0); // integral[k] = sum of src[0..k)
-        for (std::int64_t i = 0; i < n; ++i)
-            integral[(std::size_t) i + 1] = integral[(std::size_t) i] + src[(std::size_t) i];
+        std::vector<double> integral ((std::size_t) n, 0.0); // integral[k] = the trapezoid area from 0 to k
+        for (std::int64_t i = 1; i < n; ++i)
+            integral[(std::size_t) i] = integral[(std::size_t) i - 1] + 0.5 * ((double) src[(std::size_t) i - 1] + src[(std::size_t) i]);
         auto at = [&] (double x) { // linear interpolation
             const auto k = std::min ((std::int64_t) x, n - 2);
             const auto f = x - (double) k;
             return (double) src[(std::size_t) k] * (1.0 - f) + (double) src[(std::size_t) k + 1] * f;
         };
-        auto area = [&] (double x) { // the integral up to x (of the sample-and-hold signal, fine for averaging)
-            const auto k = std::min ((std::int64_t) x, n - 1);
-            return integral[(std::size_t) k] + (double) src[(std::size_t) k] * (x - (double) k);
+        auto area = [&] (double x) { // the integral up to x of the linearly interpolated signal (trapezoids)
+            x = std::clamp (x, 0.0, last);
+            const auto k = std::min ((std::int64_t) x, n - 2);
+            const auto f = x - (double) k;
+            const auto a0 = (double) src[(std::size_t) k], a1 = (double) src[(std::size_t) k + 1];
+            return integral[(std::size_t) k] + f * (a0 + 0.5 * f * (a1 - a0));
         };
         auto& out = doc.audio.channels[c];
         for (std::int64_t i = 0; i < n; ++i)
@@ -1059,7 +1062,9 @@ void scratch (Document& doc, const Envelope& position, Progress* progress)
             const auto x = pos[(std::size_t) i];
             const auto prev = i > 0 ? pos[(std::size_t) i - 1] : x;
             const auto span = std::abs (x - prev);
-            out[(std::size_t) i] = (float) (span > 1.0 ? (area (std::max (x, prev)) - area (std::min (x, prev))) / span : at (x));
+            // faster than normal: the average over the span played, centred on the position (= the value there
+            // for a straight line, so speed 1 and a little more join seamlessly)
+            out[(std::size_t) i] = (float) (span > 1.0 ? (area (x + span / 2.0) - area (x - span / 2.0)) / span : at (x));
         }
         report (progress, (double) (c + 1) / (double) doc.audio.channels.size());
     }
@@ -1428,6 +1433,8 @@ void repairSpan (std::vector<float>& x, std::int64_t a, std::int64_t b)
 int declip (Audio& audio, Range r, double threshold, bool vocalModel, bool safeMode)
 {
     int repaired = 0;
+    if (r.empty())
+        r = { 0, audio.frames() };
     r.start = std::clamp<std::int64_t> (r.start, 0, audio.frames());
     r.end = std::clamp<std::int64_t> (r.end, r.start, audio.frames());
     for (auto& ch : audio.channels)
@@ -1479,6 +1486,8 @@ int declip (Audio& audio, Range r, double threshold, bool vocalModel, bool safeM
 int declick (Audio& audio, Range r, double sensitivity)
 {
     int fixed = 0;
+    if (r.empty())
+        r = { 0, audio.frames() };
     r.start = std::clamp<std::int64_t> (r.start, 0, audio.frames());
     r.end = std::clamp<std::int64_t> (r.end, r.start, audio.frames());
     const auto factor = 24.0 - 18.0 * clamp01 (sensitivity); // how far over the local residual a click must stick out
@@ -1543,7 +1552,9 @@ void denoise (Document& doc, Range r, const NoiseProfile& profile, const Denoise
     {
         const auto hz = (double) b * sr / size;
         const auto curve = s.thresholdCurve.empty() ? 0.5 : s.thresholdCurve.at (curvePosition (hz, s.freqScale, sr));
-        floor[(std::size_t) b] = noise.magnitude[(std::size_t) b] * dbToGain ((clamp01 (s.threshold) - 0.5) * 36.0 + (curve - 0.5) * 36.0);
+        // x2: the profile is the noise's mean magnitude; a frame's noise often goes over it (Rayleigh), twice the
+        // mean covers ~96 % of it
+        floor[(std::size_t) b] = 2.0 * noise.magnitude[(std::size_t) b] * dbToGain ((clamp01 (s.threshold) - 0.5) * 36.0 + (curve - 0.5) * 36.0);
     }
     const auto minGain = clamp01 (s.amount) >= 0.999 ? 0.0 : dbToGain (-clamp01 (s.amount) * 36.0);
     // gain smoothing over time (fast open, slower close) and across neighbouring bins: no "musical noise"
@@ -2094,7 +2105,7 @@ void drumloopStretch (Document& doc, Range r, const DrumStretchSettings& s, Prog
         }
         else if (slot < len)
             fadeFrames (filled, slot - std::min<std::int64_t> (fade, slot), slot, false);
-        fadeFrames (filled, 0, std::min<std::int64_t> (32, slot), true);
+        fadeFrames (filled, 0, std::min<std::int64_t> (4, slot), true); // (just against a click: the attack stays)
         for (int c = 0; c < channels; ++c)
             for (std::int64_t k = 0; k < slot && at + k < newLength; ++k)
                 out.channels[(std::size_t) c][(std::size_t) (at + k)] += filled.channels[(std::size_t) c][(std::size_t) k];
