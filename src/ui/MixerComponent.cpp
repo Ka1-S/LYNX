@@ -1955,6 +1955,18 @@ void EffectsPanel::timerCallback()
 
     if (changed && isShowing())
         repaint (inputBoxBounds());
+
+    // another effect selected (its controls need another height): fold / unfold the EQ, scroll (round 164)
+    if (const auto* s = slots(); s != nullptr && isShowing())
+    {
+        const auto kind = selectedSlot >= 0 && selectedSlot < (int) s->size() ? (int) (*s)[(std::size_t) selectedSlot].kind : -1;
+        if (selectedSlot != fittedSlot || kind != fittedKind)
+        {
+            fittedSlot = selectedSlot;
+            fittedKind = kind;
+            refit();
+        }
+    }
 }
 
 void EffectsPanel::setTrack (int t)
@@ -2073,9 +2085,11 @@ juce::Rectangle<int> EffectsPanel::eqFoldBounds() const
 
 int EffectsPanel::neededHeight (bool folded) const
 {
-    // the slots and the effect's title row under them always fit; the knobs below may be cut by the EQ
-    return slotsTop + maxEffectSlots * slotHeight + 64 + 6 + belowHeight (folded);
+    // the slots and the selected effect's controls (round 164: its knobs and their names and values too, they were
+    // cut by the EQ at medium heights): when they don't fit with the EQ open, it folds; then the panel scrolls
+    return selectedEffectBottom() + 6 + belowHeight (folded);
 }
+
 
 void EffectsPanel::fitToView (int w, int h, int scrollBar)
 {
@@ -2581,6 +2595,11 @@ int shownParams (const EffectSlot& slot)
 
 juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
 {
+    return knobBoundsIn (param, bottomTop());
+}
+
+juce::Rectangle<int> EffectsPanel::knobBoundsIn (int param, int areaBottom) const
+{
     auto top = slotsTop + maxEffectSlots * slotHeight + 40;
     // many parameters (Effector: 12): 4 columns and shorter rows to fit the height
     int count = 0;
@@ -2589,7 +2608,7 @@ juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
     const auto columns = count > 9 ? 4 : 3;
     const auto w = (getWidth() - 16) / columns;
     const auto rows = juce::jmax (1, (count + columns - 1) / columns);
-    const auto rowHeight = count > 9 ? juce::jlimit (64, 86, (bottomTop() - top - 4) / rows) : 86;
+    const auto rowHeight = count > 9 ? juce::jlimit (64, 86, (areaBottom - top - 4) / rows) : 86;
 
     // volume gate: the 32 steps are bars (gateStepsBounds); the knobs are mix/attack/release
     if (gateSelected())
@@ -2605,6 +2624,27 @@ juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
         top = tuneKeysBounds().getBottom() + 22;
 
     return { 8 + (param % columns) * w, top + (param / columns) * rowHeight, w, rowHeight - 4 };
+}
+
+int EffectsPanel::selectedEffectBottom() const
+{
+    const auto slotsBottom = slotsTop + maxEffectSlots * slotHeight;
+    auto bottom = slotsBottom + 64; // the effect's title row
+    const auto* s = slots();
+    if (s == nullptr || selectedSlot < 0 || selectedSlot >= (int) s->size())
+        return bottom;
+    const auto& slot = (*s)[(std::size_t) selectedSlot];
+    if (slot.kind == EffectKind::plugin || isSoundgoodizerApprox (slot))
+        return juce::jmax (bottom, pluginButtonBounds().getBottom() + 34 + 40);
+    if (slot.kind == EffectKind::parametricEq || slot.kind == EffectKind::facetEq)
+        return juce::jmax (bottom, pluginButtonBounds().getBottom() + 10 + 120);
+    if (slot.kind == EffectKind::parallel)
+        return juce::jmax (bottom, knobBoundsIn (0, 0).getY() - 28 + 20 + 22 * (int) slot.branches.size());
+    const auto count = gateSelected() ? 35 : shownParams (slot);
+    for (int p = 0; p < count; ++p)
+        if (const auto r = knobBoundsIn (p, 0); ! r.isEmpty()) // (tight grids at their shortest rows)
+            bottom = juce::jmax (bottom, r.getBottom());
+    return bottom;
 }
 
 bool EffectsPanel::gateSelected() const

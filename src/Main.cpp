@@ -2274,7 +2274,8 @@ private:
                 tall->setCentrePosition (area.getCentre());
                 tall->setVisible (true);
                 lynx::keepAboveMainWindow (*tall);
-                startTimer (700);
+                // LYNX_FITTEST_MS: how long each window stays (default 700 ms; longer to take screenshots of them)
+                startTimer (juce::jlimit (300, 60000, juce::SystemStats::getEnvironmentVariable ("LYNX_FITTEST_MS", "700").getIntValue()));
             }
 
             void timerCallback() override
@@ -2284,6 +2285,29 @@ private:
                 {
                     check ("tall tool window: title bar and close button on the screen", *tall, false);
                     tall.reset();
+                    // round 164: a fixed-size LYNX tool window whose content is taller than the screen: it scrolls
+                    auto content = std::make_unique<juce::Component>();
+                    const auto screen = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+                    content->setSize (520, screen.getHeight() + 300);
+                    lynx::openToolWindow (std::move (content), "LYNX fit test - fixed size", "fittest-fixed");
+                    return;
+                }
+                if (step == 2)
+                {
+                    if (auto* w = lynx::findToolWindow ("fittest-fixed"))
+                    {
+                        check ("fixed-size tool window taller than the screen: fits (its content scrolls)", *w, true);
+                        const auto scrolls = w->getContentComponent() != nullptr && w->getContentComponent()->getNumChildComponents() > 0
+                                             && dynamic_cast<juce::Viewport*> (w->getContentComponent()->getChildComponent (0)) != nullptr;
+                        report << (scrolls ? "ok   " : "FAIL ") << "its content is in a scrolling viewport\n";
+                        ok = ok && scrolls;
+                    }
+                    else
+                    {
+                        report << "FAIL fixed-size tool window not found\n";
+                        ok = false;
+                    }
+                    lynx::closeAllToolWindows();
                     // a resizable window that fits at 100%, then the zoom goes up (the main window's case)
                     juce::Desktop::getInstance().setGlobalScaleFactor (1.0f);
                     big = std::make_unique<juce::DocumentWindow> ("LYNX fit test - zoom", lynx::theme::colour::bg2, juce::DocumentWindow::allButtons);
@@ -2295,13 +2319,13 @@ private:
                     big->setVisible (true);
                     return;
                 }
-                if (step == 2)
+                if (step == 3)
                 {
                     juce::Desktop::getInstance().setGlobalScaleFactor ((float) percent / 100.0f);
                     juce::Timer::callAfterDelay (200, [] { lynx::fitAllWindowsOnScreen(); });
                     return;
                 }
-                if (step == 3)
+                if (step == 4)
                 {
                     check ("resizable window after the zoom change: fits the screen", *big, true);
                     big.reset();
@@ -5206,6 +5230,7 @@ private:
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-browser-plugins.png");
             ui.getBrowserForSnapshot().setTab (lynx::BrowserComponent::allTab);
+            saveWindow (ui.getBrowserForSnapshot().makeFoldersPanelForSnapshot(), "-browser-folders.png"); // round 164
 
             // the undo history after a few edits
             offline.editSong ([] (lynx::Song& s) { s.bpm += 1.0; });

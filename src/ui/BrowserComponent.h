@@ -1,6 +1,8 @@
 #pragma once
 
+#include <memory>
 #include <set>
+#include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -11,6 +13,7 @@
 namespace lynx::search
 {
 struct SearchResult;
+struct FolderMatches;
 }
 
 namespace lynx
@@ -158,6 +161,11 @@ public:
     class PreviewStrip; // waveform of the selected sample
     class TabBar;       // ALL / PROJECT / STARRED
     class DetailsBox;   // date, size / version and folder of the selection (FL's details box)
+    class FoldersPanel; // the "Show folders" window: which folders this Browser shows, the user's own folders (round 164)
+
+    // The "Show folders" window of this Browser (one per Browser), and its content for --snapshot.
+    void showFoldersDialog();
+    std::unique_ptr<juce::Component> makeFoldersPanelForSnapshot();
 
     // starred files and folders (one path per line in the settings folder)
     bool isStarred (const juce::File& file) const { return starred.contains (file.getFullPathName()); }
@@ -183,6 +191,20 @@ private:
     void saveView() const;
     bool viewLoaded = false, viewFromFile = false;
     bool lists (const juce::File& file) const; // a file listed under the content filter
+    // round 164: a folder whose files are all left out by the content filter (from the search index; unknown: false)
+    bool filterHides (const juce::File& folder) const;
+    std::shared_ptr<const search::FolderMatches> filterMatches() const;
+    void applyFilterToTree();
+    void removeUserFolder (const juce::File& folder); // takes one of the user's own folders out of the Browsers
+    juce::Component::SafePointer<juce::Component> foldersPanel;
+    void refreshFoldersPanel();
+    struct FolderEntry
+    {
+        juce::String id, name, path;
+        bool shown = true, user = false, empty = false; // empty: nothing in it is listed under the content filter
+    };
+    std::vector<FolderEntry> folderEntries() const; // the open "Show folders" window's content // drops the folders the index now knows to be empty under the filter
+    std::uint64_t prunedGeneration = 0;
     void addHideItem (juce::PopupMenu& menu, const juce::String& id, const juce::String& label);
     juce::String rootId (const juce::File& folder) const; // the root's id, empty if `folder` isn't a root
     juce::StringArray starred;

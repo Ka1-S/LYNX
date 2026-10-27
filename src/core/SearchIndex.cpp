@@ -31,6 +31,7 @@ void Index::drop (const std::string& folder, char separator)
         return;
     const auto subfolders = found->second.subfolders;
     folders.erase (found);
+    ++gen;
     for (const auto& s : subfolders)
         drop (join (folder, s, separator), separator);
 }
@@ -85,6 +86,7 @@ int Index::refresh (const std::string& root, const FileSystem& fs, const std::fu
                     if (std::find (listing.subfolders.begin(), listing.subfolders.end(), old) == listing.subfolders.end())
                         drop (join (folder, old, fs.separator), fs.separator);
             auto& entry = folders[folder];
+            ++gen;
             entry.time = time;
             entry.files = std::move (listing.files);
             entry.subfolders = std::move (listing.subfolders);
@@ -124,6 +126,37 @@ std::vector<std::string> Index::find (const std::string& query, const std::vecto
     return found;
 }
 
+FolderMatches Index::folderMatches (const std::function<bool (const std::string&)>& accept) const
+{
+    FolderMatches result;
+    result.generation = gen;
+    for (const auto& [path, folder] : folders)
+    {
+        if (result.some.count (path) > 0 || std::none_of (folder.files.begin(), folder.files.end(), accept))
+            continue;
+        // this folder and every indexed folder above it hold something
+        auto at = path;
+        while (result.some.insert (at).second)
+        {
+            const auto cut = at.find_last_of ("/\\");
+            if (cut == std::string::npos || cut == 0)
+                break;
+            auto parent = at.substr (0, cut);
+            if (folders.count (parent) == 0)
+            {
+                parent += at[cut]; // a drive's root keeps its separator ("C:\\")
+                if (folders.count (parent) == 0)
+                    break;
+            }
+            at = std::move (parent);
+        }
+    }
+    for (const auto& [path, folder] : folders)
+        if (result.some.count (path) == 0 && isComplete (path))
+            result.none.insert (path);
+    return result;
+}
+
 bool Index::isComplete (const std::string& folder) const
 {
     return std::any_of (complete.begin(), complete.end(), [this, &folder] (const std::string& r) { return isUnder (folder, r) && folders.count (r) > 0; });
@@ -156,6 +189,7 @@ std::string Index::toText() const
 bool Index::fromText (const std::string& text)
 {
     clear();
+    ++gen;
     std::istringstream in (text);
     std::string line;
     if (! std::getline (in, line) || line != "LYNX browser index 1")
