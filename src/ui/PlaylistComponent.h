@@ -134,7 +134,7 @@ public:
     void showSongAfterOpen();
 
 private:
-    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint,
+    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint, autoTension,
                       trackResize, preview };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -259,6 +259,13 @@ private:
     juce::Rectangle<float> automationBody (const Clip& clip) const;
     int automationPointAt (int clip, juce::Point<int> p) const;
     bool isOnAutomationCurve (int clip, juce::Point<int> p) const;
+    // round 165: FL's in-Playlist automation editing — clips tall and wide enough to edit, the tension handles between
+    // points (hollow circles; index = the point on the left, whose tension shapes the segment), the point menu
+    bool automationEditable (int clip) const;
+    juce::Point<float> automationHandlePos (int clip, int point) const; // x < 0: no handle
+    int automationHandleAt (int clip, juce::Point<int> p) const;
+    void showAutomationPointMenu (int clip, int point);
+    float tensionStart = 0.0f, tensionSign = 1.0f;
     // hover: what a click would hit (drives the cursor, the highlight and the hint)
     struct Hover
     {
