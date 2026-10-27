@@ -16055,6 +16055,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Layer164Tests.inc"
 #include "Patcher164vTests.inc"
 #include "Vfx164Tests.inc"
+#include "VfxScript165Tests.inc"
 #include "Misc164Tests.inc"
 #include "Visual164Tests.inc"
 #include "Patcher164fTests.inc"

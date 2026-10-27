@@ -1,5 +1,6 @@
 #include "core/Patcher.h"
 #include "core/ControlSurface.h"
+#include "core/VfxScript.h"
 #include "core/XyController.h"
 
 #include <algorithm>
@@ -129,6 +130,10 @@ NodePorts nodePorts (const PatchNode& node)
             p.audioOuts = 0;
             p.midiOut = true;
             p.midiOuts = vfx::outputCount (*kind);
+            if (*kind == vfx::Kind::script) // its output controllers (round 165d)
+                if (const auto state = vfx::readState (node.channel.pluginState))
+                    if (const auto settings = vfx::parseScript (state->fl))
+                        p.controlOuts = (int) vfx::script::describe (*settings)->outputs.size();
         }
         if (node.channel.instrument == InstrumentKind::patcher)
             p.audioOuts = 1 + (int) node.channel.patcher.outputTracks.size();
