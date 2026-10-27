@@ -5034,8 +5034,11 @@ private:
             live.anyPlaying.store (launched > 0);
             ui.selectTabForSnapshot (2);
             offline.dispatchPendingMessages();
-            saveSnapshot (ui, prefix + "-playlist.png");
             auto& playlist = ui.getPlaylistForSnapshot();
+            savePng (playlist.createComponentSnapshot (playlist.getLocalBounds()), prefix + "-playlist-song.png");
+            playlist.runAction ("playlist.zoomPerformance"); // as FL opens these demos: the zone fills the view
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-playlist.png");
             savePng (playlist.createComponentSnapshot (playlist.getLocalBounds()), prefix + "-playlist-only.png");
 
             // patcherize: the first insert with effects (all of them) and the first channel that can be

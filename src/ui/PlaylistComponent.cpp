@@ -4430,9 +4430,8 @@ void PlaylistComponent::paintPerformance (juce::Graphics& g, juce::Rectangle<int
     using namespace theme;
     const auto& song = engine.getSong();
     const auto& live = engine.performanceState();
-    if (! live.anyPlaying.load (std::memory_order_relaxed))
-        return;
     const auto zoneEnd = song.performanceZoneEnd();
+    const auto any = live.anyPlaying.load (std::memory_order_relaxed);
     const auto blink = 0.45f + 0.45f * std::sin ((float) juce::Time::getMillisecondCounter() * 0.012f);
     for (int i = 0; i < (int) song.playlist.size(); ++i)
     {
@@ -4440,15 +4439,26 @@ void PlaylistComponent::paintPerformance (juce::Graphics& g, juce::Rectangle<int
         if (c.start >= zoneEnd || c.track < 0 || c.track >= perf::maxTracks)
             continue;
         const auto& view = live.tracks[(std::size_t) c.track];
-        const auto playing = view.playing.load (std::memory_order_relaxed) == c.start;
-        const auto pending = view.pending.load (std::memory_order_relaxed) == c.start;
-        if (! playing && ! pending)
-            continue;
+        const auto playing = any && view.playing.load (std::memory_order_relaxed) == c.start;
+        const auto pending = any && view.pending.load (std::memory_order_relaxed) == c.start;
         const auto r = clipBounds (i).toFloat();
         if (! r.intersects (grid.toFloat()))
             continue;
+        if (! playing && ! pending)
+        {
+            // as in FL, the zone's idle clips are dimmed: what plays stands out
+            g.setColour (colour::bg0.withAlpha (0.42f));
+            g.fillRoundedRectangle (r, radius::sm);
+            continue;
+        }
         if (playing)
         {
+            // a play mark at its left edge (FL: ▸) besides the bright frame
+            juce::Path mark;
+            const auto mx = r.getX() + 5.0f, my = r.getCentreY() + 3.0f;
+            mark.addTriangle (mx, my - 4.0f, mx, my + 4.0f, mx + 6.0f, my);
+            g.setColour (colour::ledOn);
+            g.fillPath (mark);
             g.setColour (colour::textPrimary.withAlpha (0.10f));
             g.fillRoundedRectangle (r, radius::sm);
             g.setColour (colour::ledOn);

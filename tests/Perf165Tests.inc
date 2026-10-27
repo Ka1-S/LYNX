@@ -369,6 +369,7 @@ TEST (perf165_flp_import_track_settings)
     for (const auto& m : song.markers())
         start = start || (m.action == lynx::Marker::songStart && m.tick == 1920 * 10);
     CHECK (start);
+    CHECK (song.performanceMode); // [DATA] event 0x1F = 1 in every performance demo
 }
 
 namespace perf165

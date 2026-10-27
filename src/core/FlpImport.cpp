@@ -769,6 +769,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
     Song song;
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
+    song.performanceMode = project.performanceMode; // (round 165m)
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
     song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
     song.channelGroups = project.filterGroups;
