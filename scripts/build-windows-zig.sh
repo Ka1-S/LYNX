@@ -140,6 +140,8 @@ APP_SOURCES+=(src/ui/NewProjectDialog.cpp src/ui/ClipProperties.cpp src/ui/Plugi
 APP_SOURCES+=(src/core/PluginLayout.cpp src/core/StateParams.cpp src/ui/PluginEditors.cpp src/ui/PatcherEditor.cpp)
 # crash / freeze reports: consent, anonymiser, upload, GitHub form (round 159)
 APP_SOURCES+=(src/core/CrashReport.cpp src/ui/CrashReporter.cpp)
+# visual plugins: Wave Candy, Visualizer, video export (round 164c)
+APP_SOURCES+=(src/core/VisualFx.cpp src/ui/VisualEditors.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

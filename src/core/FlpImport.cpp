@@ -191,6 +191,7 @@ const std::pair<const char*, EffectKind> flEffectTable[] = {
         { "Hardcore", EffectKind::hardcore },
         { "Multiband Delay", EffectKind::delay },
         { "Emphasizer", EffectKind::emphasizer },
+        { "Wave Candy", EffectKind::waveCandy },     { "ZGameEditor Visualizer", EffectKind::visualizer },
 };
 } // namespace
 
@@ -1990,6 +1991,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             return;
         if (plugin == "Gross Beat")
             ++options.report->partialEffects["Gross Beat (state not read: volume gate only)"];
+        if (plugin == "ZGameEditor Visualizer") // round 164c: its effects are approximated by LYNX Visualizer layers
+            ++options.report->partialEffects["ZGameEditor Visualizer (scene approximated with LYNX Visualizer layers)"];
         if (plugin == "Maximus")
             ++options.report->partialEffects["Maximus (option not decoded: approximated)"];
         else if (plugin == "Soundgoodizer")
@@ -2541,8 +2544,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 if (! made)
                 {
                     // the ones that don't touch audio (controllers, visualizers, notes) aren't missed
-                    static const char* silent[] = { "Fruity Peak Controller", "Fruity X-Y Controller", "Control Surface", "Wave Candy",
-                                                    "ZGameEditor Visualizer", "Fruity NoteBook 2", "Fruity NoteBook", "Edison",
+                    static const char* silent[] = { "Fruity Peak Controller", "Fruity X-Y Controller", "Control Surface",
+                                                    "Fruity NoteBook 2", "Fruity NoteBook", "Edison",
                                                     "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
                     const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
 

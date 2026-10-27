@@ -42,6 +42,7 @@
 #include "core/Effects.h"
 #include "core/FlpImport.h"
 #include "core/NewtoneFx.h"
+#include "core/VisualFx.h"
 #include "flp/Flp.h"
 
 namespace lynx
@@ -1203,6 +1204,19 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             emphasizer::toParams (*s, slot.params.data());
             return slot;
         }
+    if (pluginName == "Wave Candy") // REA_rodada164c: LYNX's analyser in its role, in the display mode FL's state shows
+    {
+        auto slot = makeEffectSlot (EffectKind::waveCandy);
+        visualfx::wavecandy::fromFl (state, slot);
+        return slot;
+    }
+    if (pluginName == "ZGameEditor Visualizer") // REA_rodada164c: its layers mapped to LYNX Visualizer layers
+    {
+        auto slot = makeEffectSlot (EffectKind::visualizer);
+        if (const auto scene = visualfx::scene::fromZge (state))
+            slot.state = visualfx::scene::toState (*scene);
+        return slot;
+    }
     if (pluginName == "Low Lifter") // REA_rodada154 §5: FL's own engine
         if (const auto s = lowlifter::parse (state))
         {
@@ -1518,6 +1532,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::emphasizer: return { "Emphasizer" };
         case EffectKind::flFrequencyShifter: return { "Frequency Shifter" };
         case EffectKind::flLowLifter: return { "Low Lifter" };
+        case EffectKind::waveCandy: return { "Wave Candy" };
+        case EffectKind::visualizer: return { "ZGameEditor Visualizer" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:
