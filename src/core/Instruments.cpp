@@ -685,6 +685,7 @@ struct SynthVoice
     std::array<LfoState, lfoTargets> lfo {};
     float lfoGain = 1.0f, lfoGainStep = 0.0f; // volume LFO, ramped between ticks
     float basePan = 0.0f;                     // note pan (the pan LFO adds to it)
+    float cents = 0.0f;                       // the note's fine pitch (a VFX may move it while it sounds)
     SvfCoefficients filter; // this voice's (only with a cutoff envelope)
     double pitchMul = 1.0;
     float fmLevel = 1.0f;   // FM index envelope (1 -> fmSustain)
@@ -820,6 +821,7 @@ public:
                 v.stage = 0;
                 v.age = 0;
                 const auto target = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+                v.cents = nextCents;
                 glide (v, v.phaseDelta, target);
                 lastPhaseDelta = target;
                 for (auto& m : v.mod)
@@ -852,6 +854,7 @@ public:
         target->key = key;
         target->velocity = velocity;
         const auto delta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+        target->cents = nextCents;
         glide (*target, lastPhaseDelta, delta); // with porta, starts from the previous note's pitch
         lastPhaseDelta = delta;
         voicePan (nextPan, target->panL, target->panR);
@@ -870,6 +873,29 @@ public:
         nextPan = pan;
         nextCents = cents;
         nextPorta = porta;
+    }
+
+    // a VFX changes a sounding note (round 164b): its fine pitch, pan or volume
+    void voiceProperty (int key, int prop, float value) noexcept override
+    {
+        if (! std::isfinite (value))
+            return;
+        for (auto& v : voices)
+            if (v.active && ! v.releasing && v.key == key)
+            {
+                if (prop == (int) vfx::Prop::pitch && v.phaseDelta > 0.0)
+                {
+                    v.phaseDelta *= std::exp2 ((double) (value - v.cents) / 1200.0);
+                    v.cents = value;
+                }
+                else if (prop == (int) vfx::Prop::pan)
+                {
+                    v.basePan = std::clamp (value, -1.0f, 1.0f);
+                    voicePan (v.basePan, v.panL, v.panR);
+                }
+                else if (prop == (int) vfx::Prop::velocity)
+                    v.velocity = std::clamp (value, 0.0f, 1.0f);
+            }
     }
 
     void slideTo (int key, float cents, float samples) noexcept override
@@ -1399,6 +1425,7 @@ struct SamplerVoice
     std::array<LfoState, lfoTargets> lfo {};
     float lfoGain = 1.0f, lfoGainStep = 0.0f;
     float basePan = 0.0f;
+    float cents = 0.0f; // the note's fine pitch (a VFX may move it while it sounds)
     const SampleData* data = nullptr; // this voice's sample (the chosen zone, in multi-sample)
     float zoneGain = 1.0f;
     double loopStart = 0.0, loopEnd = 0.0; // loopEnd > loopStart: the voice jumps back to the loop start
@@ -1739,6 +1766,7 @@ public:
         }
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         target->basePan = clipMode ? 0.0f : nextPan;
+        target->cents = clipMode ? 0.0f : nextCents;
 
         for (std::size_t i = 0; i < lfoTargets; ++i)
             if (lfos[i].active && ! clipMode)
@@ -1905,6 +1933,30 @@ public:
     void pitchBend (float semitones) noexcept override
     {
         bendMul = clipMode || ! std::isfinite (semitones) ? 1.0 : std::exp2 ((double) std::clamp (semitones, -48.0f, 48.0f) / 12.0);
+    }
+
+    // a VFX changes a sounding note (round 164b): its fine pitch, pan or volume
+    void voiceProperty (int key, int prop, float value) noexcept override
+    {
+        if (! std::isfinite (value))
+            return;
+        for (auto& v : voices)
+            if (v.active && v.stage != 3 && v.key == key)
+            {
+                if (prop == (int) vfx::Prop::pitch)
+                {
+                    const auto ratio = std::exp2 ((double) (value - v.cents) / 1200.0);
+                    v.rate *= ratio;
+                    v.cents = value;
+                }
+                else if (prop == (int) vfx::Prop::pan)
+                {
+                    v.basePan = v.notePan = std::clamp (value, -1.0f, 1.0f);
+                    voicePan (v.basePan, v.panL, v.panR);
+                }
+                else if (prop == (int) vfx::Prop::velocity)
+                    v.velocity = std::clamp (value, 0.0f, 1.0f);
+            }
     }
 
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override

@@ -1,6 +1,7 @@
 #include "ui/PluginPicker.h"
 
 #include "core/PluginCatalog.h"
+#include "core/Vfx.h"
 #include "ui/I18n.h"
 #include "ui/PluginManager.h"
 #include "ui/TextCache.h"
@@ -33,12 +34,15 @@ class PluginPicker final : public juce::Component,
                            private juce::KeyListener
 {
 public:
-    PluginPicker (AudioEngine& e, bool instruments, std::function<void (PluginRef)> chosen)
-        : engine (e), onChosen (std::move (chosen))
+    PluginPicker (AudioEngine& e, bool instruments, std::function<void (PluginRef)> chosen, std::function<void (ChannelDef)> builtIn)
+        : engine (e), onChosen (std::move (chosen)), onBuiltIn (std::move (builtIn))
     {
         for (const auto& type : engine.getPluginHost().getKnownPlugins().getTypes())
             entries.push_back ({ type.createIdentifierString().toStdString(), type.name.toStdString(), type.manufacturerName.toStdString(),
                                  type.pluginFormatName.toStdString(), type.category.toStdString(), type.isInstrument });
+        if (onBuiltIn) // FL's VFX note effects, built in (round 164b)
+            for (const auto kind : vfx::allKinds)
+                entries.push_back ({ builtInPrefix + std::to_string ((int) kind), vfx::flName (kind), "LYNX", "Built-in", "Note effect", true });
 
         for (auto* b : { &instrumentsTab, &effectsTab })
         {
@@ -357,6 +361,17 @@ private:
         if (row < 0 || row >= (int) shown.size() || ! onChosen)
             return;
         const auto& e = entries[(std::size_t) shown[(std::size_t) row]];
+        if (e.id.rfind (builtInPrefix, 0) == 0)
+        {
+            ChannelDef c;
+            vfx::makeChannel (c, (vfx::Kind) std::stoi (e.id.substr (builtInPrefix.size())));
+            auto chosen = std::move (onBuiltIn);
+            onChosen = nullptr;
+            closeToolWindowOf (*this);
+            if (chosen)
+                chosen (std::move (c));
+            return;
+        }
         PluginRef ref;
         ref.id = e.id;
         ref.name = e.name;
@@ -397,6 +412,8 @@ private:
 
     AudioEngine& engine;
     std::function<void (PluginRef)> onChosen;
+    std::function<void (ChannelDef)> onBuiltIn;
+    inline static const std::string builtInPrefix = "lynx:vfx:";
     std::vector<plugincatalog::Entry> entries;
     std::vector<int> shown;
     std::vector<Group> groupRows;
@@ -411,8 +428,9 @@ private:
 };
 } // namespace
 
-void showPluginPicker (AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen)
+void showPluginPicker (AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen, std::function<void (ChannelDef)> onBuiltIn)
 {
-    openToolWindow (std::make_unique<PluginPicker> (engine, instruments, std::move (onChosen)), tr ("Plugin picker"), "pluginpicker");
+    openToolWindow (std::make_unique<PluginPicker> (engine, instruments, std::move (onChosen), instruments ? std::move (onBuiltIn) : nullptr),
+                    tr ("Plugin picker"), "pluginpicker");
 }
 } // namespace lynx

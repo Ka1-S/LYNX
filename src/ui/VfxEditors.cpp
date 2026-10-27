@@ -152,7 +152,7 @@ public:
 class KeyMapperBody final : public Body
 {
 public:
-    static constexpr int lowest = -12, columns = 48; // outputs from an octave below the input's C to three above
+    static constexpr int lowest = -12, columns = 36; // outputs: an octave below the row's octave to an octave above (FL's range)
 
     KeyMapperBody()
     {
@@ -218,9 +218,14 @@ public:
             const auto pc = ((value % 12) + 12) % 12;
             const auto black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
             const juce::Rectangle<float> col (grid.getX() + (float) c * cw, grid.getY(), cw, grid.getHeight());
+            if (value >= 0 && value < 12) // the row's own octave, brighter (as FL draws it)
+            {
+                g.setColour (theme::colour::bg2);
+                g.fillRect (col);
+            }
             if (black)
             {
-                g.setColour (theme::colour::bg1.withAlpha (0.6f));
+                g.setColour (theme::colour::bg0.withAlpha (0.55f));
                 g.fillRect (col);
             }
             g.setColour (pc == 0 ? theme::colour::borderStrong : theme::colour::border);
@@ -230,7 +235,8 @@ public:
                 g.setColour (theme::colour::textSecondary);
                 g.setFont (theme::font (theme::type::caption));
                 const auto octave = value / 12;
-                g.drawText (octave == 0 ? juce::String ("C") : (octave > 0 ? "C+" + juce::String (octave) : "C" + juce::String (octave)),
+                const auto name = pitchClassName (settings.baseKey);
+                g.drawText (octave == 0 ? name : (octave > 0 ? name + " +" + juce::String (octave) : name + " " + juce::String (octave)),
                             juce::Rectangle<float> (col.getX() + 2.0f, grid.getBottom() + 2.0f, 40.0f, 14.0f), juce::Justification::centredLeft);
             }
         }
@@ -276,7 +282,7 @@ public:
         {
             hover = now;
             if (hover)
-                ui::setHint (*this, tr ("{0} plays {1} - left-click: add / remove, right-click: only this note, middle-click: reset the row",
+                ui::setHint (*this, tr ("{0} plays {1} - left-click: add / remove, right-click: only this note, middle-click or Alt+click: reset the row",
                                         { pitchClassName (hover->first + settings.baseKey), outputName (hover->first, hover->second) }));
             repaint();
         }
@@ -289,11 +295,18 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (const auto grid = gridArea(); e.position.x < grid.getX() && e.position.y >= grid.getY() && e.position.y < grid.getBottom())
+        {
+            // a click on a row's label: back to the note itself
+            const auto pc = 11 - std::clamp ((int) ((e.position.y - grid.getY()) / (grid.getHeight() / 12.0f)), 0, 11);
+            change ([pc] (vfx::KeyMapperSettings& s) { s.rows[(std::size_t) pc] = { pc }; });
+            return;
+        }
         const auto at = cellAt (e.position);
         if (! at)
             return;
         const auto [pc, value] = *at;
-        if (e.mods.isMiddleButtonDown())
+        if (e.mods.isMiddleButtonDown() || e.mods.isAltDown())
             change ([pc] (vfx::KeyMapperSettings& s) { s.rows[(std::size_t) pc] = { pc }; });
         else if (e.mods.isPopupMenu())
             change ([pc, value] (vfx::KeyMapperSettings& s) { s.rows[(std::size_t) pc] = { value }; });
@@ -303,10 +316,7 @@ public:
                 if (auto it = std::find (row.begin(), row.end(), value); it != row.end())
                     row.erase (it);
                 else
-                {
-                    row.push_back (value);
-                    std::sort (row.begin(), row.end());
-                }
+                    row.push_back (value); // (FL keeps the order: Cycle and Random follow it)
             });
     }
 
@@ -356,10 +366,12 @@ private:
     Knob offset { intSpec (tr ("Offset (transpose)"), -12, 12, 0, [] (double v) { return (v > 0 ? "+" : "") + juce::String ((int) std::lround (v)); }),
                   [this] { return (double) settings.offset; },
                   [this] (double v) { change ([v] (vfx::KeyMapperSettings& s) { s.offset = (int) std::lround (v); }); } };
-    Knob baseKey { intSpec (tr ("Base key (labels only)"), 0, 11, 0, [] (double v) { return pitchClassName ((int) std::lround (v)); }),
+    Knob baseKey { intSpec (tr ("Base key: the note the rows and their octaves start on"), 0, 11, 0, [] (double v) { return pitchClassName ((int) std::lround (v)); }),
                    [this] { return (double) settings.baseKey; },
                    [this] (double v) { change ([v] (vfx::KeyMapperSettings& s) { s.baseKey = (int) std::lround (v); }); } };
-    Knob slide { intSpec (tr ("Pitch slide"), 0, 384, 0), [this] { return (double) settings.slide; },
+    Knob slide { intSpec (tr ("Pitch slide: the new notes start at the played pitch and glide to their own (in steps)"), 0, 192, 0,
+                          [] (double v) { const auto u = (int) std::lround (v); return juce::String (u / 48) + ":" + juce::String (u % 48).paddedLeft ('0', 2); }),
+                 [this] { return (double) settings.slide; },
                  [this] (double v) { change ([v] (vfx::KeyMapperSettings& s) { s.slide = (int) std::lround (v); }); } };
     std::optional<std::pair<int, int>> hover;
 };

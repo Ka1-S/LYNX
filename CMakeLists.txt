@@ -310,6 +310,7 @@ if(LYNX_BUILD_APP)
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
         src/ui/SoundFontEditor.cpp
+        src/ui/VfxEditors.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
         src/ui/ThemeSettings.cpp

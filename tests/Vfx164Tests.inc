@@ -224,3 +224,95 @@ TEST (vfx_color_mapper_node_splits_colours_over_its_outputs)
     CHECK (ports.midiIn && ports.midiOuts == 16 && ports.audioOuts == 0);
     CHECK (lynx::patcher::shownMidiOutputs (rig.channel.patcher, 0) == 4);
 }
+
+TEST (vfx_key_mapper_follows_fl_base_key_offset_and_cycles)
+{
+    using namespace vfx164;
+    using lynx::vfx::KeyMapperSettings;
+    auto minor = lynx::vfx::defaultKeyMapper();
+    // FL's Chords / Minor preset rows
+    const std::vector<std::vector<int>> rows { { 0, 3, 7 },   { 0, 3, 5 },   { 2, 5, 8 },    { 3, 7, 8 },    { 3, 7, 10 },   { 5, 8, 12 },
+                                               { 5, 8, 10 },  { 7, 10, 14 }, { 8, 12, 14 },  { 8, 12, 15 },  { 10, 14, 15 }, { 10, 14, 17 } };
+    for (int r = 0; r < 12; ++r)
+        minor.rows[(std::size_t) r] = rows[(std::size_t) r];
+    auto keys = [] (const std::vector<lynx::vfx::Event>& out) {
+        std::vector<int> k;
+        for (const auto& e : out)
+            if (e.type == lynx::vfx::Event::Type::on)
+                k.push_back (e.voice.key);
+        std::sort (k.begin(), k.end());
+        return k;
+    };
+    auto p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyMapper, lynx::vfx::writeKeyMapper (minor));
+    CHECK ((keys (run (*p, { on (60) })) == std::vector<int> { 60, 63, 67 }));
+    CHECK ((keys (run (*p, { on (63) })) == std::vector<int> { 63, 67, 68 }));
+    CHECK ((keys (run (*p, { on (71) })) == std::vector<int> { 70, 74, 77 }));
+    // base key D: 62 plays row 0 from D, 60 is row 10 of the octave starting on 50
+    minor.baseKey = 2;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyMapper, lynx::vfx::writeKeyMapper (minor));
+    CHECK ((keys (run (*p, { on (62) })) == std::vector<int> { 62, 65, 69 }));
+    CHECK ((keys (run (*p, { on (60) })) == std::vector<int> { 60, 64, 65 }));
+    // the offset transposes what comes out (it does not pick another row)
+    auto identity = lynx::vfx::defaultKeyMapper();
+    identity.offset = -12;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyMapper, lynx::vfx::writeKeyMapper (identity));
+    CHECK ((keys (run (*p, { on (60) })) == std::vector<int> { 48 }));
+    // cycle up / down follow the row's own order
+    auto cyc = lynx::vfx::defaultKeyMapper();
+    cyc.rows[0] = { 7, 0, 3 };
+    cyc.multimode = 3;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyMapper, lynx::vfx::writeKeyMapper (cyc));
+    std::vector<int> seq;
+    for (int k = 0; k < 4; ++k)
+    {
+        seq.push_back (keys (run (*p, { on (60) }))[0]);
+        run (*p, { off (60) });
+    }
+    CHECK ((seq == std::vector<int> { 67, 60, 63, 67 }));
+    cyc.multimode = 4;
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyMapper, lynx::vfx::writeKeyMapper (cyc));
+    seq.clear();
+    for (int k = 0; k < 4; ++k)
+    {
+        seq.push_back (keys (run (*p, { on (60) }))[0]);
+        run (*p, { off (60) });
+    }
+    CHECK ((seq == std::vector<int> { 63, 60, 67, 63 }));
+    // an empty row mutes the note
+    auto muted = lynx::vfx::defaultKeyMapper();
+    muted.rows[7].clear();
+    p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyMapper, lynx::vfx::writeKeyMapper (muted));
+    CHECK (run (*p, { on (67) }).empty() && ! p->busy());
+}
+
+TEST (vfx_key_mapper_pitch_slide_glides_to_the_new_note)
+{
+    using namespace vfx164;
+    auto down = lynx::vfx::defaultKeyMapper();
+    for (int r = 0; r < 12; ++r)
+        down.rows[(std::size_t) r] = { r - 12 };
+    down.slide = 144; // FL's "Slide down": 3 steps
+    auto p = lynx::vfx::makeProcessor (lynx::vfx::Kind::keyMapper, lynx::vfx::writeKeyMapper (down));
+    lynx::vfx::EventList out;
+    lynx::vfx::Transport t;
+    t.sampleRate = 48000.0;
+    t.bpm = 120.0; // a step = 0.125 s = 6000 samples; 3 steps = 18000
+    std::vector<lynx::vfx::Event> in { on (60) };
+    p->process (in.data(), 1, 1000, t, out);
+    CHECK (out.size() == 1 && out[0].voice.key == 48 && std::abs (out[0].voice.cents - 1200.0f) < 0.01f);
+    float last = 1200.0f;
+    int steps = 0;
+    for (int b = 1; b * 1000 <= 18000; ++b)
+    {
+        out.clear();
+        p->process (nullptr, 0, 1000, t, out);
+        CHECK (out.size() == 1 && out[0].type == lynx::vfx::Event::Type::prop && out[0].prop == lynx::vfx::Prop::pitch);
+        if (out.size() == 1)
+        {
+            CHECK (out[0].value < last);
+            last = out[0].value;
+        }
+        ++steps;
+    }
+    CHECK (steps == 18 && last < 1200.0f * 0.02f); // ~99 % of the way after 3 steps
+}

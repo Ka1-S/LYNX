@@ -49,6 +49,7 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
 // Menus of known plugins (instruments or effects): the favourites, then "More plugins..." (the plugin picker) and
 // the scan. `onChosen` receives the reference; from the picker (a window of its own, chosen later) it is only
 // called while `owner` (the component whose menu this is) still exists.
+// `onBuiltIn`: the picker lists LYNX's built-in note effects too (core/Vfx.h) and hands a new channel of one over.
 void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen,
-                     juce::Component* owner = nullptr);
+                     juce::Component* owner = nullptr, std::function<void (ChannelDef)> onBuiltIn = nullptr);
 } // namespace lynx

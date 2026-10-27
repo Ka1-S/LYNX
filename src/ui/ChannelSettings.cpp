@@ -42,6 +42,7 @@
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
 #include "ui/SoundFontEditor.h"
+#include "ui/VfxEditors.h"
 
 namespace lynx
 {
@@ -3265,6 +3266,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::fruitydance:
         case InstrumentKind::sytrus:
         case InstrumentKind::soundfont:
+        case InstrumentKind::vfx:
             return true;
         default:
             return false;
@@ -3311,6 +3313,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return makeMidiOutEditor (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::soundfont)
         return makeSoundFontEditor (engine, channel);
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::vfx)
+        return makeVfxEditor (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor

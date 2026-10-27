@@ -412,6 +412,7 @@ struct VoiceTable
         int id = 0;      // output voice id
         int output = 0;
         Voice voice;
+        float slide = 0.0f; // Key Mapper's pitch slide: cents still to go (0 = none)
     };
     std::array<Entry, 512> entries {};
     int count = 0;
@@ -425,6 +426,7 @@ struct VoiceTable
         e.input = input;
         e.output = output;
         e.voice = v;
+        e.slide = 0.0f;
         e.id = nextId++;
         if (nextId > 1 << 30)
             nextId = 1;
@@ -532,9 +534,21 @@ public:
         return true;
     }
 
-    void process (const Event* in, int count, int, const Transport&, EventList& out) noexcept override
+    void process (const Event* in, int count, int n, const Transport& transport, EventList& out) noexcept override
     {
         const auto& s = current();
+        // the slides under way move on (FL: the voice's pitch covers 99 % of the way in `slide` / 192 beats)
+        if (s.slide > 0)
+        {
+            const auto beats = (double) n * transport.bpm / (60.0 * std::max (1.0, transport.sampleRate));
+            const auto keep = (float) std::pow (0.01, beats * 192.0 / (double) s.slide);
+            for (int i = 0; i < voices.count; ++i)
+                slideStep (voices.entries[(std::size_t) i], keep, out);
+        }
+        else
+            for (int i = 0; i < voices.count; ++i)
+                slideStep (voices.entries[(std::size_t) i], 0.0f, out);
+
         for (int i = 0; i < count; ++i)
         {
             const auto& e = in[i];
@@ -547,46 +561,50 @@ public:
                 continue;
             if (! s.enabled)
             {
-                send (e, e.voice, out);
+                send (e, e.voice, 0, out);
                 continue;
             }
-            // the row of the input's pitch class (after the offset), its notes from that octave's C
-            const auto shifted = e.voice.key - s.offset;
-            const auto pc = ((shifted % 12) + 12) % 12;
-            const auto octave = shifted - pc;
-            const auto& row = s.rows[(std::size_t) pc];
-            if (row.empty())
-                continue;
+            // FL: the row of the input's pitch class counted from the base key; its values are semitones from the start
+            // of that octave (on the base key); the offset transposes what comes out
+            const auto k = std::max (0, e.voice.key - s.baseKey + 12);
+            const auto rowIndex = k % 12;
+            const auto octaveStart = e.voice.key - rowIndex;
+            const auto& row = s.rows[(std::size_t) rowIndex];
+            const auto size = (int) row.size();
+            if (size == 0)
+                continue; // (the note is muted)
             auto play = [&] (int value, float gain) {
                 auto v = e.voice;
-                v.key = octave + value + s.offset;
+                v.key = octaveStart + value + s.offset;
                 if (v.key < 0 || v.key > 127)
                     return;
                 v.velocity *= gain;
-                send (e, v, out);
+                // with a pitch slide the new note starts at the played pitch and glides to its own
+                const auto slide = s.slide > 0 ? (float) (e.voice.key - v.key) * 100.0f : 0.0f;
+                send (e, v, slide, out);
             };
-            const auto n = (int) row.size();
             switch (s.multimode)
             {
-                case 1: // all, at the level of one note
+                case 1: // all, gain-compensated (1 / sqrt n)
                     for (const auto value : row)
-                        play (value, 1.0f / std::sqrt ((float) n));
+                        play (value, 1.0f / std::sqrt ((float) size));
                     break;
                 case 2: // one of them at random
-                    play (row[(std::size_t) (nextRandom() % (std::uint32_t) n)], 1.0f);
+                    play (row[(std::size_t) (nextRandom() % (std::uint32_t) size)], 1.0f);
                     break;
-                case 3:
-                case 4: // the next one each time, up or down
+                case 3: // the next one in the row's order (the first first)
                 {
-                    auto& c = cycle[(std::size_t) pc];
-                    c = s.multimode == 3 ? (c + 1) % n : (c - 1 + n) % n;
-                    if (c < 0 || c >= n)
-                        c = 0;
-                    std::array<int, 128> sorted {};
-                    const auto m = std::min (n, 128);
-                    std::copy (row.begin(), row.begin() + m, sorted.begin());
-                    std::sort (sorted.begin(), sorted.begin() + m);
-                    play (sorted[(std::size_t) std::min (c, m - 1)], 1.0f);
+                    auto& c = cycle[(std::size_t) rowIndex];
+                    const auto at = ((c % size) + size) % size;
+                    c = at + 1;
+                    play (row[(std::size_t) at], 1.0f);
+                    break;
+                }
+                case 4: // backwards (the last first)
+                {
+                    auto& c = cycle[(std::size_t) rowIndex];
+                    c = (((c + size - 1) % size) + size) % size;
+                    play (row[(std::size_t) c], 1.0f);
                     break;
                 }
                 default:
@@ -597,19 +615,51 @@ public:
         }
     }
 
-private:
-    void send (const Event& input, const Voice& v, EventList& out) noexcept
+    void releaseAll (EventList& out) noexcept override
     {
+        voices.release (-1, 0, 0.5f, out);
+        cycle.fill (0); // (FL: a flush starts the cycles again)
+    }
+
+private:
+    void send (const Event& input, Voice v, float slide, EventList& out) noexcept
+    {
+        const auto cents = v.cents;
+        v.cents += slide;
         if (const auto id = voices.add (input.id, 0, v); id >= 0)
+        {
             out.add (onEvent (input.offset, 0, id, v));
+            auto& entry = voices.entries[(std::size_t) voices.count - 1];
+            entry.slide = slide;
+            entry.voice.cents = cents;
+        }
+    }
+    // one block of a voice's slide: `keep` of the way left stays (a prop event with its pitch)
+    static void slideStep (VoiceTable::Entry& e, float keep, EventList& out) noexcept
+    {
+        if (e.slide == 0.0f)
+            return;
+        e.slide *= keep;
+        if (std::abs (e.slide) < 0.5f)
+            e.slide = 0.0f;
+        Event p;
+        p.type = Event::Type::prop;
+        p.output = e.output;
+        p.id = e.id;
+        p.voice = e.voice;
+        p.prop = Prop::pitch;
+        p.value = e.voice.cents + e.slide;
+        out.add (p);
     }
     std::uint32_t nextRandom() noexcept
     {
-        seed = seed * 1664525u + 1013904223u;
-        return seed >> 8;
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        return seed;
     }
-    std::array<int, 12> cycle { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
-    std::uint32_t seed = 0x1234567u;
+    std::array<int, 12> cycle {};
+    std::uint32_t seed = 0x9e3779b9u;
 };
 
 class ColorMapper final : public Base<ColorMapperSettings>
