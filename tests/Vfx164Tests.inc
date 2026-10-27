@@ -848,3 +848,34 @@ TEST (vfx_script_keeps_fl_scripts_as_they_are)
     std::printf ("  %d FL scripts\n", files);
     CHECK (files >= 80);
 }
+
+TEST (vfx_sequencer_node_plays_its_synth_in_a_patcher)
+{
+    // a Patcher channel played live (stopped transport): the Sequencer runs on its own clock and plays the synth
+    using namespace vfx164;
+    Rig rig (lynx::vfx::Kind::sequencer, lynx::vfx::writeSequencer (lynx::vfx::defaultSequencer())); // "Up 4 keys"
+    rig.instrument->noteOn (60, 0.8f);
+    rig.instrument->noteOn (64, 0.8f);
+    rig.instrument->noteOn (67, 0.8f);
+    for (int b = 0; b < 100; ++b) // 1 s
+        rig.render (480);
+    std::vector<int> keys;
+    for (const auto& h : rig.probes[0]->hits)
+        if (h.on)
+            keys.push_back (h.key);
+    CHECK (keys.size() >= 6);
+    CHECK (keys.size() >= 4 && keys[0] == 60 && keys[1] == 64 && keys[2] == 67 && keys[3] == 67);
+    rig.instrument->noteOff (60);
+    rig.instrument->noteOff (64);
+    rig.instrument->noteOff (67);
+    for (int b = 0; b < 20; ++b)
+        rig.render (480);
+    const auto before = rig.probes[0]->hits.size();
+    for (int b = 0; b < 100; ++b)
+        rig.render (480);
+    CHECK (rig.probes[0]->hits.size() == before); // (nothing more after the keys are up)
+    int on = 0;
+    for (const auto& h : rig.probes[0]->hits)
+        on += h.on ? 1 : -1;
+    CHECK (on == 0); // (every note ended)
+}

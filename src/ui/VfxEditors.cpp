@@ -1503,7 +1503,7 @@ public:
         {
             auto row = lanes.removeFromTop (24).reduced (0, 1);
             auto label = row.removeFromLeft (Grid::labelWidth).withTrimmedRight (4);
-            laneButtons[(std::size_t) l].setBounds (label.removeFromLeft (78));
+            laneButtons[(std::size_t) l].setBounds (label.removeFromLeft (74));
             if (l == noteSelect)
                 polyKeys.setBounds (label.reduced (2, 0));
             if (l == octave)
@@ -1622,7 +1622,7 @@ public:
     struct Grid final : juce::Component
     {
         SequencerBody* owner = nullptr;
-        static constexpr int labelWidth = 128;
+        static constexpr int labelWidth = 140;
 
         int layer() const { return owner->shown; }
         bool bars() const
