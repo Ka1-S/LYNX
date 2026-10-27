@@ -67,4 +67,13 @@ instruments inside a slot on a silent insert used to stay asleep after 4 s of si
 
 ## Where I stopped
 
-(kept current below)
+- Verified [SHOT]: `--patchershot` (Windows) renders the synth node's and the 3x Osc node's editors; in the Linux build under
+  Xvfb a double-click on a 3x Osc node inside a channel Patcher opens FL's 3x Osc page. Idle CPU with the Patcher and the
+  node editor open: ~6 % of one core (software rendering), no repaint storm.
+- Not side by side with FL running this round: the Windows desktop was in use by the user (coordinator pause), so no FL
+  screenshots of the Patcher's detached plugin windows.
+- Not done: node editors for SoundFont player, Granulizer, Keyboard / Envelope Controller nodes (they keep their own
+  windows on a channel only), Dashboard nodes (open the Dashboard surface only from a channel).
+- The plugin node's MIDI out pin is shown only when the running plugin reports MIDI output or a cable already uses it;
+  a plugin that is not loaded yet (missing / still scanning) hides it.
+- Envelope Controller Mod X / Y from FL projects: import path assumed [HYP], no FL project automating params 88 / 89 found.
