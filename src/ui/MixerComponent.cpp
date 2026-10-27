@@ -2161,75 +2161,75 @@ void EffectsPanel::paintEq (juce::Graphics& g)
             textcache::drawText (g, tr ("active"), bar.withTrimmedLeft (44.0f).toNearestInt(), juce::Justification::centredLeft);
         }
     }
-    if (eqFolded)
-        return;
-
-    // the response graph: frequency (log) across, ±18 dB up and down
-    const auto graph = eqGraphBounds().toFloat();
-    theme::fillRoundRect (g, graph, radius::sm, colour::bg1);
-    g.setColour (colour::border);
-    g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
-    const auto inner = graph.reduced (4.0f);
-    g.setColour (colour::gridBeat);
-    for (float hz : { 100.0f, 1000.0f, 10000.0f })
+    if (! eqFolded)
     {
-        const auto x = inner.getX() + inner.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
-        g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
-    }
-    g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
-
-    juce::Path curve;
-    const auto sampleRate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
-    for (int i = 0; i <= (int) inner.getWidth(); i += 2)
-    {
-        const auto hz = eqMinHz * std::pow (eqMaxHz / eqMinHz, (float) i / inner.getWidth());
-        const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, eqResponseDb (eq, hz, sampleRate));
-        const auto y = inner.getCentreY() - inner.getHeight() * 0.5f * db / eqRangeDb;
-        if (i == 0)
-            curve.startNewSubPath (inner.getX(), y);
-        else
-            curve.lineTo (inner.getX() + (float) i, y);
-    }
-    g.setColour (eq.active() ? colour::accent : colour::textSecondary.withAlpha (0.6f));
-    g.strokePath (curve, juce::PathStrokeType (1.5f));
-
-    for (int b = 0; b < 3; ++b)
-    {
-        const auto hot = hoverEq == eqPointBase - b || dragParam == eqPointBase - b;
-        const auto handle = eqHandle (b);
-        g.setColour (eqBandColour (b).withAlpha (hot ? 1.0f : 0.8f));
-        g.fillEllipse (juce::Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (handle));
-    }
-
-    // the gain faders (one per band) and the frequency / width knobs under them
-    for (int b = 0; b < 3; ++b)
-    {
-        const auto fader = eqFaderBounds (b).toFloat();
-        const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
-        theme::fillRoundRect (g, fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f, colour::bg0);
+        // the response graph: frequency (log) across, ±18 dB up and down
+        const auto graph = eqGraphBounds().toFloat();
+        theme::fillRoundRect (g, graph, radius::sm, colour::bg1);
         g.setColour (colour::border);
-        g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
-        const auto v = eqToValue (eq, b, 0);
-        const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
-        theme::fillRoundRect (g, juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f, hot ? colour::textPrimary : colour::textSecondary);
-        g.setColour (eqBandColour (b));
-        g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
-
-        for (int what = 1; what <= 2; ++what)
+        g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
+        const auto inner = graph.reduced (4.0f);
+        g.setColour (colour::gridBeat);
+        for (float hz : { 100.0f, 1000.0f, 10000.0f })
         {
-            const auto code = eqParamBase - b * 3 - what;
-            drawKnob (g, eqKnobBounds (b, what).toFloat().reduced (2.0f), eqToValue (eq, b, what), false, eqBandColour (b),
-                      hoverEq == code || dragParam == code);
+            const auto x = inner.getX() + inner.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
+            g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
         }
-    }
+        g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
 
-    g.setColour (colour::textSecondary);
-    g.setFont (font (type::title));
-    textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
-    g.setFont (font (type::caption));
-    g.setColour (colour::textDisabled);
-    textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
-    textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+        juce::Path curve;
+        const auto sampleRate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
+        for (int i = 0; i <= (int) inner.getWidth(); i += 2)
+        {
+            const auto hz = eqMinHz * std::pow (eqMaxHz / eqMinHz, (float) i / inner.getWidth());
+            const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, eqResponseDb (eq, hz, sampleRate));
+            const auto y = inner.getCentreY() - inner.getHeight() * 0.5f * db / eqRangeDb;
+            if (i == 0)
+                curve.startNewSubPath (inner.getX(), y);
+            else
+                curve.lineTo (inner.getX() + (float) i, y);
+        }
+        g.setColour (eq.active() ? colour::accent : colour::textSecondary.withAlpha (0.6f));
+        g.strokePath (curve, juce::PathStrokeType (1.5f));
+
+        for (int b = 0; b < 3; ++b)
+        {
+            const auto hot = hoverEq == eqPointBase - b || dragParam == eqPointBase - b;
+            const auto handle = eqHandle (b);
+            g.setColour (eqBandColour (b).withAlpha (hot ? 1.0f : 0.8f));
+            g.fillEllipse (juce::Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (handle));
+        }
+
+        // the gain faders (one per band) and the frequency / width knobs under them
+        for (int b = 0; b < 3; ++b)
+        {
+            const auto fader = eqFaderBounds (b).toFloat();
+            const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
+            theme::fillRoundRect (g, fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f, colour::bg0);
+            g.setColour (colour::border);
+            g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
+            const auto v = eqToValue (eq, b, 0);
+            const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
+            theme::fillRoundRect (g, juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f, hot ? colour::textPrimary : colour::textSecondary);
+            g.setColour (eqBandColour (b));
+            g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
+
+            for (int what = 1; what <= 2; ++what)
+            {
+                const auto code = eqParamBase - b * 3 - what;
+                drawKnob (g, eqKnobBounds (b, what).toFloat().reduced (2.0f), eqToValue (eq, b, what), false, eqBandColour (b),
+                          hoverEq == code || dragParam == code);
+            }
+        }
+
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::title));
+        textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
+        g.setFont (font (type::caption));
+        g.setColour (colour::textDisabled);
+        textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
+        textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+    }
 
     // the audio output target
     auto box = outputBounds().toFloat();

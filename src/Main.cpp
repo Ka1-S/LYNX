@@ -654,6 +654,16 @@ public:
             return;
         }
 
+        if (args.contains ("--fittest"))
+        {
+            // LYNX.exe --fittest report.txt [percent]: round 163 — at that UI zoom (default 150) a window taller than
+            // the screen and a big resizable window that grows with a zoom change keep their title bar and close
+            // button on the screen. The windows show for about two seconds.
+            const auto i = args.indexOf ("--fittest");
+            runFitTest (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].getIntValue() : 150);
+            return;
+        }
+
         if (args.contains ("--windowtest"))
         {
             // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor and a plugin-like window
@@ -2204,6 +2214,94 @@ private:
         test->window->setVisible (true);
         test->step ("step=shown");
         test->startTimer (4000);
+    }
+
+    void runFitTest (const juce::String& reportPath, int percent)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        struct FitTest final : juce::Timer
+        {
+            juce::String path, report;
+            bool ok = true;
+            int step = 0, percent = 150;
+            std::unique_ptr<juce::DocumentWindow> tall, big;
+            std::function<void()> done;
+
+            void check (const juce::String& what, juce::Component& w)
+            {
+                juce::BorderSize<int> frame;
+                if (auto* peer = w.getPeer())
+                    if (const auto f = peer->getFrameSizeIfPresent())
+                        frame = *f;
+                const auto outer = frame.addedTo (w.getBounds());
+                const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (outer);
+                const auto area = display != nullptr ? display->userArea : outer;
+                const auto passed = outer.getY() >= area.getY() && outer.getRight() <= area.getRight() && outer.getX() >= area.getX()
+                                    && outer.getBottom() <= area.getBottom() + 1;
+                report << (passed ? "ok   " : "FAIL ") << what << " window=" << outer.toString() << " (frame " << frame.getTop() << ","
+                       << frame.getLeft() << ") screen=" << area.toString() << "\n";
+                ok = ok && passed;
+            }
+
+            void start()
+            {
+                report << "scale=" << percent << "%\n";
+                juce::Desktop::getInstance().setGlobalScaleFactor ((float) percent / 100.0f);
+                // a tool window taller than the screen, centred (its title bar would be above the screen)
+                tall = std::make_unique<juce::DocumentWindow> ("LYNX fit test - tall", lynx::theme::colour::bg2, juce::DocumentWindow::closeButton);
+                tall->setUsingNativeTitleBar (true);
+                auto* content = new juce::Component();
+                const auto area = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+                content->setSize (500, area.getHeight() + 200);
+                tall->setContentOwned (content, true);
+                tall->setCentrePosition (area.getCentre());
+                tall->setVisible (true);
+                lynx::keepAboveMainWindow (*tall);
+                startTimer (700);
+            }
+
+            void timerCallback() override
+            {
+                ++step;
+                if (step == 1)
+                {
+                    check ("tall tool window", *tall);
+                    tall.reset();
+                    // a resizable window that fits at 100%, then the zoom goes up (the main window's case)
+                    juce::Desktop::getInstance().setGlobalScaleFactor (1.0f);
+                    big = std::make_unique<juce::DocumentWindow> ("LYNX fit test - zoom", lynx::theme::colour::bg2, juce::DocumentWindow::allButtons);
+                    big->setUsingNativeTitleBar (true);
+                    big->setResizable (true, false);
+                    big->setResizeLimits (400, 300, 10000, 10000);
+                    const auto area = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+                    big->setBounds (area.getX() + 40, area.getY() + 60, area.getWidth() * 9 / 10 - 40, area.getHeight() * 9 / 10 - 60);
+                    big->setVisible (true);
+                    return;
+                }
+                if (step == 2)
+                {
+                    juce::Desktop::getInstance().setGlobalScaleFactor ((float) percent / 100.0f);
+                    juce::Timer::callAfterDelay (200, [] { lynx::fitAllWindowsOnScreen(); });
+                    return;
+                }
+                if (step == 3)
+                {
+                    check ("resizable window after the zoom change", *big);
+                    big.reset();
+                    report << "result=" << (ok ? "OK" : "FAILED") << "\n";
+                    juce::File (path).replaceWithText (report);
+                    stopTimer();
+                    if (done)
+                        done();
+                }
+            }
+        };
+        static std::unique_ptr<FitTest> test;
+        test = std::make_unique<FitTest>();
+        test->path = reportPath;
+        test->percent = juce::jlimit (50, 300, percent);
+        test->done = [this] { juce::MessageManager::callAsync ([this] { test.reset(); quit(); }); };
+        test->start();
     }
 
     void runWindowTest (const juce::String& reportPath)
