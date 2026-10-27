@@ -351,12 +351,13 @@ void Receiver::pulse (double seconds) noexcept
     const auto estimate = fitBpm (ordered.data(), timeCount);
     if (estimate > 0.0)
     {
-        fast.store (estimate > 999.0, std::memory_order_relaxed);
+        fast.store (estimate > maxBpm, std::memory_order_relaxed);
         // hysteresis: a steady clock with jitter shows one steady tempo; the period used for the position follows the
         // estimate directly
+        // (FL's receiver: the fitted tempo rounded to 0.1 BPM and kept within 10…522 BPM, its tempo range; REA 165f)
         if (shownBpm <= 0.0 || std::abs (estimate - shownBpm) > hysteresis)
-            shownBpm = estimate;
-        tempo.store (std::clamp (shownBpm, 10.0, 999.0), std::memory_order_relaxed);
+            shownBpm = std::round (estimate * 10.0) / 10.0;
+        tempo.store (std::clamp (shownBpm, minBpm, maxBpm), std::memory_order_relaxed);
         pulseSeconds.store (60.0 / (estimate * 24.0), std::memory_order_relaxed);
     }
 

@@ -160,10 +160,11 @@ public:
     double ticksAt (double seconds) const noexcept;
     // Transport commands for the audio thread (start / stop / continue / SPP), oldest first.
     bool popCommand (Command& c, double& ticks) noexcept;
-    bool tooFast() const noexcept { return fast.load (std::memory_order_relaxed); }   // FL's "Clock is too fast !"
+    bool tooFast() const noexcept { return fast.load (std::memory_order_relaxed); }   // over 522 BPM (FL: "Clock is too fast !")
 
     static constexpr int window = 96;          // pulses in the tempo estimate (four beats)
     static constexpr double hysteresis = 0.1; // BPM
+    static constexpr double minBpm = 10.0, maxBpm = 522.0; // FL's tempo range (its receiver clamps there)
 
 private:
     void pushCommand (Command c, double ticks) noexcept;

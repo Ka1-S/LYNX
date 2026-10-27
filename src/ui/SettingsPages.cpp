@@ -1056,6 +1056,16 @@ public:
             auto p = engine.getMidiPrefs();
             const auto id = clockBox.getSelectedId();
             p.clockInput = id > 1 && id - 2 < clockInputs.size() ? clockInputs[id - 2].toStdString() : std::string();
+            // (FL asks "The device isn't enabled" → Enable device: the clock input is turned on with it)
+            if (! p.clockInput.empty() && ! p.input (p.clockInput).enabled)
+            {
+                auto in = p.input (p.clockInput);
+                in.enabled = true;
+                p.setInput (in);
+                set (p);
+                rebuildInputs();
+                return;
+            }
             set (p);
         };
         styleCombo (clockBox);
@@ -1074,7 +1084,7 @@ public:
         };
         styleLabel (clockStatusLabel, tr ("Status"));
         styleLabel (clockStatus, tr ("No clock"), false);
-        styleNote (clockNote, tr ("The input must be on in Input devices above. Song time will match the clock."));
+        styleNote (clockNote, tr ("Choosing an input turns it on in Input devices above. Song time will match the clock."));
         startTimerHz (4);
         styleNote (inputsNote, tr ("Each input device can be turned off, listen to one MIDI channel only and play a fixed channel of the "
                                    "Channel Rack instead of the selected ones."));
@@ -1305,23 +1315,26 @@ private:
 
     void timerCallback() override
     {
+        // FL's "Status: off / ready / running [Beat n] / error" (REA 165f), with the tempo received
         const auto& p = engine.getMidiPrefs();
+        auto& sync = engine.getMidiSync();
+        const auto now = juce::Time::getMillisecondCounterHiRes() * 0.001;
         juce::String text;
         if (p.clockInput.empty())
             text = tr ("Off");
         else if (! persistent)
-            text = tr ("Receiving clock {0} BPM", { "120.0" }); // --snapshot
+            text = tr ("Running: beat {0}, {1} BPM", { "17", "120.0" }); // --snapshot
+        else if (! engine.getActiveMidiInputs().contains (juce::String::fromUTF8 (p.clockInput.c_str())))
+            text = tr ("Error: the input is not open");
+        else if (! sync.receiver().receiving (now))
+            text = tr ("Ready, no clock");
+        else if (sync.receiver().tooFast())
+            text = tr ("Clock is too fast!");
+        else if (sync.receiver().running())
+            text = tr ("Running: beat {0}, {1} BPM", { juce::String ((int) (engine.getTransport().positionInBeats()) + 1),
+                                                       juce::String (sync.receiver().bpm(), 1) });
         else
-        {
-            const auto status = engine.getMidiSync().clockStatus();
-            if (status == "No clock")
-                text = tr ("No clock");
-            else if (status.rfind ("Clock is too fast", 0) == 0)
-                text = tr ("Clock is too fast!");
-            else
-                text = tr ("Receiving clock {0} BPM", { juce::String (engine.getMidiSync().receiver().bpm(), 1) })
-                       + (engine.getMidiSync().receiver().running() ? ", " + tr ("playing") : juce::String());
-        }
+            text = tr ("Receiving clock {0} BPM", { juce::String (sync.receiver().bpm(), 1) });
         if (clockStatus.getText() != text)
             clockStatus.setText (text, juce::dontSendNotification);
     }

@@ -16,6 +16,40 @@ Gap #2 of docs/analise/REA_rodada165f.md. Clean-room: behaviour and names only.
   inaccurate MIDI sync timing.", registry names `ExternalMidiClockDeviceID`, `MasterClockSyncOffset`,
   `MidiSyncTimingOffset`, toolbar `MIDISyncLED`, action "Enable MIDI master sync" (OptionsEnableMIDIMasterSyncAction).
 
+- [DECOMP] `MasterSyncBoxClick` (0x1367850): when master sync is turned on, FL first checks the audio driver: with
+  "FL Studio ASIO" it warns "Your audio device is set to FL Studio ASIO. This can cause inaccurate MIDI sync timing. Use a
+  dedicated ASIO driver for best results." (Cancel = the box goes off again); then stores the device's master-sync and
+  notes-off flags and reopens the MIDI outputs ("Opening MIDI output devices", 0x117ca10): an output is opened when it
+  has a port number or master sync. `SyncTypeSelectChange` (0x1368120), `MasterSyncOffsetChange` (0x13678e0) and
+  `MidiSyncOffsetChange` (0x1366fb0) each store **one global** value (sync type and master offset are not per device in
+  FL; LYNX keeps them per output — a superset). `SendAllNotesOffBoxClick` (0x135cd70) stores the flag of the selected
+  output. `ExtClockSyncSelectChange` (0x13610e0): item 0 = off (device −1, status 0); a device that is not enabled
+  asks "The device |%s| isn't enabled" [Enable device] [Disable sync]; status = 1 when the input is open, 3 when it is
+  not (the Status label); it also runs the FL Studio ASIO warning.
+
+- [DECOMP] **Master sync sender** = FL's "MIDI sync thread" (loop 0xbb0b00, `Sleep (1)` per pass, i.e. about 1 ms
+  timing resolution): MIDI clock only **while playing** (no clock when stopped). Start (0xbb0a40): if the song is not at
+  its start, Stop (0xFC) + Song Position Pointer (0xF2, position / ticks per 16th, rounded) first; then it waits for
+  playback and sends **Start (0xFA)** — FL never sends Continue. Each clock (0xF8, 0xbb12f0) is scheduled from the
+  previous one at one clock period, corrected against the song position (+ the master offset converted to ticks) so
+  the clocks stay phase-locked to the song; a positive master offset delays the first clock by that many ms. Stop
+  (0xbb1360): 0xFC. MTC (sync type > 0): quarter frames 0xF1 from the song time in seconds (+ offset), pieces 0…7
+  cycling, the timecode snapshot taken at piece 0 (frames = fraction of the second × fps — no drop-frame label
+  conversion), hours byte = hours mod 24 + the rate bits.
+- [DECOMP] **Clock receiver** (TMIDIClockReceiver message handler 0x1312760): 0xFA and 0xFB both reset and start
+  (status "Status: running [Beat n]"; FL plays from its **own** position — SPP is ignored); 0xFC stops ("Status:
+  ready"). Each 0xF8 while running: a least-squares line through the **last 16 clocks** (time in samples → beats),
+  tempo = its slope × 60, **clamped to 10…522 BPM and rounded to 0.1 BPM**; a second regression of FL's position
+  against the clock-derived position gives a playback speed ratio clamped to 0.25…4 (phase lock); the external offset
+  (ms × tempo / 60 000 beats) shifts the target. Every beat the status label's beat number moves. Status texts [DECOMP
+  0x136a650]: "Status: off" / "Status: ready" / "Status: running [Beat n]" / "Status: error"; the toolbar shows a MIDI
+  sync LED while running.
+- LYNX vs FL: LYNX sends SPP + **Continue** when starting elsewhere (the MIDI spec; devices that treat Start as "from
+  the top" then follow correctly), and **follows SPP** in (FL ignores it); per-output sync type / offset (FL: one
+  global); MTC with real drop-frame labels; sample-accurate time stamps instead of a 1 ms polling thread; tempo fit over
+  96 clocks with change detection + hysteresis (FL: 16 clocks, no hysteresis) — steadier with jittery USB interfaces;
+  phase correction ±5 % (FL: up to ×0.25…×4). Same tempo range (10…522) and 0.1 BPM rounding as FL.
+
 ## LYNX today [CODE]
 - No juce::MidiOutput anywhere; MIDI inputs opened in AudioEngine::enableAllMidiInputs via the deviceManager;
   handleIncomingMidiMessage ignores system real-time. Prefs: prefs::MidiPrefs (src/core/Preferences.h, text format).
