@@ -329,7 +329,8 @@ private:
 // ===================================================================================================
 
 class SurfacePanel final : public juce::Component,
-                           private juce::ChangeListener
+                           private juce::ChangeListener,
+                           private juce::ScrollBar::Listener
 {
 public:
     using Locate = std::function<const std::vector<SurfaceControl>* (const Song&)>;
@@ -365,7 +366,15 @@ public:
         addButton.onClick = [this] { showAddMenu ({ 40.0f, 60.0f }, &addButton); };
         addAndMakeVisible (addButton);
         engine.addChangeListener (this);
-        setSize (560, 380);
+        // round 165: as large as its controls (FL's Peavey: 9 channel strips), within a screen; beyond that it scrolls
+        for (auto* bar : { &hbar, &vbar })
+        {
+            bar->setAutoHide (true);
+            bar->addListener (this);
+            addChildComponent (*bar);
+        }
+        const auto extent = contentExtent();
+        setSize (juce::jlimit (560, 1400, (int) std::ceil (extent.x)), juce::jlimit (380, 900, top + (int) std::ceil (extent.y)));
     }
 
     ~SurfacePanel() override { engine.removeChangeListener (this); }
@@ -379,10 +388,13 @@ public:
         g.setColour (colour::textPrimary);
         g.setFont (font (type::title, true));
         g.drawText (heading, 14, 6, 240, 22, juce::Justification::centredLeft);
+        // (unscrolled, the edit-mode output numbers of the top row sit on the bar's lower edge, as before)
+        g.reduceClipRegion (getLocalBounds().withTrimmedTop (scroll.y > 0.0f ? top : top - 13));
         g.setColour (colour::gridStep);
-        for (int x = 10; x < getWidth(); x += 10)
-            for (int y = top + 10; y < getHeight(); y += 10)
-                g.fillRect ((float) x, (float) y, 1.0f, 1.0f);
+        const auto gx = 10.0f - std::fmod (scroll.x, 10.0f), gy = (float) top + 10.0f - std::fmod (scroll.y, 10.0f);
+        for (auto x = gx; x < (float) getWidth(); x += 10.0f)
+            for (auto y = gy; y < (float) getHeight(); y += 10.0f)
+                g.fillRect (x, y, 1.0f, 1.0f);
         const auto* controls = locate (engine.getSong());
         if (controls == nullptr)
             return;
@@ -476,12 +488,13 @@ public:
             bar.removeFromRight (6);
             midiButton.setBounds (bar.removeFromRight (56));
         }
+        updateScrollBars();
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
         const auto* controls = locate (engine.getSong());
-        if (controls == nullptr)
+        if (controls == nullptr || e.position.y < (float) top)
             return;
         const auto i = controlAt (e.position);
         if (e.mods.isPopupMenu())
@@ -489,7 +502,7 @@ public:
             if (i >= 0)
                 showControlMenu (i);
             else
-                showAddMenu (e.position, nullptr);
+                showAddMenu (e.position + scroll, nullptr);
             return;
         }
         if (i < 0)
@@ -498,7 +511,7 @@ public:
         const auto& c = (*controls)[(std::size_t) i];
         grab = { c.value, c.valueY };
         moving = editButton.getToggleState();
-        grabAt = moving ? e.position - juce::Point<float> (c.x, c.y + (float) top) : e.position;
+        grabAt = moving ? e.position + scroll - juce::Point<float> (c.x, c.y + (float) top) : e.position;
         if (moving)
             return;
         if (ui::isResetClick (e) && (c.kind == SurfaceControl::Kind::knob || c.kind == SurfaceControl::Kind::slider))
@@ -525,7 +538,7 @@ public:
         const auto& c = (*controls)[(std::size_t) i];
         if (moving)
         {
-            const auto at = e.position - grabAt;
+            const auto at = e.position + scroll - grabAt;
             const auto x = juce::jmax (0.0f, std::round (at.x / 10.0f) * 10.0f), y = juce::jmax (0.0f, std::round ((at.y - (float) top) / 10.0f) * 10.0f);
             editControls ([i, x, y] (std::vector<SurfaceControl>& cs) {
                 if (i < (int) cs.size())
@@ -569,9 +582,16 @@ public:
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
         const auto* controls = locate (engine.getSong());
-        const auto i = controlAt (e.position);
+        const auto i = e.position.y < (float) top ? -1 : controlAt (e.position);
         if (controls == nullptr || i < 0)
+        {
+            // empty space: scroll a panel larger than its window (Shift: sideways)
+            auto& bar = e.mods.isShiftDown() || (wheel.deltaX != 0.0f && wheel.deltaY == 0.0f) ? hbar : vbar;
+            const auto delta = wheel.deltaX != 0.0f && wheel.deltaY == 0.0f ? wheel.deltaX : wheel.deltaY;
+            if (bar.isVisible())
+                bar.setCurrentRangeStart (bar.getCurrentRangeStart() - delta * 120.0);
             return;
+        }
         const auto& c = (*controls)[(std::size_t) i];
         if (c.kind == SurfaceControl::Kind::knob || c.kind == SurfaceControl::Kind::slider)
             setValue (i, c.value + wheel.deltaY * (e.mods.isCtrlDown() ? 0.01f : 0.05f), c.valueY);
@@ -580,7 +600,11 @@ public:
 private:
     static constexpr int top = 34;
 
-    juce::Rectangle<float> bounds (const SurfaceControl& c) const
+    // where control c is drawn (its place on the panel, scrolled)
+    juce::Rectangle<float> bounds (const SurfaceControl& c) const { return contentBounds (c) - scroll; }
+
+    // c's place on the whole panel (unscrolled; y includes the bar)
+    juce::Rectangle<float> contentBounds (const SurfaceControl& c) const
     {
         const auto x = c.x, y = c.y + (float) top;
         const auto s = std::max (0.5f, c.size);
@@ -622,8 +646,8 @@ private:
         if (from != nullptr)
             if (const auto* controls = locate (engine.getSong()); controls != nullptr && ! controls->empty())
             {
-                const auto r = bounds (controls->back());
-                at = r.getRight() + 20.0f < (float) getWidth() - 60.0f ? juce::Point<float> (r.getRight() + 20.0f, r.getY()) : juce::Point<float> (20.0f, r.getBottom() + 20.0f);
+                const auto r = contentBounds (controls->back());
+                at = r.getRight() + 20.0f < (float) getWidth() + scroll.x - 60.0f ? juce::Point<float> (r.getRight() + 20.0f, r.getY()) : juce::Point<float> (20.0f, r.getBottom() + 20.0f);
             }
         for (const auto& [kind, name] : kinds)
             menu.addItem (tr (name), [this, kind = kind, english = juce::String (name), at] {
@@ -853,7 +877,50 @@ private:
                                  true);
     }
 
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        updateScrollBars();
+        repaint();
+    }
+
+    // the controls' extent (right / bottom edge + a margin, without the bar), at least the panel's minimum
+    juce::Point<float> contentExtent() const
+    {
+        juce::Point<float> extent { 0.0f, 0.0f };
+        if (const auto* controls = locate (engine.getSong()))
+            for (const auto& c : *controls)
+            {
+                const auto r = contentBounds (c);
+                extent.x = juce::jmax (extent.x, r.getRight() + 24.0f);
+                extent.y = juce::jmax (extent.y, r.getBottom() - (float) top + 24.0f);
+            }
+        return extent;
+    }
+
+    void updateScrollBars()
+    {
+        const auto extent = contentExtent();
+        const auto w = (double) getWidth(), h = (double) (getHeight() - top);
+        hbar.setRangeLimits (0.0, juce::jmax (w, (double) extent.x), juce::dontSendNotification);
+        hbar.setCurrentRange (scroll.x, w, juce::dontSendNotification);
+        vbar.setRangeLimits (0.0, juce::jmax (h, (double) extent.y), juce::dontSendNotification);
+        vbar.setCurrentRange (scroll.y, h, juce::dontSendNotification);
+        hbar.setBounds (0, getHeight() - 10, getWidth() - 10, 10);
+        vbar.setBounds (getWidth() - 10, top, 10, getHeight() - top - 10);
+        // (the range clamps a scroll left past the end after controls were removed)
+        const juce::Point<float> clamped { (float) hbar.getCurrentRangeStart(), (float) vbar.getCurrentRangeStart() };
+        if (clamped != scroll)
+        {
+            scroll = clamped;
+            repaint();
+        }
+    }
+
+    void scrollBarMoved (juce::ScrollBar* bar, double start) override
+    {
+        (bar == &hbar ? scroll.x : scroll.y) = (float) start;
+        repaint();
+    }
 
     AudioEngine& engine;
     juce::String heading;
@@ -863,6 +930,8 @@ private:
     int limit = surface::maxOutputs;
     MidiAccess midi;
     juce::TextButton editButton, addButton, midiButton;
+    juce::ScrollBar hbar { false }, vbar { true };
+    juce::Point<float> scroll; // (the panel's scroll, round 165)
     int dragging = -1;
     bool moving = false;
     juce::Point<float> grab, grabAt;
