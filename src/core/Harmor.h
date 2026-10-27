@@ -34,6 +34,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,11 @@ namespace lynx
 {
 // true when the exact engine can play this Harmor state (version ≥ 16 with articulators and curves, parsed fully)
 bool harmorStateUsable (const std::vector<std::uint8_t>& state);
+
+// An old state (version 11…15: the first releases' presets, FL's Default.fst included) in the current layout, as
+// FL's Harmor re-saves it after loading (REA_rodada165g §1); nullopt when the state is not an old one (or unreadable).
+// The engine plays old states directly; the importer stores the upgraded bytes so the settings panel can edit them.
+std::optional<std::vector<std::uint8_t>> harmorUpgradeState (const std::vector<std::uint8_t>& state);
 
 // the round-34 fallbacks this state relies on (empty: everything it uses is modelled), for logs and reports
 std::vector<std::string> harmorFallbacks (const std::vector<std::uint8_t>& state);
