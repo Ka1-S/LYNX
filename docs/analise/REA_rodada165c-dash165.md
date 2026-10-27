@@ -115,3 +115,21 @@ changes (a knob moved by hand wins again); `.flp` links to parameters ≥ 16 are
   plugin on its port).
   After the fix LYNX renders FL's own `fl_dash.flp` as L = −0.49999997, R = +0.74999994 for the whole render (raw
   float output of renderwav with a debug print) — FL's −0.500 / +0.750 [FL render vs RUN].
+
+## 6. Text that fits (Dashboard, plugin editors) and the panel's size
+
+- `ui::drawFittingText` (ui/ValueControl): one line fitted as FL fits its captions — over the free room around it
+  when wider, the font shrinking down to a minimum, then narrowed (≥ 60 %); no "..." while it can be read. Used by
+  the Dashboard / Control Surface captions, the native plugin editors' captions, switch labels and lit buttons, the
+  big quiet plugin name ("Wav..." in the WaveShaper) and the preset name boxes (editor and header bar).
+- Fruity WaveShaper at FL's size (277 × 358): "Wav...", "S..." and "(no pres..." were cut. The Smooth / HQ switches
+  start at x 112 (they had 13 px for their caption). [SHOT §7]
+- The Dashboard / Control Surface panel is as large as its controls (560 × 380 up to 1400 × 900; FL's Peavey: 1184 ×
+  380 with its 9 channel strips) and scrolls beyond that (scroll bars; the wheel on empty space, Shift = sideways).
+
+## 7. Screenshots [SHOT] (Linux build, Xvfb, `LYNX --controllershot`, `--plugui`; looked at)
+
+`/mnt/d/lynx-work/dash165/shots/`: `c-dashboard-fl-Peavey.png` (all 36 controls, "Stereo 1…8 / M" in full),
+`c-dashboard-fl-Peavey-edit.png` (output numbers 1…36), `c-dashboard-fl-XP30-edit.png` ("1 CC74" … "6 CC93"),
+`c-xyz-controller-stairs.png` (X curve = Stairs +40 %: 37 steps; the Curve box), `c-voltage-controller.png`,
+`c-dashboard.png`. `/mnt/d/lynx-work/dash165/plugui/Fruity WaveShaper.png` (before / after the fit).
