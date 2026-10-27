@@ -64,6 +64,9 @@ TEST (gesture_left_press_actions)
     CHECK (leftAction (EditTool::pencil, Target::autoPoint, none, true) == Action::movePoint);
     CHECK (leftAction (EditTool::brush, Target::autoCurve, none, true) == Action::addPoint);
     CHECK (leftAction (EditTool::pencil, Target::autoCurve, shift, true) == Action::copyMove);
+    // round 165: FL's automation gestures in the Playlist (Alt + drag = no snap, the tension handle bends)
+    CHECK (leftAction (EditTool::pencil, Target::autoPoint, Mods { false, false, true }, true) == Action::movePoint);
+    CHECK (leftAction (EditTool::pencil, Target::autoTension, none, true) == Action::bendSegment);
     CHECK (leftAction (EditTool::eraser, Target::clipMenu, none, true) == Action::openMenu);
 }
 
