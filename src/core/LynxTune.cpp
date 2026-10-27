@@ -669,7 +669,8 @@ public:
             // round 148: the overlap-add of shifted grains loses the highs' incoherent part (two-period Hann grains at
             // half overlap keep 0.75 of their power: -1.25 dB) — [EXEC] her takes at retune 0 / 20: 0.5–1.5 dB darker than
             // Auto-Tune Pro above 4 kHz. A first-order shelf (round 148: +1 dB from 5 kHz; round 165j: +1.5 dB from 3 kHz,
-            // below) is faded in while a correction of 5 cents or more is being applied to a voiced sound (about halves the difference: 10 kHz -1.0 -> -0.5 dB, 16 kHz -1.3 -> -0.8 dB) [model]
+            // below) is faded in while a correction of 5 cents or more is being applied to a voiced sound (round 148: about
+            // halves the difference: 10 kHz -1.0 -> -0.5 dB, 16 kHz -1.3 -> -0.8 dB) [model]
             {
                 // Round 165j ([RUN] REA_rodada165j §4, her 24 live-set takes against Auto-Tune Pro with her states): the
                 // corrected voice was still 0.52 dB darker at 2.5-6.3 kHz relative to 300-1000 Hz (Auto-Tune: 0.07); the
