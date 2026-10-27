@@ -136,6 +136,13 @@ struct EqSettings
 // gain y -> linear gain of the EQ curve.
 double eqGain (double y) noexcept;
 void equalize (Document& doc, Range r, const EqSettings& s, Progress* progress = nullptr);
+// Paste mix (envelope): the clipboard mixed in at `at` (the document gets longer if it goes past the end); at every
+// frame the result is clip * e + original * (1 - e), e = the mix envelope (x over the document's original length).
+// Returns the range the clipboard covers.
+Range pasteMixEnvelope (Document& doc, std::int64_t at, const Audio& clip, const Envelope& mix);
+// Paste mix (spectral): per frequency, the curve's y (0..1) says how much of the clipboard (y) and of the original
+// (1 - y) is heard where the clipboard goes; frequency axis as in Equalize.
+Range pasteMixSpectral (Document& doc, std::int64_t at, const Audio& clip, const Envelope& mix, double freqScale, Progress* progress = nullptr);
 // "Filter unharmonics": an EQ curve that keeps only the harmonics of `fundamentalHz` (width 0 narrow .. 2 wide).
 Envelope unharmonicsCurve (double fundamentalHz, int width, double freqScale, double sampleRate);
 

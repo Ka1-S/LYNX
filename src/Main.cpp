@@ -4954,7 +4954,7 @@ private:
         juce::File (prefix + "-menu.txt").replaceWithText (lynx::audioEditorMenuForSnapshot (*editor).joinIntoString ("\n") + "\n");
         for (int t = 0; lynx::audioToolNameForSnapshot (t) != nullptr; ++t)
         {
-            const auto envelopeTool = t >= 10; // Scale levels .. Create sequence work on the volume envelope
+            const auto envelopeTool = t >= 10 && t <= 14; // Scale levels .. Create sequence work on the volume envelope
             if (auto panel = lynx::makeAudioToolPanelForSnapshot (*editor, t, envelopeTool ? 1 : 0))
             {
                 offline.dispatchPendingMessages();

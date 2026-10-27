@@ -64,6 +64,8 @@ struct Document
     // Edison's amp envelopes drawn over the audio (round 165l; x 0..1 over the whole audio; empty = none), applied
     // by "Mixdown amp envelopes" (core/AudioEditTools.h).
     Envelope volumeEnvelope, panEnvelope, separationEnvelope;
+    // the mix envelope of "Paste mix (envelope)" (not heard: it says how much of the clipboard is mixed in)
+    Envelope mixEnvelope;
 
     bool hasLoop() const noexcept { return loopStart >= 0 && loopEnd > loopStart; }
 };

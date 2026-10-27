@@ -1445,6 +1445,32 @@ private:
             zoomToFit();
     }
 
+    // FL's Paste mix (envelope): the first time it shows the mix envelope to shape (top = the clipboard, bottom = the
+    // original); the second time it mixes the clipboard in at the cursor / selection start with that envelope
+    void pasteMixWithEnvelope()
+    {
+        const auto& clip = clipboard();
+        if (clip.empty() || doc.audio.empty() || recState != RecState::idle)
+            return;
+        if (envMode != EnvMode::mix)
+        {
+            if (doc.mixEnvelope.empty())
+                doc.mixEnvelope = ae::Envelope::flat (0.5);
+            setEnvMode (EnvMode::mix);
+            setStatus (tr ("Shape the mix envelope (top: the clipboard, bottom: the original), then choose Edit > Paste mix (envelope): apply."), false);
+            repaint();
+            return;
+        }
+        stopPlayback();
+        const auto at = selection.empty() ? cursor : selection.start;
+        const auto mix = doc.mixEnvelope;
+        doc.mixEnvelope = {};
+        const auto r = ae::pasteMixEnvelope (doc, at, clip, mix);
+        setEnvMode (EnvMode::wave);
+        selection = r;
+        commit (tr ("Paste mix (envelope)"));
+    }
+
     // the clipboard stretched to the selection's length (pitch kept), or drum-stretched (slices keep their attacks),
     // replacing the selection
     void pasteFitted (bool drum)
@@ -2308,7 +2334,8 @@ private:
         wave,
         volume,
         panning,
-        separation
+        separation,
+        mix // the mix envelope of Paste mix (envelope)
     };
     EnvMode envMode = EnvMode::wave;
     ae::NoiseProfile noiseProfile;
@@ -2319,7 +2346,7 @@ private:
 
     ae::Envelope& currentEnvelope()
     {
-        return envMode == EnvMode::panning ? doc.panEnvelope : envMode == EnvMode::separation ? doc.separationEnvelope : doc.volumeEnvelope;
+        return envMode == EnvMode::panning ? doc.panEnvelope : envMode == EnvMode::separation ? doc.separationEnvelope : envMode == EnvMode::mix ? doc.mixEnvelope : doc.volumeEnvelope;
     }
 
     static const char* envModeName (EnvMode m)
@@ -2330,6 +2357,7 @@ private:
             case EnvMode::volume: return TR_NOOP ("Edit: Volume");
             case EnvMode::panning: return TR_NOOP ("Edit: Panning");
             case EnvMode::separation: return TR_NOOP ("Edit: Stereo sep");
+            case EnvMode::mix: return TR_NOOP ("Edit: Paste mix");
         }
         return "";
     }
@@ -2349,6 +2377,8 @@ private:
         juce::PopupMenu m;
         for (auto mode : { EnvMode::wave, EnvMode::volume, EnvMode::panning, EnvMode::separation })
             m.addItem (tr (envModeName (mode)), mode == EnvMode::wave || doc.audio.numChannels() > 1 || mode == EnvMode::volume, envMode == mode, [this, mode] { setEnvMode (mode); });
+        if (envMode == EnvMode::mix)
+            m.addItem (tr (envModeName (EnvMode::mix)), true, true, [] {});
         return m;
     }
 
@@ -2442,6 +2472,7 @@ private:
             p.y = envValue (e.position.y);
             const auto y = p.y;
             setStatus (envMode == EnvMode::volume ? tr ("Volume {0} dB", { juce::String (20.0 * std::log10 (juce::jmax (1.0e-6f, ae::envelopeGain (y))), 1) })
+                                                  : envMode == EnvMode::mix ? tr ("Clipboard {0}%", { juce::String (juce::roundToInt (y * 100.0)) })
                                                   : envMode == EnvMode::panning ? tr ("Panning {0}", { juce::String (juce::roundToInt ((y * 2.0 - 1.0) * 100.0)) })
                                                                                 : tr ("Stereo separation {0}", { juce::String (juce::roundToInt ((y * 2.0 - 1.0) * 100.0)) }),
                        false);
@@ -2460,7 +2491,8 @@ private:
         };
         const Lane lanes[] = { { &doc.volumeEnvelope, EnvMode::volume, theme::colour::meterLow },
                                { &doc.panEnvelope, EnvMode::panning, theme::colour::info },
-                               { &doc.separationEnvelope, EnvMode::separation, theme::colour::warning } };
+                               { &doc.separationEnvelope, EnvMode::separation, theme::colour::warning },
+                               { &doc.mixEnvelope, EnvMode::mix, theme::colour::accent } };
         for (const auto& l : lanes)
         {
             const auto active = envMode == l.mode;
@@ -2642,6 +2674,12 @@ juce::PopupMenu AudioEditor::editMenu (bool contextual)
     menu.addItem (tr ("Paste insert") + "\tCtrl+V", clip && selection.empty(), false, [this] { paste (false); });
     menu.addItem (tr ("Paste replace"), clip && sel, false, [this] { paste (false); });
     menu.addItem (tr ("Paste mix"), clip && has, false, [this] { paste (true); });
+    menu.addItem (envMode == EnvMode::mix ? tr ("Paste mix (envelope): apply") : tr ("Paste mix (envelope)"), clip && has, false, [this] { pasteMixWithEnvelope(); });
+    menu.addItem (tr ("Paste mix (spectral)..."), clip && has, false, [this] {
+        if (selection.empty())
+            selection = { cursor, juce::jmin (doc.audio.frames(), cursor + ae::conform (clipboard(), doc.audio.numChannels(), doc.audio.sampleRate).frames()) };
+        openEdisonTool (audiotools::Tool::pasteSpectral);
+    });
     // Edison's "Paste stretch" / "Paste replace (drum)" (round 165l): the clipboard brought to the selection's length
     menu.addItem (tr ("Paste stretch"), clip && sel, false, [this] { pasteFitted (false); });
     menu.addItem (tr ("Paste replace (drum)"), clip && sel, false, [this] { pasteFitted (true); });
@@ -2699,7 +2737,9 @@ juce::PopupMenu AudioEditor::mainMenu()
     tools.addSectionHeader (tr ("Envelope"));
     tools.addSubMenu (tr ("Edit"), envModeMenu(), has);
     tools.addItem (tr ("Cancel all envelopes"), envAny, false, [this] {
-        doc.volumeEnvelope = doc.panEnvelope = doc.separationEnvelope = {};
+        doc.volumeEnvelope = doc.panEnvelope = doc.separationEnvelope = doc.mixEnvelope = {};
+        if (envMode == EnvMode::mix)
+            setEnvMode (EnvMode::wave);
         commit (tr ("Cancel all envelopes"));
     });
     tools.addItem (tr ("Add points at selection"), has && ! selection.empty(), false, [this] {
@@ -2952,7 +2992,7 @@ std::unique_ptr<juce::Component> makeAudioEditorForSnapshot (AudioEngine& engine
 std::unique_ptr<juce::Component> makeAudioToolPanelForSnapshot (juce::Component& editor, int tool, int envelopeMode)
 {
     auto* e = dynamic_cast<AudioEditor*> (&editor);
-    if (e == nullptr || tool < 0 || tool > (int) audiotools::Tool::createSequence)
+    if (e == nullptr || tool < 0 || tool > (int) audiotools::Tool::pasteSpectral)
         return {};
     e->setEnvModeForSnapshot (envelopeMode);
     return audiotools::makeToolPanel (*e, (audiotools::Tool) tool);
@@ -2960,7 +3000,7 @@ std::unique_ptr<juce::Component> makeAudioToolPanelForSnapshot (juce::Component&
 
 const char* audioToolNameForSnapshot (int tool)
 {
-    if (tool < 0 || tool > (int) audiotools::Tool::createSequence)
+    if (tool < 0 || tool > (int) audiotools::Tool::pasteSpectral)
         return nullptr;
     return audiotools::toolTitle ((audiotools::Tool) tool);
 }

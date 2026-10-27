@@ -507,7 +507,7 @@ void remapEnvelopes (Document& doc, std::int64_t oldFrames, Range edited, std::i
     const auto newFrames = doc.audio.frames();
     if (oldFrames <= 1 || newFrames <= 1 || (oldFrames == newFrames && edited.length() == newLength))
         return;
-    for (auto* env : { &doc.volumeEnvelope, &doc.panEnvelope, &doc.separationEnvelope })
+    for (auto* env : { &doc.volumeEnvelope, &doc.panEnvelope, &doc.separationEnvelope, &doc.mixEnvelope })
     {
         if (env->empty())
             continue;
@@ -964,6 +964,76 @@ void equalize (Document& doc, Range r, const EqSettings& s, Progress* progress)
     const auto gains = curveGains (s.gain, s.freqScale, doc.audio.sampleRate, size, s.smooth);
     applyGains (doc, r, gains, size, clamp01 (s.mix), progress);
     report (progress, 1.0);
+}
+
+namespace
+{
+// the clipboard in the document's format at `at`, the document lengthened when the clipboard goes past its end;
+// returns the clip as a document of its own (same format)
+Document clipAt (Document& doc, std::int64_t at, const Audio& clip)
+{
+    Document c;
+    c.audio = silence (std::max (1, doc.audio.numChannels()), doc.audio.sampleRate, 0);
+    insert (c, 0, clip);
+    at = std::clamp<std::int64_t> (at, 0, doc.audio.frames());
+    if (at + c.audio.frames() > doc.audio.frames())
+        insertSilence (doc, doc.audio.frames(), at + c.audio.frames() - doc.audio.frames());
+    return c;
+}
+} // namespace
+
+Range pasteMixEnvelope (Document& doc, std::int64_t at, const Audio& clip, const Envelope& mix)
+{
+    if (clip.empty() || doc.audio.channels.empty())
+        return {};
+    const auto originalFrames = std::max<std::int64_t> (1, doc.audio.frames());
+    at = std::clamp<std::int64_t> (at, 0, doc.audio.frames());
+    const auto c = clipAt (doc, at, clip);
+    const auto n = doc.audio.frames();
+    // [DEC 0xce28f0] every frame: clip * e + original * (1 - e), e = the mix envelope over the original length
+    // (outside the clip the clip is silence, so there the envelope only lowers the original)
+    for (std::int64_t i = 0; i < n; ++i)
+    {
+        const auto e = (float) clamp01 (mix.empty() ? 0.5 : mix.at (std::min (1.0, (double) i / (double) std::max<std::int64_t> (1, originalFrames - 1))));
+        for (std::size_t ch = 0; ch < doc.audio.channels.size(); ++ch)
+        {
+            const auto j = i - at;
+            const auto src = j >= 0 && j < c.audio.frames() ? c.audio.channels[ch][(std::size_t) j] : 0.0f;
+            auto& v = doc.audio.channels[ch][(std::size_t) i];
+            v = src * e + v * (1.0f - e);
+        }
+    }
+    return { at, at + c.audio.frames() };
+}
+
+Range pasteMixSpectral (Document& doc, std::int64_t at, const Audio& clip, const Envelope& mix, double freqScale, Progress* progress)
+{
+    if (clip.empty() || doc.audio.channels.empty())
+        return {};
+    at = std::clamp<std::int64_t> (at, 0, doc.audio.frames());
+    auto c = clipAt (doc, at, clip);
+    const Range r { at, at + c.audio.frames() };
+    // [DEC 0xce2de0] the source and the target each go through the spectral curve (the target through its
+    // complement), then they are mixed: per frequency, y = 1 is all clipboard and y = 0 all original
+    constexpr int size = 4096;
+    const auto bins = size / 2 + 1;
+    std::vector<double> w ((std::size_t) bins), rest ((std::size_t) bins);
+    for (int b = 0; b < bins; ++b)
+    {
+        const auto hz = (double) b * doc.audio.sampleRate / size;
+        w[(std::size_t) b] = clamp01 (mix.empty() ? 0.5 : mix.at (curvePosition (hz, freqScale, doc.audio.sampleRate)));
+        rest[(std::size_t) b] = 1.0 - w[(std::size_t) b];
+    }
+    applyGains (c, { 0, c.audio.frames() }, w, size, 1.0, nullptr);
+    report (progress, 0.5);
+    if (stop (progress))
+        return {};
+    applyGains (doc, r, rest, size, 1.0, nullptr);
+    for (std::size_t ch = 0; ch < doc.audio.channels.size(); ++ch)
+        for (std::int64_t i = 0; i < c.audio.frames(); ++i)
+            doc.audio.channels[ch][(std::size_t) (at + i)] += c.audio.channels[ch][(std::size_t) i];
+    report (progress, 1.0);
+    return r;
 }
 
 Envelope unharmonicsCurve (double fundamentalHz, int width, double freqScale, double sampleRate)
@@ -1623,69 +1693,83 @@ void edgeFades (Audio& a, std::int64_t frames)
     fadeFrames (a, n - f, n, false);
 }
 
-// period boundaries in [r.start, r.end): the markers inside (when snapping and there are any), else a grid
-std::vector<std::int64_t> periodStarts (const Document& doc, Range r, std::int64_t period, bool snapToMarkers)
-{
-    std::vector<std::int64_t> starts { r.start };
-    if (snapToMarkers)
-        for (const auto& m : doc.markers)
-            if (m.start > r.start && m.start < r.end)
-                starts.push_back (m.start);
-    if (starts.size() == 1)
-        for (auto p = r.start + period; p < r.end; p += period)
-            starts.push_back (p);
-    std::sort (starts.begin(), starts.end());
-    starts.erase (std::unique (starts.begin(), starts.end()), starts.end());
-    return starts;
-}
 } // namespace
 
 void clawMachine (Document& doc, Range r, const ClawSettings& s, double bpm, Progress* progress)
 {
+    // FL's claw machine [DEC 0xc7b460]: a beat grid from the start of the audio; in each period the n-th of m parts is
+    // cut out (the cut snapped to the nearest marker within half a cut when "Snap to markers" is on), the 15 ms
+    // before each cut cross-fade into the last 15 ms of what was cut (so the join continues smoothly into what
+    // follows), then the whole range is stretched by 1 + (m / (m - 1) - 1) * amount to make up the lost time.
     r = orAll (doc, r);
     if (r.empty() || bpm <= 0.0)
         return;
     const auto sr = doc.audio.sampleRate;
-    const auto period = std::max<std::int64_t> (16, (std::int64_t) std::llround (s.periodBeats * 60.0 / bpm * sr));
+    const auto period = s.periodBeats * 60.0 / bpm * sr;
     const auto of = std::max (1, s.trashOf);
     const auto part = std::clamp (s.trashPart, 1, of);
-    const auto starts = periodStarts (doc, r, period, s.snapToMarkers);
-    const auto fade = (std::int64_t) (sr * 0.002);
-    Audio out;
-    out.sampleRate = sr;
-    for (std::size_t i = 0; i < starts.size(); ++i)
+    const auto cutLen = period / (double) of;
+    if (period < 16.0 || cutLen < 1.0)
+        return;
+    std::vector<std::int64_t> markerStarts;
+    if (s.snapToMarkers)
+        for (const auto& m : doc.markers)
+            markerStarts.push_back (m.start);
+    // the cuts, from the last to the first (so the positions of the earlier ones stay valid)
+    std::vector<Range> cuts;
+    for (auto k = (std::int64_t) std::floor ((double) r.start / period); (double) k * period < (double) r.end; ++k)
+    {
+        auto end = (std::int64_t) std::llround ((double) k * period + cutLen * part);
+        auto start = (std::int64_t) std::llround ((double) k * period + cutLen * (part - 1));
+        if (! markerStarts.empty())
+        {
+            std::int64_t best = -1, bestDist = (std::int64_t) (cutLen / 2.0);
+            for (auto m : markerStarts)
+                if (std::abs (m - end) < bestDist)
+                {
+                    bestDist = std::abs (m - end);
+                    best = m;
+                }
+            if (best >= 0)
+            {
+                start += best - end;
+                end = best;
+            }
+        }
+        start = std::max (start, r.start);
+        end = std::min (end, r.end);
+        if (start < end)
+            cuts.push_back ({ start, end });
+    }
+    if (cuts.empty())
+        return;
+    const auto fade = std::max<std::int64_t> (1, (std::int64_t) std::llround (sr * 0.015));
+    auto end = r.end;
+    for (std::size_t i = cuts.size(); i-- > 0;)
     {
         if (stop (progress))
             return;
-        report (progress, (double) i / (double) starts.size());
-        const auto a = starts[i], b = i + 1 < starts.size() ? starts[i + 1] : r.end;
-        const auto len = b - a;
-        // the n-th of m equal parts goes to the trash
-        const auto ta = a + len * (part - 1) / of, tb = a + len * part / of;
-        auto kept = slice (doc.audio, a, ta);
-        auto rest = slice (doc.audio, tb, b);
-        if (! kept.empty())
-            edgeFades (kept, fade);
-        if (! rest.empty())
-            edgeFades (rest, fade);
-        Audio piece;
-        piece.sampleRate = sr;
-        piece.channels.assign ((std::size_t) doc.audio.numChannels(), {});
-        append (piece, kept);
-        append (piece, rest);
-        // compensation: the kept audio stretched back towards the period's length
-        const auto target = piece.frames() + (std::int64_t) std::llround ((double) (tb - ta) * clamp01 (s.compensation));
-        if (target != piece.frames() && piece.frames() > 0)
-            piece = refit (piece, target, s.resample);
-        if (out.channels.empty())
-            out.channels.assign ((std::size_t) doc.audio.numChannels(), {});
-        append (out, piece);
+        report (progress, 0.8 * (double) (cuts.size() - i) / (double) cuts.size());
+        const auto c = cuts[i];
+        const auto f = std::min ({ fade, c.length(), c.start - r.start });
+        for (auto& ch : doc.audio.channels)
+            for (std::int64_t j = 0; j < f; ++j)
+            {
+                const auto w = (float) (j + 1) / (float) (f + 1);
+                auto& v = ch[(std::size_t) (c.start - f + j)];
+                v = v * (1.0f - w) + ch[(std::size_t) (c.end - f + j)] * w;
+            }
+        erase (doc, c);
+        end -= c.length();
     }
-    if (out.channels.empty())
-        return;
-    // replace the range with the result (markers inside are dropped, the rest follow)
-    erase (doc, r);
-    insert (doc, r.start, out);
+    const auto ratio = of > 1 ? 1.0 + ((double) of / (double) (of - 1) - 1.0) * clamp01 (s.compensation) : 1.0;
+    if (ratio != 1.0 && end > r.start)
+    {
+        const auto target = std::max<std::int64_t> (1, (std::int64_t) std::llround ((double) (end - r.start) * std::clamp (ratio, 0.01, 100.0)));
+        auto stretched = refit (slice (doc.audio, r.start, end), target, s.resample);
+        erase (doc, { r.start, end });
+        insert (doc, r.start, stretched);
+    }
     report (progress, 1.0);
 }
 

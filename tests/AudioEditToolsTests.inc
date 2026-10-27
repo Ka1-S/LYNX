@@ -397,3 +397,43 @@ TEST (eventedit_to_automation_points_round165l)
     CHECK (std::abs (simple.back().value - 0.9f) < 1e-6f);
 }
 #endif
+
+TEST (audioedittools_paste_mix_envelope_and_spectral_round165l)
+{
+    const double sr = 44100.0;
+    // envelope: e = 1 at the start (all clipboard), 0 at the end (all original)
+    auto d = sineDoc (440.0, 1.0, sr, 0.5f);
+    const auto clip = sineDoc (2000.0, 1.0, sr, 0.5f).audio;
+    ae::Envelope mix;
+    mix.points = { { 0.0, 1.0, 0.0f }, { 1.0, 0.0, 0.0f } };
+    const auto r = ae::pasteMixEnvelope (d, 0, clip, mix);
+    CHECK (r.start == 0 && r.end == clip.frames());
+    const auto n = d.audio.frames();
+    const auto& x = d.audio.channels[0];
+    CHECK (toneLevel (x, 0, 2205, 2000.0, sr) > 0.4 && toneLevel (x, 0, 2205, 440.0, sr) < 0.06);
+    CHECK (toneLevel (x, n - 2205, n, 440.0, sr) > 0.4 && toneLevel (x, n - 2205, n, 2000.0, sr) < 0.06);
+    // past the end: the document gets longer
+    auto shortDoc = sineDoc (440.0, 0.5, sr, 0.5f);
+    ae::pasteMixEnvelope (shortDoc, shortDoc.audio.frames() / 2, clip, ae::Envelope::flat (0.5));
+    CHECK (shortDoc.audio.frames() == (std::int64_t) (0.25 * sr) + clip.frames());
+
+    // spectral: the clipboard above ~1 kHz, the original below
+    auto s = sineDoc (300.0, 1.0, sr, 0.5f);
+    for (std::size_t i = 0; i < s.audio.channels[0].size(); ++i)
+        for (auto& ch : s.audio.channels)
+            ch[i] += 0.5f * (float) std::sin (2.0 * 3.141592653589793 * 3000.0 * (double) i / sr);
+    ae::Document c2;
+    c2.audio = ae::silence (s.audio.numChannels(), sr, s.audio.frames());
+    for (std::size_t i = 0; i < c2.audio.channels[0].size(); ++i)
+        for (auto& ch : c2.audio.channels)
+            ch[i] = 0.5f * (float) std::sin (2.0 * 3.141592653589793 * 5000.0 * (double) i / sr);
+    const auto k = ae::curvePosition (1000.0, 1.0, sr);
+    ae::Envelope band;
+    band.points = { { 0.0, 0.0, 0.0f }, { k - 0.02, 0.0, 0.0f }, { k + 0.02, 1.0, 0.0f }, { 1.0, 1.0, 0.0f } };
+    ae::pasteMixSpectral (s, 0, c2.audio, band, 1.0);
+    const auto& y = s.audio.channels[0];
+    const auto a = (std::int64_t) (0.25 * sr), b = (std::int64_t) (0.75 * sr);
+    CHECK (toneLevel (y, a, b, 300.0, sr) > 0.4);  // the original's low tone stays
+    CHECK (toneLevel (y, a, b, 3000.0, sr) < 0.05); // its high tone is replaced...
+    CHECK (toneLevel (y, a, b, 5000.0, sr) > 0.4);  // ...by the clipboard's
+}

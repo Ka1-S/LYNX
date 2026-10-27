@@ -35,6 +35,7 @@ const char* toolTitle (Tool tool)
         case Tool::envFilter: return TR_NOOP ("Envelope filter");
         case Tool::smoothUp: return TR_NOOP ("Smooth up");
         case Tool::createSequence: return TR_NOOP ("Create sequence");
+        case Tool::pasteSpectral: return TR_NOOP ("Paste mix (spectral)");
     }
     return "";
 }
@@ -751,6 +752,35 @@ private:
                     s.smooth = on (smooth);
                     s.mix = value (mix) / 100.0;
                     return Process ([s] (ae::Document& d, ae::Range r, ae::Progress& p) { ae::equalize (d, r, s, &p); });
+                };
+                break;
+            }
+            case Tool::pasteSpectral:
+            {
+                // FL's spectral paste mix: the clipboard and the audio under it cross-faded per frequency
+                const auto h = header (tr ("Spectral mask"));
+                auto& c = curve (h);
+                c.axis = CurveEditor::Axis::frequency;
+                c.envelope = ae::Envelope::flat (1.0); // FL's default mask: all clipboard
+                const auto& clip = host.toolClipboard();
+                c.background = spectrumBackground (clip, { 0, clip.frames() }, 1.0);
+                c.describe = [&c] (double x, double y) {
+                    const auto hz = ae::curveFrequency (x, c.freqScale, c.sampleRate);
+                    return juce::String (hz < 1000 ? juce::String ((int) hz) + " Hz" : juce::String (hz / 1000.0, 2) + " kHz") + "  " + tr ("clipboard {0}%", { juce::String (juce::roundToInt (y * 100.0)) });
+                };
+                const auto scale = slider (tr ("Freq scale"), 0, 100, 1, 100, percent, 1);
+                static_cast<juce::Slider*> (editors[scale].get())->onValueChange = [this, &c, scale] {
+                    c.freqScale = value (scale) / 100.0;
+                    c.repaint();
+                    controlChanged();
+                };
+                describe = [where] { return where + "\n" + tr ("Per frequency: top = the clipboard, bottom = the original audio, between = a mix of both. The clipboard goes at the selection's start."); };
+                selectionOnly = true;
+                makeProcess = [=, this, &c] {
+                    const auto mask = c.envelope;
+                    const auto fs = value (scale) / 100.0;
+                    const auto clipCopy = host.toolClipboard();
+                    return Process ([mask, fs, clipCopy] (ae::Document& d, ae::Range r, ae::Progress& p) { ae::pasteMixSpectral (d, r.start, clipCopy, mask, fs, &p); });
                 };
                 break;
             }

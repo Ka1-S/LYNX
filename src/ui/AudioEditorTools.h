@@ -51,7 +51,8 @@ enum class Tool
     decimate,
     envFilter,
     smoothUp,
-    createSequence
+    createSequence,
+    pasteSpectral
 };
 
 const char* toolTitle (Tool tool); // English, for tr()
