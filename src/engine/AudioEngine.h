@@ -674,6 +674,13 @@ private:
     {
         return song.mode == PlayMode::song && (! song.hasLoop() || recordOptions.punchLoopRegion);
     }
+    // the audio thread's view of the above while takes record (false when none is open)
+    void updateLinearSong() noexcept
+    {
+        const auto on = takeCount > 0 && linearRecording();
+        liveInput.linearSong.store (on);
+        liveInput.noLoopRegion.store (on && song.hasLoop());
+    }
     takes::LatencyPing ping;                       // audio thread while running (UI starts it, reads the result)
     juce::int64 lostFrames = 0;
     std::array<int, 2> pingOutputs { -1, -1 };     // callback output slots the click goes to

@@ -628,8 +628,7 @@ void AudioEngine::setRecordOptions (const RecordOptions& options)
     recordOptions.countInBars = juce::jlimit (0, 4, options.countInBars);
     recordOptions.preRollBars = juce::jlimit (0, 8, options.preRollBars);
     recordOptions.postRollBars = juce::jlimit (0, 8, options.postRollBars);
-    if (takeCount > 0)
-        liveInput.linearSong.store (linearRecording());
+    updateLinearSong();
     sendChangeMessage();
 }
 
@@ -660,7 +659,7 @@ void AudioEngine::startPlayback()
             startAt = std::max<std::int64_t> (0, in - pre);
             transport.seekRequest.store ((double) startAt);
         }
-        liveInput.linearSong.store (takeCount > 0 && linearRecording());
+        updateLinearSong();
     }
 
     if (recordOptions.waitForInput)
@@ -1201,7 +1200,7 @@ void AudioEngine::startAudioTake()
     takeCount = 0;
     for (auto& take : made)
         takes[(std::size_t) takeCount++] = take.get();
-    liveInput.linearSong.store (takeCount > 0 && linearRecording());
+    updateLinearSong();
 }
 
 void AudioEngine::writeJournals()
@@ -1238,6 +1237,7 @@ void AudioEngine::finishAudioTake()
         takeCount = 0;
     }
     liveInput.linearSong.store (false);
+    liveInput.noLoopRegion.store (false);
     std::vector<std::shared_ptr<Take>> done;
     done.swap (openTakes);
     {
@@ -3221,9 +3221,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         // Song mode: the loop region, or else the whole song (back to the start at its end, like FL)
         // (while audio takes record in Song mode without a loop region, the song plays on past its end instead of
         // starting over: the take stays one piece, as in Pro Tools / Nuendo; round 163)
+        // (punching on the loop region: the region is not looped either, playback runs on into the post-roll)
         const auto linear = liveInput.linearSong.load (std::memory_order_relaxed);
-        const auto loop = playbackLoop (transport.songMode.load (std::memory_order_relaxed), transport.loopStart.load (std::memory_order_relaxed),
-                                        transport.loopEnd.load (std::memory_order_relaxed), linear ? 0.0 : transport.songEnd.load (std::memory_order_relaxed));
+        const auto throughRegion = liveInput.noLoopRegion.load (std::memory_order_relaxed);
+        const auto loop = playbackLoop (transport.songMode.load (std::memory_order_relaxed),
+                                        throughRegion ? 0.0 : transport.loopStart.load (std::memory_order_relaxed),
+                                        throughRegion ? 0.0 : transport.loopEnd.load (std::memory_order_relaxed),
+                                        linear ? 0.0 : transport.songEnd.load (std::memory_order_relaxed));
         const auto loopStart = loop.start, loopEnd = loop.end;
         const auto looping = playing && loop.active() && tps > 0.0;
 

@@ -305,12 +305,13 @@ public:
             // (round 163): records a click track through a loopback (cable, interface loopback or PipeWire's
             // pw-loopback): pings the round trip, plays a click on every beat from an audio clip, records it on Insert 1,
             // stops, and checks every recorded click's song position on the Playlist against its beat (samples).
-            // --loop: loop recording over bars 2-4 (take lanes).
+            // --loop: loop recording over bars 2-4 (take lanes). --punch: punch in/out on bars 3-4 with 1 bar of pre-roll
+            // and 1 of post-roll (playback stops by itself after the post-roll).
             const auto i = args.indexOf ("--rectest");
             const auto option = [&args] (const char* name) { return args.contains (name) ? args[args.indexOf (name) + 1].unquoted() : juce::String(); };
             const auto seconds = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].getDoubleValue() : 20.0;
             runRecordTest (juce::File (args[i + 1].unquoted()), seconds > 0.0 ? seconds : 20.0, option ("--type"), option ("--device"), option ("--input"),
-                           args.contains ("--loop"), option ("--pdc").getIntValue(), option ("--buffer").getIntValue());
+                           args.contains ("--loop") ? 1 : args.contains ("--punch") ? 2 : 0, option ("--pdc").getIntValue(), option ("--buffer").getIntValue());
             return;
         }
 
@@ -3336,7 +3337,7 @@ private:
     // --rectest (round 163): see the command line above. Writes report lines step by step (a driver that ends the
     // process leaves what was done).
     void runRecordTest (const juce::File& report, double seconds, const juce::String& deviceType, const juce::String& deviceName,
-                        const juce::String& inputName, bool loopRecording, int pdcSamples, int bufferSize)
+                        const juce::String& inputName, int mode, int pdcSamples, int bufferSize)
     {
         engine = std::make_unique<lynx::AudioEngine>();
         savedDeviceState = engine->getDeviceManager().createStateXml();
@@ -3418,9 +3419,14 @@ private:
         clip.start = 0;
         clip.length = (std::int64_t) beats * lynx::ppq;
         song.playlist.push_back (clip);
-        if (loopRecording) // bars 2-4
+        if (mode == 1) // loop recording, bars 2-4
         {
             song.loopStart = 4 * lynx::ppq;
+            song.loopEnd = 16 * lynx::ppq;
+        }
+        else if (mode == 2) // punch in/out, bars 3-4
+        {
+            song.loopStart = 8 * lynx::ppq;
             song.loopEnd = 16 * lynx::ppq;
         }
         if (song.mixer.size() > 1)
@@ -3435,7 +3441,7 @@ private:
         // 1) the ping
         if (const auto error = engine->startLatencyPing(); error.isNotEmpty())
             step ("ping_error=" + error);
-        juce::Timer::callAfterDelay (3500, [this, step, finish, seconds, rate, report] {
+        juce::Timer::callAfterDelay (3500, [this, step, finish, seconds, rate, report, mode] {
             if (engine == nullptr)
                 return;
             if (engine->isPinging())
@@ -3452,19 +3458,24 @@ private:
             o.recordAudio = true;
             o.countInBars = 0;
             o.waitForInput = false;
+            o.punchLoopRegion = mode == 2;
+            o.preRollBars = mode == 2 ? 1 : 0;
+            o.postRollBars = mode == 2 ? 1 : 0;
             engine->setRecordOptions (o);
             engine->stop();
             engine->rewind();
             engine->setRecording (true);
-            juce::Timer::callAfterDelay (300, [this, step, finish, seconds, rate, report] {
+            juce::Timer::callAfterDelay (300, [this, step, finish, seconds, rate, report, mode] {
                 if (engine == nullptr)
                     return;
-                engine->play();
-                juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, step, finish, seconds, rate, report] {
+                engine->startPlayback(); // (as the Play button: pre-roll / punch)
+                juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, step, finish, seconds, rate, report, mode] {
                     if (engine == nullptr)
                         return;
+                    if (mode == 2)
+                        step (juce::String ("stopped_by_post_roll=") + (engine->getTransport().playing.load() ? "no" : "yes"));
                     engine->stop();
-                    juce::Timer::callAfterDelay (500, [this, step, finish, seconds, rate, report] {
+                    juce::Timer::callAfterDelay (500, [this, step, finish, seconds, rate, report, mode] {
                         if (engine == nullptr)
                             return;
                         engine->setRecording (false);
@@ -3526,7 +3537,17 @@ private:
                         step ("clicks_in_file=" + juce::String ((int) peaks.size()) + " checked=" + juce::String (checked) + " clips=" + juce::String (clips)
                               + " muted_lanes=" + juce::String (muted));
                         step ("placement_error_samples=max " + juce::String (worst, 3) + " mean " + juce::String (checked > 0 ? sum / checked : 0.0, 3));
-                        const auto ok = checked > 0 && worst <= 1.0 && engine->getLostRecordingFrames() == 0;
+                        auto ok = checked > 0 && worst <= 1.0 && engine->getLostRecordingFrames() == 0;
+                        if (mode == 2) // one clip, exactly the punch range, its 8 beats
+                        {
+                            const auto& sp = engine->getSong();
+                            bool exact = false;
+                            for (const auto& c : sp.playlist)
+                                if (c.kind == lynx::ClipKind::audio && c.channel == take)
+                                    exact = c.start == sp.loopStart && c.start + c.length == sp.loopEnd;
+                            step (juce::String ("punch_clip_matches_range=") + (exact ? "yes" : "no"));
+                            ok = ok && clips == 1 && exact && checked == 8;
+                        }
                         step (juce::String ("result=") + (ok ? "OK" : "FAILED"));
                         finish (ok ? 0 : 1);
                     });

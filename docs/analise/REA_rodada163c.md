@@ -51,16 +51,16 @@ manuals / common knowledge of the other DAWs (no reverse engineering of third-pa
 | Disk-space warning | ✅ | ✅ | ❌ | ❌ | ✅ |
 | 24-bit / 32-bit float files at the device rate | ✅ | ✅ | ✅ | ⚠️ 24 only | ✅ |
 | Take file naming by track + take number | ✅ | ✅ | ❌ | ❌ | ✅ (`<Insert>_Take<N>`, FL naming optional) |
-| Punch in/out on a time selection | ✅ | ✅ | ⚠️ (markers) | ⚠️ (markers) | see batch 2 |
-| Pre-roll / post-roll | ✅ | ✅ | ❌ | ❌ | see batch 2 |
+| Punch in/out on a time selection | ✅ | ✅ | ⚠️ (markers) | ⚠️ (markers) | ✅ on the loop region (markers still work) |
+| Pre-roll / post-roll | ✅ | ✅ | ❌ | ❌ | ✅ 1/2/4 bars |
 | Count-in | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Loop recording into takes | ✅ | ✅ (lanes) | ⚠️ | ❌ | ✅ one clip per pass, last on top, earlier muted on folded lanes |
-| Comping (select range, promote take) | ✅ | ✅ | ❌ | ❌ | see batch 3 |
+| Comping (select range, promote take) | ✅ | ✅ | ❌ | ❌ | ✅ promote a lane (or its loop-region part) to the comp track, with short fades |
 | One key from record to clip | ✅ (3 on numpad / F12) | ✅ (*) | ⚠️ | ⚠️ | ✅ Shift+R (arms, records, Shift+R stops) |
 | Song keeps playing past its end while recording | ✅ (linear timeline) | ✅ | ⚠️ (loops) | ❌ (loops back to the start) | ✅ (Song mode without a loop region) |
-| Hardware insert (External FX with ping) | ✅ (H/W Insert) | ✅ (External FX) | ❌ (Fruity Send + mixer I/O by hand) | ❌ | see batch 4 |
+| Hardware insert (External FX with ping) | ✅ (H/W Insert) | ✅ (External FX) | ❌ (Fruity Send + mixer I/O by hand) | ❌ | ❌ not done (§4) |
 
-## 3. What changed (batch 1)
+## 3. What changed (batch 1: arm, monitoring, latency compensation with the ping)
 
 ### 3.1 Sample-accurate placement [CODE][TEST]
 `core/TakeRecording.{h,cpp}`: `takes::place (firstTick, takeTicks, ticksPerSample, latency)`.
@@ -127,7 +127,34 @@ the files only. Closing LYNX while recording also leaves the journals, so those 
   as set); Shift+R again stops — the clip is on the Playlist.
 - Messages: low disk (< 10 min left; < 30 s refuses to start), record safe, frames lost.
 
+### 3.8 Batch 2 — punch in/out, pre-roll, post-roll, count-in, crash safety [CODE][TEST][RUN]
+- Record menu: "Audio: punch in/out on the loop region", "Audio: pre-roll" and "Audio: post-roll" (Off / 1 / 2 / 4
+  bars, saved with the UI options). Count-in (1–4 bars, existing) counts in from where playback really starts.
+- Punch: Play starts `pre-roll` bars before the region (or before the play position without punch); the take records
+  everything (so nothing is lost if you start late) but only the region is kept on the Playlist (`takes::punch`,
+  sample-accurate edges). While punching, the region is *not* looped (`LiveInput::noLoopRegion`): playback runs
+  through the punch-out into the post-roll and then stops by itself (`punchStopAt`, checked on the engine's 30 Hz
+  timer — the take's cut is exact anyway).
+- FL's recording markers keep working as before when no punch region is active.
+- Crash safety: §3.5 (header every second, journal, "Recordings recovered" at the next start).
+
+### 3.9 Batch 3 — loop takes and comping [CODE][TEST][RUN]
+- Loop recording: §3.6 (one clip per pass, cut at the real wrap frames; last pass on top, earlier passes muted on
+  folded lanes named "<track> (take N)").
+- Comping: right-click a lane clip › "Promote this take to the comp track" (or "… in the loop region …" when the loop
+  region covers part of it — select the phrase with the time selection first). `takes::promoteTake` splits the comp
+  track's clips at the range edges, removes what played there, and puts that piece of the take there unmuted with
+  8-tick (~4 ms) fades at the cut edges; the lane clip stays as it was. One undo step.
+- Test `rec163_take_lanes_and_comping`: lanes/grouping/naming, promote of a middle range keeps both sides of the comp
+  with the right offsets (sample-exact), fades only on cut edges, out-of-range/invalid calls change nothing.
+
 ## 4. Not changed / notes
+- **Hardware insert (External FX with ping) — not done.** It needs a new effect kind that sends the insert's signal
+  to a chosen output pair and reads it back from an input pair inside the mixer graph, reports its measured round
+  trip as plugin latency (PDC), is bypassed with a warning in offline export (hardware can't run faster than real
+  time), plus its editor, saving and a ping button. That is a round of its own; the parts it would reuse are there
+  (`takes::LatencyPing`, per-insert hardware outputs from r156, per-insert inputs). Today: route an insert to a
+  hardware output and record the return on another insert (the take is placed with the measured compensation).
 - The metronome node is not delayed by PDC (it goes straight to the output) — a performer following the click
   rather than the song hears it `pdc` samples early. Takes are compensated for the song (what one usually plays to).
 - Audio clips play from `startSeconds = offset × secondsPerTick` at the song's base tempo; tempo automation during a
@@ -135,7 +162,24 @@ the files only. Closing LYNX while recording also leaves the journals, so those 
 - Files > 4 GB (≈ 6 h stereo 24-bit at 48 kHz) would need RF64; the header saturates at 4 GB.
 
 ## 5. Measurements
-(see "Where I stopped")
+Method: the new `LYNX --rectest report.txt [seconds] [--type T] [--device D] [--input I] [--loop|--punch] [--buffer N]`
+on the Linux build against a private PipeWire 1.6.2 daemon with `pw-loopback` (sink → source, the "cable"). It pings
+the round trip, plays a 5-sample click on every beat at 120 bpm from an audio clip, records it on Insert 1 through the
+loopback, and checks every recorded click's position on the Playlist (clip start + sub-tick offset) against its beat.
+The default song has a lookahead limiter on the Master (72 samples PDC), so the PDC part of the compensation is tested
+too. Takes are written next to the report (not into the user's Recordings folder).
+
+| Run | Block | Ping | Compensation | Take | Clicks checked | Worst placement error | Lost |
+|---|---|---|---|---|---|---|---|
+| 20 s linear | 512 | 512, spread 0, 8/8 | 584 = 512 + PDC 72 | 960 000 frames = 20.000 s | 40 | 0.000 samples | 0 |
+| 15 s linear | 128 | 128, 8/8 | 200 | 720 128 frames | 30 | 0.000 | 0 |
+| 20 s loop bars 2–4 | 256 | 256, 8/8 | 328 | 3 passes (2 muted lanes) | 36 | 0.000 | 0 |
+| 600 s linear (with 3 parallel compiles running) | 64 | 64, 8/8 | 136 | 26 982 336 frames (562.1 s) | 1088 | 0.000 | 0 |
+| punch bars 3–4, 1 bar pre/post-roll | 256 | see below | | | | | |
+
+The 600 s run: the device itself missed ~38 s of cycles while three compiles loaded the machine (PipeWire's timer
+driver under WSL; the transport stood still with it), yet all 1088 clicks over the 9½ minutes land on their beats
+with 0.000 samples of error and no frame lost — no drift.
 
 ## Where I stopped
 - Batch 1 implemented (core + engine + UI), unit tests green in the mini harness; full build-local and Windows build
