@@ -28,7 +28,7 @@ before → after (blank = not touched in round 165). Lowest first.
 
 | LYNX engine | Original | Config | Design | Since | Round 165 |
 |---|---|---|---|---|---|
-| Ridge Strip | SSL E-Channel (Waves) | 8 | 7 | 147 | |
+| Ridge Strip | SSL E-Channel (Waves) | 9 | 8 | 165 | 8 → 9 / 7 → 8 |
 | Ember Saturator | Decapitator | 8 | 7 | 135 | |
 | LYNX Tune | Auto-Tune Pro | 8 | 7 | 135 | |
 | Ridge Strip (Vocal strip) | SSL Native Vocalstrip 2 | 9 | 7 | 145 | |
@@ -737,6 +737,8 @@ Trial on this PC: yes (older capture used).
 | Saved-state translation | — | every control (E console voicing, round 123; Analog 147b; Dyn S.C. round 165) | ✅ | round 113 §3c, 123, 165 |
 
 **Round 147b:** configuration 7 → 8 (auto make-up, ANALOG measured and translated), design 7 → 7.
+
+**Round 165** (REA_rodada165h): configuration 8 → **9**, design 7 → **8** — EQ TO DYN S.C. (the filters and the EQ only in the dynamics' side chain, measured: −25 … −27 dB null on a de-essing setting), the console's ∞ : 1 (state value 100, was read as 20 : 1) and its law refitted on the trial's stairs (∞ settings −0.6 … −2 dB null → −21 … −39 dB; 10 : 1 −17 … −22 → −23 … −51 dB), the two GR LED ladders, the gain read-out of the curve in use, Split shown where it acts. Left: the E voicing's compressor threshold turns the opposite way (clockwise = higher), the output fader's −24 … +12 range, a gate-open LED, Expand as the default.
 
 **Scores:** configuration 6/10, design 6/10. An SSL user finds every knob in the expected column. What is missing
 or wrong: Split / Dyn S.C. semantics, Analog, auto make-up, the In/Out meter with the output fader, and
