@@ -233,13 +233,47 @@ TEST (browser162_search_is_served_before_a_background_pass)
     service.refresh ({ "/lib" }, true);
     std::this_thread::sleep_for (std::chrono::milliseconds (200));
     CHECK (service.status().busy);
+    const int listedAtSearch = big.lists.load();
     const auto t = std::chrono::steady_clock::now();
     service.search ("kick 1-", { "/lib/a1" }, 500, inbox.sink());
     while (inbox.take().empty() && b162::msSince (t) < 5000)
         std::this_thread::sleep_for (std::chrono::milliseconds (2));
     const auto answeredMs = b162::msSince (t);
-    std::printf ("  [b162] search answered in %.1f ms during a rebuild\n", answeredMs);
+    std::printf ("  [b162] search answered in %.1f ms during a rebuild (%d folders listed in the first 200 ms)\n", answeredMs, listedAtSearch);
     CHECK (answeredMs < 500);
     CHECK (service.waitIdle (30000));
     CHECK (service.status().folders == 2551 && ! service.status().busy);
+}
+
+TEST (browser164_rebuild_keeps_the_index_readable_and_drops_what_is_gone)
+{
+    // "Rebuild search index" lists every folder again even when its time did not change, without forgetting the index
+    // first (searches meanwhile read it); folders the rebuild no longer reaches are dropped at its end
+    b162::SlowDisk disk (5, 0);
+    lynx::search::Service service (disk.fs(), {});
+    b162::Inbox inbox;
+    service.search ("kick", { "/lib" }, 500, inbox.sink());
+    CHECK (service.waitIdle (10000));
+    auto r = inbox.take();
+    CHECK (r.size() == 1 && r[0].paths.size() == 5 * 5 * 4);
+    const auto listedFirst = disk.lists.load();
+    {
+        // the disk changes behind the folders' times: a2 is gone, a file appears in a3/b1
+        const std::lock_guard<std::mutex> g (disk.m);
+        auto& subs = disk.disk["/lib"].subs;
+        subs.erase (std::find (subs.begin(), subs.end(), "a2"));
+        disk.disk["/lib/a3/b1"].files.push_back ("kick new.wav");
+    }
+    service.refresh ({ "/lib" }, false); // an ordinary pass trusts the times
+    CHECK (service.waitIdle (10000));
+    CHECK (disk.lists.load() == listedFirst);
+    service.refresh ({ "/lib" }, true);
+    CHECK (service.waitIdle (10000));
+    CHECK (disk.lists.load() == listedFirst + 1 + 4 * 6);
+    CHECK (service.status().folders == 1 + 4 * 6 && service.status().files == 4 * 5 * 20 + 1);
+    service.search ("kick", { "/lib" }, 500, inbox.sink());
+    CHECK (service.waitIdle (10000));
+    r = inbox.take();
+    CHECK (r.size() == 1 && ! r[0].partial && r[0].paths.size() == 4 * 5 * 4 + 1);
+    CHECK (std::none_of (r[0].paths.begin(), r[0].paths.end(), [] (const std::string& p) { return p.rfind ("/lib/a2/", 0) == 0; }));
 }

@@ -103,6 +103,7 @@ private:
     {
         std::vector<std::string> roots;
         bool rebuild = false;
+        std::uint64_t rebuildMark = 0;  // Index::beginRebuild() of a rebuild that started (0: an ordinary pass)
         std::size_t listedBefore = 0; // folders listed again before the pass was interrupted
     };
 

@@ -59,8 +59,10 @@ public:
     // Brings the folders under `root` up to date (adds root when new). Returns how many folders were listed again;
     // stops early (leaving the rest for the next refresh) when shouldStop returns true (checked between folders).
     // With `guard`, the index is only locked while it is read or changed, never while the disk is read, so searches
-    // of what is already indexed are not held up by a long walk (round 162, issue #9).
-    int refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop = {}, std::mutex* guard = nullptr);
+    // of what is already indexed are not held up by a long walk (round 162, issue #9). Folders not listed since
+    // `relistBefore` (a beginRebuild() mark) are listed again even when their time did not change.
+    int refresh (const std::string& root, const FileSystem& fs, const std::function<bool()>& shouldStop = {}, std::mutex* guard = nullptr,
+                 std::uint64_t relistBefore = 0);
 
     // Files whose name matches `query` under the given roots (full paths), in folder order, at most `max`.
     std::vector<std::string> find (const std::string& query, const std::vector<std::string>& roots, std::size_t max, bool& truncated) const;
@@ -74,6 +76,12 @@ public:
         complete.clear();
         ++gen;
     }
+
+    // A rebuild without forgetting the index first (round 164): searches keep reading what is indexed while every
+    // folder is listed again (refresh with the returned mark as relistBefore); sweep (mark) then drops the folders no
+    // refresh reached since the mark (gone from the disk, or outside the rebuilt trees).
+    std::uint64_t beginRebuild() noexcept { return ++mark; }
+    void sweep (std::uint64_t since);
 
     // Changes whenever the index does (round 164: what was worked out from it is out of date).
     std::uint64_t generation() const noexcept { return gen; }
@@ -101,10 +109,12 @@ private:
     {
         std::int64_t time = 0;
         std::vector<std::string> files, subfolders;
+        std::uint64_t listedIn = 0, seenIn = 0; // the beginRebuild() mark current when it was last listed / reached
     };
     std::map<std::string, Folder> folders; // full path -> contents
     std::set<std::string> complete;
     std::uint64_t gen = 0;
+    std::uint64_t mark = 0;
     static std::string join (const std::string& folder, const std::string& name, char separator);
     void drop (const std::string& folder, char separator);
 };
