@@ -1,4 +1,6 @@
 #include "core/FlpImport.h"
+#include "core/ControlSurface.h"
+#include "core/XyController.h"
 #include "core/Patcher.h"
 #include <filesystem>
 #include "core/EditorPolish.h"
@@ -77,9 +79,10 @@ std::string lowercase (std::string s)
 
 void applyFlLayerFlags (int flags, LayerSettings& layer)
 {
-    // REA_rodada164a §1: bit 0 Random, bit 3 Crossfade
+    // REA_rodada164a §1 [DECOMP 0xF46490, 0xD29240]: bit 0 Random, bit 1 Crossfade, bit 2 Sequential (Random wins)
     layer.random = (flags & 1) != 0;
-    layer.crossfade = (flags & 8) != 0;
+    layer.crossfade = (flags & 2) != 0;
+    layer.sequential = (flags & 4) != 0 && ! layer.random;
 }
 
 InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType type)
@@ -806,6 +809,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.instrument = InstrumentKind::layer;
             def.layer.children = c.layerChildren;
             applyFlLayerFlags (c.layerFlags, def.layer);
+            def.layer.fade = std::clamp ((float) c.layerFade / 256.0f, 0.0f, 1.0f);
+        }
+        // every channel's key region (REA_rodada164a §2): FL's 0…256 range is every key
+        if (c.keyRegionLow > 0 || c.keyRegionHigh < 256)
+        {
+            def.keyLow = std::clamp (c.keyRegionLow, 0, 127);
+            def.keyHigh = std::clamp (c.keyRegionHigh, def.keyLow, 127);
         }
 
         // FL synthesizer that becomes the internal synth: a preset matching the name (in FLEX, the name
@@ -3030,7 +3040,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (! link.source.isMixer() || link.source.track() < 0 || link.source.track() >= (int) song.mixer.size())
             continue;
 
-        // static X-Y Controller / Control Surface: the current value is applied to the target once
+        // an X-Y (-Z) Controller / Control Surface imported as LYNX's own (round 164): a live link (below)
+        const auto liveSlot = effectSlotMap.find ({ link.source.track(), link.source.slot() });
+        const auto liveKind = liveSlot != effectSlotMap.end() ? song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) liveSlot->second.first].kind
+                                                              : EffectKind::eq;
+        const auto newController = xy::isXyController (liveKind) || liveKind == EffectKind::controlSurface;
+
+        // static X-Y Controller / Control Surface (not imported): the current value is applied to the target once
+        if (! newController)
         {
             const flp::MixerInsert::Slot* source = nullptr;
             for (const auto& insert : project.mixer)
@@ -3053,9 +3070,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         const auto found = effectSlotMap.find ({ link.source.track(), link.source.slot() });
         if (found == effectSlotMap.end()
             || (song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::peakController
-                && song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::formulaController))
+                && song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::formulaController
+                && ! newController))
             continue;
-        const auto formulaSource = song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind == EffectKind::formulaController;
+        const auto& sourceSlot = song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first];
+        const auto formulaSource = sourceSlot.kind == EffectKind::formulaController;
 
         Automation a;
         std::function<float (float)> valueMap;
@@ -3063,14 +3082,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (a.target.kind == AutomationTargetKind::none || a.target.kind == AutomationTargetKind::tempo)
             continue;
 
-        a.name = std::string (formulaSource ? "Formula Controller (" : "Peak Controller (") + song.mixer[(std::size_t) link.source.track()].name + ")";
+        a.name = std::string (newController ? effectInfo (sourceSlot.kind).name : formulaSource ? "Formula Controller" : "Peak Controller") + " ("
+                 + song.mixer[(std::size_t) link.source.track()].name + ")";
         a.source = { link.source.track(), found->second.first, link.source.param() - flp::ControlId::pluginParamBase };
+        if (sourceSlot.kind == EffectKind::controlSurface) // FL's output numbers → the panel's order
+        {
+            const auto k = surface::flOutputToLynx (sourceSlot.state, a.source.output);
+            if (! k)
+                continue;
+            a.source.output = *k;
+        }
+        else if (xy::isXyController (sourceSlot.kind) && (a.source.output < 0 || a.source.output >= xy::axesOf (sourceSlot.kind)))
+            continue;
         if (valueMap)
             for (int i = 0; i <= 32; ++i)
                 a.curve.push_back (std::clamp (valueMap ((float) i / 32.0f), 0.0f, 1.0f));
         song.automations.push_back (std::move (a));
         if (options.report != nullptr)
-            ++options.report->converted[formulaSource ? "Formula Controller (link)" : "Peak Controller (link)"];
+            ++options.report->converted[newController ? std::string (effectInfo (sourceSlot.kind).name) + " (link)"
+                                        : formulaSource ? "Formula Controller (link)" : "Peak Controller (link)"];
     }
 
     // Playlist: all arrangements (the first stays open); pattern, audio and automation clips.

@@ -80,7 +80,8 @@ enum class InstrumentKind : std::uint8_t
                 // MIDI input port is its port (PluginRef::midiInPort). FL's state (channel @4, port @24) in pluginState
     patcher,    // FL's Patcher as a generator (REA_rodada141): a graph of instruments and effects in ChannelDef::patcher
     soundfont,  // LYNX Soundfont (REA_rodada158, core/SoundFont.h): the .sf2 / .sf3 in samplePath, settings in modelParams
-    layer       // FL's Layer channel (REA_rodada164a, core/Layer.h): no sound; its notes play its children (ChannelDef::layer)
+    layer,      // FL's Layer channel (REA_rodada164a, core/Layer.h): no sound; its notes play its children (ChannelDef::layer)
+    dashboard   // FL's Dashboard (REA_rodada164a, core/ControlSurface.h): no sound; a panel of controls in patcher.surface
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -368,6 +369,7 @@ struct SurfaceControl
     std::string name;
     float value = 0.0f, valueY = 0.0f; // 0..1 (an XY pad has two)
     float x = 40.0f, y = 40.0f;        // place on the Surface tab
+    float size = 1.0f;                 // a Control Surface / Dashboard control's scale (round 164; 0.5…3)
     // control outputs: one each, an XY pad two (X then Y)
     int outputs() const noexcept { return kind == Kind::xy ? 2 : 1; }
     bool operator== (const SurfaceControl&) const = default;
@@ -646,10 +648,13 @@ enum class EffectKind : std::uint8_t
     voiceShift,      // LYNX's Voice Shift (REA_rodada135s, core/VoiceShift.h): pitch / formant / quantize / robot + drive
     emphasizer,      // FL's Emphasizer, exact (REA_rodada154, core/EmphasizerFx.h): FL's 6 controls / max
     flFrequencyShifter, // FL's Frequency Shifter, exact (REA_rodada154, core/FreqShifterFl.h): FL's 10 controls (raw − min) / range
-    flLowLifter      // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
+    flLowLifter,     // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
+    xyController,    // FL's X-Y Controller (REA_rodada164a, core/XyController.h): no sound; outputs X, Y follow a pad
+    xyzController,   // FL's X-Y-Z Controller (REA_rodada164a, core/XyController.h): the same with a Z axis (mouse wheel)
+    controlSurface   // FL's Control Surface (REA_rodada164a, core/ControlSurface.h): a user panel; output k = params[k]
 };
 // the last EffectKind (loops over every kind; update when one is appended)
-constexpr EffectKind lastEffectKind = EffectKind::flLowLifter;
+constexpr EffectKind lastEffectKind = EffectKind::controlSurface;
 
 constexpr int maxEffectParams = 160; // round 150: Prism Multiband 155, Ember 133. LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
 constexpr int maxEffectSlots = 10; // as in FL

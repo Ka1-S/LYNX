@@ -48,6 +48,8 @@
 #include "core/DynamicsSuite.h"
 #include "core/VoiceTools.h"
 #include "core/VoiceShift.h"
+#include "core/XyController.h"
+#include "core/ControlSurface.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2898,6 +2900,40 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                            { "Multiband", 0.0f }, { "High band", 1.0f }, { "Low band", 1.0f } } };
             return info;
         }
+        case EffectKind::xyController:
+        case EffectKind::xyzController:
+        {
+            // round 164: per axis level / min / max / tension, then speed and acceleration (core/XyController.h)
+            static const auto make = [] (EffectKind k) {
+                EffectInfo info { k == EffectKind::xyController ? "X-Y Controller" : "X-Y-Z Controller", {} };
+                static const char* names[3][4] = { { "X level", "X min", "X max", "X tension" },
+                                                   { "Y level", "Y min", "Y max", "Y tension" },
+                                                   { "Z level", "Z min", "Z max", "Z tension" } };
+                const auto d = xy::defaults (k);
+                for (int a = 0; a < xy::axesOf (k); ++a)
+                    for (int i = 0; i < 4; ++i)
+                        info.params.push_back ({ names[a][i], d[(std::size_t) (4 * a + i)] });
+                info.params.push_back ({ "Speed", d[(std::size_t) xy::speed (k)] });
+                info.params.push_back ({ "Acceleration", d[(std::size_t) xy::acceleration (k)] });
+                return info;
+            };
+            static const EffectInfo xyInfo = make (EffectKind::xyController), xyzInfo = make (EffectKind::xyzController);
+            return kind == EffectKind::xyController ? xyInfo : xyzInfo;
+        }
+        case EffectKind::controlSurface:
+        {
+            // round 164: one parameter per control output (the panel's controls name them, core/ControlSurface.h)
+            static const EffectInfo info = [] {
+                EffectInfo i { "Control Surface", {} };
+                static std::vector<std::string> names;
+                for (int k = 0; k < surface::maxOutputs; ++k)
+                    names.push_back ("Control " + std::to_string (k + 1));
+                for (const auto& n : names)
+                    i.params.push_back ({ n.c_str(), 0.0f });
+                return i;
+            }();
+            return info;
+        }
     }
     return eq;
 }
@@ -3362,6 +3398,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return fsfl::paramText (param, v);
         case EffectKind::flLowLifter:
             return lowlifter::paramText (param, v);
+        case EffectKind::xyController:
+        case EffectKind::xyzController:
+            return xy::paramText (kind, param, v);
+        case EffectKind::controlSurface:
+            std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
+            return text;
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3609,6 +3651,9 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::emphasizer: return emphasizer::make(); // round 154
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::flLowLifter: return lowlifter::make(); // round 154
+        case EffectKind::xyController:
+        case EffectKind::xyzController: return xy::makeEffect (kind); // round 164
+        case EffectKind::controlSurface: return surface::makeEffect(); // round 164
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

@@ -1531,7 +1531,8 @@ static bool hasLiveMeters (EffectKind kind) noexcept
     return mixsuite::isSuiteKind (kind) || dyn::isDynKind (kind) || kind == EffectKind::lynxTune || kind == EffectKind::facetEq
            || kind == EffectKind::apexLimiter || voicetools::isVoiceKind (kind) || kind == EffectKind::compressor
            || kind == EffectKind::echoform // round 135w: Echoform's output meter
-           || kind == EffectKind::autoPan || kind == EffectKind::voiceShift; // round 135: the pan position, the shifter's notes
+           || kind == EffectKind::autoPan || kind == EffectKind::voiceShift // round 135: the pan position, the shifter's notes
+           || kind == EffectKind::xyController || kind == EffectKind::xyzController; // round 164: the pad's target and outputs
 }
 
 void RackRenderer::setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept
@@ -1607,7 +1608,11 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         // (nor a slot whose "Smart disable" is off, or a plugin that does not allow it — FL's per-plugin options, REA round 139)
         if (key < smartDisable.size() && slots[i].smartDisable && ! (isPlugin && ! slots[i].plugin.allowSmartDisable)
             && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
-            && slots[i].kind != EffectKind::newtime)
+            && slots[i].kind != EffectKind::newtime
+            // (nor a controller: its outputs move whatever the sound — a silent insert is their usual place; round 164)
+            && slots[i].kind != EffectKind::formulaController
+            && slots[i].kind != EffectKind::xyController && slots[i].kind != EffectKind::xyzController
+            && slots[i].kind != EffectKind::controlSurface)
         {
             auto& sd = smartDisable[key];
 
@@ -2099,7 +2104,7 @@ void RackRenderer::expandLayers (const RackState& state) noexcept
         auto* picked = layerPick.empty() ? nullptr : &layerPick[(std::size_t) e.channel * 128 + (std::size_t) key];
         auto child = e;
         child.pan = std::clamp (e.pan + l.pan, -1.0f, 1.0f);
-        child.cents = e.cents + 100.0f * l.sampler.pitch;
+        child.cents = e.cents + layer::pitchCents (l);
         const auto one = l.layer.random || l.layer.sequential;
 
         if (e.type == NoteEvent::Type::on)

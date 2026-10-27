@@ -1,4 +1,7 @@
 #include "ui/PatcherEditor.h"
+#include "core/ControlSurface.h"
+#include "core/XyController.h"
+#include "ui/Controllers164.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1215,6 +1218,7 @@ public:
         builtIn ("Controller", InstrumentKind::controller, tr ("Envelope Controller"),
                  [] (ChannelDef& c) { c.controllerState = writeEnvelopeController (defaultEnvelopeController()); });
         builtIn ("Controller", InstrumentKind::controller, tr ("Keyboard Controller"), [] (ChannelDef& c) { c.controllerState = defaultKeyboardController(); });
+        builtIn ("Controller", InstrumentKind::dashboard, "Dashboard", [] (ChannelDef& c) { c.patcher.surface = surface::starterControls(); });
         for (const auto kind : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap })
             builtIn ("Drum", kind, juce::String (effectNameOf (kind)));
         builtIn ("MIDI", InstrumentKind::midiOut, "MIDI Out", [] (ChannelDef& c) { midictl::writeMidiOut (c.pluginState, midictl::MidiOutSettings {}); });
@@ -1412,7 +1416,8 @@ private:
     {
         switch (kind)
         {
-            case EffectKind::formulaController: case EffectKind::peakController:
+            case EffectKind::formulaController: case EffectKind::peakController: case EffectKind::xyController: case EffectKind::xyzController:
+            case EffectKind::controlSurface:
                 return "Controller";
             case EffectKind::delay: case EffectKind::reverb: case EffectKind::epochVerb: case EffectKind::atrium: case EffectKind::foilPlate:
             case EffectKind::nebula: case EffectKind::halo: case EffectKind::horizon: case EffectKind::echoform: case EffectKind::spiralEcho:
@@ -1720,6 +1725,23 @@ private:
                 return;
             }
         }
+        // the X-Y / X-Y-Z pad and the Control Surface's panel (round 164) on the node's slot
+        if (! node.generator && (xy::isXyController (node.effect.kind) || node.effect.kind == EffectKind::controlSurface))
+        {
+            SlotLocator slot = [t = target, n] (Song& song) -> EffectSlot* {
+                auto* doc = t.doc (song);
+                return doc != nullptr && n < (int) doc->nodes.size() && ! doc->nodes[(std::size_t) n].generator ? &doc->nodes[(std::size_t) n].effect : nullptr;
+            };
+            auto editor = node.effect.kind == EffectKind::controlSurface
+                              ? makeControlSurfaceEditor (engine, slot, std::nullopt)
+                              : makeXyControllerEditor (engine, slot,
+                                                        [effect = graph != nullptr ? graph->effectAt (n) : nullptr] (int k) {
+                                                            return effect != nullptr ? effect->controlOutput (k) : 0.0f;
+                                                        },
+                                                        std::nullopt);
+            openToolWindow (std::move (editor), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
         if (! node.generator && node.effect.kind != EffectKind::plugin && node.effect.kind != EffectKind::patcher)
         {
             openToolWindow (std::make_unique<NodeParams> (engine, target, n), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
@@ -1730,6 +1752,11 @@ private:
             auto* doc = t.doc (song);
             return doc != nullptr && n < (int) doc->nodes.size() && doc->nodes[(std::size_t) n].generator ? &doc->nodes[(std::size_t) n].channel : nullptr;
         };
+        if (node.generator && node.channel.instrument == InstrumentKind::dashboard) // round 164
+        {
+            openToolWindow (makeDashboardEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
         if (node.generator && node.channel.instrument == InstrumentKind::midiOut)
         {
             openToolWindow (makeMidiOutEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));

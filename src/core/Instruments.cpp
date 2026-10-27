@@ -1,4 +1,5 @@
 #include "core/Instruments.h"
+#include "core/ControlSurface.h"
 #include "core/Scheduler.h"
 
 #include "core/DirectWave.h"
@@ -231,6 +232,7 @@ private:
             case InstrumentKind::controller:
             case InstrumentKind::midiOut:
             case InstrumentKind::layer:
+            case InstrumentKind::dashboard:
             case InstrumentKind::patcher:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
@@ -2832,6 +2834,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return std::make_unique<ControllerInstrument>();
     if (kind == InstrumentKind::midiOut || kind == InstrumentKind::layer) // (a Layer's notes go to its children)
         return std::make_unique<MidiOutInstrument>();
+    if (kind == InstrumentKind::dashboard) // its controls' values as control outputs (round 164)
+        return surface::makeDashboard();
 
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
         return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);

@@ -4875,3 +4875,17 @@ countries: br
 "Delete children (removes the channels)" = "Excluir filhos (remove os canais)"
 "Delete children" = "Excluir filhos"
 "Delete the {0} child channels of this Layer from the project?" = "Excluir do projeto os {0} canais filhos deste Layer?"
+
+# round 164a: X-Y / X-Y-Z Controller, Control Surface, Dashboard
+"Show the {0} axis' settings (level, min, max, tension)" = "Mostra os ajustes do eixo {0} (nível, mín., máx., tensão)"
+"{0} level: where the target goes" = "Nível {0}: para onde o alvo vai"
+"{0} minimum: the output at the pad's low edge" = "Mínimo {0}: a saída na borda baixa do pad"
+"{0} maximum: the output at the pad's high edge" = "Máximo {0}: a saída na borda alta do pad"
+"{0} tension: bends the curve from the position to the output" = "Tensão {0}: curva o caminho da posição até a saída"
+"Speed: how fast the target follows the goal" = "Velocidade: quão rápido o alvo segue o objetivo"
+"Accel" = "Acel."
+"Acceleration: how quickly the target reaches its speed" = "Aceleração: quão rápido o alvo chega à velocidade"
+"Link its outputs to any knob: right-click it > Link to internal controller" = "Ligue as saídas a qualquer knob: clique direito nele > Vincular a controlador interno"
+"Edit mode: drag a control to move it, right-click it to rename, resize or delete it" = "Modo de edição: arraste um controle para movê-lo, clique direito para renomear, redimensionar ou excluir"
+"Add a control (knob, slider, button, check box, XY pad): each one is an output to link to any knob" = "Adicionar controle (knob, slider, botão, caixa de seleção, pad XY): cada um é uma saída para ligar a qualquer knob"
+"Empty panel. \"+\" adds a knob, a slider, a button, a check box or an XY pad; each one becomes an output you can link to any knob (right-click it > Link to internal controller)." = "Painel vazio. \"+\" adiciona um knob, um slider, um botão, uma caixa de seleção ou um pad XY; cada um vira uma saída que você pode ligar a qualquer knob (clique direito nele > Vincular a controlador interno)."

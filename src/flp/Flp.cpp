@@ -620,6 +620,11 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     c.fullPorta = e.data[62] != 0;
                     c.addToKey = e.data[63] != 0;
                     c.timeGate = readLE<std::uint16_t> (e.data, 64);
+                    // key region (+0x44 low, +0x48 high, inclusive; default 0 / 256 = every key) and the Layer's Fade
+                    // (+0x4C, 0…256) [REA_rodada164a DECOMP 0xD29370, 0xFF8F20]
+                    c.keyRegionLow = readLE<std::int32_t> (e.data, 0x44);
+                    c.keyRegionHigh = readLE<std::int32_t> (e.data, 0x48);
+                    c.layerFade = readLE<std::int32_t> (e.data, 0x4C);
                     c.arpRepeat = readLE<std::int32_t> (e.data, 92);
                     if (e.data.size() >= 116)
                         c.pitchRange = readLE<std::int32_t> (e.data, 112);

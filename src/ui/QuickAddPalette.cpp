@@ -1,4 +1,5 @@
 #include "ui/QuickAddPalette.h"
+#include "core/ControlSurface.h"
 
 #include "core/Effects.h"
 #include "core/PluginSubstitutes.h"
@@ -128,6 +129,21 @@ public:
                                             c.instrument = kind;
                                             targets.addInstrument (c);
                                         } });
+
+        // FL's Layer and Dashboard (round 164): no sound of their own
+        instruments.all.push_back ({ tr ("Layer"), tr ("built-in"), [this] {
+                                        ChannelDef c;
+                                        c.name = "Layer";
+                                        c.instrument = InstrumentKind::layer;
+                                        targets.addInstrument (c);
+                                    } });
+        instruments.all.push_back ({ "Dashboard", tr ("built-in"), [this] {
+                                        ChannelDef c;
+                                        c.name = "Dashboard";
+                                        c.instrument = InstrumentKind::dashboard;
+                                        c.patcher.surface = surface::starterControls();
+                                        targets.addInstrument (c);
+                                    } });
 
         // FL's own instrument engines (round 142): those this PC can make (the user's FL installation)
         for (const auto& e : natives::instrumentEngines())

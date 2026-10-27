@@ -1,6 +1,7 @@
 #include "ui/WindowOwner.h"
 #include "ui/ChannelSettings.h"
 #include "ui/LayerEditor.h"
+#include "ui/Controllers164.h"
 
 #include "core/MixerOps.h"
 
@@ -3354,6 +3355,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::sytrus:
         case InstrumentKind::soundfont:
         case InstrumentKind::layer:
+        case InstrumentKind::dashboard:
             return true;
         default:
             return false;
@@ -3402,6 +3404,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return makeSoundFontEditor (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::layer)
         return makeLayerEditor (engine, channel);
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::dashboard)
+        return makeDashboardEditor (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor

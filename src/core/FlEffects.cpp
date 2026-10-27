@@ -1,4 +1,6 @@
 #include "core/FlEffects.h"
+#include "core/ControlSurface.h"
+#include "core/XyController.h"
 #include "core/FormulaController.h"
 #include "core/Reeverb2.h"
 #include "core/LuxeVerb.h"
@@ -1186,6 +1188,18 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             slot.state = state;
             return slot;
         }
+    // X-Y / X-Y-Z Controller, Control Surface (REA_rodada164a): live controllers with FL's settings
+    if (auto xyc = xy::fromFl (pluginName, state))
+        return xyc;
+    if (pluginName == "Control Surface")
+        if (auto controls = surface::parseFlControlSurface (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::controlSurface);
+            slot.patcher.surface = std::move (*controls);
+            surface::syncParams (slot);
+            slot.state = state;
+            return slot;
+        }
     if (pluginName == "Newtone" || pluginName == "Newtime")
     {
         auto slot = makeEffectSlot (pluginName == "Newtone" ? EffectKind::newtone : EffectKind::newtime);
@@ -1518,6 +1532,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::emphasizer: return { "Emphasizer" };
         case EffectKind::flFrequencyShifter: return { "Frequency Shifter" };
         case EffectKind::flLowLifter: return { "Low Lifter" };
+        case EffectKind::xyController: return { "Fruity X-Y Controller" };
+        case EffectKind::xyzController: return {}; // (FL's X-Y-Z Controller: name from REA_rodada164a)
+        case EffectKind::controlSurface: return { "Control Surface" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:

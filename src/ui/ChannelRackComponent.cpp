@@ -3,6 +3,7 @@
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
 #include "ui/ChannelRackComponent.h"
+#include "core/ControlSurface.h"
 
 #include "core/MixerOps.h"
 
@@ -80,6 +81,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::patcher: return "Patcher";
         case InstrumentKind::soundfont: return "LYNX Soundfont";
         case InstrumentKind::layer: return "Layer";
+        case InstrumentKind::dashboard: return "Dashboard";
     }
     return "?";
 }
@@ -99,6 +101,7 @@ juce::String instrumentLabel (InstrumentKind k)
         case InstrumentKind::controller: return tr ("Envelope Controller");
         case InstrumentKind::midiOut: return tr ("MIDI Out");
         case InstrumentKind::layer: return tr ("Layer");
+        case InstrumentKind::dashboard: return "Dashboard";
         default: return instrumentName (k);
     }
 }
@@ -2108,6 +2111,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         ChannelDef c;
         c.name = tr ("Layer").toStdString();
         c.instrument = InstrumentKind::layer;
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Dashboard (round 164): a panel of knobs / sliders / buttons, each an output to link to any knob
+    menu.addItem ("Dashboard", [this, add] {
+        ChannelDef c;
+        c.name = "Dashboard";
+        c.instrument = InstrumentKind::dashboard;
+        c.patcher.surface = surface::starterControls();
         const auto added = add (c);
         openChannelSettings (engine, added);
     });

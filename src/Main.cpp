@@ -45,6 +45,9 @@
 #include "ui/Dialogs.h"
 #include "core/RackOps.h"
 #include "core/Layer.h"
+#include "core/XyController.h"
+#include "core/ControlSurface.h"
+#include "ui/Controllers164.h"
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
@@ -4397,6 +4400,36 @@ private:
         fx.params[1] = 0.25f;
         fx.params[2] = 0.5f;
         song.mixer[1].effects.push_back (fx);
+        // round 164: X-Y (slot 2), X-Y-Z (slot 3) and a Control Surface (slot 4)
+        {
+            auto xyFx = lynx::makeEffectSlot (lynx::EffectKind::xyController);
+            xyFx.params[(std::size_t) lynx::xy::level (0)] = 0.3f;
+            xyFx.params[(std::size_t) lynx::xy::level (1)] = 0.7f;
+            xyFx.params[(std::size_t) lynx::xy::tension (0)] = 0.8f;
+            song.mixer[1].effects.push_back (xyFx);
+            auto xyzFx = lynx::makeEffectSlot (lynx::EffectKind::xyzController);
+            xyzFx.params[(std::size_t) lynx::xy::level (2)] = 0.8f;
+            song.mixer[1].effects.push_back (xyzFx);
+            auto panel = lynx::makeEffectSlot (lynx::EffectKind::controlSurface);
+            lynx::SurfaceControl c;
+            for (const auto& [kind, name, v, x, y] : std::vector<std::tuple<lynx::SurfaceControl::Kind, const char*, float, float, float>> {
+                     { lynx::SurfaceControl::Kind::knob, "Cutoff", 0.65f, 20.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::knob, "Reso", 0.3f, 90.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::slider, "Mix", 0.8f, 170.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::xy, "Space", 0.4f, 230.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::button, "Drop", 0.0f, 20.0f, 110.0f },
+                     { lynx::SurfaceControl::Kind::checkBox, "Bypass", 1.0f, 20.0f, 160.0f } })
+            {
+                c.kind = kind;
+                c.name = name;
+                c.value = v;
+                c.valueY = 0.6f;
+                c.x = x;
+                c.y = y;
+                lynx::surface::add (panel, c);
+            }
+            song.mixer[1].effects.push_back (panel);
+        }
         lynx::ChannelDef env;
         env.name = "Envelope Controller";
         env.instrument = lynx::InstrumentKind::controller;
@@ -4438,6 +4471,13 @@ private:
             song.channels[(std::size_t) self].layer.crossfade = true;
             song.channels[(std::size_t) self].layer.fade = 0.35f;
         }
+        {
+            lynx::ChannelDef dash; // channel 6
+            dash.name = "Dashboard";
+            dash.instrument = lynx::InstrumentKind::dashboard;
+            dash.patcher.surface = lynx::surface::starterControls();
+            song.channels.push_back (dash);
+        }
         song.patterns.emplace_back();
         offline.setSong (std::move (song));
         offline.dispatchPendingMessages();
@@ -4450,6 +4490,16 @@ private:
         shoot (lynx::makeChannelSettingsPanel (offline, 1), "-midi-out.png");
         shoot (lynx::makeChannelSettingsPanel (offline, 5), "-layer.png");
         shoot (lynx::makeChannelSettingsPanel (offline, 3), "-layer-child.png");
+        {
+            const auto slotOf = [] (int k) -> lynx::SlotLocator {
+                return [k] (lynx::Song& s) { return &s.mixer[1].effects[(std::size_t) k]; };
+            };
+            const lynx::AutomationTarget target { lynx::AutomationTargetKind::effectParam, 1, 1, 0 };
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (1), nullptr, target), "-xy-controller.png");
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (2), nullptr, target), "-xyz-controller.png");
+            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (3), target), "-control-surface.png");
+            shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
+        }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
             for (int part = 0; part < 7; ++part)

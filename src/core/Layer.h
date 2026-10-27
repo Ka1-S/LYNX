@@ -28,13 +28,16 @@ struct Pick
 // The children (valid channel indices that are not Layers themselves) of channel `layer`.
 std::vector<int> validChildren (const Song& song, int layer);
 
-// The level factor of the Layer's VOL knob for its notes: 1 at FL's default channel volume (0.78), the channel volume
-// curve relative to it otherwise.
+// The level factor of the Layer's VOL knob for its notes: FL multiplies the child voice by the Layer's channel gain
+// (the channel volume curve, about −5 dB at the default 78 %; REA_rodada164a §1).
 float levelGain (const ChannelDef& layer) noexcept;
 
-// Crossfade: the gain of child `index` of `count` at Fade `fade` (0..1). Position p = fade × (count − 1); a child
-// sounds fully at its own position and fades out linearly towards its neighbours (equal-power blend between them).
+// Crossfade: the gain of child `index` of `count` at Fade `fade` (0..1), FL's triangle max (0, 1 − |fade·(count − 1) −
+// index|): each child sounds fully at its own position and fades out linearly towards its neighbours.
 float crossfadeGain (int index, int count, float fade) noexcept;
+
+// The pitch shift (cents) of the Layer's notes on its children: its PITCH knob minus (root note − C5) × 100.
+float pitchCents (const ChannelDef& layer) noexcept;
 
 // Picks the children a note-on of `key` plays (at most `max`, into `out`). `random` is a 32-bit LCG state; `turn` the
 // Sequential counter of this Layer (both advanced). Children whose key region excludes `key` are skipped (a Random /

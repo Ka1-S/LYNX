@@ -26,19 +26,23 @@ std::vector<int> validChildren (const Song& song, int layer)
 
 float levelGain (const ChannelDef& layer) noexcept
 {
-    const auto reference = channelGain (0.78f);
-    return reference > 0.0f ? channelGain (layer.volume) / reference : 1.0f;
+    // FL multiplies a child voice's volume by its Layer's channel gain [REA_rodada164a DECOMP 0xD265E0]
+    return channelGain (layer.volume);
 }
 
 float crossfadeGain (int index, int count, float fade) noexcept
 {
+    // FL's triangle per child [DECOMP 0xFEA3D0]: max (0, 1 − |f·(N − 1) − i|); one child: f
+    const auto f = (double) std::clamp (fade, 0.0f, 1.0f);
     if (count <= 1)
-        return 1.0f;
-    const auto p = (double) std::clamp (fade, 0.0f, 1.0f) * (double) (count - 1);
-    const auto d = std::abs (p - (double) index);
-    if (d >= 1.0)
-        return 0.0f;
-    return (float) std::cos (d * 1.5707963267948966); // equal power between the two neighbours
+        return (float) f;
+    return (float) std::max (0.0, 1.0 - std::abs (f * (double) (count - 1) - (double) index));
+}
+
+float pitchCents (const ChannelDef& layer) noexcept
+{
+    // the Layer's pitch knob, minus its root note's distance from C5 [DECOMP 0xD265E0]
+    return 100.0f * layer.sampler.pitch - 100.0f * (float) (layer.misc.rootNote - 60);
 }
 
 int pick (const ChannelDef& layer, const std::vector<ChannelDef>& channels, int key, std::uint32_t& random, int& turn, Pick* out, int max) noexcept

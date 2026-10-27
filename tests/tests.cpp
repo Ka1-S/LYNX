@@ -43,6 +43,8 @@
 #include "core/FlPatcher.h"
 #include "core/Patcher.h"
 #include "core/Layer.h"
+#include "core/XyController.h"
+#include "core/ControlSurface.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"

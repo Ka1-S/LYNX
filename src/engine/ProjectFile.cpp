@@ -116,6 +116,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::patcher: return "patcher";
         case InstrumentKind::soundfont: return "soundfont";
         case InstrumentKind::layer: return "layer";
+        case InstrumentKind::dashboard: return "dashboard";
     }
     return "synth";
 }
@@ -130,7 +131,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
                     InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::flkeys,
-                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut, InstrumentKind::patcher, InstrumentKind::soundfont, InstrumentKind::layer })
+                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut, InstrumentKind::patcher, InstrumentKind::soundfont, InstrumentKind::layer, InstrumentKind::dashboard })
         if (id == instrumentId (k))
             return k;
 
@@ -239,6 +240,9 @@ const char* effectId (EffectKind k)
         case EffectKind::emphasizer: return "emphasizer";
         case EffectKind::flFrequencyShifter: return "flFrequencyShifter";
         case EffectKind::flLowLifter: return "flLowLifter";
+        case EffectKind::xyController: return "xyController";
+        case EffectKind::xyzController: return "xyzController";
+        case EffectKind::controlSurface: return "controlSurface";
     }
     return "eq";
 }
@@ -402,11 +406,16 @@ juce::var patcherToVar (const PatcherDoc& doc)
         o->setProperty ("toMidiPorts", ports (doc.toMidiPorts));
     if (doc.fromNotesHidden)
         o->setProperty ("fromNotesHidden", true);
-    if (! doc.surface.empty()) // the Surface tab (round 151): [kind, name, value, value Y, x, y]
+    if (! doc.surface.empty()) // the Surface tab (round 151): [kind, name, value, value Y, x, y(, size: round 164)]
     {
         juce::Array<juce::var> controls;
         for (const auto& c : doc.surface)
-            controls.add (juce::Array<juce::var> { (int) c.kind, juce::String::fromUTF8 (c.name.c_str()), c.value, c.valueY, c.x, c.y });
+        {
+            juce::Array<juce::var> control { (int) c.kind, juce::String::fromUTF8 (c.name.c_str()), c.value, c.valueY, c.x, c.y };
+            if (c.size != 1.0f)
+                control.add (c.size);
+            controls.add (control);
+        }
         o->setProperty ("surface", controls);
         o->setProperty ("surfaceAt", juce::Array<juce::var> { doc.surfaceX, doc.surfaceY });
     }
@@ -505,6 +514,8 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
                 s.valueY = juce::jlimit (0.0f, 1.0f, (float) (double) c[3]);
                 s.x = (float) (double) c[4];
                 s.y = (float) (double) c[5];
+                if (c.size() >= 7)
+                    s.size = juce::jlimit (0.5f, 3.0f, (float) (double) c[6]);
                 doc.surface.push_back (std::move (s));
             }
     if (const auto& at = v["surfaceAt"]; at.isArray() && at.size() == 2)
@@ -557,7 +568,7 @@ juce::var effectToVar (const EffectSlot& slot)
     else if (slot.isSubstitute()) // a LYNX substitute: the original plugin travels with it, unchanged
         e->setProperty ("substituteFor", pluginToVar (slot.substituteFor));
 
-    if (slot.kind == EffectKind::patcher)
+    if (slot.kind == EffectKind::patcher || slot.kind == EffectKind::controlSurface) // (a Control Surface's controls: round 164)
         e->setProperty ("patcher", patcherToVar (slot.patcher));
 
     if (slot.kind == EffectKind::parallel) // container branches, each with its own chain
@@ -648,7 +659,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
                         branch.chain.push_back (std::move (*c)); // containers can be nested
             slot.branches.push_back (std::move (branch));
         }
-    if (*kind == EffectKind::patcher && e.hasProperty ("patcher"))
+    if ((*kind == EffectKind::patcher || *kind == EffectKind::controlSurface) && e.hasProperty ("patcher"))
         slot.patcher = patcherFromVar (e["patcher"], Song {});
     if (auto* links = e["links"].getArray())
         for (const auto& l : *links)
@@ -686,7 +697,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter })
+                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter,
+                    EffectKind::xyController, EffectKind::xyzController, EffectKind::controlSurface })
         if (id == effectId (k))
             return k;
 
@@ -1029,7 +1041,7 @@ juce::var channelToVar (const ChannelDef& c)
 
     if (c.instrument == InstrumentKind::plugin)
         o->setProperty ("plugin", pluginToVar (c.plugin));
-    if (c.instrument == InstrumentKind::patcher)
+    if (c.instrument == InstrumentKind::patcher || c.instrument == InstrumentKind::dashboard) // (a Dashboard's controls: round 164)
         o->setProperty ("patcher", patcherToVar (c.patcher));
 
     return juce::var (o.release());
@@ -1294,7 +1306,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         readLfos (s, def.sampler.lfo);
     }
 
-    if (def.instrument == InstrumentKind::patcher && c.hasProperty ("patcher"))
+    if ((def.instrument == InstrumentKind::patcher || def.instrument == InstrumentKind::dashboard) && c.hasProperty ("patcher"))
         def.patcher = patcherFromVar (c["patcher"], song);
     return def;
 }
