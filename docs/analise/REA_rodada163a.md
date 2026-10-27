@@ -39,5 +39,16 @@ of the effect slots when the window is short, menus waste vertical space, Alt-dr
   that plays (or its first clip) — `transportedit::patternSeekTarget`, test `ui163_piano_roll_ruler_seek`.
 - Hints: rulers and the seek / time-selection drags mention "[Alt] no snap".
 
+## Verification
+- build-local with FL Data: 1753133 checks, 0 failures (tests `ui163_window_fit`, `ui163_piano_roll_ruler_seek`).
+- Windows `--snapshot` at 1280x700 (= a 1920x1050 work area at 150%): `-menu163-compact/comfortable.png`,
+  `-mixer163-450/560/680/820.png` (450: panel scrolls; 560: EQ folded, output row kept; 680+: EQ open),
+  `-settings-general.png`. Copies in D:\lynx-work\ui163\snap.
+- Windows `LYNX.exe --fittest report.txt <percent>` on the real desktop (1920x1080): at 125/150/175/200% a centred
+  tool window taller than the screen lands with its title bar at the top of the work area (y=0, close button in),
+  and a 90%-of-screen resizable window shrinks to the work area after the zoom goes up. All OK.
+- Not done: a Linux GUI pass (the fit rule is platform-neutral; on Linux a missing frame size counts as none).
+
 ## Where I stopped
-- (kept current below)
+- Batch 1 (all three items) handed to land.sh; notes in tmp/coord/notes-0.1.18.md (New: Compact menus, Alt on the
+  rulers; Fixes: windows reachable at 150%+, Mixer EQ folds).
