@@ -34,6 +34,7 @@
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/Denormals.h"
+#include "core/TestProfile.h"
 #include "core/FlpImport.h"
 #include "core/MidiControls.h"
 #include "core/MidiImport.h"
@@ -5408,6 +5409,26 @@ TEST (rea165i_task_graph_matches_layers_with_sidechain_and_cycle)
     const auto cycleParallel = render (song, true, graph);
     CHECK (! graph);
     CHECK (cycleLayered == cycleParallel);
+}
+
+TEST (rea165i_test_profile_and_test_mode_parsing)
+{
+    using namespace lynx::testprofile;
+    CHECK (! profileDirFrom (nullptr));
+    CHECK (! profileDirFrom (""));
+    CHECK (! profileDirFrom ("relative/dir")); // only absolute folders
+    CHECK (! profileDirFrom ("C:relative"));
+    CHECK (profileDirFrom ("/tmp/lynx-profile/") == std::string ("/tmp/lynx-profile"));
+    CHECK (profileDirFrom ("  \"C:\\Users\\me\\bench profile\\\" ") == std::string ("C:\\Users\\me\\bench profile"));
+    CHECK (profileDirFrom ("D:/x") == std::string ("D:/x"));
+    CHECK (profileDirFrom ("C:\\") == std::string ("C:\\")); // a drive root keeps its separator
+    CHECK (! testModeFrom (nullptr));
+    CHECK (! testModeFrom (""));
+    CHECK (! testModeFrom ("0"));
+    CHECK (! testModeFrom (" Off "));
+    CHECK (! testModeFrom ("false"));
+    CHECK (testModeFrom ("1"));
+    CHECK (testModeFrom ("yes"));
 }
 
 TEST (rea165i_keep_float_mode_restores_ftz_after_foreign_code)

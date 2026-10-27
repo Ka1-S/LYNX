@@ -49,7 +49,21 @@ Evidence markers: **[EXEC]** measured here, **[DECOMP]** Ghidra pseudocode of FL
 
 ## 1. Method
 
-(to be filled)
+- **PC:** AMD Ryzen 5 3600 (6 cores / 12 threads), Windows 11, the same machine as REA rounds 116 / 151. FL Studio
+  2026 (`FL64.exe` build of 2026-10-08). LYNX **base** = main `5ed718d1` (0.1.19 + site), **branch** = this round.
+- **Harness** `C:\Users\kauan\lynx-test\perf165\bench.ps1` (round 116's, extended): starts the program at
+  AboveNormal priority, waits for its main window (≥ 900×500, answering `WM_NULL`, titled with the project), then
+  for it to go quiet; idle CPU over 10 s for the **main process** (`idle_main_cpu_pct`, new) and for the whole tree
+  (LYNX's plugin-scan children, FL's helpers), private working set, threads. Playback: `--rtstress` (LYNX: its own
+  callback statistics) / a posted Space (FL), per-thread CPU over 20 s, the shared "FL Studio ASIO" driver with its
+  block size set in the registry. `benche.ps1` = the same with environment variables (A/B switches).
+  Driver scripts: `tmp/perf165/run.sh <startup|open|render|play>` (LYNX and FL interleaved, under the Windows GUI
+  lock and FL's lock, every process closed by PID), `null.sh` (Linux null tests with `renderwav`).
+- **Load:** other rounds were building during the whole session (load average 2–33 on 12 cores). Every run logs the
+  load; timing series were started only below load 8 (the gate waits), CPU *time* is reported rather than wall time
+  where possible, and A/B pairs run back to back on the same binary (`LYNX_TASKGRAPH=0/1`).
+- **Null tests:** `renderwav` of the FL demo patterns sequential / layers / task graph → identical files (md5);
+  `LYNX.exe --export` base vs branch on Windows.
 
 ## 2. Results — LYNX vs FL Studio 2026
 

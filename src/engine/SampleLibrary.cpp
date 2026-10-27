@@ -360,7 +360,9 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
 
 juce::File SampleLibrary::cacheFolder()
 {
-    auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("LYNX-cache");
+    // (under a test profile, LYNX_PROFILE_DIR: inside it)
+    const auto profile = platform::profileOverride();
+    auto folder = (profile != juce::File() ? profile.getChildFile ("cache") : juce::File::getSpecialLocation (juce::File::tempDirectory)).getChildFile ("LYNX-cache");
     folder.createDirectory();
     return folder;
 }
