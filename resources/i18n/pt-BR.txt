@@ -5215,3 +5215,4 @@ countries: br
 "A web page: LYNX does not load web pages itself. Use \"Open in browser\"." = "Uma página da web: o LYNX não carrega páginas da web. Use \"Abrir no navegador\"."
 "The page was not found: {0}" = "A página não foi encontrada: {0}"
 "The page has no text to show." = "A página não tem texto para mostrar."
+"Browse" = "Procurar"
