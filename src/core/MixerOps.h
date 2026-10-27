@@ -32,6 +32,10 @@ bool deleteTrack (Song& song, int t);
 // `track` on (adding inserts as needed, up to maxMixerTracks). Returns the insert of each channel.
 std::vector<int> linkChannels (Song& song, const std::vector<int>& channels, int track, bool startingHere);
 
+// Removes the unused inserts (Song::insertInUse) at the end of the mixer, keeping at least `keep` inserts (round 163,
+// Mixer › "Remove unused inserts at the end"). Returns how many were removed.
+int removeUnusedTrailingInserts (Song& song, int keep = 0);
+
 // Channels whose output goes to `track`.
 std::vector<int> channelsOn (const Song& song, int track);
 

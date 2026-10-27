@@ -4,6 +4,8 @@
 #include "ui/TextCache.h"
 #include "ui/PlaylistComponent.h"
 
+#include "core/Templates.h"
+
 #include "core/TransportEdit.h"
 
 #include "core/ClipOps.h"
@@ -475,7 +477,10 @@ int PlaylistComponent::numTracks() const
     for (const auto& c : engine.getSong().playlist)
         highest = juce::jmax (highest, c.track);
 
-    return juce::jlimit (16, 500, highest + 8); // always a few free tracks at the bottom
+    // Options › Mixer › "Playlist tracks shown" (round 163; 16 by default): at least that many, and always a few free
+    // tracks under the last clip
+    const auto least = juce::jlimit (1, 500, newProjectDefaults().playlistTracks);
+    return juce::jlimit (least, 500, highest + 1 + juce::jlimit (1, 7, least / 2));
 }
 
 std::int64_t PlaylistComponent::gridTicks() const

@@ -322,14 +322,12 @@ private:
 
     Song makeSong (const TemplateItem& item) const
     {
-        if (item.builtIn == -1)
-            return Song::makeDefault();
-        if (item.builtIn >= 0)
-            return makeTemplate (item.builtIn);
+        if (item.builtIn >= -1) // LYNX's own templates follow Options › Mixer (round 163); a user's template stays as saved
+            return makeNewProject (item.builtIn);
         juce::String error;
         if (auto song = ProjectFile::load (item.file, error))
             return std::move (*song);
-        return Song::makeDefault();
+        return makeNewProject();
     }
 
     NewProjectSetup setup() const

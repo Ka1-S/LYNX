@@ -105,9 +105,22 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 {
     heldKeys.setSender ([this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on, true); });
     connectBrowser (browser);
+    mixeroptions::changed = [safe = juce::Component::SafePointer<MainComponent> (this)] {
+        if (safe != nullptr)
+        {
+            safe->saveUiSettings();
+            safe->playlist.repaint();
+        }
+    };
+    mixeroptions::setShowUsedOnly = [safe = juce::Component::SafePointer<MainComponent> (this)] (bool on) {
+        if (safe != nullptr)
+            safe->mixer.getStripsForSnapshot().setShowUsedOnly (on);
+    };
     if (persistent)
     {
         loadUiSettings();
+        if (! (newProjectDefaults() == NewProjectDefaults {})) // the start-up song follows Options › Mixer too (round 163)
+            engine.setSong (makeNewProject());
         skin::onStyleSettingsChanged = [safe = juce::Component::SafePointer<MainComponent> (this)] { // an editor's own style was picked
             if (safe != nullptr) safe->saveUiSettings();
         };
@@ -1402,6 +1415,10 @@ void MainComponent::loadUiSettings()
             recordQuantiseOn = on;
             updateRecordQuantise();
         }
+        else if (key == "newInserts" || key == "newMasterChain" || key == "newCleanMixer" || key == "playlistTracks")
+            newProjectDefaults().readKey (key.toStdString(), line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
+        else if (key == "mixerUsedOnly")
+            MixerStrips::showUsedOnly = on;
     }
 
     startup = StartupOptions::load();
@@ -1452,7 +1469,8 @@ void MainComponent::saveUiSettings()
                                       + "\nrecordQuantiseAutomation=" + juce::String (engine.getRecordOptions().quantiseAutomation ? 1 : 0)
                                       + "\nrecordPunchLoop=" + juce::String (engine.getRecordOptions().punchLoopRegion ? 1 : 0)
                                       + "\nrecordPreRoll=" + juce::String (engine.getRecordOptions().preRollBars)
-                                      + "\nrecordPostRoll=" + juce::String (engine.getRecordOptions().postRollBars) + "\n");
+                                      + "\nrecordPostRoll=" + juce::String (engine.getRecordOptions().postRollBars) + "\nmixerUsedOnly=" + juce::String (MixerStrips::showUsedOnly ? 1 : 0) + "\n"
+                                      + juce::String (newProjectDefaults().toText()));
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -3407,7 +3425,7 @@ void MainComponent::newProject (bool askAlways)
     confirmDiscard ([this, askAlways] {
         if (! askAlways && ! newProjectDialogEnabled())
         {
-            startNewProject (Song::makeDefault(), {});
+            startNewProject (makeNewProject(), {});
             return;
         }
         showNewProjectDialog ([safe = juce::Component::SafePointer<MainComponent> (this)] (Song song, juce::File file) {
@@ -4132,7 +4150,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
                 confirmDiscard ([this, i] {
                     engine.stop();
                     engine.rewind();
-                    engine.setSong (makeTemplate (i));
+                    engine.setSong (makeNewProject (i));
                     currentFile = juce::File();
                     projectName = {};
                     importedSuffix = {};
@@ -4273,6 +4291,11 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addItem (tr ("File settings (search folders)..."), [this] { openSettings ((int) SettingsPage::files); });
         menu.addItem (tr ("Project settings (tempo, time signature)..."), [this] { openSettings ((int) SettingsPage::project); });
         menu.addItem (tr ("Project info..."), [this] { openSettings ((int) SettingsPage::info); });
+        {
+            juce::PopupMenu mixerMenu; // round 163: clean mixer, inserts and Master chain of new projects
+            mixeroptions::addItems (mixerMenu, engine, true);
+            menu.addSubMenu (tr ("Mixer"), mixerMenu);
+        }
         menu.addSeparator();
         menu.addItem (tr ("Plugin manager..."), [this] { showPluginManager(); });
         const auto scanning = engine.getPluginHost().backgroundScan().running;

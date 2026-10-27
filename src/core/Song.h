@@ -1102,6 +1102,9 @@ struct Song
     // A/B of the LYNX substitutes (round 113): when set, every substitute slot plays as bypassed (the project's own
     // effects and the hosted plugins still play). Saved with the project.
     bool substitutesBypassed = false;
+    // Clean mixer (round 163, Options › Mixer): the inserts have no built-in processing — the per-track EQ is bypassed
+    // (its settings are kept, nothing is computed) and hidden from the mixer. Saved with the project.
+    bool cleanMixer = false;
     // whether an effect slot processes: switched on, and not a substitute while the substitutes are bypassed
     bool slotActive (const EffectSlot& slot) const noexcept { return slot.enabled && ! (substitutesBypassed && slot.isSubstitute()); }
     std::vector<Automation> automations;
@@ -1130,7 +1133,10 @@ struct Song
     }
 
     static std::vector<MixerTrack> defaultMixer (int inserts = 16);
-    // First insert nothing uses (no channel, send, effect, input, Playlist link or custom name); 0 (Master) if none.
+    // Whether anything uses insert `t`: a channel, a send to or from it, effects, an input, a Playlist link, a custom
+    // name, its fader / pan / mute / colour / EQ / output moved from the defaults or automation on it. Master: true.
+    bool insertInUse (int t) const;
+    // First insert nothing uses (insertInUse false); 0 (Master) if none.
     int nextFreeInsert() const;
     // nextFreeInsert, but when every insert is in use a new one is added (up to maxMixerTracks), like FL where a new
     // channel takes the next of its 125 inserts (round 162); 0 (Master) only when the mixer is full.

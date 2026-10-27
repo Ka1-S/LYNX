@@ -1477,14 +1477,14 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         state.channelDelays[(std::size_t) i]->process (l, r, n);
 }
 
-void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float* r, int n) noexcept
+void RackRenderer::applyTrackEq (const MixerTrack& track, int t, bool bypassed, float* l, float* r, int n) noexcept
 {
     if ((std::size_t) t >= trackEqs.size())
         return;
 
     auto& eq = trackEqs[(std::size_t) t];
 
-    if (! track.eq.active())
+    if (bypassed || ! track.eq.active()) // clean mixer (round 163): no built-in processing, the samples pass untouched
     {
         if (eq.running)
             eq = {}; // off: reset the filters so they don't come back with a stale tail
@@ -2296,7 +2296,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     if (! song.mixer.empty())
     {
-        applyTrackEq (song.mixer[0], 0, trackBuffer (0, 0), trackBuffer (0, 1), numSamples);
+        applyTrackEq (song.mixer[0], 0, song.cleanMixer, trackBuffer (0, 0), trackBuffer (0, 1), numSamples);
         applyStereo (song.mixer[0], trackBuffer (0, 0), trackBuffer (0, 1), numSamples);
     }
 
@@ -2512,7 +2512,7 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
 
     auto* l = trackBuffer (t, 0);
     auto* r = trackBuffer (t, 1);
-    applyTrackEq (track, t, l, r, n);
+    applyTrackEq (track, t, state.song.cleanMixer, l, r, n);
     applyStereo (track, l, r, n);
     lastL = glideGain (l, l, n, fromL, gl);
     lastR = glideGain (r, r, n, fromR, gr);

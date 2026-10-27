@@ -16042,5 +16042,6 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Browser162Tests.inc"
 #include "BrowserView163Tests.inc"
 #include "Transport162Tests.inc"
+#include "Workflow163Tests.inc"
 #include "Rec163Tests.inc"
 #include "Ui163Tests.inc"

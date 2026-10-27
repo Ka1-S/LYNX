@@ -3,6 +3,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -52,6 +53,18 @@ bool isCustom (const AudioEngine& engine, int track);
 // The output target menu of a track.
 void showMenu (AudioEngine& engine, int track, juce::Component* target, juce::Rectangle<int> screenArea);
 } // namespace mixeroutput
+
+// Mixer options (round 163): Options › Mixer and the mixer track menu's "Mixer" section.
+namespace mixeroptions
+{
+// Called after an option kept in ui-options.txt changed (the main window saves the file).
+extern std::function<void()> changed;
+// Shows or hides the unused inserts in the mixer (the main window points it at its mixer).
+extern std::function<void (bool)> setShowUsedOnly;
+// The items: this project's clean mixer, show only used inserts, remove unused inserts at the end and — with
+// `newProjects` — the new-project choices (inserts, Master chain, clean mixer, Playlist tracks).
+void addItems (juce::PopupMenu& menu, AudioEngine& engine, bool newProjects);
+} // namespace mixeroptions
 
 // FL-style mixer: one compact vertical strip per track (Master first).
 //  - header: record arm, number, name (once), effect count; drag it sideways to reorder inserts
@@ -106,6 +119,11 @@ public:
     // The insert's right-click menu (FL's mixer track menu, REA rounds 115/134/143); public for --snapshot and tests.
     juce::PopupMenu buildMenu (int track);
 
+    // Mixer menu › "Show only used inserts" (round 163; ui-options.txt "mixerUsedOnly"): inserts nothing uses
+    // (Song::insertInUse) take no room; "+" brings back the first unused insert before adding one.
+    static inline bool showUsedOnly = false;
+    bool isHidden (int track) const noexcept { return track > 0 && track < (int) hidden.size() && hidden[(std::size_t) track]; }
+
     static constexpr int stripWidth = 60;
     static constexpr int masterWidth = 76;
     // x of a strip (`track` == the number of tracks: the "+" button), after the docks and separators (round 146a)
@@ -125,6 +143,18 @@ private:
     // x of each gap between two dock blocks and of each separator line
     void layoutStrips();
     std::vector<int> stripXs;                                    // layout x (before pinning)
+    std::vector<bool> hidden;                                    // per track: not shown (unused, "Show only used inserts")
+    static constexpr int hiddenX = -100000;
+    std::set<int> revealed;                                      // unused inserts shown anyway (added with "+")
+public:
+    void setShowUsedOnly (bool on)
+    {
+        showUsedOnly = on;
+        revealed.clear();
+        updateSize();
+        repaint();
+    }
+private:
     std::vector<std::pair<int, MixerDock>> dockGaps, separatorLines;
     int blockStart[3] {}, blockEnd[3] {};                        // each dock block's layout span (0 width = empty)
     int contentWidth = 0;
@@ -260,6 +290,7 @@ private:
     juce::Rectangle<int> arrowBounds (int slot) const; // the slot's options arrow
     juce::Rectangle<int> ledBounds (int slot) const;   // the slot's on/off LED
     int bottomTop() const;                             // top of the EQ + output section
+    bool eqShown() const;                              // false in a clean mixer (round 163)
     int belowHeight (bool folded) const;               // height of the EQ + output section
     juce::Rectangle<int> eqFoldBounds() const;         // the EQ's title bar (click: fold / unfold)
     void refit();
