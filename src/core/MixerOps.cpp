@@ -200,6 +200,26 @@ std::vector<int> linkChannels (Song& song, const std::vector<int>& channels, int
     return result;
 }
 
+int ensureInsert (Song& song, int track)
+{
+    track = std::clamp (track, 0, maxMixerTracks - 1);
+    if (song.mixer.empty())
+        song.mixer = Song::defaultMixer (0);
+    while ((int) song.mixer.size() <= track)
+    {
+        const auto name = "Insert " + std::to_string (song.mixer.size());
+        song.mixer.emplace_back().name = name;
+    }
+    return track;
+}
+
+void routeChannel (Song& song, int channel, int track)
+{
+    if (channel < 0 || channel >= (int) song.channels.size())
+        return;
+    song.channels[(std::size_t) channel].mixerTrack = ensureInsert (song, track);
+}
+
 std::vector<int> channelsOn (const Song& song, int track)
 {
     std::vector<int> out;

@@ -1019,7 +1019,7 @@ int addSoundFontChannel (AudioEngine& engine, const std::string& path, int bank,
     }
     int index = 0;
     engine.editSong ([&] (Song& s) {
-        c.mixerTrack = s.nextFreeInsert();
+        c.mixerTrack = s.claimFreeInsert();
         if (insertAt < 0 || insertAt > (int) s.channels.size())
         {
             s.channels.push_back (c);
