@@ -297,8 +297,10 @@ public:
             }
         }
 
-        meters[sendPeak] = sendPeakNow;
-        meters[returnPeak] = returnPeakNow;
+        // peak meters with a 300 ms fall: the editor reads them 30 times a second, a short peak between two reads still shows
+        const auto fall = (float) std::exp (-(double) n / (0.3 * sampleRate));
+        meters[sendPeak] = std::max (sendPeakNow, meters[sendPeak] * fall);
+        meters[returnPeak] = std::max (returnPeakNow, meters[returnPeak] * fall);
         meters[status] = (float) flags / 16.0f;
     }
 

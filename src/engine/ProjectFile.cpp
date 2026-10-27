@@ -524,8 +524,10 @@ juce::var effectToVar (const EffectSlot& slot)
     e->setProperty ("on", slot.enabled);
     juce::Array<juce::var> params;
     const auto used = slot.kind == EffectKind::plugin ? 0 : effectInfo (slot.kind).params.size();
+    // (the hardware insert's are exact: its round trip is a sample count over 65536 steps, round 164d)
+    const auto exact = slot.kind == EffectKind::hardwareInsert;
     for (std::size_t i = 0; i < used && i < slot.params.size(); ++i)
-        params.add (juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
+        params.add (exact ? (double) slot.params[i] : juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
     e->setProperty ("params", params);
 
     if (slot.mix < 1.0f)

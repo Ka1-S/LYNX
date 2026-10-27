@@ -3688,6 +3688,13 @@ public:
             setValue (param, plugui::optionValue (item, juce::jlimit (0, n - 1, o)));
             return;
         }
+        if (item.type == Item::stepper && item.steps > 1000 && wheel.deltaY != 0.0f) // a fine count (the hardware insert's delay in samples): one per notch, Shift ×10
+        {
+            const auto step = (e.mods.isShiftDown() ? 10.0f : 1.0f) / (float) item.steps;
+            setValue (param, juce::jlimit (0.0f, 1.0f, valueOf (param) + (wheel.deltaY > 0.0f ? step : -step)));
+            ui::flashValueTip (*this, rectOf (item).toNearestInt(), valueText (param, valueOf (param)));
+            return;
+        }
         if (const auto v = ui::wheelValue (valueOf (param), e, wheel, spec))
         {
             setValue (param, (float) *v);

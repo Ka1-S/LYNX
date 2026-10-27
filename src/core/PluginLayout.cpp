@@ -2575,7 +2575,7 @@ Layout voiceShiftLayout()
 Layout hardwareInsertLayout()
 {
     Layout l;
-    l.width = 760;
+    l.width = 784;
     l.height = 236;
     auto& v = l.items;
     v.push_back (section (4, 4, 186, 228, TR_NOOP ("Send")));
@@ -2589,16 +2589,16 @@ Layout hardwareInsertLayout()
     v.push_back (toggle (206, 80, 162, 18, "Input stereo", TR_NOOP ("Stereo pair")));
     v.push_back (dial (256, 148, 62, "Return", TR_NOOP ("Return"), big));
     v.push_back (toggle (304, 138, 66, 22, "Invert", TR_NOOP ("Invert")));
-    v.push_back (section (384, 4, 90, 228, TR_NOOP ("Levels")));
-    auto io = display (392, 26, 74, 198, "iometer");
+    v.push_back (section (384, 4, 114, 228, TR_NOOP ("Levels")));
+    auto io = display (392, 26, 98, 198, "iometer");
     io.steps = 2; // send / return peaks
     v.push_back (io);
-    v.push_back (section (478, 4, 180, 228, TR_NOOP ("Round trip")));
-    v.push_back (display (486, 26, 164, 96, "hwping"));
-    v.push_back (toggle (486, 130, 164, 26, "Ping", TR_NOOP ("Ping (measure)"), momentary));
-    v.push_back (stepper (486, 184, 164, 34, "Round trip", TR_NOOP ("Delay (samples)"), 65536));
-    v.push_back (section (662, 4, 94, 228, TR_NOOP ("Mix")));
-    v.push_back (dial (709, 100, 62, "Dry/wet", TR_NOOP ("Dry/wet"), big));
+    v.push_back (section (502, 4, 180, 228, TR_NOOP ("Round trip")));
+    v.push_back (display (510, 26, 164, 96, "hwping"));
+    v.push_back (toggle (510, 130, 164, 26, "Ping", TR_NOOP ("Ping"), momentary));
+    v.push_back (stepper (510, 184, 164, 34, "Round trip", TR_NOOP ("Delay (samples)"), 65536));
+    v.push_back (section (686, 4, 94, 228, TR_NOOP ("Mix")));
+    v.push_back (dial (733, 100, 62, "Dry/wet", TR_NOOP ("Dry/wet"), big));
     return l;
 }
 
