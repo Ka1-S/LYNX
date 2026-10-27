@@ -124,6 +124,24 @@ inverted the wrong side, the Center passed the signal through, the EQs and the d
 `tests/tests.cpp` `fl_legacy_fx_match_fl_engines`: DLL goldens (two rates each; FNV-1a of the float bits on x86, ten
 samples within the x87 tolerance elsewhere), the value texts and the Phase Inverter's side boundaries.
 
+## 9. Fruity Transporter: the map (not rebuilt this round) **[DECOMP]**
+
+The plug-in (`tp.dll`) is a thin front end: its render (vtable slot 7) feeds an engine object from the shared
+`ildsp_x64.dll`, a `TransientLooperImpl` that wraps a Faust-generated DSP named `transientDetectionLooper`. The front
+end's ProcessParam maps its 22 controls to the engine's parameters by name; a curve shapes the level controls; its
+state record holds the 22 raw values. The front end also reads the host song position (for the loop) and exchanges audio
+with other tracks (side-chain send/receive), so an exact rebuild needs those host paths too.
+
+The Faust part keeps about 15 MB of state (the loop buffers), its per-sample compute is one large routine (≈ 14 KB of
+code), its constants use the CRT's `tanf`/`expf`/`powf`/`log10f`/`fmodf` (LYNX has exact `expf`/`powf`/`log10f` in
+`IldspMath.h`; `tanf` and `fmodf` would be new), and its random source is a 32-bit linear congruential generator (so it
+stays deterministic and testable). Estimate: a full round on its own.
+
+## 10. Left
+
+- Fruity Transporter (§9) and Fruity Emphasis (round 154 §3: a large multiband limiter): still approximate.
+- The Close generators (Sytrus, Harmless, Ogun, GMS, Morphine, Sakura, Drumpad): not touched this round.
+
 ## Where I stopped
 
 - 16:40 start: worktree `lynx-wt-flexact165`, tools in `tmp/flexact165/` (bin = DLL copies, py, cpp, gh), data in
@@ -131,3 +149,4 @@ samples within the x87 tolerance elsewhere), the value texts and the Phase Inver
 - 17:00 engines written and bit-exact against the DLLs: Phase Inverter, Center, Bass Boost, 7 Band EQ.
 - 17:40 Fruity Delay (v1) exact; all five wired (import, mixer, project ids, tests, PLUGINS.md, pt-BR, notes).
   Next: build-local + Windows build, land; then Transporter (§ to come), Emphasis, the Close generators.
+- 17:45 Transporter mapped (§9), too large for what is left of the round: landing the five effects; §10 lists the rest.
