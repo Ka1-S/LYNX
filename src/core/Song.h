@@ -652,6 +652,8 @@ enum class EffectKind : std::uint8_t
     emphasizer,      // FL's Emphasizer, exact (REA_rodada154, core/EmphasizerFx.h): FL's 6 controls / max
     flFrequencyShifter, // FL's Frequency Shifter, exact (REA_rodada154, core/FreqShifterFl.h): FL's 10 controls (raw − min) / range
     flLowLifter,     // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
+    waveCandy,       // LYNX's analyser in FL's Wave Candy role (REA_rodada164c, core/VisualFx.h): no sound; scope, spectrum, meters
+    visualizer,      // LYNX's Visualizer in FL's ZGameEditor Visualizer role (REA_rodada164c): no sound; scene in EffectSlot::state
     xyController,    // FL's X-Y Controller (REA_rodada164a, core/XyController.h): no sound; outputs X, Y follow a pad
     xyzController,   // FL's X-Y-Z Controller (REA_rodada164a, core/XyController.h): the same with a Z axis (mouse wheel)
     controlSurface   // FL's Control Surface (REA_rodada164a, core/ControlSurface.h): a user panel; output k = params[k]

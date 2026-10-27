@@ -1,4 +1,5 @@
 #include "ui/PatcherEditor.h"
+#include "ui/VisualEditors.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "ui/VoltageEditor.h"
@@ -1329,7 +1330,7 @@ public:
               pluginInstruments);
         add.addColumnBreak();
         rows = 0.0f;
-        side (tr ("Effects"), false, effects, { "Controller", "Delay reverb", "Distortion", "Dynamics", "Filter", "Flanger", "Misc", "Patcher" },
+        side (tr ("Effects"), false, effects, { "Controller", "Delay reverb", "Distortion", "Dynamics", "Filter", "Flanger", "Misc", "Patcher", "Visual" },
               pluginEffects);
         return add;
     }
@@ -1477,6 +1478,8 @@ private:
                 return "Flanger";
             case EffectKind::patcher:
                 return "Patcher";
+            case EffectKind::waveCandy: case EffectKind::visualizer:
+                return "Visual";
             default:
                 return "Misc";
         }
@@ -1774,6 +1777,28 @@ private:
                                                         },
                                                         std::nullopt);
             openToolWindow (std::move (editor), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (! node.generator && VisualWindows::handles (node.effect.kind)) // Wave Candy / Visualizer in a Patcher (round 164c)
+        {
+            VisualTarget vt;
+            vt.engine = &engine;
+            vt.locate = [t = target, n] (Song& song) -> EffectSlot* {
+                auto* doc = t.doc (song);
+                return doc != nullptr && n < (int) doc->nodes.size() && ! doc->nodes[(std::size_t) n].generator
+                               && VisualWindows::handles (doc->nodes[(std::size_t) n].effect.kind)
+                           ? &doc->nodes[(std::size_t) n].effect
+                           : nullptr;
+            };
+            auto graphIn = [t = target] (AudioEngine& e) -> patcher::Graph* {
+                return t.channel ? patcher::graphOf (e.getChannelInstrument (t.index).get()) : patcher::graphOf (e.getEffect (t.index, t.slot).get());
+            };
+            vt.runningIn = [graphIn, n] (AudioEngine& e) -> std::shared_ptr<Effect> {
+                auto* g = graphIn (e);
+                return g != nullptr ? g->effectAt (n) : nullptr;
+            };
+            vt.running = [runningIn = vt.runningIn, &e = engine] { return runningIn (e); };
+            VisualWindows::openNode (vt, title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         if (! node.generator && node.effect.kind != EffectKind::plugin && node.effect.kind != EffectKind::patcher)

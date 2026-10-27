@@ -57,6 +57,7 @@ constexpr const char* eqFilter = "EQ & filter";
 constexpr const char* modulation = "Modulation";
 constexpr const char* pitch = "Pitch & vocal";
 constexpr const char* analyzer = "Analyzer";
+constexpr const char* visual = "Visual"; // FL's picker has a Visual group (Wave Candy, ZGameEditor Visualizer; round 164c)
 constexpr const char* utility = "Utility";
 
 std::string effectCategory (const std::string& declared, const std::string& name)
@@ -65,6 +66,8 @@ std::string effectCategory (const std::string& declared, const std::string& name
     for (const auto* text : { &declared, &name })
     {
         const auto& t = *text;
+        if (has (t, { "visualiz", "visualis", "video", "milkdrop", "projectm", "plugin dance" }) || hasToken (t, { "visual" }))
+            return visual;
         if (has (t, { "analy", "meter", "scope", "spectrum", "loudness" }))
             return analyzer;
         if (has (t, { "reverb", "verb", "delay", "echo", "plate", "room", "hall", "spring" }))
@@ -120,7 +123,7 @@ std::string categoryOf (const Entry& entry)
 const std::vector<std::string>& categories (bool instruments)
 {
     static const std::vector<std::string> generators { synth, sampler, drum, keys, other };
-    static const std::vector<std::string> effects { delayReverb, distortion, dynamics, eqFilter, modulation, pitch, analyzer, utility, other };
+    static const std::vector<std::string> effects { delayReverb, distortion, dynamics, eqFilter, modulation, pitch, analyzer, visual, utility, other };
     return instruments ? generators : effects;
 }
 
