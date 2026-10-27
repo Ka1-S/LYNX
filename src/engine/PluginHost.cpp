@@ -171,7 +171,7 @@ struct BlockCall
 };
 
 // a block call under the crash guard, with this thread's floating-point mode put back after it (core/Denormals.h)
-std::uint32_t runBlock (const BlockCall& call) noexcept
+std::uint32_t runBlock (BlockCall call) noexcept
 {
     const KeepFloatMode keep;
     return crashguard::run (call);
