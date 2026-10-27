@@ -33,4 +33,11 @@ Cost: with the switch on, `applyTrackEq` returns before touching the buffers (no
 
 ## Where I stopped
 
-- Batch 1 (items 1 + 2) implemented, tests added; build-local / Windows build / landing: see below.
+- Items 1 + 2 done; tests in tests/Workflow163Tests.inc (clean mixer bit-exact vs no EQ, new-project defaults incl.
+  0 / 4 / 125 inserts and the three Master chains, ui-options round trip, insertInUse / trimming). build-local with FL
+  Data: 1753260 checks, 0 failures. Windows build OK; `--snapshot` of the Mixer with and without the clean mixer
+  (D:\lynx-work\workflow163\s2-*-mixer.png): the EQ section (ui163's foldable "EQ" bar included) disappears and the
+  slots keep the room. Merged ui163's foldable EQ: a clean mixer has no fold bar at all.
+- Items 3 (Browser) and 4 (pitch) landed from the sub-forks (19ab4278, 18e442fa).
+- Not done: a Settings-window page for these options (they live in Options › Mixer menus); the clipper choice uses
+  FL's Fruity Soft Clipper engine (LYNX's exact reimplementation, available without FL).
