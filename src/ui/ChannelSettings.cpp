@@ -1,5 +1,8 @@
 #include "ui/WindowOwner.h"
 #include "ui/ChannelSettings.h"
+#include "ui/LayerEditor.h"
+#include "ui/Controllers164.h"
+#include "ui/VoltageEditor.h"
 
 #include "core/MixerOps.h"
 
@@ -2299,21 +2302,46 @@ class RootKeyboard final : public juce::Component, public juce::SettableTooltipC
 {
 public:
     std::function<void (int)> onPick;
+    // FL's key region ruler (round 164): a drag on the strip above the keys sets the notes the channel plays,
+    // a double-click there gives it the whole keyboard back
+    std::function<void (int, int)> onRegion;
     void setRoot (int key)
     {
         root = key;
         repaint();
+    }
+    void setRegion (int low, int high)
+    {
+        if (low != regionLow || high != regionHigh)
+        {
+            regionLow = low;
+            regionHigh = high;
+            repaint();
+        }
     }
 
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
         const auto w = whiteWidth();
+        const auto top = (float) rulerHeight();
+        const auto keysH = (float) getHeight() - top;
+        if (onRegion)
+        {
+            const auto ruler = juce::Rectangle<float> (0.0f, 0.0f, (float) getWidth(), top - 2.0f);
+            g.setColour (colour::bg0);
+            g.fillRect (ruler);
+            const auto full = regionLow <= 0 && regionHigh >= 127;
+            const auto x0 = keyLeft (regionLow), x1 = keyRight (regionHigh);
+            g.setColour (full ? colour::bg5 : colour::accent);
+            g.fillRect (juce::Rectangle<float> (x0, 1.0f, juce::jmax (2.0f, x1 - x0), ruler.getHeight() - 2.0f));
+        }
         for (int k = 0, white = 0; k < 128; ++k)
             if (! isBlack (k))
             {
-                const auto r = juce::Rectangle<float> ((float) (white++) * w, 0.0f, w - 1.0f, (float) getHeight());
-                g.setColour (k == root ? colour::accent : k == hover ? juce::Colour (0xffc8ccd4) : juce::Colour (0xffe6e8ec));
+                const auto r = juce::Rectangle<float> ((float) (white++) * w, top, w - 1.0f, keysH);
+                const auto outside = onRegion && (k < regionLow || k > regionHigh);
+                g.setColour (k == root ? colour::accent : k == hover ? juce::Colour (0xffc8ccd4) : outside ? juce::Colour (0xff9a9ea8) : juce::Colour (0xffe6e8ec));
                 g.fillRect (r);
                 if (k % 12 == 0 && w * 7.0f >= 14.0f) // the octave's C named (FL's C5 = 60)
                 {
@@ -2328,16 +2356,22 @@ public:
             {
                 const auto x = (float) whitesBefore (k) * w - w * 0.32f;
                 g.setColour (k == root ? colour::accent : k == hover ? colour::bg5 : colour::bg0);
-                g.fillRect (juce::Rectangle<float> (x, 0.0f, w * 0.64f, (float) getHeight() * 0.6f));
+                g.fillRect (juce::Rectangle<float> (x, top, w * 0.64f, keysH * 0.6f));
             }
     }
 
     void mouseMove (const juce::MouseEvent& e) override
     {
-        if (const auto k = keyAt (e.position); k != hover)
+        const auto onRuler = onRegion && e.position.y < (float) rulerHeight();
+        if (const auto k = keyAt (e.position); k != hover || onRuler != hoverRuler)
         {
             hover = k;
-            setTooltip (k >= 0 ? tr ("Root note: {0}", { keyName (k) }) : juce::String());
+            hoverRuler = onRuler;
+            if (onRuler)
+                setTooltip (tr ("Key region: {0} to {1} (drag to set, double-click for the whole keyboard)",
+                                { keyName (regionLow), keyName (regionHigh) }));
+            else
+                setTooltip (k >= 0 ? tr ("Root note: {0}", { keyName (k) }) : juce::String());
             repaint();
         }
     }
@@ -2348,8 +2382,29 @@ public:
     }
     void mouseDown (const juce::MouseEvent& e) override
     {
+        dragFrom = -1;
+        if (onRegion && e.position.y < (float) rulerHeight())
+        {
+            dragFrom = keyAtX (e.position.x);
+            if (dragFrom >= 0)
+                onRegion (dragFrom, dragFrom);
+            return;
+        }
         if (const auto k = keyAt (e.position); k >= 0 && onPick)
             onPick (k);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (dragFrom < 0 || ! onRegion)
+            return;
+        const auto k = keyAtX (e.position.x);
+        if (k >= 0)
+            onRegion (juce::jmin (dragFrom, k), juce::jmax (dragFrom, k));
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (onRegion && e.position.y < (float) rulerHeight())
+            onRegion (0, 127);
     }
 
     static juce::String keyName (int key)
@@ -2371,11 +2426,37 @@ private:
             count += isBlack (i) ? 0 : 1;
         return count;
     }
+    int rulerHeight() const noexcept { return onRegion ? 9 : 0; }
     float whiteWidth() const noexcept { return (float) getWidth() / 75.0f; } // 75 white keys in 0…127
+    float keyLeft (int k) const noexcept
+    {
+        const auto w = whiteWidth();
+        return isBlack (k) ? (float) whitesBefore (k) * w - w * 0.32f : (float) whitesBefore (k) * w;
+    }
+    float keyRight (int k) const noexcept
+    {
+        const auto w = whiteWidth();
+        return isBlack (k) ? keyLeft (k) + w * 0.64f : keyLeft (k) + w;
+    }
+    // the key under x on the ruler (each key owns its own horizontal span; black keys win where they overlap)
+    int keyAtX (float x) const noexcept
+    {
+        for (int k = 0; k < 128; ++k)
+            if (isBlack (k) && x >= keyLeft (k) && x < keyRight (k))
+                return k;
+        const auto white = (int) std::floor (x / whiteWidth());
+        for (int k = 0, n = 0; k < 128; ++k)
+            if (! isBlack (k) && n++ == white)
+                return k;
+        return x < 0.0f ? 0 : 127;
+    }
     int keyAt (juce::Point<float> p) const noexcept
     {
         const auto w = whiteWidth();
-        if (p.y < (float) getHeight() * 0.6f)
+        const auto top = (float) rulerHeight();
+        if (p.y < top)
+            return keyAtX (p.x);
+        if (p.y < top + ((float) getHeight() - top) * 0.6f)
             for (int k = 0; k < 128; ++k)
                 if (isBlack (k))
                 {
@@ -2390,7 +2471,9 @@ private:
         return -1;
     }
 
-    int root = 60, hover = -1;
+    int root = 60, hover = -1, dragFrom = -1;
+    int regionLow = 0, regionHigh = 127;
+    bool hoverRuler = false;
 };
 
 class MiscPanel final : public juce::Component,
@@ -2646,6 +2729,12 @@ public:
                     d.misc.rootNote = key;
             });
         };
+        rootKeys.onRegion = [this] (int low, int high) {
+            edit ([low, high] (ChannelDef& d) {
+                d.keyLow = juce::jlimit (0, 127, low);
+                d.keyHigh = juce::jlimit (d.keyLow, 127, high);
+            });
+        };
         addAndMakeVisible (addToKey);
         addAndMakeVisible (rootKeys);
         // Arpeggiator: FL's Slide and Chord
@@ -2894,6 +2983,7 @@ private:
         addToKey.setToggleState (c->misc.addToKey, juce::dontSendNotification);
         addToKey.setEnabled (c->instrument != InstrumentKind::sampler);
         rootKeys.setRoot (c->misc.rootNote);
+        rootKeys.setRegion (c->keyLow, c->keyHigh);
         arpSlide.setToggleState (c->arp.slide, juce::dontSendNotification);
         const auto filter = c->instrument == InstrumentKind::synth || c->instrument == InstrumentKind::sampler;
         modX->setEnabled (filter);
@@ -3266,6 +3356,9 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::fruitydance:
         case InstrumentKind::sytrus:
         case InstrumentKind::soundfont:
+        case InstrumentKind::layer:
+        case InstrumentKind::dashboard:
+        case InstrumentKind::voltage:
         case InstrumentKind::vfx:
             return true;
         default:
@@ -3313,6 +3406,12 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return makeMidiOutEditor (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::soundfont)
         return makeSoundFontEditor (engine, channel);
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::layer)
+        return makeLayerEditor (engine, channel);
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::dashboard)
+        return makeDashboardEditor (engine, channel);
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::voltage)
+        return makeVoltageControllerEditor (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::vfx)
         return makeVfxEditor (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;

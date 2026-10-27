@@ -1,4 +1,6 @@
 #include "core/Patcher.h"
+#include "core/ControlSurface.h"
+#include "core/XyController.h"
 
 #include <algorithm>
 #include <cctype>
@@ -93,7 +95,10 @@ NodePorts nodePorts (const PatchNode& node)
         p.midiIn = true;
         if (node.channel.instrument == InstrumentKind::controller) // Envelope Controller: 8 outputs; Keyboard Controller: 1
             p.controlOuts = parseKeyboardController (node.channel.controllerState) ? 1 : 8;
-        if (node.channel.instrument == InstrumentKind::controller || node.channel.instrument == InstrumentKind::midiOut)
+        if (node.channel.instrument == InstrumentKind::dashboard) // round 164: one per control (an XY pad: two)
+            p.controlOuts = surface::firstOutput (node.channel.patcher.surface, (int) node.channel.patcher.surface.size());
+        if (node.channel.instrument == InstrumentKind::controller || node.channel.instrument == InstrumentKind::midiOut
+            || node.channel.instrument == InstrumentKind::dashboard || node.channel.instrument == InstrumentKind::layer)
             p.audioOuts = 0; // (no sound of their own)
         p.midiOut = node.channel.instrument == InstrumentKind::midiOut;
         p.midiOuts = p.midiOut ? 1 : 0;
@@ -119,6 +124,10 @@ NodePorts nodePorts (const PatchNode& node)
         p.controlOuts = 3;
     else if (node.effect.kind == EffectKind::formulaController)
         p.controlOuts = 1;
+    else if (xy::isXyController (node.effect.kind)) // round 164: X, Y (, Z)
+        p.controlOuts = xy::axesOf (node.effect.kind);
+    else if (node.effect.kind == EffectKind::controlSurface) // round 164: one per control (an XY pad: two)
+        p.controlOuts = surface::firstOutput (node.effect.patcher.surface, (int) node.effect.patcher.surface.size());
     return p;
 }
 

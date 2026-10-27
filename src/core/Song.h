@@ -80,6 +80,10 @@ enum class InstrumentKind : std::uint8_t
                 // MIDI input port is its port (PluginRef::midiInPort). FL's state (channel @4, port @24) in pluginState
     patcher,    // FL's Patcher as a generator (REA_rodada141): a graph of instruments and effects in ChannelDef::patcher
     soundfont,  // LYNX Soundfont (REA_rodada158, core/SoundFont.h): the .sf2 / .sf3 in samplePath, settings in modelParams
+    layer,      // FL's Layer channel (REA_rodada164a, core/Layer.h): no sound; its notes play its children (ChannelDef::layer)
+    dashboard,  // FL's Dashboard (REA_rodada164a, core/ControlSurface.h): no sound; a panel of controls in patcher.surface
+    voltage,    // FL's Voltage Controller (REA_rodada164a, core/VoltageController.h): its notes as control voltages; FL's
+                // state in pluginState
     vfx         // FL's VFX note processors (round 164b, core/Vfx.h): kind, output port and FL's state in pluginState; no sound
 };
 
@@ -368,6 +372,7 @@ struct SurfaceControl
     std::string name;
     float value = 0.0f, valueY = 0.0f; // 0..1 (an XY pad has two)
     float x = 40.0f, y = 40.0f;        // place on the Surface tab
+    float size = 1.0f;                 // a Control Surface / Dashboard control's scale (round 164; 0.5…3)
     // control outputs: one each, an XY pad two (X then Y)
     int outputs() const noexcept { return kind == Kind::xy ? 2 : 1; }
     bool operator== (const SurfaceControl&) const = default;
@@ -496,6 +501,20 @@ struct ChannelMisc
     bool operator== (const ChannelMisc&) const = default;
 };
 
+// FL's Layer channel (REA_rodada164a §1, FL's manual "Layer channel settings"): it makes no sound; every note played on
+// it (Piano roll, steps, keyboard) plays its children channels. A child played from its own notes is not affected.
+struct LayerSettings
+{
+    std::vector<int> children; // channel indices ("Set children": the selected channels, in Channel Rack order)
+    bool random = false;     // one child at random per note (else every child)
+    bool crossfade = false;  // the Fade knob crossfades the children, top to bottom
+    bool sequential = false; // the children in turn (round robin), one per note
+    float fade = 0.0f;       // the Fade knob 0..1 (with crossfade)
+    // (the Layer's VOL / PAN are the channel's volume / pan, its PITCH the header's pitch knob: sampler.pitch)
+
+    bool operator== (const LayerSettings&) const = default;
+};
+
 struct ChannelDef
 {
     std::string name;
@@ -525,7 +544,13 @@ struct ChannelDef
     ChannelMisc misc;         // FL's Misc tab: time shift / gate, echo delay, velocity / key tracking (REA round 146b)
     // Piano Roll key labels (FL 2026's custom key labels, REA round 153): MIDI key -> the name shown on that key
     std::map<int, std::string> keyLabels;
+    // FL's key region (the Channel settings keyboard's ruler, REA_rodada164a §2): the channel plays only the notes
+    // from keyLow to keyHigh (MIDI keys); 0…127 = every note. Layer's "Split children" sets one key per child.
+    int keyLow = 0, keyHigh = 127;
+    LayerSettings layer; // instrument == layer: its children and options
 
+    bool hasKeyRegion() const noexcept { return keyLow > 0 || keyHigh < 127; }
+    bool inKeyRegion (int key) const noexcept { return key >= keyLow && key <= keyHigh; }
     bool operator== (const ChannelDef&) const = default;
 };
 
@@ -629,6 +654,9 @@ enum class EffectKind : std::uint8_t
     flLowLifter,     // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
     waveCandy,       // LYNX's analyser in FL's Wave Candy role (REA_rodada164c, core/VisualFx.h): no sound; scope, spectrum, meters
     visualizer,      // LYNX's Visualizer in FL's ZGameEditor Visualizer role (REA_rodada164c): no sound; scene in EffectSlot::state
+    xyController,    // FL's X-Y Controller (REA_rodada164a, core/XyController.h): no sound; outputs X, Y follow a pad
+    xyzController,   // FL's X-Y-Z Controller (REA_rodada164a, core/XyController.h): the same with a Z axis (mouse wheel)
+    controlSurface,  // FL's Control Surface (REA_rodada164a, core/ControlSurface.h): a user panel; output k = params[k]
     hardwareInsert   // LYNX's hardware insert (REA_rodada164d, core/HardwareInsert.h): send to device outputs, return from inputs, pinged round trip
 };
 // the last EffectKind (loops over every kind; update when one is appended)

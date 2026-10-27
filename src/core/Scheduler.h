@@ -37,6 +37,9 @@ struct NoteEvent
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f;
     // the note's Mod X / Y (0..1, 0.5 = none) and, on its "off", its release velocity (0..1) — REA round 151
     float modX = 0.5f, modY = 0.5f, release = 0.5f;
+    // the note's level factor (a Layer's VOL and crossfade, round 164): the instrument scales the voice when it can,
+    // else the velocity is scaled
+    float gain = 1.0f;
     std::int8_t colour = 0; // the note's colour group 0…15 (FL's note colours: VFX Color Mapper, round 164b)
     // A VFX channel (round 164b): −1 = an ordinary note; −2 = one its processor takes (it goes nowhere else); N ≥ 0 =
     // what the processor sent on MIDI port N (only the routes on that port take it)

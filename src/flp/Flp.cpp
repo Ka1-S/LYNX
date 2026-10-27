@@ -15,6 +15,8 @@ enum : std::uint32_t
     evPanLaw = 0x17,
     evTimeSignatureNumerator = 0x11,
     evChannelSwingMix = 0x61,
+    evLayerChild = 0x5E,  // u16: a Layer channel's child (one event per child; REA_rodada164a §1)
+    evLayerFlags = 0x90,  // u32: a Layer channel's options (REA_rodada164a §1)
     evChannelTimeShift = 0x59,  // u16: Misc › Time › Shift, FL's time-knob value (REA round 146b)
     evChannelEcho = 0xD1,       // i32 feedback, pan, pitch, echoes, time (REA round 146b)
     evChannelEchoModXY = 0x8A,  // u16 mod X, u16 mod Y of the echoes (128 = none)
@@ -478,6 +480,16 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     channel().swingMix = (int) e.value;
                 break;
 
+            case evLayerChild:
+                if (section == Section::channel)
+                    channel().layerChildren.push_back ((int) e.value);
+                break;
+
+            case evLayerFlags:
+                if (section == Section::channel)
+                    channel().layerFlags = (int) e.value;
+                break;
+
             case evChannelTimeShift:
                 if (section == Section::channel)
                     channel().timeShift = (int) e.value;
@@ -608,6 +620,11 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     c.fullPorta = e.data[62] != 0;
                     c.addToKey = e.data[63] != 0;
                     c.timeGate = readLE<std::uint16_t> (e.data, 64);
+                    // key region (+0x44 low, +0x48 high, inclusive; default 0 / 256 = every key) and the Layer's Fade
+                    // (+0x4C, 0…256) [REA_rodada164a DECOMP 0xD29370, 0xFF8F20]
+                    c.keyRegionLow = readLE<std::int32_t> (e.data, 0x44);
+                    c.keyRegionHigh = readLE<std::int32_t> (e.data, 0x48);
+                    c.layerFade = readLE<std::int32_t> (e.data, 0x4C);
                     c.arpRepeat = readLE<std::int32_t> (e.data, 92);
                     if (e.data.size() >= 116)
                         c.pitchRange = readLE<std::int32_t> (e.data, 112);

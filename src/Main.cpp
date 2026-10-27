@@ -46,6 +46,11 @@
 #include "core/FlSynths.h"
 #include "ui/Dialogs.h"
 #include "core/RackOps.h"
+#include "core/Layer.h"
+#include "core/XyController.h"
+#include "core/ControlSurface.h"
+#include "core/VoltageController.h"
+#include "ui/Controllers164.h"
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
@@ -4719,6 +4724,36 @@ private:
         fx.params[1] = 0.25f;
         fx.params[2] = 0.5f;
         song.mixer[1].effects.push_back (fx);
+        // round 164: X-Y (slot 2), X-Y-Z (slot 3) and a Control Surface (slot 4)
+        {
+            auto xyFx = lynx::makeEffectSlot (lynx::EffectKind::xyController);
+            xyFx.params[(std::size_t) lynx::xy::level (0)] = 0.3f;
+            xyFx.params[(std::size_t) lynx::xy::level (1)] = 0.7f;
+            xyFx.params[(std::size_t) lynx::xy::tension (0)] = 0.8f;
+            song.mixer[1].effects.push_back (xyFx);
+            auto xyzFx = lynx::makeEffectSlot (lynx::EffectKind::xyzController);
+            xyzFx.params[(std::size_t) lynx::xy::level (2)] = 0.8f;
+            song.mixer[1].effects.push_back (xyzFx);
+            auto panel = lynx::makeEffectSlot (lynx::EffectKind::controlSurface);
+            lynx::SurfaceControl c;
+            for (const auto& [kind, name, v, x, y] : std::vector<std::tuple<lynx::SurfaceControl::Kind, const char*, float, float, float>> {
+                     { lynx::SurfaceControl::Kind::knob, "Cutoff", 0.65f, 20.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::knob, "Reso", 0.3f, 90.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::slider, "Mix", 0.8f, 170.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::xy, "Space", 0.4f, 230.0f, 20.0f },
+                     { lynx::SurfaceControl::Kind::button, "Drop", 0.0f, 20.0f, 110.0f },
+                     { lynx::SurfaceControl::Kind::checkBox, "Bypass", 1.0f, 20.0f, 160.0f } })
+            {
+                c.kind = kind;
+                c.name = name;
+                c.value = v;
+                c.valueY = 0.6f;
+                c.x = x;
+                c.y = y;
+                lynx::surface::add (panel, c);
+            }
+            song.mixer[1].effects.push_back (panel);
+        }
         lynx::ChannelDef env;
         env.name = "Envelope Controller";
         env.instrument = lynx::InstrumentKind::controller;
@@ -4739,6 +4774,47 @@ private:
         settings.port = 1;
         lynx::midictl::writeMidiOut (out.pluginState, settings);
         song.channels.push_back (out);
+        // a Layer (round 164) over three synths split across the keyboard, crossfading
+        for (const auto* name : { "Bass", "Pad", "Lead" })
+        {
+            lynx::ChannelDef c;
+            c.name = name;
+            c.instrument = lynx::InstrumentKind::synth;
+            song.channels.push_back (c);
+        }
+        {
+            lynx::ChannelDef layer;
+            layer.name = "Layer";
+            layer.instrument = lynx::InstrumentKind::layer;
+            song.channels.push_back (layer);
+            const auto self = (int) song.channels.size() - 1;
+            lynx::layer::setChildren (song, self, { 2, 3, 4 });
+            song.channels[2].keyLow = 0, song.channels[2].keyHigh = 47;
+            song.channels[3].keyLow = 36, song.channels[3].keyHigh = 83;
+            song.channels[4].keyLow = 72, song.channels[4].keyHigh = 127;
+            song.channels[(std::size_t) self].layer.crossfade = true;
+            song.channels[(std::size_t) self].layer.fade = 0.35f;
+        }
+        {
+            lynx::ChannelDef dash; // channel 6
+            dash.name = "Dashboard";
+            dash.instrument = lynx::InstrumentKind::dashboard;
+            dash.patcher.surface = lynx::surface::starterControls();
+            song.channels.push_back (dash);
+        }
+        {
+            lynx::ChannelDef volt; // channel 7: FL's render-test settings (main L pitch, R gate × 0.5) with Out 2 on insert 3
+            volt.name = "Voltage Controller";
+            volt.instrument = lynx::InstrumentKind::voltage;
+            lynx::voltage::Settings v;
+            v.enabled = true;
+            v.params[9] = 49152;
+            v.unipolar[2] = true;
+            v.tracks = { 3, 0, 0 };
+            v.source[6] = lynx::voltage::Source::clock;
+            volt.pluginState = lynx::voltage::write (v);
+            song.channels.push_back (volt);
+        }
         song.patterns.emplace_back();
         offline.setSong (std::move (song));
         offline.dispatchPendingMessages();
@@ -4749,6 +4825,19 @@ private:
         };
         shoot (lynx::makeChannelSettingsPanel (offline, 0), "-envelope-controller.png");
         shoot (lynx::makeChannelSettingsPanel (offline, 1), "-midi-out.png");
+        shoot (lynx::makeChannelSettingsPanel (offline, 5), "-layer.png");
+        shoot (lynx::makeChannelFrame (offline, 3, -1), "-layer-child-misc.png"); // (the key-region ruler over the root keyboard)
+        {
+            const auto slotOf = [] (int k) -> lynx::SlotLocator {
+                return [k] (lynx::Song& s) { return &s.mixer[1].effects[(std::size_t) k]; };
+            };
+            const lynx::AutomationTarget target { lynx::AutomationTargetKind::effectParam, 1, 1, 0 };
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (1), nullptr, target), "-xy-controller.png");
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (2), nullptr, target), "-xyz-controller.png");
+            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (3), target), "-control-surface.png");
+            shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
+            shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
+        }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
             for (int part = 0; part < 7; ++part)

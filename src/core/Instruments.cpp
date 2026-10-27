@@ -1,4 +1,6 @@
 #include "core/Instruments.h"
+#include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "core/Vfx.h"
 #include "core/Scheduler.h"
 
@@ -231,6 +233,9 @@ private:
             case InstrumentKind::plugin:
             case InstrumentKind::controller:
             case InstrumentKind::midiOut:
+            case InstrumentKind::layer:
+            case InstrumentKind::dashboard:
+            case InstrumentKind::voltage:
             case InstrumentKind::vfx:
             case InstrumentKind::patcher:
             case InstrumentKind::sakura:
@@ -2927,8 +2932,12 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 {
     if (kind == InstrumentKind::controller)
         return std::make_unique<ControllerInstrument>();
-    if (kind == InstrumentKind::midiOut)
+    if (kind == InstrumentKind::midiOut || kind == InstrumentKind::layer) // (a Layer's notes go to its children)
         return std::make_unique<MidiOutInstrument>();
+    if (kind == InstrumentKind::dashboard) // its controls' values as control outputs (round 164)
+        return surface::makeDashboard();
+    if (kind == InstrumentKind::voltage) // its notes as control voltages (round 164)
+        return voltage::makeInstrument();
     if (kind == InstrumentKind::vfx)
         return std::make_unique<VfxInstrument>();
 

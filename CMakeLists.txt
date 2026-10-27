@@ -144,6 +144,10 @@ add_library(lynx_core STATIC
     src/core/FormulaController.cpp
     src/core/VoiceShift.cpp
     src/core/NativeEngines.cpp
+    src/core/Layer.cpp
+    src/core/XyController.cpp
+    src/core/ControlSurface.cpp
+    src/core/VoltageController.cpp
     src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
@@ -312,6 +316,9 @@ if(LYNX_BUILD_APP)
         src/ui/VisualEditors.cpp
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
+        src/ui/LayerEditor.cpp
+        src/ui/Controllers164.cpp
+        src/ui/VoltageEditor.cpp
         src/ui/SoundFontEditor.cpp
         src/ui/VfxEditors.cpp
         src/ui/BrowserComponent.cpp

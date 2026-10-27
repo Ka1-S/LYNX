@@ -107,6 +107,12 @@ struct Channel
     std::vector<std::uint8_t> pluginState; // the generator's 0xD5 (e.g. 3x Osc state)
     int wrapperFlags = -1;                 // the generator's 0xD4 u16 at +16 (0x10 generator, 0x20 smart disable; −1 = none)
 
+    // Layer channels (type layer, REA_rodada164a §1): 0x5E = a child channel's index (one per child), 0x90 = options
+    std::vector<int> layerChildren;
+    int layerFlags = 0;
+    int layerFade = 0;                         // 0…256 (0xD7 +0x4C)
+    int keyRegionLow = 0, keyRegionHigh = 256; // inclusive keys (0xD7 +0x44 / +0x48; 0…256 = every key)
+
     int swingMix = 128;          // 0x61: 0..128
     int cutGroup = 0, cutBy = 0; // 0x84
     int rootNote = -1;           // 0x87 (MIDI), -1 = default (C5 = 60)

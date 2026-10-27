@@ -5,6 +5,8 @@
 #include <map>
 
 #include "core/Effects.h"
+#include "core/ControlSurface.h"
+#include "core/XyController.h"
 #include "core/MidiControls.h"
 #include "core/FlSynths.h"
 #include "engine/Text.h"
@@ -752,6 +754,13 @@ std::vector<ControllerOutput> controllerOutputs (const Song& song)
     for (int c = 0; c < (int) song.channels.size(); ++c)
     {
         const auto& ch = song.channels[(std::size_t) c];
+        if (ch.instrument == InstrumentKind::dashboard) // round 164: one output per control
+        {
+            const auto outputs = surface::firstOutput (ch.patcher.surface, (int) ch.patcher.surface.size());
+            for (int k = 0; k < outputs; ++k)
+                out.push_back ({ -1, 0, k, c, nameOf (ch.name) + " - " + nameOf (surface::outputName (ch.patcher.surface, k)) });
+            continue;
+        }
         if (ch.instrument != InstrumentKind::controller)
             continue;
         const auto name = nameOf (ch.name);
@@ -769,8 +778,21 @@ std::vector<ControllerOutput> controllerOutputs (const Song& song)
             const auto kind = song.mixer[(std::size_t) t].effects[(std::size_t) s].kind;
             const auto track = t == 0 ? tr ("Master") : nameOf (song.mixer[(std::size_t) t].name);
             const auto where = (track.isNotEmpty() ? track : tr ("Insert {0}", { juce::String (t) })) + " (" + juce::String (s + 1) + ")";
+            const auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) s];
             if (kind == EffectKind::formulaController)
                 out.push_back ({ t, s, 0, -1, tr ("Formula Controller") + " " + where });
+            else if (xy::isXyController (kind)) // round 164: X, Y (, Z)
+            {
+                static const char* axes[] = { "X", "Y", "Z" };
+                for (int a = 0; a < xy::axesOf (kind); ++a)
+                    out.push_back ({ t, s, a, -1, juce::String (effectInfo (kind).name) + " " + where + " - " + axes[a] });
+            }
+            else if (kind == EffectKind::controlSurface) // round 164: one output per control
+            {
+                const auto outputs = surface::firstOutput (fx.patcher.surface, (int) fx.patcher.surface.size());
+                for (int k = 0; k < outputs; ++k)
+                    out.push_back ({ t, s, k, -1, "Control Surface " + where + " - " + nameOf (surface::outputName (fx.patcher.surface, k)) });
+            }
             else if (kind == EffectKind::peakController)
             {
                 out.push_back ({ t, s, 1, -1, tr ("Peak Controller") + " " + where + " - " + tr ("Peak") });
