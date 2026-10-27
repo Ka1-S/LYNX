@@ -15601,6 +15601,7 @@ TEST (flp_pattern_events_import)
 #include "PluginCatalogTests151.inc"
 #include "Rea151Tests.inc"
 #include "AudioEditTests.inc"
+#include "AudioEditToolsTests.inc"
 #include "InputTests.inc"
 #include "../asio/InputDrift.h"
 #include "AsioDriftTests.inc"

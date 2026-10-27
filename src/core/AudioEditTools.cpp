@@ -485,6 +485,51 @@ void mixdownEnvelopes (Document& doc, const Envelope& volume, const Envelope& pa
     }
 }
 
+void mixdownEnvelopes (Document& doc)
+{
+    if (! hasEnvelopes (doc))
+        return;
+    mixdownEnvelopes (doc, doc.volumeEnvelope, doc.panEnvelope, doc.separationEnvelope);
+    doc.volumeEnvelope = {};
+    doc.panEnvelope = {};
+    doc.separationEnvelope = {};
+}
+
+bool hasEnvelopes (const Document& doc) noexcept
+{
+    return ! doc.volumeEnvelope.empty() || ! doc.panEnvelope.empty() || ! doc.separationEnvelope.empty();
+}
+
+void remapEnvelopes (Document& doc, std::int64_t oldFrames, Range edited, std::int64_t newLength)
+{
+    const auto newFrames = doc.audio.frames();
+    if (oldFrames <= 1 || newFrames <= 1 || (oldFrames == newFrames && edited.length() == newLength))
+        return;
+    for (auto* env : { &doc.volumeEnvelope, &doc.panEnvelope, &doc.separationEnvelope })
+    {
+        if (env->empty())
+            continue;
+        std::vector<EnvPoint> kept;
+        for (auto p : env->points)
+        {
+            const auto f = p.x * (double) (oldFrames - 1);
+            double g;
+            if (f <= (double) edited.start)
+                g = f;
+            else if (f >= (double) edited.end)
+                g = f + (double) (newLength - edited.length());
+            else if (newLength <= 0)
+                continue; // the audio under the point was deleted
+            else
+                g = (double) edited.start + (f - (double) edited.start) * (double) newLength / (double) std::max<std::int64_t> (1, edited.length());
+            p.x = clamp01 (g / (double) (newFrames - 1));
+            kept.push_back (p);
+        }
+        env->points = std::move (kept);
+        env->sort();
+    }
+}
+
 void addPointsAt (Envelope& env, const std::vector<double>& xs)
 {
     std::vector<std::pair<double, double>> add;

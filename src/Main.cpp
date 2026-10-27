@@ -846,6 +846,16 @@ public:
             return;
         }
 
+        if (args.contains ("--edisonshot"))
+        {
+            // LYNX.exe --edisonshot prefix [audio.wav]: the audio editor's Edison tool windows (round 165l) and the
+            // editor before / after some of them, as PNGs (a synthetic drum loop without a file)
+            const auto i = args.indexOf ("--edisonshot");
+            runEdisonShot (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].unquoted() : juce::String());
+            quit();
+            return;
+        }
+
         if (args.contains ("--vfxshot"))
         {
             // LYNX.exe --vfxshot prefix: the VFX note effects' editors (round 164b), on channels and in a Patcher, as PNGs
@@ -4871,6 +4881,90 @@ private:
                 if (w->getName().startsWith ("Formula") && w->getContentComponent() != nullptr)
                     savePng (w->getContentComponent()->createComponentSnapshot (w->getContentComponent()->getLocalBounds()), prefix + "-formula-controller.png");
         lynx::FormulaControllerWindows::closeAll();
+    }
+
+    void runEdisonShot (const juce::String& prefix, const juce::String& file)
+    {
+        namespace ae = lynx::audioedit;
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        ae::Document d;
+        if (file.isNotEmpty())
+        {
+            juce::MemoryBlock bytes;
+            if (! juce::File (file).loadFileAsData (bytes) || ! ae::decodeWav (static_cast<const std::uint8_t*> (bytes.getData()), bytes.getSize(), d))
+            {
+                std::fprintf (stderr, "edisonshot: cannot read %s\n", file.toRawUTF8());
+                return;
+            }
+        }
+        else
+        {
+            // a drum loop with a hum and hiss under it (something for the denoiser and the EQ to show)
+            d.title = "Drum loop";
+            d.audio.sampleRate = 44100.0;
+            const auto frames = (std::size_t) (44100 * 2);
+            d.audio.channels.assign (2, std::vector<float> (frames, 0.0f));
+            std::uint32_t seed = 7;
+            for (std::size_t i = 0; i < frames; ++i)
+            {
+                seed = seed * 1664525u + 1013904223u;
+                const auto hiss = ((float) (seed >> 8) / 16777216.0f - 0.5f) * 0.02f;
+                const auto hum = 0.01f * (float) std::sin (2.0 * 3.141592653589793 * 50.0 * (double) i / 44100.0);
+                d.audio.channels[0][i] = hiss + hum;
+                d.audio.channels[1][i] = hiss * 0.9f + hum;
+            }
+            for (int hit = 0; hit < 8; ++hit)
+            {
+                const auto at = (std::size_t) hit * frames / 8;
+                const auto kick = hit % 2 == 0;
+                double phase = 0.0;
+                for (std::size_t i = 0; i < 12000 && at + i < frames; ++i)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    const auto noise = (float) (seed >> 8) / 16777216.0f - 0.5f;
+                    const auto t = (double) i / 44100.0;
+                    phase += 2.0 * 3.141592653589793 * (kick ? 45.0 + 160.0 * std::exp (-t * 30.0) : 190.0) / 44100.0;
+                    const auto body = (float) std::sin (phase) * (float) std::exp (-t * (kick ? 9.0 : 22.0));
+                    const auto v = kick ? 0.85f * body : 0.35f * body + 0.6f * noise * (float) std::exp (-t * 18.0);
+                    d.audio.channels[0][at + i] += v;
+                    d.audio.channels[1][at + i] += kick ? v : v * 0.8f;
+                }
+            }
+            for (int hit = 1; hit < 8; ++hit)
+                ae::addMarker (d, (std::int64_t) (hit * frames / 8));
+            ae::setLoop (d, { 0, (std::int64_t) frames });
+        }
+        // a volume envelope (a fade-in and a dip) to show the envelope mode and the envelope tools
+        d.volumeEnvelope.points = { { 0.0, 0.0, 0.0f }, { 0.12, 0.5, 0.4f }, { 0.55, 0.5, 0.0f }, { 0.62, 0.25, 0.0f }, { 0.7, 0.5, 0.0f }, { 1.0, 0.5, 0.0f } };
+        auto editor = lynx::makeAudioEditorForSnapshot (offline, d, false);
+        auto shot = [&prefix] (juce::Component& c, const juce::String& name) {
+            juce::Image image (juce::Image::ARGB, c.getWidth(), c.getHeight(), true);
+            {
+                juce::Graphics g (image);
+                g.fillAll (lynx::theme::panel);
+                c.paintEntireComponent (g, false);
+            }
+            savePng (image, prefix + name);
+        };
+        editor->setSize (1120, 600);
+        lynx::setAudioEditorEnvelopeModeForSnapshot (*editor, 1);
+        shot (*editor, "-editor-volume-envelope.png");
+        lynx::setAudioEditorEnvelopeModeForSnapshot (*editor, 0);
+        juce::File (prefix + "-menu.txt").replaceWithText (lynx::audioEditorMenuForSnapshot (*editor).joinIntoString ("\n") + "\n");
+        for (int t = 0; lynx::audioToolNameForSnapshot (t) != nullptr; ++t)
+        {
+            const auto envelopeTool = t >= 10; // Scale levels .. Create sequence work on the volume envelope
+            if (auto panel = lynx::makeAudioToolPanelForSnapshot (*editor, t, envelopeTool ? 1 : 0))
+            {
+                offline.dispatchPendingMessages();
+                const auto name = juce::String (lynx::audioToolNameForSnapshot (t)).toLowerCase().retainCharacters ("abcdefghijklmnopqrstuvwxyz ").trim().replaceCharacter (' ', '-');
+                shot (*panel, "-tool-" + juce::String (t).paddedLeft ('0', 2) + "-" + name + ".png");
+                if (envelopeTool)
+                    shot (*editor, "-tool-" + juce::String (t).paddedLeft ('0', 2) + "-" + name + "-editor.png");
+                panel.reset(); // (puts the envelope back)
+            }
+        }
     }
 
     void runVfxShot (const juce::String& prefix)

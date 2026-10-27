@@ -91,7 +91,7 @@ APP_SOURCES+=(src/platform/CrashGuard.cpp)
 # workflow P2: core (note tools, mixer operations, history labels, browser search)
 APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/AudioEditTools.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/SearchService.cpp src/core/BrowserView.cpp src/core/EffectPresets.cpp src/core/PluginPresets.cpp src/core/ParamHelp.cpp)
 # workflow P2: UI (note tool dialogs, tool windows, undo history, quick-add palette)
-APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/EventEditor.cpp src/ui/AudioEditor.cpp src/ui/ToolWindow.cpp src/ui/TempoTapper.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
+APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/EventEditor.cpp src/ui/AudioEditor.cpp src/ui/AudioEditorTools.cpp src/ui/ToolWindow.cpp src/ui/TempoTapper.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
 # start-up: splash screen and its procedurally synthesised sound
 APP_SOURCES+=(src/core/StartupSound.cpp src/ui/Splash.cpp)
 # main window chrome: hint bar and toolbar widgets

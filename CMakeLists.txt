@@ -352,6 +352,7 @@ if(LYNX_BUILD_APP)
         src/ui/NoteToolDialogs.cpp
         src/ui/EventEditor.cpp
         src/ui/AudioEditor.cpp
+        src/ui/AudioEditorTools.cpp
         src/ui/ToolWindow.cpp
         src/ui/TempoTapper.cpp
         src/ui/HistoryPanel.cpp

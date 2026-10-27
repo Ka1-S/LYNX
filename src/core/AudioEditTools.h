@@ -25,29 +25,7 @@ struct Progress
     void set (float f) noexcept { done.store (f, std::memory_order_relaxed); }
 };
 
-// --- point envelopes (the curves drawn in the tool forms and over the audio) ------------------------------------
-// x 0..1 (time or frequency, depending on the tool), y 0..1; `tension` bends the segment that ends at the point
-// (-1..1, 0 = straight; positive = slow start). Points are kept sorted by x.
-struct EnvPoint
-{
-    double x = 0.0, y = 0.0;
-    float tension = 0.0f;
-};
-
-struct Envelope
-{
-    std::vector<EnvPoint> points;
-
-    bool empty() const noexcept { return points.empty(); }
-    // The value at x (the first / last point's value outside them; 0 when there are no points).
-    double at (double x) const noexcept;
-    void sort();
-    // Index of the point inserted at (x, y).
-    int insert (double x, double y, float tension = 0.0f);
-
-    static Envelope flat (double y); // two points (0, y) and (1, y)
-};
-
+// --- point envelopes: EnvPoint / Envelope are in core/AudioEdit.h (the document carries the amp envelopes) ---
 // Bends a straight 0..1 segment position by a tension (-1..1).
 double tensionCurve (double t, float tension) noexcept;
 
@@ -96,6 +74,11 @@ enum class EnvTarget : std::uint8_t
 float envelopeGain (double y) noexcept;
 // Applies the envelopes (the empty ones are skipped) to the whole audio.
 void mixdownEnvelopes (Document& doc, const Envelope& volume, const Envelope& panning, const Envelope& separation);
+// The document's own envelopes applied (then removed) — Edison's "Mixdown amp envelopes".
+void mixdownEnvelopes (Document& doc);
+bool hasEnvelopes (const Document& doc) noexcept;
+// Keeps the envelopes on the same audio when [edited.start, edited.end) of `oldFrames` became `newLength` frames.
+void remapEnvelopes (Document& doc, std::int64_t oldFrames, Range edited, std::int64_t newLength);
 // Points at the selection's edges (keeping the current values there) — "Add points at selection".
 void addPointsAt (Envelope& env, const std::vector<double>& xs);
 
