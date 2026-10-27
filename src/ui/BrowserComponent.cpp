@@ -25,6 +25,7 @@
 #include "ui/ChannelRackComponent.h"
 #include "ui/MixerComponent.h"
 #include "ui/SoundFontEditor.h"
+#include "ui/ToolWindow.h"
 
 namespace lynx
 {
@@ -529,6 +530,44 @@ public:
         repaint();
     }
 
+    // Removes the folders on disk `drop` takes (round 164: the content filter found them empty), keeping what is open
+    // and selected. False when nothing went.
+    bool pruneFolders (const std::function<bool (const juce::File&)>& drop)
+    {
+        if (flat || root == nullptr)
+            return false;
+        auto* keep = juce::isPositiveAndBelow (selected, (int) rows.size()) ? rows[(std::size_t) selected] : nullptr;
+        bool removed = false, lostSelection = false;
+        std::function<void (Node&)> walk = [&] (Node& n) {
+            for (auto it = n.children.begin(); it != n.children.end();)
+            {
+                auto& c = **it;
+                if (c.kind == Kind::fsFolder && drop (c.file))
+                {
+                    for (auto* s = keep; s != nullptr; s = s->parent)
+                        lostSelection = lostSelection || s == &c;
+                    it = n.children.erase (it);
+                    removed = true;
+                    continue;
+                }
+                if (c.kind == Kind::fsFolder && c.loaded)
+                    walk (c);
+                ++it;
+            }
+        };
+        walk (*root);
+        if (! removed)
+            return false;
+        rebuild();
+        selected = -1;
+        if (! lostSelection)
+            for (int i = 0; i < (int) rows.size(); ++i)
+                if (rows[(std::size_t) i] == keep)
+                    selected = i;
+        hovered = -1;
+        return true;
+    }
+
     juce::File selectedFile() const
     {
         return juce::isPositiveAndBelow (selected, (int) rows.size()) ? rows[(std::size_t) selected]->file : juce::File();
@@ -614,6 +653,15 @@ public:
 
     // FL's folder "Expand all": the folder and its sub-folders open (on disk: down to `depth` levels, so a big
     // library is not scanned at once)
+    // --snapshot: opens the top-level folder `f` and its sub-folders (round 164)
+    void expandTop (const juce::File& f, int depth)
+    {
+        if (root != nullptr)
+            for (auto& c : root->children)
+                if (c->kind == Kind::fsFolder && c->file == f)
+                    expandFolder (*c, depth);
+    }
+
     void expandFolder (Node& n, int depth)
     {
         n.expanded = true;
@@ -1121,6 +1169,8 @@ private:
         for (const auto& f : folders)
         {
             if (f.isHidden() || f.getFileName().startsWithChar ('.'))
+                continue;
+            if (browser.filterHides (f)) // nothing in it is listed under the content filter (round 164)
                 continue;
             auto c = std::make_unique<Node>();
             c->kind = Kind::fsFolder;
@@ -2096,6 +2146,31 @@ bool BrowserComponent::lists (const juce::File& file) const
     return browserview::listed (file.getFileName().toStdString(), view.filter) || file.isDirectory();
 }
 
+std::shared_ptr<const search::FolderMatches> BrowserComponent::filterMatches() const
+{
+    if (view.filter == browserview::ContentFilter::all || searcher == nullptr)
+        return nullptr;
+    const auto filter = view.filter;
+    return searcher->service->folderMatches ((int) filter, [filter] (const std::string& name) { return browserview::listed (name, filter); });
+}
+
+bool BrowserComponent::filterHides (const juce::File& folder) const
+{
+    // from the search index (cached; never waits for it): a folder it doesn't know yet stays listed
+    const auto matches = filterMatches();
+    return matches != nullptr && matches->of (folder.getFullPathName().toStdString()) == search::FolderMatches::Contents::none;
+}
+
+void BrowserComponent::applyFilterToTree()
+{
+    const auto matches = filterMatches();
+    if (matches == nullptr || matches->generation == prunedGeneration)
+        return;
+    prunedGeneration = matches->generation;
+    if (tree->pruneFolders ([this] (const juce::File& f) { return filterHides (f); }))
+        treeView->setViewPosition (treeView->getViewPosition()); // (keeps the scroll inside the shorter list)
+}
+
 void BrowserComponent::setContentFilter (browserview::ContentFilter filter)
 {
     if (filter == view.filter)
@@ -2103,7 +2178,9 @@ void BrowserComponent::setContentFilter (browserview::ContentFilter filter)
     view.filter = filter;
     saveView();
     refreshViewButton();
+    prunedGeneration = 0;
     rebuildTree();
+    refreshFoldersPanel();
     if (searchBox.getText().trim().isNotEmpty())
         runSearch();
 }
@@ -2172,32 +2249,250 @@ void BrowserComponent::addViewItems (juce::PopupMenu& menu)
     }
     menu.addSubMenu (tr ("Show") + ": " + tr (browserview::contentFilterLabel (view.filter)), filters);
 
-    // which top-level entries are shown (a checklist; hidden ones come back from here)
-    juce::PopupMenu folders;
-    auto toggle = [safe] (const juce::String& id) {
+    // which top-level entries are shown and the user's own folders: a window (round 164; a checklist sub-menu before)
+    menu.addItem (tr ("Show folders..."), [safe] {
         if (safe != nullptr)
-            safe->setRootShown (id, ! safe->view.shows (id.toStdString()));
+            safe->showFoldersDialog();
+    });
+}
+
+// --- the "Show folders" window (round 164) --------------------------------------------------------------
+
+// Which top-level entries this Browser shows, as a checklist (ticks apply at once), the user's own folders with a
+// Remove button, Add folder..., Show all. Each entry says where it is and, under a content filter, whether it holds
+// anything to list (those folders are left out of the tree while the filter is on).
+class BrowserComponent::FoldersPanel final : public juce::Component
+{
+public:
+    using Entry = FolderEntry;
+
+    explicit FoldersPanel (BrowserComponent* b) : browser (b)
+    {
+        title.setFont (theme::font (theme::type::body, true));
+        title.setColour (juce::Label::textColourId, theme::colour::textPrimary);
+        addAndMakeVisible (title);
+        note.setFont (theme::font (theme::type::small));
+        note.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        note.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (note);
+        list.setViewedComponent (&rows, false);
+        list.setScrollBarsShown (true, false);
+        list.setScrollBarThickness (10);
+        addAndMakeVisible (list);
+
+        addFolder.setButtonText (tr ("Add folder..."));
+        addFolder.setTooltip (tr ("Add one of your own folders to the Browsers (samples, projects, SoundFonts...)"));
+        addFolder.onClick = [this] { if (browser != nullptr) browser->addUserFolder(); };
+        showAll.setButtonText (tr ("Show all"));
+        showAll.setTooltip (tr ("Tick every folder"));
+        showAll.onClick = [this] { if (browser != nullptr) browser->showAllRoots(); };
+        close.setButtonText (tr ("Close"));
+        close.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
+        close.setColour (juce::TextButton::textColourOffId, theme::colour::onAccent);
+        close.onClick = [this] { closeToolWindowOf (*this); };
+        for (auto* button : { &addFolder, &showAll, &close })
+            addAndMakeVisible (button);
+        refresh();
+        setSize (520, 470);
+    }
+
+    // the browser's entries again (a tick, an added / removed folder, the filter changed)
+    void refresh()
+    {
+        if (browser == nullptr)
+            return;
+        setEntries (browser->folderEntries(), browser->role == Role::samples,
+                    browser->view.filter == browserview::ContentFilter::all ? juce::String() : tr (browserview::contentFilterLabel (browser->view.filter)));
+    }
+
+    void setEntries (std::vector<Entry> newEntries, bool sampleBrowser, const juce::String& filterName)
+    {
+        entries = std::move (newEntries);
+        title.setText (sampleBrowser ? tr ("Folders shown in the Sample browser") : tr ("Folders shown in the Browser"), juce::dontSendNotification);
+        auto text = tr ("Untick what you don't use: it leaves this Browser and its searches. Nothing is deleted.");
+        if (filterName.isNotEmpty())
+            text << "\n" << tr ("Listing \"{0}\": folders with nothing of that kind are left out of the tree.", { filterName });
+        note.setText (text, juce::dontSendNotification);
+        int shown = 0;
+        for (const auto& e : entries)
+            shown += e.shown ? 1 : 0;
+        showAll.setEnabled (shown < (int) entries.size());
+
+        rows.deleteAllChildren();
+        for (int i = 0; i < (int) entries.size(); ++i)
+            rows.addAndMakeVisible (new Row (*this, i));
+        layoutRows();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (14, 12);
+        title.setBounds (area.removeFromTop (22));
+        note.setBounds (area.removeFromTop (note.getText().containsChar ('\n') ? 36 : 20));
+        area.removeFromTop (6);
+        auto bottom = area.removeFromBottom (28);
+        close.setBounds (bottom.removeFromRight (90));
+        addFolder.setBounds (bottom.removeFromLeft (120));
+        bottom.removeFromLeft (8);
+        showAll.setBounds (bottom.removeFromLeft (90));
+        area.removeFromBottom (10);
+        list.setBounds (area);
+        layoutRows();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg2);
+        g.setColour (theme::colour::border);
+        g.drawRect (list.getBounds().expanded (1), 1);
+    }
+
+    static constexpr int rowHeight = 34;
+
+private:
+    struct Row final : public juce::Component
+    {
+        Row (FoldersPanel& p, int i) : panel (p), index (i)
+        {
+            const auto& e = panel.entries[(std::size_t) i];
+            tick.setToggleState (e.shown, juce::dontSendNotification);
+            tick.setTooltip (e.shown ? tr ("Shown: untick to hide it from this Browser") : tr ("Hidden: tick to show it"));
+            tick.onClick = [this] { panel.toggle (index, tick.getToggleState()); };
+            addAndMakeVisible (tick);
+            if (e.user)
+            {
+                remove.setTooltip (tr ("Remove this folder from the Browsers (the folder itself stays on the disk)"));
+                remove.setFlat (true);
+                remove.onClick = [this] { panel.remove (index); };
+                addAndMakeVisible (remove);
+            }
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (6, 0);
+            tick.setBounds (area.removeFromLeft (26).withSizeKeepingCentre (24, 24));
+            if (remove.isVisible())
+                remove.setBounds (area.removeFromRight (26).withSizeKeepingCentre (22, 22));
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto& e = panel.entries[(std::size_t) index];
+            if (index % 2 == 1)
+                g.fillAll (theme::colour::bg2.brighter (0.06f));
+            auto area = getLocalBounds().reduced (6, 2).withTrimmedLeft (32).withTrimmedRight (remove.isVisible() ? 30 : 0);
+            auto top = area.removeFromTop (area.getHeight() / 2 + 1);
+            g.setFont (theme::font (theme::type::body, e.shown));
+            g.setColour (e.shown ? theme::colour::textPrimary : theme::colour::textDisabled);
+            juce::String name = e.name;
+            if (e.user)
+                name << "  " << tr ("(your folder)");
+            g.drawText (name, top, juce::Justification::bottomLeft, true);
+            g.setFont (theme::font (theme::type::small));
+            g.setColour (theme::colour::textDisabled);
+            auto detail = e.path;
+            if (e.empty)
+                detail = tr ("nothing to list under the filter") + "  ·  " + detail;
+            g.drawFittedText (detail, area, juce::Justification::topLeft, 1, 0.9f);
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (e.mouseWasClicked() && ! e.mods.isPopupMenu())
+                tick.triggerClick(); // the whole row ticks
+        }
+
+        FoldersPanel& panel;
+        int index;
+        juce::ToggleButton tick;
+        IconButton remove { "remove folder", Icon::close };
     };
-    folders.addItem (tr ("Current project"), true, view.shows (browserview::projectRootId), [toggle] { toggle (browserview::projectRootId); });
-    folders.addItem (tr ("Plugin database"), true, view.shows (browserview::pluginsRootId), [toggle] { toggle (browserview::pluginsRootId); });
+
+    void layoutRows()
+    {
+        const auto width = list.getWidth() - (entries.size() * (std::size_t) rowHeight > (std::size_t) list.getHeight() ? 10 : 0);
+        rows.setSize (juce::jmax (0, width), (int) entries.size() * rowHeight);
+        for (int i = 0; i < rows.getNumChildComponents(); ++i)
+            rows.getChildComponent (i)->setBounds (0, i * rowHeight, rows.getWidth(), rowHeight);
+    }
+
+    void toggle (int index, bool shown)
+    {
+        if (browser != nullptr && juce::isPositiveAndBelow (index, (int) entries.size()))
+        {
+            const auto id = entries[(std::size_t) index].id;
+            juce::MessageManager::callAsync ([safe = browser, id, shown] { // (rebuilds the rows: not inside a row's click)
+                if (safe != nullptr)
+                    safe->setRootShown (id, shown);
+            });
+        }
+    }
+
+    void remove (int index)
+    {
+        if (browser != nullptr && juce::isPositiveAndBelow (index, (int) entries.size()))
+        {
+            const juce::File folder (entries[(std::size_t) index].path);
+            juce::MessageManager::callAsync ([safe = browser, folder] {
+                if (safe != nullptr)
+                    safe->removeUserFolder (folder);
+            });
+        }
+    }
+
+    juce::Component::SafePointer<BrowserComponent> browser;
+    std::vector<Entry> entries;
+    juce::Label title, note;
+    juce::Viewport list;
+    juce::Component rows;
+    juce::TextButton addFolder, showAll, close;
+};
+
+std::vector<BrowserComponent::FolderEntry> BrowserComponent::folderEntries() const
+{
+    std::vector<FolderEntry> out;
+    out.push_back ({ browserview::projectRootId, tr ("Current project"), tr ("the project's patterns, channels, samples and history"),
+                     view.shows (browserview::projectRootId), false, false });
+    out.push_back ({ browserview::pluginsRootId, tr ("Plugin database"), tr ("LYNX's, FL's and your installed plugins"),
+                     view.shows (browserview::pluginsRootId), false, false });
     for (int i = 0; i < allRoots.size(); ++i)
     {
-        const auto id = allRoots[i].getFullPathName();
-        juce::PopupMenu::Item item (allRootNames[i]);
-        item.setTicked (view.shows (id.toStdString())).setAction ([toggle, id] { toggle (id); });
-        item.shortcutKeyDescription = allRoots[i].getParentDirectory().getFileName();
-        folders.addItem (std::move (item));
+        FolderEntry e;
+        e.id = e.path = allRoots[i].getFullPathName();
+        e.name = allRootNames[i];
+        e.shown = view.shows (e.id.toStdString());
+        e.user = allRootKinds[(std::size_t) i] == browserview::RootKind::user;
+        e.empty = filterHides (allRoots[i]);
+        out.push_back (std::move (e));
     }
-    folders.addSeparator();
-    folders.addItem (tr ("Show all folders"), ! view.hidden.empty(), false, [safe] {
-        if (safe != nullptr)
-            safe->showAllRoots();
-    });
-    folders.addItem (tr ("Add folder..."), [safe] {
-        if (safe != nullptr)
-            safe->addUserFolder();
-    });
-    menu.addSubMenu (tr ("Show folders"), folders);
+    return out;
+}
+
+void BrowserComponent::refreshFoldersPanel()
+{
+    if (auto* panel = dynamic_cast<FoldersPanel*> (foldersPanel.getComponent()))
+        panel->refresh();
+}
+
+void BrowserComponent::showFoldersDialog()
+{
+    auto panel = std::make_unique<FoldersPanel> (this);
+    foldersPanel = panel.get();
+    openToolWindow (std::move (panel), role == Role::samples ? tr ("Sample browser folders") : tr ("Browser folders"),
+                    role == Role::samples ? "sample-browser-folders" : "browser-folders");
+}
+
+std::unique_ptr<juce::Component> BrowserComponent::makeFoldersPanelForSnapshot()
+{
+    auto panel = std::make_unique<FoldersPanel> (this);
+    // a user folder (with its Remove button) and one hidden entry, whatever this machine has
+    auto entries = folderEntries();
+    entries.push_back ({ "D:\\Samples\\Drums", "Drums", "D:\\Samples\\Drums", true, true, false });
+    if (entries.size() > 3)
+        entries[2].shown = false;
+    panel->setEntries (std::move (entries), false, {});
+    return panel;
 }
 
 void BrowserComponent::showViewMenu()
@@ -2324,6 +2619,7 @@ void BrowserComponent::rebuildRoots()
             rootNames.add (allRootNames[i]);
         }
     refreshViewButton();
+    refreshFoldersPanel();
 
     starred.clear();
     for (const auto& line : juce::StringArray::fromLines (starredFile().loadFileAsString()))
@@ -2370,6 +2666,8 @@ void BrowserComponent::rebuildTree()
         {
             if (! roots.contains (allRoots[i]))
                 continue; // hidden from this Browser (round 163)
+            if (filterHides (allRoots[i]))
+                continue; // nothing in it is listed under the content filter (round 164)
             // the FL folders keep their colour by position; the user's own folders share one
             auto colour = rootColour (i < 9 ? i : 99);
             top.push_back (FileTree::makeFolder (allRoots[i], allRootNames[i], colour));
@@ -2408,6 +2706,7 @@ void BrowserComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
     }
     if (source == &searcher->indexChanged)
     {
+        applyFilterToTree();
         // the background check found changed folders: the results shown are searched again, in place
         if (resultsView->isVisible() && tab != projectTab && searchBox.getText().trim().isNotEmpty())
             runSearch (true);
@@ -2435,6 +2734,19 @@ void BrowserComponent::addUserFolder()
         setTab (allTab);
         rebuildRoots();
     });
+}
+
+void BrowserComponent::removeUserFolder (const juce::File& folder)
+{
+    auto lines = juce::StringArray::fromLines (userFoldersFile().loadFileAsString());
+    lines.removeEmptyStrings();
+    for (int i = lines.size(); --i >= 0;)
+        if (juce::File (lines[i].trim()) == folder)
+            lines.remove (i);
+    userFoldersFile().replaceWithText (lines.joinIntoString ("\n"));
+    if (view.hidden.erase (folder.getFullPathName().toStdString()) > 0) // (a hidden mark of a folder no longer listed)
+        saveView();
+    rebuildRoots();
 }
 
 BrowserComponent::~BrowserComponent()
@@ -2623,7 +2935,14 @@ void BrowserComponent::showFolderMenu (const juce::File& folder, std::function<v
     menu.addItem (tr ("Copy the file path"), [folder] { juce::SystemClipboard::copyTextToClipboard (folder.getFullPathName()); });
     menu.addSeparator();
     if (const auto id = rootId (folder); id.isNotEmpty() && tab == allTab)
+    {
         addHideItem (menu, id, allRootNames[allRoots.indexOf (folder)]);
+        if (allRootKinds[(std::size_t) allRoots.indexOf (folder)] == browserview::RootKind::user)
+            menu.addItem (tr ("Remove this folder from the Browsers"), [safe = juce::Component::SafePointer<BrowserComponent> (this), folder] {
+                if (safe != nullptr)
+                    safe->removeUserFolder (folder);
+            });
+    }
     juce::PopupMenu browserMenu;
     addViewItems (browserMenu);
     browserMenu.addSeparator();
@@ -2699,6 +3018,36 @@ void BrowserComponent::selectFirstSampleForSnapshot()
         strip->show (tree->selectedFile(), false);
         tree->setHovered (row + 1 < tree->numRows() ? row + 1 : -1);
     }
+}
+
+void BrowserComponent::showFilterForSnapshot (const juce::File& folder, browserview::ContentFilter filter)
+{
+    // a folder of the user's (not saved) listed under `filter` once the index knows it (nothing saved either)
+    if (! allRoots.contains (folder))
+    {
+        allRoots.add (folder);
+        allRootNames.add (folder.getFileName());
+        allRootKinds.push_back (browserview::RootKind::user);
+    }
+    roots.clear();
+    roots.add (folder);
+    view.filter = filter;
+    view.setShown (browserview::projectRootId, false);
+    view.setShown (browserview::pluginsRootId, false);
+    searcher->service->refresh (toPaths ({ folder }));
+    searcher->service->waitIdle (60000);
+    prunedGeneration = 0;
+    setTab (allTab);
+    rebuildTree();
+    tree->expandTop (folder, 3);
+    refreshViewButton();
+}
+
+void BrowserComponent::resetViewForSnapshot()
+{
+    viewLoaded = false; // (read again: the snapshot's changes were never saved)
+    prunedGeneration = 0;
+    rebuildRoots();
 }
 
 void BrowserComponent::showPluginDatabaseForSnapshot()
@@ -2874,6 +3223,7 @@ void BrowserComponent::searchAnswered (const search::SearchResult& r, const juce
 
 void BrowserComponent::indexStatusChanged()
 {
+    applyFilterToTree(); // the index changed: folders found empty under the content filter go (round 164)
     const auto st = searcher->service->status();
     juce::String line;
     if (resultsView->isVisible() && tab != projectTab && searchBox.getText().trim().isNotEmpty())

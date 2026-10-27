@@ -990,7 +990,7 @@ void MainComponent::showCustomizeToolbar()
     };
 
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (panel.release());
+    options.content.setOwned (fitContentToScreen (std::move (panel)).release());
     options.dialogTitle = tr ("Customize toolbar");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;

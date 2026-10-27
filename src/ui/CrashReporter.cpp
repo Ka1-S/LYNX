@@ -776,7 +776,7 @@ private:
 void launch (std::unique_ptr<ReportPanel> panel, const juce::String& title)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (panel.release());
+    options.content.setOwned (fitContentToScreen (std::move (panel)).release());
     options.dialogTitle = title;
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;

@@ -315,6 +315,9 @@ private:
     bool hoverOutput = false, hoverArrow = false;
     static constexpr int gateStepParam = -3; // drawing the volume gate steps
     juce::Rectangle<int> knobBounds (int param) const;
+    juce::Rectangle<int> knobBoundsIn (int param, int areaBottom) const; // laid out above areaBottom
+    int selectedEffectBottom() const; // the lowest edge of the selected effect's controls (laid out from the top)
+    int fittedSlot = -2, fittedKind = -2; // the selected effect the panel's height was fitted to
     bool gateSelected() const;
     juce::Rectangle<int> gateStepsBounds() const;
     void setGateStep (juce::Point<int> p);
