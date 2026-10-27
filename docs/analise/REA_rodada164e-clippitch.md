@@ -52,6 +52,30 @@ MUL without a TIME stretches the sample by 2^(MUL/10000). Sampler channels follo
   decoded sample, which the rack reuses).
 - [TEST] `c164p_fl_clip_and_sampler_pitch_import` (every row of §2 as an import case), `c164p_stretch_panel_rules`.
 
+## 4. LYNX against FL [WIN]
+
+Windows build (build-win-misc164p), `LYNX.exe --render <case>.flp out.wav 5` on the same FL test projects, measured the
+same way. Every case of §2 now matches FL: pitch within FL's own stretcher error (FL: +694.6…+699.7 cents for +700 in
+the stretch modes, LYNX +700.0) and length within 6 ms (MUL x2: FL 4.000 / 4.004 s, LYNX 4.000 / 3.999 s). The 0.1.18
+build played all audio clip cases at 0 cents (header pitch, root note, stretch PITCH, MUL all ignored) and the
+Sampler-channel stretch PITCH / MUL cases at 0 cents. Table: D:\lynx-work\misc164p\lengths.txt, renders in
+D:\lynx-work\misc164p\renders.
+
+FL demo projects, FL render vs LYNX render, mean 1 s chroma cosine (60 Hz–4 kHz, windows with sound):
+
+| demo | 0.1.18 | now |
+|---|---|---|
+| NewStuff (31 pitched audio clips: stretch PITCH ±1200, Stretch mode) | 0.818 (71/236 windows < 0.8) | 0.938 (13/236) |
+| Asher Postman - Future House (header pitch +400, Auto mode + MUL) | 0.693 | 0.700 |
+| Astes - Bien Duro (stretch PITCH ±1200 on vocals, E3 modes) | 0.763 | 0.768 |
+
+(The last two differ from FL for other reasons — synths, effects — the pitch import only moves them closer.)
+
+Cost: loading NewStuff 4.5 s (0.1.18: 6.4 s); rendering its 240 s took 99 s instead of 38 s because 17 clip channels
+now run the per-voice pitch shifter keeping their length, as FL does (FL itself took 151 s for the render).
+
 ## Where I stopped
 
-- (updated at landing)
+- Done and verified (§2–§4); build-local with FL Data 0 failures.
+- Not done: FL's main pitch on audio clips (LYNX: clips don't follow it) was not measured; MUL without TIME is turned
+  into beats at the project's starting tempo (FL's is probably tempo-free — a later tempo change in LYNX stretches it).
