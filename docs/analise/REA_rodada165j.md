@@ -7,13 +7,11 @@ REA/Ghidra (clean-room); [SRC] open-source tuner source read (licence noted); [m
 
 ## Where I stopped
 
-- Done: harness, references scored (Auto-Tune Pro ×3, Waves Tune RT, FL Pitcher DLL), LYNX baseline (minitune =
-  bit-identical to 0.1.19's LYNX Tune). Pitcher null vs FL's DLL done (§3).
-- Finding: on corrections ≥ ~35 c LYNX Tune loses 3–10 dB at 2.5–6 kHz (pitch-mark phase vs the glottal pulse);
-  Auto-Tune / Waves don't. Her takes: bursts 40.9 vs 31.2 / min, formant distance 0.80 vs 0.49 dB.
-- In progress: experiments in src/core/VocalPitch.cpp behind `vocal::experiment` bits (TEMPORARY, must be removed
-  or turned into the real code before landing): E1 voicing hysteresis, E2 PSOLA dropout bridge, E3 first mark on the
-  HF-energy peak, E5 slow phase lock of marks onto the HF peak.
+- Done: harness, references scored (Auto-Tune Pro ×3, Waves Tune RT, FL Pitcher DLL), LYNX baseline, Pitcher null vs
+  FL's DLL (§3), experiments E1–E7 (§4.2); adopted the normalised overlap-add + 3 kHz shelf (§4.3, committed; the
+  experiment switches are gone). Unit tests in `tests/Tune165Tests.inc`.
+- In progress: final renders with the landed code (synthetic, her takes, low latency), CPU before / after, the A/B
+  listening folder, PARITY rows, landing.
 
 ## 1. Method: the three-way comparison harness
 
@@ -77,3 +75,54 @@ synthetic takes, Formant on, Correction Speed 1 (instant) and 0.612 (~20 ms), Ra
 220 Hz for the soprano): **14 of 20 renders bit-identical**; the other six null at −43 … −51 dB (soprano ×2,
 breathy ×2, the formant trap at 0.612) — the CRT `log2f` rounding already noted in round 30 (one splice instant moves).
 Nothing to fix.
+
+## 4. LYNX Tune: what was measured, tried and kept [RUN]
+
+### 4.1 Where LYNX Tune stood (0.1.19)
+
+Synthetic takes (medians over the ten takes; Auto-Tune Pro retune 20 ms = its default):
+
+| system | latency ms | accuracy med / p90 c | retune ms | vibrato kept | bursts / min | formant dB |
+|---|---|---|---|---|---|---|
+| Auto-Tune Pro (retune 20) [REF] | 61.6 | 2.8 / 10.1 | 42 | 1.01 | 30.0 | 0.18 |
+| Auto-Tune Pro Classic [REF] | 2.1 | 2.6 / 8.1 | 35 | — | 29.0 | 0.32 |
+| Waves Tune RT (transition 20 ms) [REF] | 5.4 | 2.3 / 12.2 | 29 | 1.02 | 18.5 | 0.26 |
+| LYNX Tune 0.1.19 [RUN] | 25.4 | 1.7 / 4.4 | 38 | 0.97 | 15.7 | 0.28 |
+
+Her 24 takes, each with the Auto-Tune Pro state she used translated into LYNX Tune (as the FL import does): Auto-Tune
+median 5.79 c / p90 26.2 c, bursts 31.2 / min, formant distance 0.49 dB, HF balance −0.07 dB; LYNX 0.1.19 4.39 c /
+20.9 c, 95.8 % of voiced frames on Auto-Tune's note, bursts 40.9 / min, formant 0.80 dB, **HF balance −0.52 dB**.
+LYNX is already tighter on pitch; it lost on timbre (darker highs, bigger envelope change) and on bursts.
+
+The HF loss: on corrections of ~35 c and more the corrected voice lost 3–10 dB at 2.5–6 kHz on the synthetic held
+notes (s01) and ~0.5 dB on average on her takes; Auto-Tune and Waves keep the band. Two causes found: (a) the grains'
+Hann windows do not sum to 1 while the output marks are re-spaced (the overlap-add sum dips between marks: a comb
+that removes energy where harmonics are dense, i.e. the highs), (b) the grain's centre is not on the glottal pulse
+(the HF energy is concentrated there; a grain centred off the pulse smears it).
+
+Burst locations on her takes (0.1.19, the 21.4 / min LYNX has and the dry take does not): note changes 26 %, note
+onsets 19 %, offsets 17 %, voicing dropouts 16 %, held notes 11 %; pitch slopes at note changes are no steeper than
+Auto-Tune's.
+
+### 4.2 Experiments (each one off-line, minitune = LYNX Tune alone, block 128)
+
+| exp | change | synthetic | her takes (bursts / formant / HF) | verdict |
+|---|---|---|---|---|
+| E1 | voicing hysteresis (2 frames to drop voicing) | bursts 10.8, formant 0.30 | 40.4 / 0.87 / −0.60 | dropped: darker, no burst gain |
+| E2 | PSOLA dropout bridge (hold the last period over short unvoiced gaps) | 14.4, 0.39 | 44.2 / — / — | dropped |
+| E3 | first mark of a voiced run on the HF-energy peak | HF −0.20, 17.4 | 40.6 / 0.88 / — | dropped: fixes synthetic, not her takes |
+| E5 | slow phase lock of the marks onto the HF peak | — | 55.8 / — / — | dropped: many more bursts |
+| E6 | normalised overlap-add (divide by the window sum, clamped 0.5…2) | 17.6 (±2 events), — | 39.4 / 0.76 / −0.52 (5 takes better, 2 worse) | **kept** |
+| E7 | high shelf 3 kHz +1.5 dB on the corrected path (was 5 kHz +1 dB) | — | 42.3 / — / −0.13 | kept with E6 |
+| E6+E7 | both | see §4.3 | **40.1 / 0.77 / −0.13** | **adopted** |
+| E6+E7b | shelf at 4 kHz | — | — / — / −0.28 | dropped |
+
+### 4.3 What changed (code)
+
+- `vocal::Psola::setNormalise` (`src/core/VocalPitch.h/.cpp`): the overlap-add also accumulates the window weights in a
+  ring and divides the output by their sum (clamped 0.5…2) — on a steady unshifted note the windows already sum to 1,
+  so nothing changes there; when the marks are re-spaced the dips between marks are gone. LYNX Tune turns it on;
+  VoiceShift (the other Psola user) is unchanged.
+- LYNX Tune's high shelf on the corrected path: 5 kHz +1 dB → 3 kHz +1.5 dB (it compensates the residual softening
+  of the grain at the pulse, measured HF balance −0.52 → −0.13 dB vs the dry take; Auto-Tune −0.07 dB).
+- Tests: `tests/Tune165Tests.inc`.
