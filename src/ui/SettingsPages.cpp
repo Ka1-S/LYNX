@@ -333,8 +333,11 @@ public:
     {
         for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &driverNote, &outputLabel,
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
-                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &outputChannels, &realtime, &recordInput, &recordNote, &inputChannels })
+                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &outputChannels, &realtime, &recordInput, &recordNote, &inputChannels,
+                                                                 &formatLabel, &formatBox, &takeNames, &latencyTitle, &latencyText, &pingOutLabel, &pingOutBox,
+                                                                 &pingInLabel, &pingInBox, &measureButton, &pingNote, &useMeasured, &offsetLabel, &offsetSlider, &offsetNote })
             add (*c);
+        setupRecordingControls();
 
         styleLabel (driverLabel, tr ("Driver"));
         styleLabel (outputLabel, tr ("Output device"));
@@ -444,6 +447,17 @@ private:
         inputChannels.setBounds (r.full (34));
         recordInput.setBounds (r.full (24));
         recordNote.setBounds (r.full (32).translated (0, -6));
+        formatBox.setBounds (r.row (formatLabel, 320));
+        takeNames.setBounds (r.full (24));
+        r.section (latencyTitle);
+        latencyText.setBounds (r.full (50));
+        pingOutBox.setBounds (r.row (pingOutLabel, 260));
+        pingInBox.setBounds (r.row (pingInLabel, 260));
+        measureButton.setBounds (r.indented().withWidth (240));
+        pingNote.setBounds (r.full (48).translated (0, -4));
+        useMeasured.setBounds (r.full (24));
+        offsetSlider.setBounds (r.row (offsetLabel, 200));
+        offsetNote.setBounds (r.full (32).translated (0, -6));
         return r.bottom();
     }
 
@@ -530,6 +544,7 @@ private:
         panelButton.setEnabled (device != nullptr && device->hasControlPanel());
         testButton.setEnabled (device != nullptr);
         recordInput.setToggleState (engine.isAudioRecordingArmed(), juce::dontSendNotification);
+        refreshRecording();
         {
             // what the mixer inserts can take their input from
             const auto names = engine.getInputChannelNames();
@@ -608,7 +623,154 @@ private:
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
-    void timerCallback() override { updateStatus(); }
+    void timerCallback() override
+    {
+        updateStatus();
+        if (measuring && ! engine.isPinging())
+        {
+            measuring = false;
+            const auto r = engine.finishLatencyPing();
+            pingResult = r.ok ? tr ("Measured: {0} samples ({1} ms) round trip, {2} of {3} clicks, level {4} dB.",
+                                    { juce::String (r.samples), juce::String (1000.0 * r.samples / juce::jmax (1.0, sampleRate()), 2), juce::String (r.found),
+                                      juce::String (r.sent), juce::String (juce::Decibels::gainToDecibels (r.peak, -100.0f), 1) })
+                              : r.problem == "no signal" ? tr ("No click came back. Connect the output to the input (cable or loopback) and try again.")
+                              : r.problem == "unstable"  ? tr ("The clicks came back at different times ({0} samples apart): the driver is not stable at this buffer size. Nothing was stored.",
+                                                               { juce::String (r.spread) })
+                                                         : tr ("Only {0} of {1} clicks came back: raise the input level or use a cable loopback. Nothing was stored.",
+                                                               { juce::String (r.found), juce::String (r.sent) });
+            refreshRecording();
+        }
+    }
+
+    double sampleRate() const
+    {
+        auto* device = devices.getCurrentAudioDevice();
+        return device != nullptr && device->getCurrentSampleRate() > 0.0 ? device->getCurrentSampleRate() : 48000.0;
+    }
+
+    // Recording format, file names and the latency compensation (round 163)
+    void setupRecordingControls()
+    {
+        styleLabel (formatLabel, tr ("File format"));
+        styleCombo (formatBox);
+        formatBox.addItem (tr ("WAV 24-bit (the device's sample rate)"), 1);
+        formatBox.addItem (tr ("WAV 32-bit float (the device's sample rate)"), 2);
+        formatBox.onChange = [this] {
+            if (updating)
+                return;
+            auto s = engine.getRecordingSettings();
+            s.format = formatBox.getSelectedId() == 2 ? takes::SampleFormat::float32 : takes::SampleFormat::pcm24;
+            engine.setRecordingSettings (s);
+        };
+        styleToggle (takeNames, tr ("Name takes after the track (\"Bass DI_Take3.wav\"); off: project, date and time as FL does"));
+        takeNames.onClick = [this] {
+            auto s = engine.getRecordingSettings();
+            s.trackTakeNames = takeNames.getToggleState();
+            engine.setRecordingSettings (s);
+        };
+        styleNote (latencyText, {});
+        styleLabel (pingOutLabel, tr ("Ping output"));
+        styleLabel (pingInLabel, tr ("Ping input"));
+        for (auto* b : { &pingOutBox, &pingInBox })
+        {
+            styleCombo (*b);
+            b->setTextWhenNoChoicesAvailable (tr ("(open an input device first)"));
+        }
+        pingOutBox.onChange = [this] {
+            if (updating)
+                return;
+            auto s = engine.getRecordingSettings();
+            s.pingOutput = juce::jmax (0, pingOutBox.getSelectedId() - 1);
+            engine.setRecordingSettings (s);
+        };
+        pingInBox.onChange = [this] {
+            if (updating)
+                return;
+            auto s = engine.getRecordingSettings();
+            s.pingInput = juce::jmax (0, pingInBox.getSelectedId() - 1);
+            engine.setRecordingSettings (s);
+        };
+        measureButton.onClick = [this] {
+            if (measuring)
+            {
+                engine.cancelLatencyPing();
+                return;
+            }
+            const auto problem = engine.startLatencyPing();
+            if (problem.isNotEmpty())
+            {
+                pingResult = tr ("Can't measure: {0}", { tr (problem) });
+                refreshRecording();
+                return;
+            }
+            measuring = true;
+            pingResult = tr ("Measuring... (8 clicks)");
+            refreshRecording();
+        };
+        styleNote (pingNote, tr ("Connect the ping output to the ping input with a cable (or a loopback in your interface's mixer) and turn your speakers "
+                                 "down: LYNX plays 8 clicks and times their way back. The result is kept for this driver, device, sample rate and buffer size."));
+        styleToggle (useMeasured, tr ("Use the measured round trip instead of the driver's figures"));
+        useMeasured.onClick = [this] {
+            auto s = engine.getRecordingSettings();
+            s.useMeasured = useMeasured.getToggleState();
+            engine.setRecordingSettings (s);
+        };
+        styleLabel (offsetLabel, tr ("Fine adjust (samples)"));
+        offsetSlider.setSliderStyle (juce::Slider::IncDecButtons);
+        offsetSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 80, 24);
+        offsetSlider.setRange (-4800.0, 4800.0, 1.0);
+        offsetSlider.onValueChange = [this] {
+            if (updating)
+                return;
+            auto s = engine.getRecordingSettings();
+            s.manualOffset = (int) offsetSlider.getValue();
+            engine.setRecordingSettings (s);
+        };
+        styleNote (offsetNote, tr ("Moves every new take: positive = earlier on the Playlist. Leave it at 0 after a measurement."));
+    }
+
+    void refreshRecording()
+    {
+        const juce::ScopedValueSetter<bool> guard (updating, true);
+        const auto& s = engine.getRecordingSettings();
+        formatBox.setSelectedId (s.format == takes::SampleFormat::float32 ? 2 : 1, juce::dontSendNotification);
+        takeNames.setToggleState (s.trackTakeNames, juce::dontSendNotification);
+        useMeasured.setToggleState (s.useMeasured, juce::dontSendNotification);
+        offsetSlider.setValue (s.manualOffset, juce::dontSendNotification);
+
+        pingOutBox.clear (juce::dontSendNotification);
+        pingInBox.clear (juce::dontSendNotification);
+        if (auto* device = devices.getCurrentAudioDevice())
+        {
+            const auto outs = device->getOutputChannelNames();
+            for (int c = 0; c + 1 < outs.size(); c += 2)
+                pingOutBox.addItem (outs[c] + " - " + outs[c + 1], c + 1);
+            if (outs.size() == 1)
+                pingOutBox.addItem (outs[0], 1);
+            pingOutBox.setSelectedId (s.pingOutput + 1, juce::dontSendNotification);
+            const auto ins = engine.getInputChannelNames();
+            for (int c = 0; c < (int) ins.size(); ++c)
+                pingInBox.addItem (juce::String::fromUTF8 (ins[(std::size_t) c].c_str()), c + 1);
+            pingInBox.setSelectedId (s.pingInput + 1, juce::dontSendNotification);
+        }
+        measureButton.setButtonText (measuring ? tr ("Stop measuring") : tr ("Measure the round trip"));
+        measureButton.setEnabled (pingInBox.getNumItems() > 0);
+
+        const auto l = engine.currentLatency();
+        const auto rate = sampleRate();
+        const auto ms = [rate] (int samples) { return juce::String (1000.0 * samples / rate, 2); };
+        auto text = tr ("Takes are moved back by {0} samples ({1} ms) so they sit where you played them:", { juce::String (l.total()), ms (l.total()) }) + " ";
+        text += l.measured >= 0 ? tr ("measured round trip {0}", { juce::String (l.measured) })
+                                : tr ("driver's input {0} + output {1}", { juce::String (l.driverInput), juce::String (l.driverOutput) });
+        if (l.manual != 0)
+            text += ", " + tr ("fine adjust {0}", { juce::String (l.manual) });
+        if (l.pdc != 0)
+            text += ", " + tr ("plugin delay compensation {0}", { juce::String (l.pdc) });
+        text += ".";
+        if (pingResult.isNotEmpty())
+            text += "\n" + pingResult;
+        latencyText.setText (text, juce::dontSendNotification);
+    }
 
     // The driver types with what they mean (JUCE's type names stay the identity in the saved setup).
     static juce::String driverDisplayName (const juce::String& typeName)
@@ -680,6 +842,15 @@ private:
     juce::ComboBox driverBox, outputBox, inputBox, rateBox, bufferBox;
     juce::TextButton panelButton { tr ("Driver settings...") }, testButton { tr ("Play a test sound") };
     juce::ToggleButton recordInput;
+    // recording format and latency compensation (round 163)
+    SectionTitle latencyTitle { tr ("Recording latency compensation") };
+    juce::Label formatLabel, latencyText, pingOutLabel, pingInLabel, pingNote, offsetLabel, offsetNote;
+    juce::ComboBox formatBox, pingOutBox, pingInBox;
+    juce::ToggleButton takeNames, useMeasured;
+    juce::TextButton measureButton { tr ("Measure the round trip") };
+    juce::Slider offsetSlider;
+    bool measuring = false;
+    juce::String pingResult;
 };
 
 // ================================================================================================================

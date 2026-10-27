@@ -16,6 +16,7 @@
 #include "core/LiveInput.h"
 #include "core/HardwareOutput.h"
 #include "core/Recorder.h"
+#include "core/TakeRecording.h"
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
 #include "core/RtStats.h"
@@ -122,7 +123,15 @@ public:
         // clips; pattern mode: the pattern's events); Quantize › "Automations" puts their points on the snap
         bool recordAutomation = true;
         bool quantiseAutomation = false;
+        // round 163 (Pro Tools / Nuendo): punch in/out on the Playlist's loop region (instead of loop recording; the
+        // song plays straight through it), pre-roll before the punch-in (or before the position recording starts at)
+        // and post-roll after the punch-out (then playback stops). Bars; 0 = off.
+        bool punchLoopRegion = false;
+        int preRollBars = 0;
+        int postRollBars = 0;
     };
+    // The range this recording keeps (pre-roll or punch), while one is active. UI thread.
+    std::optional<PunchRange> getActivePunch() const noexcept { return activePunch; }
     const RecordOptions& getRecordOptions() const noexcept { return recordOptions; }
     void setRecordOptions (const RecordOptions& options);
 
@@ -188,6 +197,46 @@ public:
     const std::vector<juce::File>& getSessionRecordings() const noexcept { return sessionRecordings; }
     void forgetRecordings (const std::vector<juce::File>& files);
 
+    // --- hardware recording (round 163, docs/analise/REA_rodada163c.md) ---
+    // Options › Audio › Recording, saved in <settings>/recording.txt.
+    struct RecordingSettings
+    {
+        takes::SampleFormat format = takes::SampleFormat::pcm24; // 24-bit or 32-bit float WAV; the device's rate
+        bool trackTakeNames = true;  // "<Insert>_Take<N>.wav" (off: FL's "<project>_<date time>_<insert>.wav")
+        int manualOffset = 0;        // samples added to the compensation (negative: earlier)
+        bool useMeasured = true;     // a ping measured for this device setup replaces the driver's figures
+        std::map<std::string, int> measured; // setupKey -> round trip (samples)
+        int pingOutput = 0, pingInput = 0;   // device channels the ping uses (output pair's first, input)
+    };
+    const RecordingSettings& getRecordingSettings() const noexcept { return recordingSettings; }
+    void setRecordingSettings (const RecordingSettings& settings); // saves
+    // The current device setup's key (takes::setupKey) and its latency figures (pdc = the Master's PDC now).
+    std::string currentSetupKey() const;
+    takes::Latency currentLatency() const;
+    // The latency ping: clicks on output channel pair `pingOutput` (and the next), listened for on input channel
+    // `pingInput` through a loopback. Needs the transport stopped and the input open. Returns an error (empty: started).
+    juce::String startLatencyPing();
+    bool isPinging() const noexcept { return ping.isRunning(); }
+    void cancelLatencyPing() noexcept { ping.cancel(); }
+    // After isPinging() turned false: the result (stored for this setup when ok).
+    takes::LatencyPing::Result finishLatencyPing();
+    // Record safe (round 163): a safe insert can't be armed (undoable, saved with the project).
+    void setInsertRecordSafe (int track, bool safe);
+    bool isInsertRecordSafe (int track) const noexcept
+    {
+        return track > 0 && track < (int) song.mixer.size() && song.mixer[(std::size_t) track].recordSafe;
+    }
+    // Frames lost while recording (the disk could not keep up; they became silence, the timing kept) since the
+    // last take started.
+    juce::int64 getLostRecordingFrames() const noexcept { return lostFrames; }
+    // Interrupted takes (crash while recording): repaired WAVs and where they belonged. Scans the journals in the
+    // given folders (the default recordings folder always). UI thread, at start-up.
+    std::vector<takes::Journal> recoverInterruptedTakes (const std::vector<juce::File>& folders);
+    // Puts recovered takes on the Playlist at their recorded positions (undoable). Returns how many were placed.
+    int placeRecoveredTakes (const std::vector<takes::Journal>& recovered);
+    // Leaves them as files only (their journals are removed).
+    void forgetInterruptedTakes (const std::vector<takes::Journal>& recovered);
+
     // --- external audio input through the mixer (REA_rodada88) ---
     // Names of the open device's input channels (all of them, open or not); empty without an input device.
     std::vector<std::string> getInputChannelNames() const;
@@ -200,6 +249,9 @@ public:
         noInputOpen,       // recording with no input open
         armedWithoutInput, // armed inserts, none with an input source
         insertWithoutInput,// one armed insert (track) has no input source
+        lowDisk,           // little room left on the recordings drive (detail = minutes)
+        recordSafe,        // the insert (track) is record safe: not armed
+        framesLost,        // the disk could not keep up: frames became silence (detail = how many)
         failed             // the driver refused (detail = its message) or a file could not be written
     };
     struct RecordingNotice
@@ -566,17 +618,31 @@ private:
     juce::TimeSliceThread recordThread { "LYNX recording" };
     RecordingNotice recordingNotice;
     void notify (InputIssue issue, int track = 0, const juce::String& detail = {});
+    // One take being recorded (round 163): the audio thread pushes into `stream`, the recording thread drains it
+    // into `writer` (crash-safe WAV). Shared by the UI (start/finish), the audio thread (raw pointer under
+    // takeLock) and the recording thread (drainer list under drainLock).
     struct Take
     {
         int track = 0;      // insert it plays through (0 = a new free insert)
         int first = 0;      // device input channel
         int channels = 0;   // 1 or 2
         juce::File file;
-        std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
+        std::unique_ptr<takes::TakeStream> stream;
+        takes::WavTakeWriter writer;
+        std::atomic<bool> failed { false };
+        std::vector<float> scratch;
+        juce::CriticalSection drainMutex; // the recording thread vs the UI's final drain
+        // recording thread: writes what arrived; false when the file could not be written
+        bool drain();
     };
     static constexpr int maxTakes = 16;
-    std::array<Take, maxTakes> takes;              // guarded by takeLock
+    std::array<Take*, maxTakes> takes {};          // guarded by takeLock (the audio thread's view)
     int takeCount = 0;
+    std::vector<std::shared_ptr<Take>> openTakes;  // UI thread (owner)
+    juce::CriticalSection drainLock;               // the recording thread's list
+    std::vector<std::shared_ptr<Take>> draining;
+    struct Drainer;
+    std::unique_ptr<Drainer> drainer;
     juce::SpinLock takeLock;                       // the audio thread only tries (never waits)
     LiveInput liveInput;
     HardwareOutput hwOutput;                              // inserts' hardware outputs (renderer -> callback)
@@ -589,8 +655,26 @@ private:
     std::array<int, LiveInput::maxChannels> inputSlot {}; // device input channel -> callback input index (-1: closed)
     std::atomic<double> takeStartTick { -1.0 };    // position of the first recorded sample
     std::atomic<juce::int64> takeFrames { 0 };
+    std::atomic<double> takeTicks { 0.0 };         // ticks the transport moved while recording (not wrapped)
+    std::array<std::atomic<juce::int64>, 256> takeWraps {}; // take frames at which the loop jumped back (loop recording)
+    std::atomic<int> takeWrapCount { 0 };
     double takeSampleRate = 44100.0;
-    int takeLatency = 0;                           // input + output, in samples
+    double takeTicksPerSample = 0.0;
+    int takeLatency = 0;                           // takes::Latency::total() at the take's start, in samples
+    std::optional<PunchRange> activePunch;         // pre-roll / punch range of the recording in progress (UI thread)
+    std::int64_t punchStopAt = -1;                 // post-roll end: playback stops there (-1: none)
+    bool linearRecording() const noexcept
+    {
+        return song.mode == PlayMode::song && (! song.hasLoop() || recordOptions.punchLoopRegion);
+    }
+    takes::LatencyPing ping;                       // audio thread while running (UI starts it, reads the result)
+    juce::int64 lostFrames = 0;
+    std::array<int, 2> pingOutputs { -1, -1 };     // callback output slots the click goes to
+    int pingInput = -1;                            // callback input slot listened to
+    RecordingSettings recordingSettings;
+    juce::File journalFor (const juce::File& wav) const { return wav.withFileExtension ("wav.lynxrec"); }
+    void writeJournals();
+    bool journalsWritten = false;
     MeterBank meters;
     std::unique_ptr<AudioLogger> audioLogger; // after `meters` (it reads meters.logTap): destroyed first
     PluginHost plugins;

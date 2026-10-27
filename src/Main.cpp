@@ -299,6 +299,21 @@ public:
             return;
         }
 
+        if (args.contains ("--rectest"))
+        {
+            // LYNX --rectest report.txt [seconds] [--type T] [--device D] [--input I] [--loop] [--buffer N]
+            // (round 163): records a click track through a loopback (cable, interface loopback or PipeWire's
+            // pw-loopback): pings the round trip, plays a click on every beat from an audio clip, records it on Insert 1,
+            // stops, and checks every recorded click's song position on the Playlist against its beat (samples).
+            // --loop: loop recording over bars 2-4 (take lanes).
+            const auto i = args.indexOf ("--rectest");
+            const auto option = [&args] (const char* name) { return args.contains (name) ? args[args.indexOf (name) + 1].unquoted() : juce::String(); };
+            const auto seconds = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].getDoubleValue() : 20.0;
+            runRecordTest (juce::File (args[i + 1].unquoted()), seconds > 0.0 ? seconds : 20.0, option ("--type"), option ("--device"), option ("--input"),
+                           args.contains ("--loop"), option ("--pdc").getIntValue(), option ("--buffer").getIntValue());
+            return;
+        }
+
         if (args.contains ("--uiperf"))
         {
             // LYNX --uiperf project.(flp|lynx) report.txt: the heavy UI cases in the real window, every frame timed (round 161)
@@ -3314,6 +3329,206 @@ private:
                 restoreSavedDeviceState();
                 setApplicationReturnValue (s.callbacks == 0 ? 1 : 0);
                 quit();
+            });
+        });
+    }
+
+    // --rectest (round 163): see the command line above. Writes report lines step by step (a driver that ends the
+    // process leaves what was done).
+    void runRecordTest (const juce::File& report, double seconds, const juce::String& deviceType, const juce::String& deviceName,
+                        const juce::String& inputName, bool loopRecording, int pdcSamples, int bufferSize)
+    {
+        engine = std::make_unique<lynx::AudioEngine>();
+        savedDeviceState = engine->getDeviceManager().createStateXml();
+        auto text = std::make_shared<juce::String>();
+        auto step = [report, text] (const juce::String& line) { *text << line << "\n"; report.replaceWithText (*text); };
+        auto finish = [this, step] (int code) {
+            restoreSavedDeviceState();
+            setApplicationReturnValue (code);
+            quit();
+        };
+        auto& devices = engine->getDeviceManager();
+        if (deviceType.isNotEmpty() && devices.getCurrentAudioDeviceType() != deviceType)
+            devices.setCurrentAudioDeviceType (deviceType, true);
+        {
+            auto setup = devices.getAudioDeviceSetup();
+            if (deviceName.isNotEmpty())
+                setup.outputDeviceName = deviceName;
+            if (bufferSize > 0)
+                setup.bufferSize = bufferSize;
+            if (const auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+                step ("device_error=" + error);
+        }
+        if (const auto r = engine->openAudioInput (inputName.isNotEmpty() ? inputName : deviceName); r.issue != lynx::AudioEngine::InputIssue::none)
+            step ("input_error=" + juce::String ((int) r.issue) + " " + r.detail);
+        auto* device = devices.getCurrentAudioDevice();
+        if (device == nullptr || engine->getInputChannelNames().empty())
+        {
+            step ("result=ERROR no device / no input");
+            finish (1);
+            return;
+        }
+        const auto rate = device->getCurrentSampleRate();
+        step ("device=" + device->getTypeName() + " | " + device->getName() + " | " + juce::String (rate) + " Hz | block " + juce::String (device->getCurrentBufferSizeSamples())
+              + " | driver latency in " + juce::String (device->getInputLatencyInSamples()) + " out " + juce::String (device->getOutputLatencyInSamples()));
+
+        // a click (the ping's pulse) on every beat at 120 bpm: beat k at sample k * rate / 2
+        const auto beats = (int) std::ceil (seconds * 2.0) + 8;
+        const auto clickFile = report.getSiblingFile (report.getFileNameWithoutExtension() + "-clicks.wav");
+        {
+            lynx::takes::WavTakeWriter w;
+            w.open (clickFile.getFullPathName().toStdString(), rate, 1, lynx::takes::SampleFormat::float32);
+            const auto total = (juce::int64) std::llround ((double) beats * rate / 2.0);
+            std::vector<float> block (4096);
+            for (juce::int64 at = 0; at < total; at += (juce::int64) block.size())
+            {
+                std::fill (block.begin(), block.end(), 0.0f);
+                for (int k = 0; k < (int) block.size(); ++k)
+                {
+                    const auto f = at + k;
+                    const auto beat = (juce::int64) std::floor ((double) f / (rate / 2.0));
+                    const auto rel = f - (juce::int64) std::llround ((double) beat * rate / 2.0);
+                    static constexpr float shape[] { 0.25f, 0.75f, 1.0f, 0.75f, 0.25f };
+                    if (rel >= 0 && rel < 5)
+                        block[(std::size_t) k] = 0.5f * shape[rel];
+                }
+                const float* d[] { block.data() };
+                w.write (d, (int) std::min<juce::int64> ((juce::int64) block.size(), total - at));
+            }
+            w.close();
+        }
+
+        lynx::Song song = lynx::Song::makeDefault();
+        song.bpm = 120.0;
+        song.mode = lynx::PlayMode::song;
+        song.playlist.clear();
+        lynx::ChannelDef c;
+        c.name = "Clicks";
+        c.instrument = lynx::InstrumentKind::audioClip;
+        c.samplePath = clickFile.getFullPathName().toStdString();
+        c.mixerTrack = 0;
+        c.volume = 1.0f;
+        song.channels.push_back (c);
+        lynx::Clip clip;
+        clip.kind = lynx::ClipKind::audio;
+        clip.channel = (int) song.channels.size() - 1;
+        clip.track = 0;
+        clip.start = 0;
+        clip.length = (std::int64_t) beats * lynx::ppq;
+        song.playlist.push_back (clip);
+        if (loopRecording) // bars 2-4
+        {
+            song.loopStart = 4 * lynx::ppq;
+            song.loopEnd = 16 * lynx::ppq;
+        }
+        if (song.mixer.size() > 1)
+        {
+            song.mixer[1].name = "Loop In";
+            song.mixer[1].monitor = lynx::InputMonitor::off; // (the loopback must not hear itself)
+        }
+        engine->setSong (std::move (song));
+        engine->setInsertInput (1, 0, false);
+        juce::ignoreUnused (pdcSamples);
+
+        // 1) the ping
+        if (const auto error = engine->startLatencyPing(); error.isNotEmpty())
+            step ("ping_error=" + error);
+        juce::Timer::callAfterDelay (3500, [this, step, finish, seconds, rate, report] {
+            if (engine == nullptr)
+                return;
+            if (engine->isPinging())
+                engine->cancelLatencyPing();
+            const auto r = engine->finishLatencyPing();
+            step ("ping=" + juce::String (r.ok ? "ok" : "FAILED " + juce::String (r.problem)) + " samples " + juce::String (r.samples) + " spread " + juce::String (r.spread)
+                  + " found " + juce::String (r.found) + "/" + juce::String (r.sent) + " peak " + juce::String (juce::Decibels::gainToDecibels (r.peak, -150.0f), 1) + " dB");
+            const auto l = engine->currentLatency();
+            step ("compensation=" + juce::String (l.total()) + " (round trip " + juce::String (l.roundTrip()) + ", manual " + juce::String (l.manual) + ", pdc " + juce::String (l.pdc) + ")");
+
+            // 2) record
+            engine->setInsertArmed (1, true);
+            auto o = engine->getRecordOptions();
+            o.recordAudio = true;
+            o.countInBars = 0;
+            o.waitForInput = false;
+            engine->setRecordOptions (o);
+            engine->stop();
+            engine->rewind();
+            engine->setRecording (true);
+            juce::Timer::callAfterDelay (300, [this, step, finish, seconds, rate, report] {
+                if (engine == nullptr)
+                    return;
+                engine->play();
+                juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, step, finish, seconds, rate, report] {
+                    if (engine == nullptr)
+                        return;
+                    engine->stop();
+                    juce::Timer::callAfterDelay (500, [this, step, finish, seconds, rate, report] {
+                        if (engine == nullptr)
+                            return;
+                        engine->setRecording (false);
+                        const auto& s = engine->getSong();
+                        const auto tps = 120.0 * lynx::ppq / (60.0 * rate);
+                        int take = -1;
+                        for (int ch = 0; ch < (int) s.channels.size(); ++ch)
+                            if (s.channels[(std::size_t) ch].instrument == lynx::InstrumentKind::audioClip && s.channels[(std::size_t) ch].name != "Clicks")
+                                take = ch;
+                        if (take < 0)
+                        {
+                            step ("result=ERROR no take (" + engine->getLastRecordingError() + ")");
+                            finish (1);
+                            return;
+                        }
+                        std::vector<std::vector<float>> audio;
+                        double takeRate = 0.0;
+                        const auto& path = s.channels[(std::size_t) take].samplePath;
+                        lynx::takes::readWav (path, audio, &takeRate);
+                        const auto frames = audio.empty() ? (juce::int64) 0 : (juce::int64) audio[0].size();
+                        step ("take=" + juce::String::fromUTF8 (path.c_str()) + " frames " + juce::String (frames) + " (" + juce::String ((double) frames / rate, 3)
+                              + " s of " + juce::String (seconds, 1) + " s played) lost " + juce::String (engine->getLostRecordingFrames()));
+                        // the clicks in the file (peaks above -12 dBFS, one per 1/8 s at most)
+                        std::vector<juce::int64> peaks;
+                        if (! audio.empty())
+                            for (juce::int64 f = 1; f + 1 < frames; ++f)
+                            {
+                                const auto x = std::abs (audio[0][(std::size_t) f]);
+                                if (x > 0.25f && x >= std::abs (audio[0][(std::size_t) f - 1]) && x > std::abs (audio[0][(std::size_t) f + 1])
+                                    && (peaks.empty() || f - peaks.back() > (juce::int64) (rate / 8)))
+                                    peaks.push_back (f);
+                            }
+                        // every clip of the take: each click inside it against the nearest beat
+                        int clips = 0, checked = 0, muted = 0;
+                        double worst = 0.0, sum = 0.0;
+                        for (const auto& c : s.playlist)
+                        {
+                            if (c.kind != lynx::ClipKind::audio || c.channel != take)
+                                continue;
+                            ++clips;
+                            muted += c.muted ? 1 : 0;
+                            const auto skip = ((double) c.offset + (double) c.offsetFraction) / tps; // file samples before the clip start
+                            for (const auto f : peaks)
+                            {
+                                const auto intoClip = (double) f - skip;
+                                if (intoClip < 0.0 || intoClip * tps >= (double) c.length)
+                                    continue;
+                                const auto songTick = (double) c.start + intoClip * tps - 2.0 * tps; // (the pulse's peak is its 3rd sample)
+                                const auto beat = std::round (songTick / lynx::ppq) * lynx::ppq;
+                                const auto error = (songTick - beat) / tps;
+                                worst = std::max (worst, std::abs (error));
+                                sum += error;
+                                ++checked;
+                            }
+                            step ("clip track " + juce::String (c.track) + " start " + juce::String ((juce::int64) c.start) + " length " + juce::String ((juce::int64) c.length)
+                                  + " offset " + juce::String ((juce::int64) c.offset) + juce::String (c.offsetFraction >= 0.0f ? "+" : "") + juce::String (c.offsetFraction, 4)
+                                  + (c.muted ? " (muted lane)" : ""));
+                        }
+                        step ("clicks_in_file=" + juce::String ((int) peaks.size()) + " checked=" + juce::String (checked) + " clips=" + juce::String (clips)
+                              + " muted_lanes=" + juce::String (muted));
+                        step ("placement_error_samples=max " + juce::String (worst, 3) + " mean " + juce::String (checked > 0 ? sum / checked : 0.0, 3));
+                        const auto ok = checked > 0 && worst <= 1.0 && engine->getLostRecordingFrames() == 0;
+                        step (juce::String ("result=") + (ok ? "OK" : "FAILED"));
+                        finish (ok ? 0 : 1);
+                    });
+                });
             });
         });
     }

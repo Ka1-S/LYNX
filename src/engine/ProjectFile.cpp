@@ -1301,6 +1301,8 @@ juce::var mixerTrackToVar (const MixerTrack& t)
     }
     if (t.monitor != InputMonitor::automatic)
         o->setProperty ("monitor", (int) t.monitor);
+    if (t.recordSafe)
+        o->setProperty ("recordSafe", true);
     if (t.outputChannel != outputDefault) // hardware output target (REA round 156): -1 = none, else device channel
     {
         o->setProperty ("output", t.outputChannel);
@@ -1354,6 +1356,7 @@ MixerTrack mixerTrackFromVar (const juce::var& t)
     track.inputChannel = juce::jlimit (-1, 255, (int) t.getProperty ("input", -1));
     track.inputStereo = ! (bool) t.getProperty ("inputMono", false);
     track.monitor = (InputMonitor) juce::jlimit (0, 3, (int) t.getProperty ("monitor", (int) InputMonitor::automatic));
+    track.recordSafe = (bool) t.getProperty ("recordSafe", false);
     track.outputChannel = juce::jlimit (outputDefault, 255, (int) t.getProperty ("output", outputDefault));
     if (const auto mode = t["outputMode"].toString(); mode == "mono")
         track.outputMode = OutputMode::monoSum;

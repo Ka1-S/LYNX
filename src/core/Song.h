@@ -785,6 +785,8 @@ struct MixerTrack
     int inputChannel = -1;
     bool inputStereo = true;
     InputMonitor monitor = InputMonitor::automatic;
+    // record safe (round 163, as Pro Tools / Nuendo): the insert can't be armed by accident (saved)
+    bool recordSafe = false;
     // an FL project's input (.flp 0x9A, REA round 157c): the index in FL's list of its own device's inputs, which only
     // the open device can turn into a channel — AudioEngine::setSong resolves it (flInputSource) when the project opens,
     // if inputChannel is still -1. -1 = none. Not saved.
