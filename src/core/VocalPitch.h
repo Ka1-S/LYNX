@@ -22,6 +22,11 @@
 
 namespace lynx::vocal
 {
+extern int experiment;          // EXPERIMENT (round 165j tuning, removed before landing)
+extern float experimentRelaxed;
+extern float experimentBridgeMs;
+extern float experimentLock;
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Scales
 
@@ -178,10 +183,14 @@ private:
     double nextSynth = 0.0;      // next synthesis mark (absolute, output timeline = input timeline)
     double lastMark = 0.0;       // the last voiced mark placed (absolute; 0 = none): the next one correlates with it
     double period = 0.0, ratio = 1.0, formant = 1.0;
+    std::int64_t voicedAt = -(1 << 30); // EXPERIMENT E2
     bool voiced = false, peakAlign = true, lastVoiced = false;
     std::array<Mark, maxMarks> marks {};
     int markHead = 0, markCount = 0;
     std::vector<float> in[2], acc[2], env; // input history, output accumulators, a low-passed copy for peak search
     float envZ = 0.0f;
+    std::vector<float> hfEnv; // EXPERIMENT E3
+    float hpZ = 0.0f, hfZ = 0.0f;
+    int hfLead = 44;
 };
 } // namespace lynx::vocal
