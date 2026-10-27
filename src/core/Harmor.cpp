@@ -3058,7 +3058,7 @@ struct Part
         }
         if (blend > 5)
             fallbacks.push_back ("timbre blend mode " + std::to_string (blend) + " (played as mode 0)");
-        if (pd.tail > 1024)
+        if (pd.tail >= 4 + 0x2c) // (any image object: Labyrinth's 16 × 12 one is 829 bytes)
             buildImage (pd);
     }
 
