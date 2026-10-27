@@ -1483,6 +1483,10 @@ std::optional<Scene> fromZge (const std::vector<std::uint8_t>& state, std::vecto
         fallback.height = s.height;
         fallback.fps = s.fps;
         fallback.name = s.name;
+        // (the project's feedback / post-process layers stay, over LYNX's scene)
+        for (const auto& l : s.layers)
+            if (readsBelow (l.type))
+                fallback.layers.push_back (l);
         return fallback;
     }
     if (s.layers.front().type != LayerType::background)

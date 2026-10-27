@@ -316,6 +316,7 @@ if(LYNX_BUILD_APP)
         src/ui/ControllerEditors.cpp
         src/ui/VisualEditors.cpp
         src/ui/VisualGl.cpp
+        src/ui/DanceView.cpp
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
         src/ui/LayerEditor.cpp

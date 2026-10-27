@@ -8,7 +8,7 @@
 //
 // Care for the graphics driver (a GPU crash once took this machine down): frames are only drawn when the message
 // thread hands a new one over (30 a second in the editor, 60 in full screen, a third of that in silence; never
-// continuous), with vsync; the live picture is drawn at most 1920 x 1080 inside; ray-marching loops have fixed small
+// continuous), with vsync; the live picture is drawn at most 1280 x 720 inside; ray-marching loops have fixed small
 // step counts. A session note marks the GPU path as active, so a crash inside the driver turns it off at the next
 // start (Main.cpp). Without OpenGL (or after a failure) the editor uses the 2D renderer.
 

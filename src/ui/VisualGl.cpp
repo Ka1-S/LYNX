@@ -46,6 +46,10 @@ void viewStopped()
 
 bool enabled()
 {
+    // (LYNX_VISUALIZER_GPU=0: the 2D renderer for this run, without changing the saved choice)
+    static const bool forcedOff = juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALIZER_GPU", {}).trim() == "0";
+    if (forcedOff)
+        return false;
     if (setting < 0)
         setting = platform::settingsFile ("visualizer-gpu.txt").loadFileAsString().trim() == "0" ? 0 : 1;
     return setting != 0;
@@ -85,7 +89,10 @@ void useClassicRendering (juce::Component& topLevel)
 // ---------------------------------------------------------------------------------------------------------------
 namespace
 {
-constexpr int maxLiveWidth = 1920, maxLiveHeight = 1080;
+// the live picture is drawn at most 1280 x 720 inside and stretched to the window (full screen too): the shader layers'
+// cost grows with the pixels, and a quarter of a 4K screen's pixels keeps even an integrated GPU cool (the video
+// export draws its own size off-screen, as fast as the encoder takes the frames)
+constexpr int maxLiveWidth = 1280, maxLiveHeight = 720;
 
 struct Program
 {
@@ -527,7 +534,7 @@ struct GlSceneRenderer::Impl
                         bindTarget (accum[cur]);
                         glEnable (GL_BLEND);
                         glBlendFunc (GL_ONE, L.blend == vs::Blend::add ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
-                        bindTexture (0, accum[cur].getTextureID()); // (not read by these shaders)
+                        bindTexture (0, 0); // (these shaders do not read the picture below: no texture bound to the target)
                         bindAnalysisTextures();
                         drawQuad (*p);
                         glDisable (GL_BLEND);
@@ -801,7 +808,7 @@ void GlSceneView::renderOpenGL()
     auto area = frameArea (drawnScene, { 0, 0, fullW, fullH });
     if (fresh && area.getWidth() > 8 && area.getHeight() > 8)
     {
-        // drawn at most 1920 x 1080 inside, stretched to the window
+        // drawn at most maxLiveWidth x maxLiveHeight inside, stretched to the window
         auto rw = area.getWidth(), rh = area.getHeight();
         const auto shrink = juce::jmin (1.0, (double) maxLiveWidth / rw, (double) maxLiveHeight / rh);
         rw = juce::jmax (16, juce::roundToInt (rw * shrink));

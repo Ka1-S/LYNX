@@ -3422,6 +3422,25 @@ public:
             }
         if (juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_VIDEO_ONLY", {}).isNotEmpty())
             cases.clear();
+        // short checks (round 165e: a few seconds of GPU drawing in a small window): only some cases, shorter, smaller
+        if (const auto only = juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_ONLY", {}); only.isNotEmpty())
+        {
+            const auto wanted = juce::StringArray::fromTokens (only, ",", "");
+            cases.erase (std::remove_if (cases.begin(), cases.end(), [&wanted] (const Case& c) {
+                             for (const auto& w : wanted)
+                                 if (c.name.containsIgnoreCase (w.trim()))
+                                     return false;
+                             return true;
+                         }), cases.end());
+        }
+        seconds = juce::jlimit (0.5, 5.0, juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_SECONDS", "5").getDoubleValue());
+        noVideo = juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_NO_VIDEO", {}).isNotEmpty();
+        if (juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_SMALL", {}).isNotEmpty())
+            for (auto& c : cases)
+            {
+                c.w = c.w * 2 / 3;
+                c.h = c.h * 2 / 3;
+            }
         engine = std::make_unique<AudioEngine> (false);
         report << "visualizer renderer: " << (visualgl::enabled() && ! visualgl::failedThisSession() ? "GPU (OpenGL) wanted" : "2D") << "\n";
         report << "case\tcpu % of one core (animating: demo signal; idle: no audio)\n";
@@ -3438,7 +3457,10 @@ private:
         if (at >= cases.size())
         {
             stopTimer();
-            exportVideos();
+            if (noVideo)
+                finish (true);
+            else
+                exportVideos();
             return;
         }
         const auto& c = cases[at];
@@ -3477,7 +3499,7 @@ private:
     void timerCallback() override
     {
         const auto now = juce::Time::getMillisecondCounterHiRes();
-        if (phase == 0 && now - t0 > 2500.0)
+        if (phase == 0 && now - t0 > juce::jmin (2500.0, seconds * 1000.0))
         {
             const auto& c = cases[at];
             auto* content = window->getContentComponent();
@@ -3575,7 +3597,7 @@ private:
                 gpuSum += gl->gpuMs();
                 ++gpuCount;
             }
-        if (phase == 1 && now - t0 > 5000.0)
+        if (phase == 1 && now - t0 > seconds * 1000.0)
         {
             const auto cpu = (processCpuSeconds() - c0) / ((now - t0) * 0.001) * 100.0;
             report << cases[at].name << "\t" << juce::String (cpu, 2);
@@ -3665,6 +3687,8 @@ private:
             v.height = 720;
             v.fps = 30;
             v.maxSeconds = withFfmpeg ? 12.0 : onMaster ? 0.5 : 2.0;
+            if (const auto cap = juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_VIDEO_SECONDS", {}).getDoubleValue(); cap > 0.0)
+                v.maxSeconds = juce::jmin (v.maxSeconds, cap);
             v.ffmpeg = withFfmpeg ? findFfmpeg() : juce::File();
             if (withFfmpeg && ! v.ffmpeg.existsAsFile())
             {
@@ -3738,8 +3762,9 @@ private:
     std::unique_ptr<AudioEngine> engine;
     std::unique_ptr<juce::DocumentWindow> window, gpuWindow;
     GlFrameExporter* gpuExporter = nullptr;
-    double gpuSum = 0.0;
+    double gpuSum = 0.0, seconds = 5.0;
     int gpuCount = 0, gpuViews = 0;
+    bool noVideo = false;
     VisualTarget videoTarget;
     scene::Scene videoScene;
     std::unique_ptr<VideoJob> job;
