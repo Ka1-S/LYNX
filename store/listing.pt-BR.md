@@ -5,11 +5,12 @@ inglês (`store/screenshots/`, `store/logo-300.png`, `store/box-art-1080.png`).
 
 ## Nome do produto
 
-LYNX
+LYNX SHARE
+(nome reservado na Store — "LYNX" já existia; no Windows e dentro do app o programa continua se chamando LYNX)
 
 ## Descrição [≤ 10.000 caracteres]
 
-O LYNX é uma estação de trabalho de áudio digital (DAW) gratuita e de código aberto para fazer beats e músicas. Ele
+O LYNX (publicado aqui como LYNX SHARE) é uma estação de trabalho de áudio digital (DAW) gratuita e de código aberto para fazer beats e músicas. Ele
 segue o fluxo baseado em padrões que os beatmakers adoram — Channel Rack com sequenciador de passos, padrões, Piano
 Roll, Playlist com arranjos e um Mixer com inserts, sends e sidechain — e foi feito para continuar leve e rápido em
 qualquer PC.

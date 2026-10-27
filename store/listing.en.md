@@ -6,13 +6,13 @@ Partner Center's. Screenshots: `store/screenshots/*.png` (1920×1080). Logos: `s
 
 ## Product name
 
-LYNX
-(fallbacks if "LYNX" is taken: **LYNX DAW**, **LYNX Music Studio**, **LYNX Beat Maker** — whichever is reserved must
-also go into the repository variable `MSIX_DISPLAY_NAME`)
+LYNX SHARE
+(the reserved Store name — "LYNX" was taken. The package's `Properties/DisplayName` is built with it (repository
+variable `MSIX_DISPLAY_NAME`, default `LYNX SHARE`); inside Windows and the app the program is still called LYNX.)
 
 ## Description [≤ 10,000 characters]
 
-LYNX is a free, open-source digital audio workstation for making beats and songs. It follows the pattern-based
+LYNX (published here as LYNX SHARE) is a free, open-source digital audio workstation for making beats and songs. It follows the pattern-based
 workflow loved by beatmakers — a step-sequencer Channel Rack, patterns, a Piano Roll, a Playlist with arrangements
 and a Mixer with inserts, sends and sidechain — and it is built to stay light and fast on any PC.
 

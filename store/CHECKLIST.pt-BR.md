@@ -12,8 +12,8 @@ a conta e os cliques de envio. Detalhes técnicos: `docs/STORE.md`.
 ## 2. Reservar o nome
 
 1. Partner Center → **Aplicativos e jogos** → **Novo produto** → **Aplicativo MSIX ou PWA**.
-2. Nome: **LYNX**. Se estiver ocupado, tente nesta ordem: **LYNX DAW**, **LYNX Music Studio**, **LYNX Beat Maker**.
-   (Se não for exatamente "LYNX", anote o nome reservado para o passo 3.)
+2. Nome: **LYNX SHARE** ("LYNX" já estava ocupado). O pacote já sai com esse nome na Store; no menu Iniciar e dentro
+   do app continua aparecendo "LYNX".
 
 ## 3. Copiar a identidade para o GitHub
 
@@ -24,7 +24,7 @@ a conta e os cliques de envio. Detalhes técnicos: `docs/STORE.md`.
    - `MSIX_IDENTITY_NAME` = Package/Identity/Name
    - `MSIX_PUBLISHER` = Package/Identity/Publisher (começa com `CN=`)
    - `MSIX_PUBLISHER_DISPLAY` = PublisherDisplayName
-   - `MSIX_DISPLAY_NAME` = o nome reservado (só se não for "LYNX")
+   - (`MSIX_DISPLAY_NAME` não precisa: o padrão já é `LYNX SHARE`; só crie se reservar outro nome)
 3. Me avise: eu gero o pacote de novo (ou ele sai sozinho na próxima versão) — arquivo `LYNX-<versão>-store.msix`
    nos assets do release no GitHub.
 

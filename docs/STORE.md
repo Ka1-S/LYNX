@@ -27,6 +27,10 @@ is in the repository:
 - **Microphone** device capability: Windows asks once before LYNX records from a microphone / audio interface.
 - **Execution alias** `lynx.exe` (`%LOCALAPPDATA%\Microsoft\WindowsApps\lynx.exe`): command-line options such as
   `lynx --selftest r.txt` run inside the package.
+- **Names:** the Store name is the one reserved in Partner Center, **LYNX SHARE** ("LYNX" was taken):
+  `Package/Properties/DisplayName` and the listing title. Start menu, taskbar, Explorer's *Open with* and the app
+  itself still say **LYNX** (`VisualElements DisplayName`). If certification ever asks for the reserved name there
+  too, change that attribute in the template.
 - **Version:** `project(LYNX VERSION x.y.z)` → `x.y.z.0` (the Store requires the fourth part to be 0). Every
   submission needs a higher version than the last one.
 - **Identity:** Partner Center › the app › *Product management › Product identity* shows `Package/Identity/Name`,
@@ -38,7 +42,7 @@ is in the repository:
   | `MSIX_IDENTITY_NAME` | Package/Identity/Name, e.g. `12345Ka1-S.LYNX` | `LYNX.DAW` |
   | `MSIX_PUBLISHER` | Package/Identity/Publisher, e.g. `CN=1A2B3C4D-…` | `CN=LYNX` |
   | `MSIX_PUBLISHER_DISPLAY` | Package/Properties/PublisherDisplayName | `LYNX` |
-  | `MSIX_DISPLAY_NAME` | the reserved app name (only if it is not exactly `LYNX`) | `LYNX` |
+  | `MSIX_DISPLAY_NAME` | the reserved app name (only if it changes) | `LYNX SHARE` |
 
   A package built with the placeholders is valid but Partner Center rejects it ("identity does not match"): set the
   variables first, then run the workflow (tag push, or *Actions › Release › Run workflow*).
