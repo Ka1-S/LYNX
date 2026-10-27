@@ -4754,3 +4754,5 @@ countries: br
 "Semitones (-24 to +24)" = "Semitons (-24 a +24)"
 "Cents (-100 to +100)" = "Cents (-100 a +100)"
 "Off: resample, like a tape: higher is shorter, lower is longer." = "Desligado: resample, como uma fita: mais agudo fica mais curto, mais grave fica mais longo."
+"Clip menu: [LMB] or [RMB] opens it (pitch, fit to tempo, reverse, chop, make unique...)" = "Menu do clipe: [LMB] ou [RMB] abre (pitch, encaixar no tempo, inverter, picotar, tornar único...)"
+"(pitch: [RMB] › Pitch...)" = "(pitch: [RMB] › Pitch...)"

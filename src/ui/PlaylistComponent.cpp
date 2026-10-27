@@ -3861,7 +3861,9 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
     {
         const auto onHeader = p.y < clipBounds (h.clip).getY() + (int) clipTitleHeight;
         if (h.target == gesture::Target::clipMenu)
-            hint.text = tr ("Clip menu: [LMB] or [RMB] opens it (make unique, rename and colour, chop, select source...)");
+            hint.text = song.playlist[(std::size_t) h.clip].kind == ClipKind::audio
+                            ? tr ("Clip menu: [LMB] or [RMB] opens it (pitch, fit to tempo, reverse, chop, make unique...)")
+                            : tr ("Clip menu: [LMB] or [RMB] opens it (make unique, rename and colour, chop, select source...)");
         else if (onHeader && ! m.ctrl)
             hint.text << "  " << tr ("The icon at the top left opens the clip menu (make unique, rename...)");
         else if (h.target == gesture::Target::item && ! m.ctrl)
