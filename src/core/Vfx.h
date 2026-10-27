@@ -11,6 +11,7 @@
 // that state. Behaviour rebuilt from FL's plugins (REA, clean-room: our own code).
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -70,7 +71,9 @@ enum class Prop : std::uint8_t
 
 struct Event
 {
-    enum class Type : std::uint8_t { on, off, prop };
+    // program (round 165c): an incoming MIDI program change, `value` = the program number 0…127 (FL's engines take
+    // it as the plugin's preset / program selection)
+    enum class Type : std::uint8_t { on, off, prop, program };
     Type type = Type::on;
     int offset = 0; // sample within the block
     int output = 0; // output port 0… (inputs: 0)
@@ -82,6 +85,8 @@ struct Event
 
 // The id of a host voice (an input event's id): its key and colour
 int inputId (int key, int colour) noexcept;
+// A program change event (round 165c)
+Event programEvent (int program, int offset = 0) noexcept;
 
 // Fixed-capacity event list (never allocates on the audio thread; extra events are dropped)
 class EventList
@@ -353,6 +358,44 @@ std::vector<std::uint8_t> writeState (const State& state);
 void makeChannel (ChannelDef& channel, Kind kind);
 std::optional<Kind> kindOf (const ChannelDef& channel);
 
+// What a running processor shows its editor (round 165c), lock-free: the audio thread pushes, the editor's timer
+// reads (one reader). Nothing is pushed until an editor watches.
+class Monitor
+{
+public:
+    struct Item
+    {
+        std::uint8_t kind = 0; // Level Scaler: the tab (0 velocity … 5 Mod Y); Keyboard Splitter mapping: 0
+        float in = 0.0f, out = 0.0f;
+    };
+    static constexpr std::uint32_t size = 256;
+    std::atomic<bool> watching { false }; // an editor shows the events (Level Scaler's "event persistence")
+    std::atomic<bool> mapping { false };  // Keyboard Splitter's "Manual mapping": the notes are taken, not played
+    void push (const Item& item) noexcept
+    {
+        const auto h = head.load (std::memory_order_relaxed);
+        if (h - tail.load (std::memory_order_acquire) >= size)
+            return; // (full: the editor has not read for a while)
+        ring[h % size] = item;
+        head.store (h + 1, std::memory_order_release);
+    }
+    // (editor) the items pushed since the last call, oldest first
+    int pop (Item* into, int max) noexcept
+    {
+        auto t = tail.load (std::memory_order_relaxed);
+        const auto h = head.load (std::memory_order_acquire);
+        int n = 0;
+        for (; t != h && n < max; ++t)
+            into[n++] = ring[t % size];
+        tail.store (t, std::memory_order_release);
+        return n;
+    }
+
+private:
+    std::array<Item, size> ring {};
+    std::atomic<std::uint32_t> head { 0 }, tail { 0 };
+};
+
 // The processor. Audio thread: process() never allocates. UI thread: configure() hands new settings over.
 class Processor
 {
@@ -368,9 +411,14 @@ public:
     virtual bool busy() const noexcept { return false; }
     // New FL state (UI thread); taken at the next block. False if it does not parse.
     virtual bool configure (const std::vector<std::uint8_t>& flState) = 0;
+    // FL's automatable parameter `index` (an automation / a Patcher control cable), value 0..1 (audio thread; the
+    // value holds until the next configure). Round 165c: the Level Scaler's 36 parameters.
+    virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
+    Monitor& monitor() noexcept { return live; }
 
 protected:
     double rate = 44100.0;
+    Monitor live;
 };
 std::unique_ptr<Processor> makeProcessor (Kind kind, const std::vector<std::uint8_t>& flState);
 std::unique_ptr<Processor> makeSequencer (const std::vector<std::uint8_t>& flState); // (VfxSequencer.cpp)

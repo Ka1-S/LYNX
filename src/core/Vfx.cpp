@@ -24,6 +24,15 @@ constexpr std::uint32_t lynxMagic = 0x5846564c; // "LVFX"
 
 int inputId (int key, int colour) noexcept { return (colour & 15) * 128 + (key & 127); }
 
+Event programEvent (int program, int offset) noexcept
+{
+    Event e;
+    e.type = Event::Type::program;
+    e.offset = offset;
+    e.value = (float) std::clamp (program, 0, 127);
+    return e;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 
 const char* flName (Kind kind) noexcept
@@ -1287,46 +1296,179 @@ public:
 namespace
 {
 // One voice in, one voice out, its velocity, fine pitch, pan, Mod X / Y and release velocity through the curves.
-// (FL re-evaluates the curves every tick from the parent's live levels; LYNX applies them when the note starts and
-// to its release velocity when it ends: the voices' levels do not change on their way here.)
-class LevelScaler final : public Base<LevelScalerSettings>
+// FL re-evaluates the curves every tick from the parent's live levels (round 165c): LYNX re-evaluates a held voice
+// whenever its levels change on the way here (a VFX before it sends them) and whenever the settings change (the
+// editor, an automation or a Patcher control cable on one of its 36 parameters), and sends what changed. Each voice
+// keeps its six random numbers (FL: R[0…5], fixed per note); the release velocity draws a fresh one.
+class LevelScaler final : public Processor
 {
 public:
-    explicit LevelScaler (LevelScalerSettings s) : Base (std::move (s)) {}
+    explicit LevelScaler (LevelScalerSettings s) : settings (s), live (s) {}
     Kind kind() const noexcept override { return Kind::levelScaler; }
     bool configure (const std::vector<std::uint8_t>& fl) override
     {
         auto s = parseLevelScaler (fl);
         if (! s)
             return false;
-        publish (std::move (*s));
+        settings.publish (std::move (*s));
         return true;
     }
-    void process (const Event* in, int count, int, const Transport&, EventList& out) noexcept override
+    bool busy() const noexcept override { return count > 0; }
+    void releaseAll (EventList& out) noexcept override
     {
-        using L = LevelScalerSettings;
-        const auto& s = current();
         for (int i = 0; i < count; ++i)
+            out.add (offEvent (voices[(std::size_t) i], 0, voices[(std::size_t) i].sent.release));
+        count = 0;
+    }
+    void setParameter (int index, float value) noexcept override
+    {
+        if (index < 0 || index >= 36 || ! std::isfinite (value))
+            return;
+        // FL's FromMIDI: min + round (v · (max − min))
+        static constexpr int lo[6] = { 0, -16384, -8192, -8192, 0, 0 }, hi[6] = { 8192, 16384, 8192, 8192, 16384, 2 };
+        const auto f = index % 6;
+        const auto v = lo[f] + (int) std::lround (std::clamp ((double) value, 0.0, 1.0) * (hi[f] - lo[f]));
+        if (live.p[(std::size_t) index] != v)
+        {
+            live.p[(std::size_t) index] = v;
+            dirty = true;
+        }
+    }
+
+    void process (const Event* in, int n, int, const Transport&, EventList& out) noexcept override
+    {
+        if (settings.take())
+        {
+            live = settings.get();
+            dirty = true;
+        }
+        if (dirty) // (the curves moved: the held voices follow)
+        {
+            dirty = false;
+            for (int i = 0; i < count; ++i)
+                update (voices[(std::size_t) i], 0, out);
+        }
+        for (int i = 0; i < n; ++i)
         {
             const auto& e = in[i];
             if (e.type == Event::Type::on)
             {
-                auto v = e.voice;
-                // (FL's order: pan, Mod X, Mod Y, fine pitch, velocity; each with its own random, fixed for the note)
-                v.pan = (float) levelScale (s, L::pan, v.pan, -1.0, 1.0, random());
-                v.modX = (float) (levelScale (s, L::modX, v.modX * 2.0 - 1.0, -1.0, 1.0, random()) * 0.5 + 0.5);
-                v.modY = (float) (levelScale (s, L::modY, v.modY * 2.0 - 1.0, -1.0, 1.0, random()) * 0.5 + 0.5);
-                v.cents = (float) (levelScale (s, L::finePitch, v.cents / 1200.0, -1.0, 1.0, random()) * 1200.0);
-                v.velocity = (float) levelScale (s, L::velocity, v.velocity, 0.0, 1.0, random());
-                if (const auto id = voices.add (e.id, 0, v); id >= 0)
-                    out.add (onEvent (e.offset, 0, id, v));
+                if (count >= (int) voices.size())
+                    continue;
+                auto& v = voices[(std::size_t) count];
+                v.input = e.id;
+                v.id = nextId++;
+                if (nextId > 1 << 30)
+                    nextId = 1;
+                v.source = e.voice;
+                for (auto& r : v.random)
+                    r = random();
+                v.sent = scaled (v, true);
+                out.add (onEvent (e.offset, 0, v.id, v.sent));
+                ++count;
             }
             else if (e.type == Event::Type::off)
-                voices.release (e.id, e.offset, (float) levelScale (s, L::release, e.voice.release, 0.0, 1.0, random()), out);
+            {
+                for (int k = 0; k < count; ++k)
+                    if (voices[(std::size_t) k].input == e.id)
+                    {
+                        const auto x = (double) e.voice.release;
+                        const auto r = (float) levelScale (live, LevelScalerSettings::release, x, 0.0, 1.0, random());
+                        show (LevelScalerSettings::release, x, r);
+                        out.add (offEvent (voices[(std::size_t) k], e.offset, r));
+                        voices[(std::size_t) k] = voices[(std::size_t) --count];
+                        --k;
+                    }
+            }
+            else if (e.type == Event::Type::prop) // (a VFX before it moves the voice: the curves follow)
+            {
+                for (int k = 0; k < count; ++k)
+                {
+                    auto& v = voices[(std::size_t) k];
+                    if (v.input != e.id)
+                        continue;
+                    switch (e.prop)
+                    {
+                        case Prop::velocity: v.source.velocity = e.value; break;
+                        case Prop::pitch: v.source.cents = e.value; break;
+                        case Prop::pan: v.source.pan = e.value; break;
+                        case Prop::modX: v.source.modX = e.value; break;
+                        case Prop::modY: v.source.modY = e.value; break;
+                    }
+                    update (v, e.offset, out);
+                }
+            }
         }
     }
 
 private:
+    struct Voice
+    {
+        int input = -1, id = 0;
+        vfx::Voice source, sent;
+        std::array<double, 6> random {};
+    };
+
+    // the voice through the curves (FL's order: pan, Mod X, Mod Y, fine pitch, velocity)
+    vfx::Voice scaled (const Voice& v, bool shown) noexcept
+    {
+        using L = LevelScalerSettings;
+        auto out = v.source;
+        auto through = [&] (int tab, double x, double lo, double hi) {
+            const auto y = levelScale (live, tab, x, lo, hi, v.random[(std::size_t) tab]);
+            if (shown)
+                show (tab, (x - lo) / (hi - lo), (y - lo) / (hi - lo));
+            return y;
+        };
+        out.pan = (float) through (L::pan, v.source.pan, -1.0, 1.0);
+        out.modX = (float) (through (L::modX, v.source.modX * 2.0 - 1.0, -1.0, 1.0) * 0.5 + 0.5);
+        out.modY = (float) (through (L::modY, v.source.modY * 2.0 - 1.0, -1.0, 1.0) * 0.5 + 0.5);
+        out.cents = (float) (through (L::finePitch, v.source.cents / 1200.0, -1.0, 1.0) * 1200.0);
+        out.velocity = (float) through (L::velocity, v.source.velocity, 0.0, 1.0);
+        return out;
+    }
+
+    void update (Voice& v, int offset, EventList& out) noexcept
+    {
+        const auto now = scaled (v, false);
+        auto send = [&] (Prop prop, float before, float after) {
+            if (std::abs (after - before) < 1e-5f)
+                return;
+            Event p;
+            p.type = Event::Type::prop;
+            p.offset = offset;
+            p.id = v.id;
+            p.voice = v.sent;
+            p.prop = prop;
+            p.value = after;
+            out.add (p);
+        };
+        send (Prop::velocity, v.sent.velocity, now.velocity);
+        send (Prop::pitch, v.sent.cents, now.cents);
+        send (Prop::pan, v.sent.pan, now.pan);
+        send (Prop::modX, v.sent.modX, now.modX);
+        send (Prop::modY, v.sent.modY, now.modY);
+        v.sent = now;
+    }
+
+    // the editor's "event persistence" display: what came in and what went out (0..1 on the tab's range)
+    void show (int tab, double x, double y) noexcept
+    {
+        if (live_.watching.load (std::memory_order_relaxed))
+            live_.push ({ (std::uint8_t) tab, (float) x, (float) y });
+    }
+
+    static Event offEvent (const Voice& v, int offset, float release) noexcept
+    {
+        Event e;
+        e.type = Event::Type::off;
+        e.offset = offset;
+        e.id = v.id;
+        e.voice = v.sent;
+        e.voice.release = release;
+        return e;
+    }
+
     double random() noexcept
     {
         seed ^= seed << 13;
@@ -1334,6 +1476,13 @@ private:
         seed ^= seed << 5;
         return (double) (seed >> 8) / 16777216.0;
     }
+
+    Handoff<LevelScalerSettings> settings;
+    LevelScalerSettings live; // (the audio thread's copy: automation moves it)
+    Monitor& live_ = monitor();
+    std::array<Voice, 256> voices {};
+    int count = 0, nextId = 1;
+    bool dirty = false;
     std::uint32_t seed = 0x2545f491u;
 };
 } // namespace
@@ -1439,12 +1588,14 @@ namespace
 {
 // An FL curve as the Envelope Controller's (core/FlSynths.h): accumulated points, LYNX's tension sign on the segment
 // starting at a point, a hold as a step
-void toArticulator (const MapCurve& m, ControllerArticulator& a)
+void toArticulator (const MapCurve& m, ControllerArticulator& a, int* loopPoint = nullptr)
 {
     a.count = 0;
     a.sustain = -1;
     a.decayPoint = -1;
-    const auto sustain = m.footer[4], decay = m.footer[2];
+    if (loopPoint != nullptr)
+        *loopPoint = -1;
+    const auto sustain = m.footer[4], decay = m.footer[2], loop = m.footer[3];
     for (std::size_t i = 0; i < m.points.size() && a.count < (int) a.time.size(); ++i)
     {
         const auto& p = m.points[i];
@@ -1464,11 +1615,25 @@ void toArticulator (const MapCurve& m, ControllerArticulator& a)
             a.sustain = a.count;
         if ((int) i == decay)
             a.decayPoint = a.count;
+        if ((int) i == loop && loopPoint != nullptr)
+            *loopPoint = a.count;
         a.time[(std::size_t) a.count] = (float) p.x;
         a.level[(std::size_t) a.count] = (float) std::clamp (p.y, 0.0, 1.0);
         a.tension[(std::size_t) a.count] = 0.0f;
         ++a.count;
     }
+}
+
+// FL's envelope loop (round 165c): while the key is held, the time between the loop point and the sustain point
+// repeats (the sustain point ends the loop); the release then goes on from the sustain point as before
+double envelopeLoopTime (const ControllerArticulator& a, int loop, double t, double sinceRelease) noexcept
+{
+    if (loop < 0 || a.sustain <= loop || a.sustain >= a.count || sinceRelease >= 0.0)
+        return t;
+    const auto start = (double) a.time[(std::size_t) loop], end = (double) a.time[(std::size_t) a.sustain];
+    if (end - start <= 1e-9 || t < end)
+        return t;
+    return start + std::fmod (t - start, end - start);
 }
 
 // What the audio thread evaluates: per articulator and target the envelope, the LFO amplitude and the LFO wave
@@ -1480,6 +1645,7 @@ struct EnvelopeRuntime
         float base = 0.5f, env = 0.0f, lfo = 0.0f, offset = 0.5f;
         ControllerArticulator envelope, amplitude, wave; // (levels 0…1 with base 0: their curves' values)
         double rate = 1.0, startPhase = 0.0;            // LFO: cycles per unit, phase at the trigger
+        int envLoop = -1, ampLoop = -1;                 // FL's loop point (start loop; the sustain point ends it)
     };
     struct Articulator
     {
@@ -1514,7 +1680,7 @@ struct EnvelopeRuntime
                 q.env = p.env;
                 q.lfo = p.lfo;
                 q.offset = t == EnvelopeSettings::velocity ? 0.0f : 0.5f;
-                toArticulator (p.envelope, q.envelope);
+                toArticulator (p.envelope, q.envelope, &q.envLoop);
                 q.envelope.adsr = p.adsr;
                 q.envelope = controllerWithKnobs (q.envelope);
                 for (auto* c : { &q.envelope, &q.amplitude })
@@ -1524,7 +1690,7 @@ struct EnvelopeRuntime
                     c->bipolar = false;
                     c->envOn = true;
                 }
-                toArticulator (p.lfoAmp, q.amplitude);
+                toArticulator (p.lfoAmp, q.amplitude, &q.ampLoop);
                 q.wave.lfoSpeed = p.speed;
                 q.wave.lfoTension = p.tension;
                 q.wave.lfoSkew = p.skew;
@@ -1672,15 +1838,15 @@ private:
                     const auto& p = rt.articulators[(std::size_t) g].parts[(std::size_t) t];
                     if (! p.envOn && ! p.lfoOn)
                         continue;
-                    const auto envTime = p.envTempo ? v.beats : v.seconds;
                     const auto envRelease = ! v.released ? -1.0 : p.envTempo ? v.releaseBeats : v.releaseSeconds;
+                    const auto envTime = envelopeLoopTime (p.envelope, p.envLoop, p.envTempo ? v.beats : v.seconds, envRelease);
                     const auto e = p.envOn ? controllerValue (p.envelope, envTime, envRelease) - p.offset : 0.0f;
                     double l = 0.0;
                     if (p.lfoOn)
                     {
                         const auto lfoTime = p.lfoTempo ? v.beats : v.seconds;
                         const auto lfoRelease = ! v.released ? -1.0 : p.lfoTempo ? v.releaseBeats : v.releaseSeconds;
-                        const auto amp = controllerValue (p.amplitude, lfoTime, lfoRelease) - 0.5;
+                        const auto amp = controllerValue (p.amplitude, envelopeLoopTime (p.amplitude, p.ampLoop, lfoTime, lfoRelease), lfoRelease) - 0.5;
                         l = amp * controllerLfoWave (p.wave, p.startPhase + p.rate * lfoTime);
                     }
                     if (t == EnvelopeSettings::velocity)
