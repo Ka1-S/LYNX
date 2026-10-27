@@ -24,6 +24,12 @@
   Compare tool: tmp/vfxscript165/py/notes.py (note segments of a render).
 - PAUSED 16:3x by the coordinator (load 33). Next: read the LOAD LIMIT section, fix the 3 failures + `match`, JUCE
   build of the editor, FL renders vs LYNX, screenshots, notes, land.
+- 17:xx (after a context compaction): fixed since the pause — the 43 GB run (a bare `except:` caught the
+  TimeoutError forever; interrupts now skip except handlers), `match` soft keyword, counted pocketpy heap (scripts
+  stopped past 768 MB), CPython's missing str methods, `globals().get(k, default)`, realtime flag from the engine.
+  Test build with FL Data: 334 checks, 0 failures; 89/89 FL factory scripts run. FL renders of the 12 cases done
+  (D:\lynx-work\vfxscript165\fl). Next: JUCE Linux build of the editor (queued in buildslot), LYNX renders of the
+  cases (tmp/vfxscript165/lxrender.sh) + compare.py, --vfxshot screenshots, build-local + Windows, notes, land.
 
 ## 1. What FL's VFX Script is
 
