@@ -93,6 +93,18 @@ inline juce::FontOptions font (float size, bool bold = false)
     return juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain);
 }
 
+// --- menus -------------------------------------------------------------------------------------------
+// Options › General › Menu density (round 163): compact rows close to native Windows / FL menus (the default),
+// or the roomier rows of LYNX 0.1.17 and older.
+namespace menus
+{
+void setCompact (bool compact);
+bool compact();
+int itemHeight();    // a normal row
+int headerHeight();  // a section header (the "DOCUMENTS" titles)
+int separatorHeight();
+} // namespace menus
+
 inline juce::FontOptions monoFont (float size)
 {
     return juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), size, juce::Font::plain);

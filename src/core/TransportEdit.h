@@ -79,6 +79,34 @@ inline double patternPlayhead (const Song& song, int pattern, double transportTi
     return best != nullptr ? inSong - (double) best->start + (double) best->offset : -1.0;
 }
 
+// Where the transport goes when the Piano Roll's ruler is clicked at `patternTick` (round 163, FL: clicking the
+// Piano Roll's timeline moves the position): in Pattern mode that pattern position; in Song mode the same place in
+// the clip of `pattern` that plays at `transportTick`, else in its earliest clip (upper track first). -1 in Song
+// mode when the pattern has no clip in the Playlist.
+inline double patternSeekTarget (const Song& song, int pattern, double patternTick, double transportTick)
+{
+    patternTick = std::max (0.0, patternTick);
+    if (song.mode == PlayMode::pattern)
+        return patternTick;
+
+    const auto inSong = transportTick >= 0.0 ? std::fmod (transportTick, (double) std::max<std::int64_t> (1, song.songLength())) : -1.0;
+    const Clip *playing = nullptr, *earliest = nullptr;
+    for (const auto& c : song.playlist)
+    {
+        if (c.kind != ClipKind::pattern || c.pattern != pattern)
+            continue;
+        if (inSong >= (double) c.start && inSong < (double) c.end() && (playing == nullptr || c.track < playing->track))
+            playing = &c;
+        if (earliest == nullptr || c.start < earliest->start || (c.start == earliest->start && c.track < earliest->track))
+            earliest = &c;
+    }
+    const auto* clip = playing != nullptr ? playing : earliest;
+    if (clip == nullptr)
+        return -1.0;
+    const auto inClip = std::clamp (patternTick - (double) clip->offset, 0.0, (double) std::max<std::int64_t> (0, clip->length - 1));
+    return (double) clip->start + inClip;
+}
+
 // --- follow (auto scrolling) ----------------------------------------------------------------------------------
 
 // The editors' "Follow": when the playhead at `tick` leaves the view [viewStart, viewStart + viewTicks), the view
