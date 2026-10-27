@@ -17,6 +17,7 @@
 #include "engine/PluginSandbox.h"
 #include "engine/FlStudio.h"
 #include "platform/CrashGuard.h"
+#include "core/Denormals.h"
 #include "ui/I18n.h"
 
 #if JUCE_WINDOWS
@@ -168,6 +169,13 @@ struct BlockCall
     juce::MidiBuffer* midi;
     void operator()() const { plugin->processBlock (*view, *midi); }
 };
+
+// a block call under the crash guard, with this thread's floating-point mode put back after it (core/Denormals.h)
+std::uint32_t runBlock (const BlockCall& call) noexcept
+{
+    const KeepFloatMode keep;
+    return crashguard::run (call);
+}
 } // namespace
 
 int pluginCrashCount() noexcept
@@ -421,7 +429,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
             juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
             view.clear();
             if (! crashed.load (std::memory_order_relaxed))
-                if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &pending }); code != 0)
+                if (const auto code = runBlock (BlockCall { plugin.get(), &view, &pending }); code != 0)
                 {
                     failed (code);
                     view.clear(); // silent from here on
@@ -454,7 +462,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
         const auto count = juce::jmin (blockSize, n - done);
         juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
         view.clear();
-        if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+        if (const auto code = runBlock (BlockCall { plugin.get(), &view, &midi }); code != 0)
         {
             midi.clear();
             failed (code);
@@ -561,7 +569,7 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
             view.clear();
             view.copyFrom (0, 0, ch[0], count);
             view.copyFrom (1, 0, ch[1], count);
-            if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+            if (const auto code = runBlock (BlockCall { plugin.get(), &view, &midi }); code != 0)
             {
                 midi.clear();
                 failed (code); // this block keeps its dry input
@@ -581,7 +589,7 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
         view.clear();
         view.copyFrom (0, 0, left + done, count);
         view.copyFrom (1, 0, right + done, count);
-        if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+        if (const auto code = runBlock (BlockCall { plugin.get(), &view, &midi }); code != 0)
         {
             midi.clear();
             failed (code); // this block keeps its dry input

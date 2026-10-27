@@ -5410,6 +5410,21 @@ TEST (rea165i_task_graph_matches_layers_with_sidechain_and_cycle)
     CHECK (cycleLayered == cycleParallel);
 }
 
+TEST (rea165i_keep_float_mode_restores_ftz_after_foreign_code)
+{
+    // a hosted plugin that turns flush-to-zero off (or changes the rounding) no longer leaks it into LYNX's DSP
+    const lynx::ScopedFlushDenormals ftz;
+    const auto before = _mm_getcsr();
+    {
+        const lynx::KeepFloatMode keep;
+        _mm_setcsr ((before & ~0x8040u) | 0x6000u); // what a plugin might leave: no FTZ/DAZ, round toward zero
+    }
+    CHECK (_mm_getcsr() == before);
+    volatile float tiny = 1.0e-38f;
+    volatile float smaller = tiny * 1.0e-3f; // denormal without FTZ
+    CHECK (smaller == 0.0f);
+}
+
 TEST (arrangements_switch_and_keep_clip_indices)
 {
     auto s = lynx::Song::makeDefault();

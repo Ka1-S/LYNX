@@ -2286,7 +2286,11 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             std::atomic<std::size_t> nextStretch { 0 };
             auto stretchWorker = [&] {
                 for (auto i = nextStretch++; i < stretches.size(); i = nextStretch++)
-                    library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio, stretches[i].method);
+                    if (auto stretched = library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio, stretches[i].method))
+                    {
+                        const std::scoped_lock l (keep); // held until the rack is built (the cache drops unused lengths)
+                        out.decoded.push_back (std::move (stretched));
+                    }
             };
             std::vector<std::thread> helpers;
             for (std::size_t i = 1; i < juce::jmin (threads, stretches.size()); ++i)

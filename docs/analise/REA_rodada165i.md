@@ -57,7 +57,25 @@ Evidence markers: **[EXEC]** measured here, **[DECOMP]** Ghidra pseudocode of FL
 
 ## 3. How FL does it (REA)
 
-(to be filled)
+Sources: `objdump` of `FLEngine_x64.dll` (FL Studio 2026, 22 MB, Delphi; full listing kept on
+`D:\lynx-work\perf165\fleng.dis`), its UTF-16/ASCII strings, and the earlier decompilations
+(docs/ANALISE_FL_STUDIO.md §1–2, REA_rodada2 §2.4, REA_rodada139 B6). Clean-room: behaviour only.
+
+| Topic | FL Studio 2026 | LYNX (before this round) | Evidence |
+|---|---|---|---|
+| Multi-core mixer | generators: one task group (shared atomic counter, "self-scheduling", `QuickThreads`/`TSTBTaskGroup`), summed into tracks under a per-track `CRITICAL_SECTION`; then the mixer **by layers, a barrier after each** (`FUN_00cf42f0`), tracks grouped into "units" | channel pass (parallelFor), then the layers (parallelFor per layer) — FL's model | [DECOMP] ANALISE §1.3/§2.2 |
+| Smart disable | per plugin ("Allow smart disable"), −96 dB, 4 s hold, input **and** output tested; Options › CPU › Smart disable (global) | per slot since r139; silent channels skipped | [DECOMP] REA_rodada2 §2.4 |
+| Denormals | MXCSR set at engine init to **0x9f80 (FTZ)** and `|= 0x40` **(DAZ)** when the CPU feature word says so (`0x63ab03`–`0x63ab3e`: bits 0x80 / 0x20000), else left alone; **re-asserted at 71 call sites** together with the x87 control word (`0x63a660`: `fnclex; fldcw; emms`, then `0x63a6d0`: `ldmxcsr`), e.g. right before taking the global render lock (`0xc4eb44`) and around plugin entry points | FTZ+DAZ for the audio callback and each worker (ScopedFlushDenormals); **not** re-asserted after a hosted plugin's process call | [DECOMP] |
+| SIMD | FLEngine's own code is scalar SSE: `mulss` 5 380, `mulsd` 4 976, `addsd` 4 056 vs packed `mulps` 243 / `addps` 184, practically no AVX (`vmovups` 12). The heavy DSP lives in the plugin DLLs | core/Simd.h (SSE / NEON via sse2neon) in the hot loops | [DECOMP] instruction census |
+| Sample loading | "Use threads to load samples while loading project" (`TThreadedSampleLoader`, `DataBrowser.SampleLoader`); "Keep on disk" / "Stream sample from hard disk when possible" (`TWAVStreamingThread`); ffmpeg decoder on a threaded queue (`TThreadedQueue<SmpLoader_Ffmpeg.TAudioBlock>`) | parallel decode at open (≤ 6 threads), samples > 30 s memory-mapped from a PCM disk cache, prefetch thread | [STR] |
+| Plugin database | no scan at start: the plugin database is files (`Data\Patches\Plugin database`, `.nfo` / `.fst`), "Rescan plugins (fast)", a separate scanner; bridged plugins load through a queue (`TBridgeLoaderQueueItem`) | `plugins.xml` + optional background scan at start of new/changed files (child process per file) | [STR] |
+| Waveforms | `il.WaveformCacheProcessor` with job keys (asynchronous, cached waveform rendering) | WaveformCache on a juce::ThreadPool + `%APPDATA%\LYNX\wavecache` | [STR] |
+| Voices | typed voice pools `TDynamicVoiceArray<TMixVoiceGenPlug / AudioClip / Hybrid / 404>`; per-channel polyphony limit, "Disable maximum polyphony" | fixed voice arrays per instrument | [STR] |
+| Tick splitting | the driver block is cut at every tick boundary (variable sub-blocks), "Align tick lengths" makes the ticks a whole number of samples | chunks cut only at events (sample-accurate), so far fewer, longer chunks | [DECOMP] ANALISE §1.1, [MANUAL] |
+
+What LYNX takes from it this round: re-asserting the floating-point mode after foreign code (§4.2), FL's
+"next step" for the mixer — readiness instead of layer barriers (§4.1, the improvement ANALISE §2 already proposed),
+and FL's "no start-up rescans" behaviour for the plugin list (§4.3).
 
 ## 4. Changes in LYNX, measured
 
