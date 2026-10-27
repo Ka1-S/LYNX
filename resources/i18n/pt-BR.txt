@@ -5193,3 +5193,8 @@ countries: br
 "Thickness" = "Espessura"
 "Beat threshold" = "Limiar da batida"
 "Hue shift" = "Rotação de matiz"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
+"Host" = "Host"
+"Inverted stereo" = "Estéreo invertido"
+"Ping-pong" = "Pingue-pongue"
