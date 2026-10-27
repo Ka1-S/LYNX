@@ -24,3 +24,38 @@
   Compare tool: tmp/vfxscript165/py/notes.py (note segments of a render).
 - PAUSED 16:3x by the coordinator (load 33). Next: read the LOAD LIMIT section, fix the 3 failures + `match`, JUCE
   build of the editor, FL renders vs LYNX, screenshots, notes, land.
+
+## 1. What FL's VFX Script is
+
+- A note processor (Patcher node / Channel Rack channel, 16 voice outputs) that runs a Python 3.12 script
+  (`import flvfx as vfx`). The script's controls (`createDialog()` → `vfx.ScriptDialog`) become the plugin's
+  automatable inputs; `vfx.addOutputController()` adds control outputs.
+- FL's own API reference (the plugin's "API reference" tab, text inside `VFX Script_x64.dll`) [MANUAL]:
+  `context` (isPlaying, ticks, PPQ, tempo, voices, form), `addOutputController(name, defaultvalue)`,
+  `setOutputController(name, value)`, `class Voice([incomingVoice])` with pan, velocity, note, finePitch, color,
+  length, releaseVelocity, fcut, fres, output and trigger() / release() / copyFrom(otherVoice); callbacks
+  onTriggerVoice(incomingVoice), onReleaseVoice(incomingVoice), onTick(), createDialog(); "see the Piano Roll
+  scripting reference for ScriptDialog". The editor's tabs: User interface, Script, Log ("Use print-function in
+  script to output text to this log"), API reference [EXEC FL, DLL form resources].
+- FL's tutorial scripts: an incoming voice cannot be triggered (a copy is), and they release voices while walking
+  `vfx.context.voices` — LYNX's `voices` is a snapshot list so that works.
+
+## 2. LYNX's design
+
+- **pocketpy 2.2** (MIT, one C file, ~1.3 MB of source, ~0.5 MB in the binary) instead of CPython (~30 MB): a Python 3
+  subset; LYNX adds what FL's factory scripts need (`re` on std::regex, 3-argument pow, sys.float_info, random.gauss /
+  seed of any value, generator expressions, backslash line continuation, `match` as a soft keyword).
+- `src/core/Python.{h,cpp}`: one Python thread runs every script (pocketpy keeps global state); up to 15 VMs, one per
+  script instance; sandbox (no `os`, no file imports); a time limit (supervisor thread → interrupt flag checked per
+  opcode; a stopped script cannot catch it in its own `except:`); a counted heap (stopped past 768 MB).
+  The audio thread wakes the Python thread with an OS semaphore (std::counting_semaphore polls with Sleep() under
+  Zig's libc++ for Windows).
+- `src/core/VfxScript.{h,cpp}`: LYNX's own `flvfx` (written from the API reference above), the processor and the
+  values / [Parameters] encodings. Real time: each audio block hands its notes + ticks to the Python thread
+  (lock-free ring) and waits at most 0.3 × the block (0.2–2 ms); an answer that comes later plays at the next block's
+  start, and while it is late the audio thread does not wait at all. Exports wait for every answer (exact).
+- Editor (`src/ui/VfxEditors.cpp`, ScriptBody): FL's four tabs. User interface: the script's controls in FL's two
+  columns (knobs, checkboxes, combos, text), group headers, output-controller bars, live values (automation,
+  setNormalizedValue) and the error that stops the script. Script: code editor with Python colours and line
+  numbers, Apply (Ctrl+Enter), Revert, Restart, "Line N: error" button that jumps to the line. Log: print() and
+  errors (the same error repeated is counted, not flooded). API reference: LYNX's own text.
