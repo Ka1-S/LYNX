@@ -175,14 +175,15 @@ too. Takes are written next to the report (not into the user's Recordings folder
 | 15 s linear | 128 | 128, 8/8 | 200 | 720 128 frames | 30 | 0.000 | 0 |
 | 20 s loop bars 2–4 | 256 | 256, 8/8 | 328 | 3 passes (2 muted lanes) | 36 | 0.000 | 0 |
 | 600 s linear (with 3 parallel compiles running) | 64 | 64, 8/8 | 136 | 26 982 336 frames (562.1 s) | 1088 | 0.000 | 0 |
-| punch bars 3–4, 1 bar pre/post-roll | 256 | see below | | | | | |
+| punch bars 3–4, 1 bar pre-roll + 1 bar post-roll | 256 | 256, 8/8 | 328 | 384 768 frames = 8.016 s (bar 2 → end of bar 5, then playback stopped by itself) | 8 (one clip, exactly bars 3–4) | 0.000 | 0 |
 
 The 600 s run: the device itself missed ~38 s of cycles while three compiles loaded the machine (PipeWire's timer
 driver under WSL; the transport stood still with it), yet all 1088 clicks over the 9½ minutes land on their beats
 with 0.000 samples of error and no frame lost — no drift.
 
 ## Where I stopped
-- Batch 1 implemented (core + engine + UI), unit tests green in the mini harness; full build-local and Windows build
-  running. Next: loopback check of the placement with the PipeWire test daemon, --rtstress --record long take, land
-  batch 1; then batch 2 (punch on the loop region, pre/post-roll), batch 3 (comping / promote), batch 4 (hardware
-  insert).
+- Batches 1–3 done and verified (unit tests, loopback runs in §5), landed together for v0.1.18. Batch 4 (hardware
+  insert / External FX) not done — see §4; it is the natural next recording round.
+- Not tested on real Windows/ASIO hardware here (no interface in this setup): the ping and the placement math are the
+  same code on every driver; a user with an interface can verify with `--rectest … --type ASIO --device "<name>"`
+  and a cable from an output to an input.
