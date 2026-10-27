@@ -17,6 +17,7 @@
 #include "core/NoteEdit.h"
 #include "core/PlaylistOps.h"
 #include "core/TempoDetect.h"
+#include "core/TakeRecording.h"
 #include "ui/ExportDialog.h"
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
@@ -3046,6 +3047,21 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
 
     menu.addItem (tr ("Select all clips of this source"), [this, index] { setSelection (clipops::sameSource (engine.getSong(), index)); });
     menu.addSeparator();
+
+    // --- comping (round 163): a take lane's clip onto its comp track (the group header above) ----------
+    if (const auto comp = takes::compTrackOf (song, clip.track); comp >= 0 && clip.kind == ClipKind::audio)
+    {
+        // the loop region where it covers the clip (comping a phrase), else the whole clip
+        const auto useLoop = song.hasLoop() && song.loopStart < clip.end() && song.loopEnd > clip.start;
+        const auto from = useLoop ? std::max (song.loopStart, clip.start) : clip.start;
+        const auto to = useLoop ? std::min (song.loopEnd, clip.end()) : clip.end();
+        menu.addItem (useLoop ? tr ("Promote this take in the loop region to the comp track") : tr ("Promote this take to the comp track"), [this, index, comp, from, to] {
+            setSelection ({});
+            engine.editSong ([index, comp, from, to] (Song& s) { takes::promoteTake (s, index, comp, from, to); });
+            sortClips();
+        });
+        menu.addSeparator();
+    }
 
     // --- cutting and joining -------------------------------------------------------------------------
     const auto splitAt = snap (xToTick (mouseX) + gridTicks() / 2.0, true);

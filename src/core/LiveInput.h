@@ -107,6 +107,12 @@ struct LiveInput
     // UI -> audio
     std::array<std::atomic<bool>, maxMixerTracks> armed {};
     std::atomic<bool> recording { false };
+    // audio takes are recording in Song mode without a loop region: the song plays once, then silence (no start over
+    // at its end), so the take is one piece (round 163)
+    std::atomic<bool> linearSong { false };
+    // punching on the loop region (round 163): the region is not looped either, playback runs through the punch-out
+    // into the post-roll
+    std::atomic<bool> noLoopRegion { false };
 
     // audio -> UI: peak of each insert's input source, monitored or not
     MeterBank meters;

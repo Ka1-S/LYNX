@@ -78,6 +78,7 @@ std::vector<Action> makeActions()
         { "transport.metronome", TR_NOOP ("Metronome on/off"), Context::global, { chord ('M', ctrl) } },
         { "record.countIn", TR_NOOP ("Count-in before recording on/off"), Context::global, { chord ('P', ctrl) } },
         { "record.waitForInput", TR_NOOP ("Recording waits for the first note on/off"), Context::global, { chord ('I', ctrl) } },
+        { "record.quickAudio", TR_NOOP ("Record audio now: arm the selected insert and record (press again to stop)"), Context::global, { chord ('R', shift) } },
 
         // files and history
         { "file.new", TR_NOOP ("New project"), Context::global, { chord ('N', ctrl) } },

@@ -244,6 +244,8 @@ private:
     bool askUnusedRecordings = true;                  // Settings › General › Backup
     void startSession();                              // crash detection: a marker that a clean exit removes
     void checkPreviousSession (juce::Time sessionStart);
+    void checkInterruptedTakes(); // round 163: takes left by a crash while recording
+    void quickRecordAudio();      // round 163: one key from "record" to a clip
     std::unique_ptr<juce::InterProcessLock> sessionLock;
     juce::File sessionMarker;
     int autosaveTicks = 0;

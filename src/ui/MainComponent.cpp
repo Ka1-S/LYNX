@@ -1107,6 +1107,7 @@ bool MainComponent::runAction (const std::string& id)
         browser.focusSearch();
     }
     else if (is ("transport.record")) toggleRecording();
+    else if (is ("record.quickAudio")) quickRecordAudio();
     else if (is ("transport.metronome"))
     {
         engine.getTransport().metronome.store (! engine.getTransport().metronome.load());
@@ -1399,6 +1400,16 @@ void MainComponent::loadUiSettings()
                 (key == "recordToStepSequencer" ? o.toStepSequencer : o.recordingMarkers) = on;
             engine.setRecordOptions (o);
         }
+        else if (key == "recordPunchLoop" || key == "recordPreRoll" || key == "recordPostRoll")
+        {
+            auto o = engine.getRecordOptions();
+            const auto v = line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue();
+            if (key == "recordPunchLoop")
+                o.punchLoopRegion = v != 0;
+            else
+                (key == "recordPreRoll" ? o.preRollBars : o.postRollBars) = juce::jlimit (0, 8, v);
+            engine.setRecordOptions (o);
+        }
         else if (key == "recordQuantiseStarts")
         {
             recordQuantiseOn = on;
@@ -1456,7 +1467,9 @@ void MainComponent::saveUiSettings()
                                       + "\nrecordingMarkers=" + juce::String (engine.getRecordOptions().recordingMarkers ? 1 : 0)
                                       + "\nrecordAutomation=" + juce::String (engine.getRecordOptions().recordAutomation ? 1 : 0)
                                       + "\nrecordQuantiseAutomation=" + juce::String (engine.getRecordOptions().quantiseAutomation ? 1 : 0)
-                                      + "\nmixerUsedOnly=" + juce::String (MixerStrips::showUsedOnly ? 1 : 0) + "\n"
+                                      + "\nrecordPunchLoop=" + juce::String (engine.getRecordOptions().punchLoopRegion ? 1 : 0)
+                                      + "\nrecordPreRoll=" + juce::String (engine.getRecordOptions().preRollBars)
+                                      + "\nrecordPostRoll=" + juce::String (engine.getRecordOptions().postRollBars) + "\nmixerUsedOnly=" + juce::String (MixerStrips::showUsedOnly ? 1 : 0) + "\n"
                                       + juce::String (newProjectDefaults().toText()));
 }
 
@@ -1876,6 +1889,7 @@ void MainComponent::addRecordOptions (juce::PopupMenu& menu)
         change (options);
         engine.setRecordOptions (options);
         refreshRecordOptionButtons();
+        saveUiSettings();
     };
 
     juce::PopupMenu countIn;
@@ -1886,6 +1900,22 @@ void MainComponent::addRecordOptions (juce::PopupMenu& menu)
     menu.addSubMenu (tr ("Count-in") + shortcutText ("record.countIn"), countIn);
     menu.addItem (tr ("Wait for the first note to start") + shortcutText ("record.waitForInput"), true, o.waitForInput,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.waitForInput = ! r.waitForInput; }); });
+    // round 163: punch in/out on the loop region, pre-roll and post-roll (bars)
+    {
+        auto bars = [&set] (juce::PopupMenu& m, int now, std::function<void (AudioEngine::RecordOptions&, int)> apply) {
+            m.addItem (tr ("Off"), true, now == 0, [set, apply] { set ([apply] (AudioEngine::RecordOptions& r) { apply (r, 0); }); });
+            for (int n : { 1, 2, 4 })
+                m.addItem (n == 1 ? tr ("1 bar") : tr ("{0} bars", { juce::String (n) }), true, now == n,
+                           [set, apply, n] { set ([apply, n] (AudioEngine::RecordOptions& r) { apply (r, n); }); });
+        };
+        juce::PopupMenu pre, post;
+        bars (pre, o.preRollBars, [] (AudioEngine::RecordOptions& r, int n) { r.preRollBars = n; });
+        bars (post, o.postRollBars, [] (AudioEngine::RecordOptions& r, int n) { r.postRollBars = n; });
+        menu.addItem (tr ("Audio: punch in/out on the loop region (plays through it, keeps only the region)"), true, o.punchLoopRegion,
+                      [set] { set ([] (AudioEngine::RecordOptions& r) { r.punchLoopRegion = ! r.punchLoopRegion; }); });
+        menu.addSubMenu (tr ("Audio: pre-roll (plays before the punch-in or the start position)"), pre);
+        menu.addSubMenu (tr ("Audio: post-roll (plays after the punch-out, then stops)"), post);
+    }
     menu.addSeparator();
     menu.addItem (tr ("Overdub: add to the pattern"), true, o.mode == RecordMode::overdub,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.mode = RecordMode::overdub; }); });
@@ -1943,6 +1973,32 @@ void MainComponent::toggleRecording()
         if (o.startsPlayback && ! safe->engine.getTransport().playing.load()) // FL's "Recording starts playback"
             safe->engine.startPlayback();
     });
+}
+
+// Round 163: the fastest way from "press record" to a clip on the Playlist — one key arms the selected insert (or the
+// one with an input), records audio only (no question) and starts playback (count-in / pre-roll as set); pressed
+// again it stops, and the take is on the Playlist.
+void MainComponent::quickRecordAudio()
+{
+    auto& transport = engine.getTransport();
+    if (engine.isRecording() && (transport.playing.load() || engine.isCountingIn() || engine.isWaitingForInput()))
+    {
+        engine.stop();
+        engine.setRecording (false);
+        return;
+    }
+    if (engine.getArmedInserts().empty())
+        armSelectedInsertForAudio();
+    if (engine.getArmedInserts().empty()) // no input yet: its menu is open, nothing to record
+        return;
+    if (auto o = engine.getRecordOptions(); ! o.recordAudio)
+    {
+        o.recordAudio = true;
+        engine.setRecordOptions (o);
+    }
+    engine.setRecording (true);
+    if (! transport.playing.load())
+        engine.startPlayback();
 }
 
 void MainComponent::armSelectedInsertForAudio()
@@ -3277,6 +3333,54 @@ void MainComponent::startSession()
     }
     sessionMarker.getParentDirectory().createDirectory();
     sessionMarker.replaceWithText (juce::String (juce::Time::getCurrentTime().toMilliseconds()));
+    // takes that were recording when LYNX stopped (crash, power loss, closed while recording): after the backup offer
+    juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<MainComponent> (this)] {
+        if (safe != nullptr)
+            safe->checkInterruptedTakes();
+    });
+}
+
+void MainComponent::checkInterruptedTakes()
+{
+    if (juce::Component::getCurrentlyModalComponent() != nullptr) // a dialog is open (the backup offer): ask later
+    {
+        juce::Timer::callAfterDelay (2000, [safe = juce::Component::SafePointer<MainComponent> (this)] {
+            if (safe != nullptr)
+                safe->checkInterruptedTakes();
+        });
+        return;
+    }
+    std::vector<juce::File> folders { engine.getRecordingFolder() };
+    const auto takes = engine.recoverInterruptedTakes (folders);
+    if (takes.empty())
+        return;
+    juce::StringArray names;
+    for (const auto& j : takes)
+        names.add (juce::File (juce::String::fromUTF8 (j.wav.c_str())).getFileName());
+    const auto folder = juce::File (juce::String::fromUTF8 (takes.front().wav.c_str())).getParentDirectory();
+    auto* w = new juce::AlertWindow (tr ("Recordings recovered"),
+                                     tr ("LYNX was recording when it stopped. These takes were saved and repaired:\n{0}\n\nPut them on the Playlist "
+                                         "where they were recorded?", { names.joinIntoString ("\n") }),
+                                     juce::MessageBoxIconType::InfoIcon);
+    w->addButton (tr ("Put them on the Playlist"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (tr ("Show the folder"), 2);
+    w->addButton (tr ("Keep the files only"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<MainComponent> (this), takes, folder] (int result) {
+                            if (safe == nullptr)
+                                return;
+                            if (result == 1)
+                            {
+                                const auto placed = safe->engine.placeRecoveredTakes (takes);
+                                ui::postHint ({ tr ("{0} recovered take(s) placed on the Playlist", { juce::String (placed) }), {}, false, false }, 5000);
+                            }
+                            else
+                            {
+                                if (result == 2)
+                                    folder.startAsProcess();
+                                safe->engine.forgetInterruptedTakes (takes);
+                            }
+                        }),
+                        true);
 }
 
 void MainComponent::checkPreviousSession (juce::Time sessionStart)

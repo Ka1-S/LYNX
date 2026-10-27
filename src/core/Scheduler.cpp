@@ -198,13 +198,15 @@ double hostPositionTick (const Song& song, double tick, std::int64_t songLength)
 }
 
 void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out, bool resume,
-                   const ScheduleIndex* index) noexcept
+                   const ScheduleIndex* index, bool wrap) noexcept
 {
     if (numSamples <= 0 || tps <= 0.0 || song.playlist.empty())
         return;
 
-    const auto loop = index != nullptr ? index->songLength : song.songLength();
     const auto endTick = startTick + numSamples * tps;
+    auto loop = index != nullptr ? index->songLength : song.songLength();
+    if (! wrap) // a "loop" longer than anything played: nothing starts over
+        loop = std::max<std::int64_t> (loop, (std::int64_t) std::ceil (endTick) + 1) * 2;
 
     // Block window within the loop; if it crosses the end, it becomes two windows.
     const auto loopStart = std::fmod (startTick, (double) loop);
