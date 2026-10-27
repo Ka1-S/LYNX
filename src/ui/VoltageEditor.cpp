@@ -25,7 +25,9 @@ public:
         ui::setHint (enable, tr ("Sends the voltages (off: silence, FL's default for a new one)"));
         addAndMakeVisible (enable);
 
-        range.addItemList ({ juce::CharPointer_UTF8 ("\xc2\xb1" "10 V"), juce::CharPointer_UTF8 ("\xc2\xb1" "5 V"), juce::CharPointer_UTF8 ("0\xe2\x80\xa6" "10 V") }, 1);
+        range.addItem (juce::String::fromUTF8 ("\xc2\xb1" "10 V"), 1);
+        range.addItem (juce::String::fromUTF8 ("\xc2\xb1" "5 V"), 2);
+        range.addItem (juce::String::fromUTF8 ("0\xe2\x80\xa6" "10 V"), 3);
         range.onChange = [this] { edit ([i = range.getSelectedItemIndex()] (voltage::Settings& s) { s.range = juce::jlimit (0, 2, i); }); };
         ui::setHint (range, tr ("Voltage range of the interface: full scale (1.0) is 10 V"));
         addAndMakeVisible (range);
@@ -111,7 +113,7 @@ public:
         }
         engine.addChangeListener (this);
         refresh();
-        setSize (620, 460);
+        setSize (620, rowTop + voltage::outputs * rowHeight + 8);
     }
 
     ~VoltageEditor() override { engine.removeChangeListener (this); }
@@ -163,8 +165,8 @@ public:
             auto& row = rows[(std::size_t) o];
             row.source.setBounds (r.removeFromLeft (110).withSizeKeepingCentre (110, 22));
             r.removeFromLeft (10);
-            row.offset->setBounds (r.removeFromLeft (70).withTrimmedTop (-4).withHeight (rowHeight + 2));
-            row.scale->setBounds (r.removeFromLeft (70).withTrimmedTop (-4).withHeight (rowHeight + 2));
+            row.offset->setBounds (r.removeFromLeft (70));
+            row.scale->setBounds (r.removeFromLeft (70));
             r.removeFromLeft (10);
             row.polarity.setBounds (r.removeFromLeft (70).withSizeKeepingCentre (70, 22));
             r.removeFromLeft (10);
@@ -174,7 +176,7 @@ public:
     }
 
 private:
-    static constexpr int rowTop = 106, rowHeight = 42;
+    static constexpr int rowTop = 104, rowHeight = 64;
     static constexpr int clockChoices[] = { 2, 4, 8, 12, 16, 24, 32, 48, 64, 96 };
 
     struct Row
