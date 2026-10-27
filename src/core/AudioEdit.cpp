@@ -1196,4 +1196,31 @@ bool decodeWavMarkers (const std::uint8_t* data, std::size_t size, Document& out
     parseMarkers (data, size, out, (std::size_t) std::max<std::int64_t> (out.audio.frames(), 0), any);
     return any;
 }
+
+WavExtras decodeWavExtras (const std::uint8_t* data, std::size_t size, std::int64_t frames)
+{
+    WavExtras x;
+    if (data == nullptr || size < 12 || frames <= 0 || std::memcmp (data, "RIFF", 4) != 0 || std::memcmp (data + 8, "WAVE", 4) != 0)
+        return x;
+    Document d;
+    bool any = false;
+    parseMarkers (data, size, d, (std::size_t) frames, any);
+    for (const auto& m : d.markers)
+        x.markerStarts.push_back (std::min (m.start, frames - 1));
+    std::sort (x.markerStarts.begin(), x.markerStarts.end());
+    for (std::size_t p = 12; p + 8 <= size;)
+    {
+        const auto len = (std::size_t) get32 (data + p + 4);
+        const auto body = p + 8;
+        if (body + len > size)
+            break;
+        if (std::memcmp (data + p, "acid", 4) == 0 && len >= 16)
+        {
+            const auto beats = get32 (data + body + 12);
+            x.acidBeats = beats > 0 && beats < 65536 ? (float) beats : 0.0f;
+        }
+        p = body + len + (len & 1);
+    }
+    return x;
+}
 } // namespace lynx::audioedit

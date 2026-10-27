@@ -2,9 +2,11 @@
 #include "platform/Paths.h"
 
 #include <condition_variable>
+#include <cstring>
 #include <mutex>
 #include <set>
 
+#include "core/AudioEdit.h"
 #include "core/OggVorbis.h"
 #include "core/Mp3Decoder.h"
 #include "core/TimeStretch.h"
@@ -391,6 +393,47 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
     return data;
 }
 
+namespace
+{
+// A WAV's cue points / regions and ACID beats (core/AudioEdit decodeWavExtras): its chunks read without the audio
+void readWavExtras (const juce::File& file, SampleData& data)
+{
+    if (! file.hasFileExtension ("wav"))
+        return;
+    juce::FileInputStream in (file);
+    if (! in.openedOk())
+        return;
+    std::vector<std::uint8_t> riff (12);
+    if (in.read (riff.data(), 12) != 12 || std::memcmp (riff.data(), "RIFF", 4) != 0 || std::memcmp (riff.data() + 8, "WAVE", 4) != 0)
+        return;
+    const auto total = in.getTotalLength();
+    for (int guard = 0; guard < 256 && in.getPosition() + 8 <= total; ++guard)
+    {
+        std::uint8_t h[8];
+        if (in.read (h, 8) != 8)
+            break;
+        const auto len = (std::int64_t) ((std::uint32_t) h[4] | ((std::uint32_t) h[5] << 8) | ((std::uint32_t) h[6] << 16) | ((std::uint32_t) h[7] << 24));
+        const auto next = in.getPosition() + len + (len & 1);
+        const auto wanted = std::memcmp (h, "cue ", 4) == 0 || std::memcmp (h, "LIST", 4) == 0 || std::memcmp (h, "acid", 4) == 0;
+        if (wanted && len <= (1 << 20) && in.getPosition() + len <= total)
+        {
+            const auto at = riff.size();
+            riff.insert (riff.end(), h, h + 8);
+            riff.resize (at + 8 + (std::size_t) len + (std::size_t) (len & 1), 0);
+            if (in.read (riff.data() + at + 8, (int) len) != (int) len)
+                break;
+        }
+        if (next > total || ! in.setPosition (next))
+            break;
+    }
+    if (riff.size() <= 12)
+        return;
+    const auto x = audioedit::decodeWavExtras (riff.data(), riff.size(), (std::int64_t) data.frames());
+    data.markerStarts = x.markerStarts;
+    data.acidBeats = x.acidBeats;
+}
+} // namespace
+
 std::shared_ptr<const SampleData> SampleLibrary::findLoaded (const juce::String& path)
 {
     auto& shared = sharedCache();
@@ -439,6 +482,7 @@ std::shared_ptr<const SampleData> SampleLibrary::decode (const juce::String& pat
 
     if (channels > 1)
         data->right.assign (buffer.getReadPointer (1), buffer.getReadPointer (1) + frames);
+    readWavExtras (file, *data);
 
     return data;
 }

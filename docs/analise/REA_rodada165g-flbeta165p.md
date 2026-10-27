@@ -8,14 +8,35 @@ Evidence markers: [DECOMP addr], [DATA], [FL render], [EXEC FL] (the installatio
 
 ## Where I stopped
 
-- 2026-10-27 16:05 — resumed after the BSOD. State rebuilt from the checkpoint commit 1a512119 (`src/core/FlAutoSlicer.*`)
-  and the scratch data `tmp/r165g` (harness `gx.c`/`gx.exe` = round 67's Granulizer harness + `slices`/`dispf`
-  options, Python model `py/slmodel.py`, C++ probe `cpp/as.cpp`, batch logs `py/bat1_*.log` (Python model vs DLL, 40/40
-  identical) and `py/bat2_*.log` (C++ `autoSlice` vs DLL, 60/60 identical at 44.1/48/22.05/96/32 kHz)).
-- FL projects g0…g10 (slice modes, key modes, sync, ACID beats) rendered by FL 2026 headless under
-  `C:\Users\kauan\lynx-test\flbeta165p\gr` (made by `tmp/r165g/py/mkgr.py`).
-- Next: wire the auto slicer + region slices + transient hold + key mode 3 + sync into `core/Granulizer`, compare with
-  the DLL harness and the FL renders.
+- 2026-10-27 ~16:40 — PAUSED by the r165g parent (load limit: one sub-round at a time). Nothing built yet this session.
+- Done (uncommitted code now committed as WIP, NOT compiled yet):
+  - `core/AudioEdit` `decodeWavExtras` (cue/region starts + ACID beats of a WAV's chunks);
+  - `SampleData::markerStarts`, `SampleData::acidBeats`; `engine/SampleLibrary` `readWavExtras` fills them for
+    in-memory WAVs (chunk walk, audio skipped; streamed long samples: not read).
+- Verified this session [EXEC FL vs FL render], scripts in the scratchpad (copies: tmp/r165g/py, cmpg.py, sl.py, blk.py):
+  - g0/g1/g4: DLL with no beats == FL render (−78.6 dB = 16-bit quantisation). g4 (state v5, no sync byte) plays
+    WITHOUT sync although FL sends beats → states without the sync byte: sync off (FL sends Dispatcher 0x13 with 0
+    before the state, switching mode 2 → 0).
+  - g2/g3 (channel TIME stretch 4 / 8 beats) and g5 (ACID chunk 4 beats, no stretch): FL sends Dispatcher 0x13 =
+    those beats; DLL with beats=4/8 == FL to quantisation up to the note end (blockwise −60…−80 dB; the −25 dB of the
+    whole-file figure is only the harness holding the note past FL's note-off).
+  - g6 (auto slice), g7 (cue points), g8 (regions): DLL with slices from autoSlice / the cue or region starts == FL
+    (same pattern). Region end does not matter (the slice start = min(start, end, len−1), sorted).
+- Next steps (decoded, to implement in `core/Granulizer.cpp`):
+  1. Engine fields: slices (starts), th = samplesMs(msLaw(p[11])) (P+0x174), invAH = 1/AH (0x17c),
+     k18c = AH / max(wsp, 1) (0x18c), beats (0x19c), beatLen = rnd((beats·60f·(float)fs)/tempoF) (0x198);
+     sync on iff state sync byte == 1 and beats > 0 → wsp = (gsp·(float)(le+1))/(float)beatLen, loop on.
+  2. Voice.slice = −1 at trigger. Voice_Render (0x753ea0), non-random branch with slices and wsp > 0:
+     t = Final.Pitch+pofs; t==0 ? pos+A : (float)(pos + A·exp(t·ln2/1200)); i7 = rnd(t − 0.5); first slice s_i ≥ i7:
+     d = s_i − t; same slice as before → n = max(1, rnd(d/wsp)), d = ((d − n·wsp)·k18c)/n, hold = max(0, H + d);
+     new slice → v.slice = i, d·= k18c, hold = th, if d < A+th: hold = max(0, d − A). f14 = (A+hold)·invAH
+     (float, not exactly 1). Grain with rnd(hold); next += rnd(gsp·f14); pos += wsp·f14. Random branch: f14 = 1.
+  3. TriggerVoice: key mode 2 with beats > 0 (sync on or not): d = le·(k/4)/beats; key mode 3: slices[k % n] (0 if none).
+  4. Instrument: slices computed in configure() (off the audio thread) — mode 1: sample markerStarts; mode 2:
+     flslice::autoSlice(sample); beats = channel.sampler.stretchBeats (TIME/192 [·MUL? HYP]) else sample acidBeats.
+  5. C++ vs DLL batch (r67/py/cppcmp.py + slices/sync/rates), then LYNX vs FL renders g0…g10; new FL renders still
+     wanted: stretch+MUL, ACID+TIME both set, 48 kHz sample (auto slice; sync — is 0x198 at host fs?).
+  6. tests (tests/*Tests.inc), drop "(beta)" if all match; then Newtime, Newtone.
 
 ## 1. Auto slicing (framework slicer used by the Granulizer's slice mode 2)
 
