@@ -65,10 +65,13 @@ TEST (patcher164f_mixer_slot_patcher_notes_land_at_their_sample)
     // a MIDI Out channel on port 4 plays a note at a tick inside a block; a mixer-slot Patcher on insert 1 feeds a
     // synth from its "MIDI port 4" pin. The synth starts at the note's sample, not at the block's start (round 162 put
     // it at the chunk's start).
-    // renders the song with its note at `noteTick`; returns the first audible sample
-    const auto render = [] (std::int64_t noteTick)
+    // renders the song (with or without the default Master limiter); returns the first audible sample, the note's
+    // sample and the latency at the Master output
+    const auto render = [] (bool masterLimiter)
     {
         auto song = lynx::Song::makeDefault();
+        if (! masterLimiter)
+            song.mixer[0].effects.clear();
         song.mixer.resize (3);
         song.channels.resize (1);
         song.channels[0] = {};
@@ -81,6 +84,7 @@ TEST (patcher164f_mixer_slot_patcher_notes_land_at_their_sample)
         slot.patcher.nodes = { generator (lynx::InstrumentKind::synth) };
         slot.patcher.wires = { patcher162::midi (lynx::patchFromHost, lynx::patchMidiPortPin (4), 0, 0), patcher141::audio (0, lynx::patchToHost) };
         song.mixer[1].effects = { slot };
+        const std::int64_t noteTick = lynx::ppq / 2; // 0.5 beat
         lynx::Pattern p;
         p.notes.push_back ({ noteTick, lynx::ppq, 0, 60, 0.8f });
         song.patterns = { p };
@@ -100,19 +104,21 @@ TEST (patcher164f_mixer_slot_patcher_notes_land_at_their_sample)
             r.process (state.get(), true, tick, 512, l.data(), rr.data(), nullptr);
             all.insert (all.end(), l.begin(), l.end());
         }
-        return std::make_pair (onset (all), (int) std::ceil ((double) noteTick / lynx::ppq * 60.0 / song.bpm * 48000.0));
+        return std::array<int, 3> { onset (all), (int) std::ceil ((double) noteTick / lynx::ppq * 60.0 / song.bpm * 48000.0),
+                                    state->pdc.total };
     };
-    // the path's own delay to the first audible sample (the synth's attack, the insert's latency compensation): a note
-    // on a block's first sample
-    const auto [reference, referenceAt] = render (0);
-    CHECK (referenceAt == 0 && reference >= 0);
-    // the same note inside a block sounds that long after its own sample (at the block's start it would sound
-    // expected % 512 samples early)
-    const auto [first, expected] = render (lynx::ppq / 2); // 0.5 beat
+    // without Master effects nothing delays the path: the synth's first non-zero sample (its sine starts at phase 0)
+    // follows the note's own sample
+    const auto [first, expected, latency] = render (false);
     CHECK (expected % 512 > 16); // (the note falls inside a block)
-    if (std::abs (first - (expected + reference)) > 1)
-        std::printf ("  patcher164f: onset %d, note at sample %d, reference onset %d\n", first, expected, reference);
-    CHECK (std::abs (first - (expected + reference)) <= 1);
+    CHECK (latency == 0);
+    CHECK (first == expected || first == expected + 1);
+    // the default project's Master limiter looks 1.5 ms ahead (72 samples at 48 kHz) and reports it: the whole mix comes
+    // out that much later, the note still on its own sample relative to it (round 164 delay164: the "73 samples late"
+    // seen after the merge of round 164 was this, not leaked state)
+    const auto [limited, expected2, masterLatency] = render (true);
+    CHECK (expected2 == expected && masterLatency == 72);
+    CHECK (limited == first + masterLatency);
 }
 
 TEST (patcher164f_graph_queued_notes_play_at_their_offset_across_pieces)
