@@ -37,6 +37,10 @@ struct NoteEvent
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f;
     // the note's Mod X / Y (0..1, 0.5 = none) and, on its "off", its release velocity (0..1) — REA round 151
     float modX = 0.5f, modY = 0.5f, release = 0.5f;
+    std::int8_t colour = 0; // the note's colour group 0…15 (FL's note colours: VFX Color Mapper, round 164b)
+    // A VFX channel (round 164b): −1 = an ordinary note; −2 = one its processor takes (it goes nowhere else); N ≥ 0 =
+    // what the processor sent on MIDI port N (only the routes on that port take it)
+    std::int16_t port = -1;
 };
 
 // Fixed-capacity buffer. Events beyond capacity are dropped
@@ -53,6 +57,7 @@ public:
     int size() const noexcept { return count; }
     int droppedCount() const noexcept { return dropped; }
     const NoteEvent& operator[] (int i) const noexcept { return events[(std::size_t) i]; }
+    NoteEvent& at (int i) noexcept { return events[(std::size_t) i]; }
     const NoteEvent* begin() const noexcept { return events.data(); }
     const NoteEvent* end() const noexcept { return events.data() + count; }
 

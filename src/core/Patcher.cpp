@@ -40,6 +40,9 @@ bool sameEffectSetup (const EffectSlot& a, const EffectSlot& b)
 
 bool sameInstrumentSetup (const ChannelDef& a, const ChannelDef& b)
 {
+    // a VFX node takes new settings while it runs (its held voices end as they started): only its kind is structure
+    if (a.instrument == InstrumentKind::vfx || b.instrument == InstrumentKind::vfx)
+        return a.instrument == b.instrument && vfx::kindOf (a) == vfx::kindOf (b);
     if (a.instrument != b.instrument || a.samplePath != b.samplePath || a.zones != b.zones || a.modelParams != b.modelParams
         || a.pluginState != b.pluginState || a.plugin.id != b.plugin.id || ! (a.plugin == b.plugin) || a.controllerState != b.controllerState)
         return false;
@@ -93,6 +96,13 @@ NodePorts nodePorts (const PatchNode& node)
         if (node.channel.instrument == InstrumentKind::controller || node.channel.instrument == InstrumentKind::midiOut)
             p.audioOuts = 0; // (no sound of their own)
         p.midiOut = node.channel.instrument == InstrumentKind::midiOut;
+        p.midiOuts = p.midiOut ? 1 : 0;
+        if (const auto kind = vfx::kindOf (node.channel)) // a VFX node: voices in, voices out (round 164b)
+        {
+            p.audioOuts = 0;
+            p.midiOut = true;
+            p.midiOuts = vfx::outputCount (*kind);
+        }
         if (node.channel.instrument == InstrumentKind::patcher)
             p.audioOuts = 1 + (int) node.channel.patcher.outputTracks.size();
         return p;
@@ -156,6 +166,8 @@ struct Graph::Node
     std::shared_ptr<Effect> effect;
     std::shared_ptr<Instrument> instrument;
     bool plugin = false; // values reach it through setParameter (control cables), not the params array
+    vfx::Processor* vfx = nullptr;                    // a VFX node's processor (owned by its instrument)
+    std::vector<std::vector<MidiTarget>> vfxTargets;  // [voice output] what it reaches
 
     struct Head
     {
@@ -184,6 +196,17 @@ struct Graph::ControlWire
     int from = 0, output = 0, to = 0, param = 0;
     std::vector<float> curve;
     int docIndex = 0;
+};
+
+struct Graph::VfxQueue
+{
+    vfx::EventList in, out; // the voices that reached the node in this piece; what it sends
+};
+
+struct Graph::NoteOut
+{
+    int node = 0, midiChannel = -1;
+    vfx::Event event;
 };
 
 struct Graph::Values
@@ -350,31 +373,53 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
     }
     highestAux = std::max (highestAux, (int) doc.outputTracks.size());
 
-    // MIDI (round 162): what each "From LYNX" pin reaches, through MIDI Out nodes (they set the MIDI channel)
+    // MIDI (round 162): what each "From LYNX" pin reaches, through MIDI Out nodes (they set the MIDI channel); VFX
+    // nodes (round 164b) take the voices into their processors and send theirs on from their voice outputs
     pinTargets.assign ((std::size_t) patchMidiPortPin (patchMidiPorts), {});
     for (int pin = 0; pin < (int) pinTargets.size(); ++pin)
+        pinTargets[(std::size_t) pin] = midiTargetsOf (doc, patchFromHost, pin);
+    vfxQueues.resize ((std::size_t) count);
+    for (int i = 0; i < count; ++i)
     {
-        auto& targets = pinTargets[(std::size_t) pin];
-        std::vector<char> seen ((std::size_t) count, 0);
-        // (source, its pin, the channel set on the way)
-        std::vector<std::tuple<int, int, int>> todo { { patchFromHost, pin, -1 } };
-        while (! todo.empty())
+        auto& node = *nodes[(std::size_t) i];
+        if (node.instrument == nullptr || (node.vfx = node.instrument->noteProcessor()) == nullptr)
+            continue;
+        node.vfx->prepare (rate);
+        const auto kind = node.vfx->kind();
+        for (int k = 0; k < vfx::outputCount (kind); ++k)
+            node.vfxTargets.push_back (midiTargetsOf (doc, i, k));
+        vfxQueues[(std::size_t) i] = std::make_unique<VfxQueue>();
+        hasVfx = true;
+    }
+    if (hasVfx)
+    {
+        // sources first (Kahn over the VFX → VFX links); a loop runs in index order (its voices wait a piece)
+        std::vector<int> pendingInputs ((std::size_t) count, 0);
+        for (int i = 0; i < count; ++i)
+            for (const auto& targets : nodes[(std::size_t) i]->vfxTargets)
+                for (const auto& t : targets)
+                    if (t.vfx && t.node != i)
+                        ++pendingInputs[(std::size_t) t.node];
+        std::vector<char> placed ((std::size_t) count, 0);
+        for (bool progress = true; progress;)
         {
-            const auto [from, fromPin, channel] = todo.back();
-            todo.pop_back();
-            for (const auto& w : doc.wires)
-            {
-                if (w.kind != PatchWire::Kind::midi || ! w.enabled || w.from != from || w.fromPort != fromPin || w.to < 0 || w.to >= count
-                    || seen[(std::size_t) w.to])
-                    continue;
-                seen[(std::size_t) w.to] = 1;
-                const auto& target = doc.nodes[(std::size_t) w.to];
-                if (target.generator && target.channel.instrument == InstrumentKind::midiOut)
-                    todo.emplace_back (w.to, 0, midictl::parseMidiOut (target.channel.pluginState).channel);
-                else if (target.generator)
-                    targets.push_back ({ w.to, channel });
-            }
+            progress = false;
+            for (int i = 0; i < count; ++i)
+                if (! placed[(std::size_t) i] && nodes[(std::size_t) i]->vfx != nullptr && pendingInputs[(std::size_t) i] == 0)
+                {
+                    placed[(std::size_t) i] = 1;
+                    vfxOrder.push_back (i);
+                    progress = true;
+                    for (const auto& targets : nodes[(std::size_t) i]->vfxTargets)
+                        for (const auto& t : targets)
+                            if (t.vfx && t.node != i)
+                                --pendingInputs[(std::size_t) t.node];
+                }
         }
+        for (int i = 0; i < count; ++i)
+            if (! placed[(std::size_t) i] && nodes[(std::size_t) i]->vfx != nullptr)
+                vfxOrder.push_back (i);
+        noteOuts.reserve (vfx::EventList::capacity);
     }
 
     published = doc.published;
@@ -548,25 +593,28 @@ void Graph::reset() noexcept
     }
 }
 
-void Graph::setSongPosition (double ticks) noexcept
+void Graph::setSongPosition (double position) noexcept
 {
+    ticks = position;
+    playing = hostTimeline().playing.load (std::memory_order_relaxed);
     for (auto& n : nodes)
     {
         if (n->effect != nullptr)
-            n->effect->setSongPosition (ticks);
+            n->effect->setSongPosition (position);
         if (n->instrument != nullptr)
-            n->instrument->setSongPosition (ticks);
+            n->instrument->setSongPosition (position);
         for (auto& h : n->heads)
             if (h.effect != nullptr)
-                h.effect->setSongPosition (ticks);
+                h.effect->setSongPosition (position);
     }
 }
 
-void Graph::setPlaying (bool playing) noexcept
+void Graph::setPlaying (bool on) noexcept
 {
+    playing = on;
     for (auto& n : nodes)
         if (n->effect != nullptr)
-            n->effect->setPlaying (playing);
+            n->effect->setPlaying (on);
 }
 
 void Graph::setHeldNotes (const NoteMask* channels, int count) noexcept
@@ -581,11 +629,63 @@ void Graph::noteOff (int key) noexcept { deliver (0, false, key, 0.0f, -1); }
 void Graph::noteOnMidi (int key, float velocity, int midiChannel) noexcept { deliver (0, true, key, velocity, midiChannel); }
 void Graph::noteOffMidi (int key, int midiChannel) noexcept { deliver (0, false, key, 0.0f, midiChannel); }
 
+std::vector<Graph::MidiTarget> Graph::midiTargetsOf (const PatcherDoc& doc, int from, int pin) const
+{
+    std::vector<MidiTarget> targets;
+    const auto count = (int) doc.nodes.size();
+    std::vector<char> seen ((std::size_t) count, 0);
+    // (source, its pin, the channel set on the way)
+    std::vector<std::tuple<int, int, int>> todo { { from, pin, -1 } };
+    while (! todo.empty())
+    {
+        const auto [source, sourcePin, channel] = todo.back();
+        todo.pop_back();
+        for (const auto& w : doc.wires)
+        {
+            if (w.kind != PatchWire::Kind::midi || ! w.enabled || w.from != source || w.fromPort != sourcePin || w.to < 0 || w.to >= count
+                || seen[(std::size_t) w.to])
+                continue;
+            seen[(std::size_t) w.to] = 1;
+            const auto& target = doc.nodes[(std::size_t) w.to];
+            if (! target.generator)
+                continue;
+            if (target.channel.instrument == InstrumentKind::midiOut)
+                todo.emplace_back (w.to, 0, midictl::parseMidiOut (target.channel.pluginState).channel);
+            else
+                targets.push_back ({ w.to, channel, target.channel.instrument == InstrumentKind::vfx });
+        }
+    }
+    return targets;
+}
+
 void Graph::deliver (int pin, bool on, int key, float velocity, int midiChannel) noexcept
 {
     if (pin < 0 || pin >= (int) pinTargets.size())
         return;
     for (const auto& t : pinTargets[(std::size_t) pin])
+    {
+        if (t.vfx)
+        {
+            // into the VFX node's processor at the next piece's start, with the note's properties
+            if (auto& q = vfxQueues[(std::size_t) t.node])
+            {
+                vfx::Event e;
+                e.type = on ? vfx::Event::Type::on : vfx::Event::Type::off;
+                e.voice.key = key;
+                e.voice.velocity = velocity;
+                e.voice.pan = nextVoice.pan;
+                e.voice.cents = nextVoice.cents;
+                e.voice.modX = nextVoice.modX;
+                e.voice.modY = nextVoice.modY;
+                e.voice.release = nextVoice.release;
+                e.voice.porta = nextVoice.porta;
+                const auto channel = t.midiChannel >= 0 ? t.midiChannel : midiChannel;
+                e.voice.colour = channel >= 0 ? (channel & 15) : nextVoice.colour;
+                e.id = vfx::inputId (key, e.voice.colour);
+                q->in.add (e);
+            }
+            continue;
+        }
         if (auto& i = nodes[(std::size_t) t.node]->instrument)
         {
             const auto channel = t.midiChannel >= 0 ? t.midiChannel : midiChannel;
@@ -594,6 +694,11 @@ void Graph::deliver (int pin, bool on, int key, float velocity, int midiChannel)
             else
                 on ? i->noteOnMidi (key, velocity, channel) : i->noteOffMidi (key, channel);
         }
+    }
+    if (! on)
+        nextVoice.release = 0.5f;
+    else
+        nextVoice = {};
 }
 
 void Graph::noteOnPort (int port, int key, float velocity, int midiChannel) noexcept
@@ -615,6 +720,15 @@ bool Graph::takesMidiPort (int port) const noexcept
 
 void Graph::allNotesOff() noexcept
 {
+    // the VFX nodes' voices end (their instruments stop below anyway); their queues empty
+    for (const auto i : vfxOrder)
+    {
+        auto& q = *vfxQueues[(std::size_t) i];
+        q.in.clear();
+        q.out.clear();
+        nodes[(std::size_t) i]->vfx->releaseAll (q.out);
+        q.out.clear();
+    }
     for (auto& n : nodes)
         if (n->instrument != nullptr)
             n->instrument->allNotesOff();
@@ -627,8 +741,20 @@ void Graph::slideTo (int key, float cents, float samples) noexcept
             i->slideTo (key, cents, samples);
 }
 
+void Graph::setNextNoteModulation (float modX, float modY) noexcept
+{
+    nextVoice.modX = modX;
+    nextVoice.modY = modY;
+}
+
+void Graph::setNextNoteRelease (float velocity) noexcept { nextVoice.release = velocity; }
+void Graph::setNextNoteColour (int colour) noexcept { nextVoice.colour = colour & 15; }
+
 void Graph::setNextNoteExpression (float pan, float cents, bool porta) noexcept
 {
+    nextVoice.pan = pan;
+    nextVoice.cents = cents;
+    nextVoice.porta = porta;
     for (const auto t : noteTargets)
         if (auto& i = nodes[(std::size_t) t]->instrument)
             i->setNextNoteExpression (pan, cents, porta);
@@ -641,7 +767,10 @@ bool Graph::hasInstruments() const noexcept
 
 bool Graph::instrumentsIdle() const noexcept
 {
-    return std::all_of (nodes.begin(), nodes.end(), [] (const auto& n) { return n->instrument == nullptr || n->instrument->idle(); });
+    // (a VFX node that holds voices or plays on its own — a sequencer — keeps the graph running)
+    return std::all_of (nodes.begin(), nodes.end(), [] (const auto& n) {
+        return (n->instrument == nullptr || n->instrument->idle()) && (n->vfx == nullptr || ! n->vfx->busy());
+    });
 }
 
 float Graph::controlOutput (int) const noexcept { return 0.0f; }
@@ -725,14 +854,128 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
             values.nodes[(std::size_t) c.to].params[(std::size_t) c.param] = v;
     }
 
+    if (! hasVfx)
+    {
+        renderNodes (inL, inR, scL, scR, outL, outR, 0, n, bpm);
+        return;
+    }
+    // VFX nodes: what they play lands at its sample; the piece is rendered in parts between those samples
+    runVfx (n, bpm);
+    std::size_t next = 0;
+    for (int position = 0; position < n;)
+    {
+        while (next < noteOuts.size() && noteOuts[next].event.offset <= position)
+            playNoteOut (noteOuts[next++]);
+        const auto end = next < noteOuts.size() ? std::min (n, noteOuts[next].event.offset) : n;
+        if (end > position)
+            renderNodes (inL + position, inR + position, scL != nullptr ? scL + position : nullptr, scR != nullptr ? scR + position : nullptr,
+                         outL + position, outR + position, position, end - position, bpm);
+        position = end;
+    }
+    while (next < noteOuts.size())
+        playNoteOut (noteOuts[next++]);
+}
+
+void Graph::runVfx (int n, double bpm) noexcept
+{
+    noteOuts.clear();
+    vfx::Transport t;
+    t.sampleRate = rate;
+    t.bpm = bpm;
+    t.ticks = ticks;
+    t.playing = playing;
+    for (const auto i : vfxOrder)
+    {
+        auto& q = *vfxQueues[(std::size_t) i];
+        q.in.sortByOffset();
+        q.out.clear();
+        nodes[(std::size_t) i]->vfx->process (&q.in[0], q.in.size(), n, t, q.out);
+        q.in.clear();
+        for (int k = 0; k < q.out.size(); ++k)
+            routeVfxOutput (i, q.out[k]);
+        q.out.clear();
+    }
+    // (stable insertion sort in place: std::stable_sort may allocate on the audio thread)
+    for (std::size_t i = 1; i < noteOuts.size(); ++i)
+    {
+        const auto o = noteOuts[i];
+        auto j = i;
+        for (; j > 0 && o.event.offset < noteOuts[j - 1].event.offset; --j)
+            noteOuts[j] = noteOuts[j - 1];
+        noteOuts[j] = o;
+    }
+    ticks += (double) n * bpm * (double) ppq / (60.0 * rate);
+}
+
+void Graph::routeVfxOutput (int node, const vfx::Event& e) noexcept
+{
+    const auto& targets = nodes[(std::size_t) node]->vfxTargets;
+    if (e.output < 0 || e.output >= (int) targets.size())
+        return;
+    for (const auto& t : targets[(std::size_t) e.output])
+    {
+        if (t.vfx)
+        {
+            if (auto& q = vfxQueues[(std::size_t) t.node])
+            {
+                auto in = e;
+                in.output = 0;
+                in.id = (node + 1) * (1 << 20) + (e.id & ((1 << 20) - 1)); // (ids of different sources never meet)
+                if (t.midiChannel >= 0)
+                    in.voice.colour = t.midiChannel & 15;
+                q->in.add (in);
+            }
+        }
+        else if (noteOuts.size() < noteOuts.capacity())
+            noteOuts.push_back ({ t.node, t.midiChannel, e });
+    }
+}
+
+void Graph::playNoteOut (const NoteOut& o) noexcept
+{
+    auto& i = nodes[(std::size_t) o.node]->instrument;
+    if (i == nullptr)
+        return;
+    const auto& e = o.event;
+    const auto& v = e.voice;
+    const auto channel = o.midiChannel >= 0 ? o.midiChannel : v.colour;
+    switch (e.type)
+    {
+        case vfx::Event::Type::on:
+            i->setNextNoteExpression (v.pan, v.cents, v.porta);
+            i->setNextNoteModulation (v.modX, v.modY);
+            i->setNextNoteColour (v.colour);
+            if (channel > 0)
+                i->noteOnMidi (v.key, v.velocity, channel);
+            else
+                i->noteOn (v.key, v.velocity);
+            break;
+        case vfx::Event::Type::off:
+            i->setNextNoteRelease (v.release);
+            if (channel > 0)
+                i->noteOffMidi (v.key, channel);
+            else
+                i->noteOff (v.key);
+            break;
+        case vfx::Event::Type::prop:
+            i->voiceProperty (v.key, (int) e.prop, e.value);
+            break;
+    }
+}
+
+void Graph::renderNodes (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int start, int n,
+                         double bpm) noexcept
+{
+    // (inL…outR point at this part of the piece; the nodes' buffers are indexed from `start`)
+    auto& values = *active;
     auto sourceOf = [&] (const AudioWire& w, int side) -> const float* {
         if (w.from == patchFromHost)
         {
             if (w.fromBuffer == 1)
-                return (side == 0 ? scL : scR) != nullptr ? (side == 0 ? scL : scR) : zeros.data();
+                return (side == 0 ? scL : scR) != nullptr ? (side == 0 ? scL : scR) : zeros.data() + start;
             return side == 0 ? inL : inR;
         }
-        return nodes[(std::size_t) w.from]->out[(std::size_t) w.fromBuffer][(std::size_t) side].data();
+        return nodes[(std::size_t) w.from]->out[(std::size_t) w.fromBuffer][(std::size_t) side].data() + start;
     };
     auto gather = [&] (const std::vector<int>& list, float* l, float* r) {
         std::fill (l, l + n, 0.0f);
@@ -768,8 +1011,8 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
     {
         auto& node = *nodes[(std::size_t) i];
         auto& v = values.nodes[(std::size_t) i];
-        auto* oL = node.out[0][0].data();
-        auto* oR = node.out[0][1].data();
+        auto* oL = node.out[0][0].data() + start;
+        auto* oR = node.out[0][1].data() + start;
 
         if (node.generator)
         {
@@ -800,8 +1043,8 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
         }
         for (std::size_t h = 0; h < node.heads.size(); ++h)
         {
-            auto* hL = node.out[1 + h][0].data();
-            auto* hR = node.out[1 + h][1].data();
+            auto* hL = node.out[1 + h][0].data() + start;
+            auto* hR = node.out[1 + h][1].data() + start;
             std::copy (inBufL, inBufL + n, hL);
             std::copy (inBufR, inBufR + n, hR);
             if (node.heads[h].effect != nullptr)
@@ -821,7 +1064,7 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
     std::copy (inBufL, inBufL + n, outL);
     std::copy (inBufR, inBufR + n, outR);
     for (std::size_t bus = 1; bus < outputs.size(); ++bus)
-        gather (outputs[bus], aux[bus - 1][0].data(), aux[bus - 1][1].data());
+        gather (outputs[bus], aux[bus - 1][0].data() + start, aux[bus - 1][1].data() + start);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -911,6 +1154,9 @@ public:
     void noteOffPort (int port, int key, int midiChannel) noexcept override { graph.noteOffPort (port, key, midiChannel); }
     void slideTo (int key, float cents, float samples) noexcept override { graph.slideTo (key, cents, samples); }
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override { graph.setNextNoteExpression (pan, cents, porta); }
+    void setNextNoteModulation (float modX, float modY) noexcept override { graph.setNextNoteModulation (modX, modY); }
+    void setNextNoteRelease (float velocity) noexcept override { graph.setNextNoteRelease (velocity); }
+    void setNextNoteColour (int colour) noexcept override { graph.setNextNoteColour (colour); }
     void setSongPosition (double ticks) noexcept override { graph.setSongPosition (ticks); }
     void setParameter (int index, float value) noexcept override { graph.setPublished (index, value); }
     int latencySamples() const noexcept override { return graph.latencySamples(); }
@@ -1171,6 +1417,21 @@ std::vector<int> shownToMidiPorts (const PatcherDoc& doc)
         if (w.kind == PatchWire::Kind::midi && w.to == patchToHost && w.toPort >= 0 && w.toPort < patchMidiPorts)
             addSorted (ports, w.toPort);
     return ports;
+}
+
+int shownMidiOutputs (const PatcherDoc& doc, int node)
+{
+    if (node < 0 || node >= (int) doc.nodes.size())
+        return 0;
+    const auto ports = nodePorts (doc.nodes[(std::size_t) node]);
+    const auto kind = vfx::kindOf (doc.nodes[(std::size_t) node].channel);
+    if (! kind)
+        return ports.midiOuts;
+    int highest = -1;
+    for (const auto& w : doc.wires)
+        if (w.kind == PatchWire::Kind::midi && w.from == node)
+            highest = std::max (highest, w.fromPort);
+    return std::clamp (std::max (vfx::outputsShown (*kind), highest + 2), 1, ports.midiOuts);
 }
 
 bool fromNotesShown (const PatcherDoc& doc, bool generator)

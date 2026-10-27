@@ -1,4 +1,5 @@
 #include "core/Instruments.h"
+#include "core/Vfx.h"
 #include "core/Scheduler.h"
 
 #include "core/DirectWave.h"
@@ -230,6 +231,7 @@ private:
             case InstrumentKind::plugin:
             case InstrumentKind::controller:
             case InstrumentKind::midiOut:
+            case InstrumentKind::vfx:
             case InstrumentKind::patcher:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
@@ -2816,6 +2818,50 @@ public:
     void render (float*, float*, int, float, float) noexcept override {}
     bool idle() const noexcept override { return true; }
 };
+
+// A VFX note processor in the Channel Rack or a Patcher (round 164b): no sound; the renderer / the graph run its
+// processor on the notes and send what it plays to the instruments on its outputs.
+class VfxInstrument final : public Instrument
+{
+public:
+    void prepare (double sampleRate) noexcept override
+    {
+        rate = sampleRate;
+        if (processor != nullptr)
+            processor->prepare (sampleRate);
+    }
+    void noteOn (int, float) noexcept override {}
+    void noteOff (int) noexcept override {}
+    void allNotesOff() noexcept override {}
+    void render (float*, float*, int, float, float) noexcept override {}
+    bool idle() const noexcept override { return true; }
+    vfx::Processor* noteProcessor() noexcept override { return processor.get(); }
+    // (UI thread: the first call builds the processor before the instrument reaches the audio thread; later ones only
+    // hand the new settings over)
+    void configure (const ChannelDef& channel, double) noexcept override
+    {
+        const auto state = vfx::readState (channel.pluginState);
+        if (! state)
+            return;
+        if (processor == nullptr || processor->kind() != state->kind)
+        {
+            if (processor == nullptr)
+            {
+                processor = vfx::makeProcessor (state->kind, state->fl);
+                processor->prepare (rate);
+            }
+            return;
+        }
+        if (state->fl != lastState)
+            processor->configure (state->fl);
+        lastState = state->fl;
+    }
+
+private:
+    std::unique_ptr<vfx::Processor> processor;
+    std::vector<std::uint8_t> lastState;
+    double rate = 44100.0;
+};
 } // namespace
 
 float samplerGain (float db) noexcept
@@ -2831,6 +2877,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return std::make_unique<ControllerInstrument>();
     if (kind == InstrumentKind::midiOut)
         return std::make_unique<MidiOutInstrument>();
+    if (kind == InstrumentKind::vfx)
+        return std::make_unique<VfxInstrument>();
 
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
         return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);
