@@ -104,47 +104,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
       browser (e)
 {
     heldKeys.setSender ([this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on, true); });
-    browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
-    browser.onLoadIntoChannel = [this] (const juce::File& file) { return rack.loadSampleIntoSelected (file); };
-    // the Browser's "Current project" items (REA_rodada115)
-    browser.onOpenPattern = [this] (int pattern) {
-        selectPattern (pattern);
-        openPianoRoll();
-    };
-    browser.onPatternMenu = [this] (int pattern) {
-        selectPattern (pattern);
-        makePatternMenu().showMenuAsync (juce::PopupMenu::Options().withMousePosition());
-    };
-    browser.onOpenChannel = [this] (int channel) {
-        engine.setSelectedChannel (channel);
-        rack.toggleEditor (channel, true);
-    };
-    browser.onOpenEffect = [this] (int track, int slot) {
-        showPanel (Panel::mixer);
-        mixer.openSlotEditor (track, slot);
-    };
-    browser.onShowInsert = [this] (int track) {
-        showPanel (Panel::mixer);
-        mixer.selectTrack (track);
-    };
-    browser.onOpenAutomation = [this] (int automation) { openAutomationEditor (engine, automation); };
-    // the Browser's Plugin database (round 142): the same targets as the quick-add palette
-    browser.onAddInstrument = [this] (ChannelDef c) {
-        if (PatcherWindows::takeInstrumentFromBrowser (c)) // a Patcher's Add plugin › Browse plugin database (round 162)
-            return;
-        rack.addChannel (std::move (c), true);
-        showPanel (Panel::channelRack);
-    };
-    browser.onAddEffect = [this] (EffectSlot slot) {
-        if (PatcherWindows::takeEffectFromBrowser (slot))
-            return;
-        if (! mixer.addEffectToSelected (std::move (slot)))
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin database"),
-                                                    tr ("The selected insert has no free effect slot."));
-        else
-            showPanel (Panel::mixer);
-    };
-    browser.onPreviewVolumeChanged = [this] { saveUiSettings(); };
+    connectBrowser (browser);
     mixeroptions::changed = [safe = juce::Component::SafePointer<MainComponent> (this)] {
         if (safe != nullptr)
         {
@@ -156,10 +116,6 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         if (safe != nullptr)
             safe->mixer.getStripsForSnapshot().setShowUsedOnly (on);
     };
-    browser.onSendToPlaylist = [this] (const juce::File& file) {
-        playlist.addAudioClipAtPlayhead (file);
-        showPanel (Panel::playlist);
-    };
     if (persistent)
     {
         loadUiSettings();
@@ -170,6 +126,11 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         };
         loadKeyMap();
         startSession();
+        if (BrowserComponent::sampleBrowserWasOpen()) // it was open when LYNX closed (round 163)
+            juce::Timer::callAfterDelay (800, [safe = juce::Component::SafePointer<MainComponent> (this)] {
+                if (safe != nullptr && findToolWindow ("sampleBrowser") == nullptr)
+                    safe->openSampleBrowser();
+            });
         EditorGlobals::get().onOptionsChanged = [safe = juce::Component::SafePointer<MainComponent> (this)] { // Follow on/off
             if (safe != nullptr) safe->saveUiSettings();
         };
@@ -853,7 +814,11 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
     playlist.resized();
 
     if (save && scaleChanged)
+    {
         juce::Desktop::getInstance().setGlobalScaleFactor ((float) toolbarLayout.uiScale / 100.0f);
+        // the windows grow with the zoom: keep their title bars and close buttons on the screen (round 163)
+        juce::Timer::callAfterDelay (200, [] { fitAllWindowsOnScreen(); });
+    }
 
     resized();
     repaint();
@@ -1169,6 +1134,7 @@ bool MainComponent::runAction (const std::string& id)
     }
     else if (is ("view.audioEditor")) openAudioEditorForSelection();
     else if (is ("view.tempoTapper")) openTempoTapper (engine);
+    else if (is ("view.sampleBrowser")) toggleSampleBrowser();
     else if (is ("rack.groupSelected")) rack.groupSelected();
     else if (is ("rack.rotateLeft")) rack.rotateSelected (-1);
     else if (is ("rack.rotateRight")) rack.rotateSelected (1);
@@ -1261,6 +1227,85 @@ void MainComponent::loadKeyMap()
     }
 }
 
+// --- Browsers ------------------------------------------------------------------------------------
+
+// The main Browser and the separate Sample browser window (round 163) act on the project the same way.
+void MainComponent::connectBrowser (BrowserComponent& b)
+{
+    b.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
+    b.onLoadIntoChannel = [this] (const juce::File& file) { return rack.loadSampleIntoSelected (file); };
+    // the Browser's "Current project" items (REA_rodada115)
+    b.onOpenPattern = [this] (int pattern) {
+        selectPattern (pattern);
+        openPianoRoll();
+    };
+    b.onPatternMenu = [this] (int pattern) {
+        selectPattern (pattern);
+        makePatternMenu().showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+    };
+    b.onOpenChannel = [this] (int channel) {
+        engine.setSelectedChannel (channel);
+        rack.toggleEditor (channel, true);
+    };
+    b.onOpenEffect = [this] (int track, int slot) {
+        showPanel (Panel::mixer);
+        mixer.openSlotEditor (track, slot);
+    };
+    b.onShowInsert = [this] (int track) {
+        showPanel (Panel::mixer);
+        mixer.selectTrack (track);
+    };
+    b.onOpenAutomation = [this] (int automation) { openAutomationEditor (engine, automation); };
+    // the Browser's Plugin database (round 142): the same targets as the quick-add palette
+    b.onAddInstrument = [this] (ChannelDef c) {
+        if (PatcherWindows::takeInstrumentFromBrowser (c)) // a Patcher's Add plugin › Browse plugin database (round 162)
+            return;
+        rack.addChannel (std::move (c), true);
+        showPanel (Panel::channelRack);
+    };
+    b.onAddEffect = [this] (EffectSlot slot) {
+        if (PatcherWindows::takeEffectFromBrowser (slot))
+            return;
+        if (! mixer.addEffectToSelected (std::move (slot)))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin database"),
+                                                    tr ("The selected insert has no free effect slot."));
+        else
+            showPanel (Panel::mixer);
+    };
+    b.onPreviewVolumeChanged = [this] { saveUiSettings(); };
+    b.onSendToPlaylist = [this] (const juce::File& file) {
+        playlist.addAudioClipAtPlayhead (file);
+        showPanel (Panel::playlist);
+    };
+    b.onToggleSampleBrowser = [this] { toggleSampleBrowser(); };
+}
+
+void MainComponent::toggleSampleBrowser()
+{
+    if (auto* w = findToolWindow ("sampleBrowser"))
+    {
+        w->closeButtonPressed(); // (hidden, then deleted: remembered as closed)
+        return;
+    }
+    openSampleBrowser();
+}
+
+void MainComponent::openSampleBrowser()
+{
+    auto* window = openToolWindow (BrowserComponent::makeSampleBrowserContent (engine, [this] (BrowserComponent& b) { connectBrowser (b); }),
+                                   tr ("Sample browser"), "sampleBrowser");
+    if (window == nullptr)
+        return;
+    window->setResizable (true, false);
+    window->setResizeLimits (240, 260, 4000, 4000);
+    const auto saved = BrowserComponent::sampleBrowserBounds();
+    const auto area = juce::Desktop::getInstance().getDisplays().getTotalBounds (true);
+    if (saved.getWidth() >= 240 && saved.getHeight() >= 260 && area.intersects (saved))
+        window->setBounds (saved);
+    else if (auto* top = getTopLevelComponent())
+        window->setBounds (top->getScreenBounds().getRight() - 360, top->getScreenY() + 80, 340, juce::jmax (400, top->getHeight() - 160));
+}
+
 // --- UI options ----------------------------------------------------------------------------------
 
 juce::File MainComponent::uiSettingsFile() const
@@ -1310,6 +1355,8 @@ void MainComponent::loadUiSettings()
             toolbarLayout.separators = on;
         else if (key == "toolbarVisible")
             toolbarLayout.visible = on;
+        else if (key == "menuDensity")
+            theme::menus::setCompact (line.fromFirstOccurrenceOf ("=", false, false).trim() != "comfortable");
         else if (key == "uiScale")
             toolbarLayout.uiScale = toolbarlayout::clampScale (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "editPatternsIn")
@@ -1388,6 +1435,7 @@ void MainComponent::saveUiSettings()
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
                                       + "\nuiScale=" + juce::String (toolbarLayout.uiScale)
+                                      + "\nmenuDensity=" + juce::String (theme::menus::compact() ? "compact" : "comfortable")
                                       + "\ntoolbarSeparators=" + juce::String (toolbarLayout.separators ? 1 : 0)
                                       + "\ntoolbarVisible=" + juce::String (toolbarLayout.visible ? 1 : 0)
                                       + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
@@ -1713,7 +1761,9 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
             break;
         case Panel::browser:
             action (menu, "browser.search", tr ("Search the Browser"));
+            browser.addViewItems (menu); // what it lists, which folders it shows (round 163)
             menu.addItem (tr ("Add folder..."), [this] { browser.addUserFolder(); });
+            action (menu, "view.sampleBrowser", tr ("Sample browser (separate window)"));
             menu.addSeparator();
             // the search index (round 162, issue #9): searches read it; it follows changed folders by itself
             menu.addSectionHeader (browser.searchIndexStatus());
@@ -3486,6 +3536,7 @@ void MainComponent::openSettings (int page)
             return o;
         o.language = i18n::saved();
         o.uiScale = safe->toolbarLayout.uiScale;
+        o.compactMenus = theme::menus::compact();
         o.waveSpectral = ui::WaveformCache::spectral;
         o.waveStereo = ui::WaveformCache::stereo;
         o.reducedEffects = skin::reducedEffects();
@@ -3518,6 +3569,7 @@ void MainComponent::openSettings (int page)
             layout.uiScale = toolbarlayout::clampScale (o.uiScale);
             self.setToolbarLayout (layout, true);
         }
+        theme::menus::setCompact (o.compactMenus);
         if (o.reducedEffects != skin::reducedEffects() || o.pluginStyle != skin::forcedStyle())
         {
             skin::setReducedEffects (o.reducedEffects);
@@ -4109,6 +4161,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addSeparator();
         menu.addItem (tr ("Audio editor") + shortcutText ("view.audioEditor"), [this] { openAudioEditorForSelection(); });
         menu.addItem (tr ("Tempo tapper") + shortcutText ("view.tempoTapper"), [this] { openTempoTapper (engine); });
+        menu.addItem (tr ("Sample browser (separate window)") + shortcutText ("view.sampleBrowser"), true, findToolWindow ("sampleBrowser") != nullptr,
+                      [this] { toggleSampleBrowser(); });
         menu.addSeparator();
         menu.addItem (tr ("Typing keyboard as a piano") + shortcutText ("view.typingPiano"), true, typingPiano, [this] { setTypingPiano (! typingPiano); });
         menu.addItem (tr ("Touch keyboard"), true, isTouchKeyboardOpen(), [this] { toggleTouchKeyboard (engine); });

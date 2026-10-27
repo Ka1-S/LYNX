@@ -18,6 +18,7 @@ struct GeneralOptions
 {
     juce::String language;      // i18n id ("en", "pt-BR")
     int uiScale = 100;          // percent
+    bool compactMenus = true;   // menu density: compact (native-like rows) or comfortable (round 163)
     bool waveSpectral = false, waveStereo = false;
     bool splash = true, startupSound = true, scanAtStart = true;
     bool menuEntry = false;     // Linux AppImage: LYNX in the applications menu + the .lynx file type (round 161)

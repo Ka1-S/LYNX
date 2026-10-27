@@ -145,9 +145,9 @@ public:
         pan.setDoubleClickReturnValue (true, 0.0);
         pan.setTooltip (tr ("The clip's pan (left -100% ... right 100%), on top of the channel's"));
         label (pitchLabel, tr ("Pitch"));
-        slider (pitch, -24.0, 24.0, 1.0, " st");
+        slider (pitch, -24.0, 24.0, 0.01, " st");
         pitch.setDoubleClickReturnValue (true, 0.0);
-        pitch.setTooltip (tr ("The audio channel's pitch: every clip of this file follows it"));
+        pitch.setTooltip (tr ("The audio channel's pitch in semitones (0.5 = 50 cents): every clip of this file follows it. With \"Keep length\" the length stays, else the speed changes like a tape"));
         label (fadeInLabel, tr ("Fade in"));
         slider (fadeIn, 0.0, 16.0, 0.01, " " + tr ("beats"));
         label (fadeOutLabel, tr ("Fade out"));
@@ -155,7 +155,8 @@ public:
         label (stretchLabel, tr ("Stretch to"));
         slider (stretch, 0.0, 256.0, 0.25, " " + tr ("beats"));
         stretch.setTooltip (tr ("0: the file plays at its own speed; otherwise the whole file lasts this many beats at the project tempo"));
-        keepPitch.setButtonText (tr ("Keep the pitch"));
+        keepPitch.setButtonText (tr ("Keep length (stretch engine)"));
+        keepPitch.setTooltip (tr ("On: the stretch and the pitch change separately (the stretch keeps the pitch, the pitch keeps the length). Off: resample, pitch and speed change together"));
         keepPitch.onClick = [this] { apply(); };
         addAndMakeVisible (keepPitch);
 
@@ -328,7 +329,6 @@ private:
         fadeOut.setValue ((double) props.fadeOut / ppq, n);
         stretch.setValue (props.stretchBeats, n);
         keepPitch.setToggleState (props.keepPitch, n);
-        keepPitch.setEnabled (props.stretchBeats > 0.0f);
         for (auto* c : std::initializer_list<juce::Component*> { &levelsTitle, &gainLabel, &gain, &panLabel, &pan, &pitchLabel, &pitch, &fadeInLabel, &fadeIn,
                                                                   &fadeOutLabel, &fadeOut, &stretchLabel, &stretch, &keepPitch })
             c->setVisible (isAudio());

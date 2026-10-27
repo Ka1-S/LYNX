@@ -4,6 +4,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/BrowserView.h"
 #include "engine/AudioEngine.h"
 #include "ui/Icons.h"
 
@@ -41,8 +42,33 @@ class BrowserComponent final : public juce::Component,
                                private juce::Timer
 {
 public:
-    explicit BrowserComponent (AudioEngine& engine);
+    // The main Browser (a panel) or the separate Sample browser window (round 163): each keeps its own view (which
+    // top-level folders it shows, which kinds of files it lists).
+    enum class Role
+    {
+        main,
+        samples
+    };
+    explicit BrowserComponent (AudioEngine& engine, Role role = Role::main);
     ~BrowserComponent() override;
+    Role getRole() const noexcept { return role; }
+
+    // What this Browser shows (round 163): the content filter, the hidden top-level entries; saved at once.
+    const browserview::View& getView() const noexcept { return view; }
+    void setContentFilter (browserview::ContentFilter filter);
+    void setRootShown (const juce::String& id, bool shown);
+    void showAllRoots();
+    // The Browser's options menu (the button beside the search box, the panel menu): filter, folders, search index.
+    void addViewItems (juce::PopupMenu& menu);
+    void showViewMenu();
+    // The Sample browser window opens / closes from here (the main window sets it): View › Sample browser.
+    std::function<void()> onToggleSampleBrowser;
+    // The Sample browser window's content: a drag container holding a Browser of role `samples`; `wire` connects
+    // its callbacks like the main Browser's. The window keeps its bounds and open state in the view file.
+    static std::unique_ptr<juce::Component> makeSampleBrowserContent (AudioEngine& engine, const std::function<void (BrowserComponent&)>& wire);
+    // Whether the Sample browser was open when LYNX last closed (its view file).
+    static bool sampleBrowserWasOpen();
+    static juce::Rectangle<int> sampleBrowserBounds(); // its last window bounds (empty: default)
 
     std::function<void (const juce::File&)> onOpenProject;
     // Enter / Shift+Up/Down: put this file into the selected channel; returns false if it can't take it.
@@ -152,6 +178,13 @@ private:
     void rebuildTree();
     static juce::File userFoldersFile();
     static juce::File starredFile();
+    static juce::File viewFile (Role role);
+    void loadView();
+    void saveView() const;
+    bool viewLoaded = false, viewFromFile = false;
+    bool lists (const juce::File& file) const; // a file listed under the content filter
+    void addHideItem (juce::PopupMenu& menu, const juce::String& id, const juce::String& label);
+    juce::String rootId (const juce::File& folder) const; // the root's id, empty if `folder` isn't a root
     juce::StringArray starred;
     void openFile (const juce::File& file); // what a double-click does
     void fileSelected (const juce::File& file, bool preview);
@@ -177,6 +210,8 @@ private:
     class FocusWatcher; // a click outside the search box takes the keyboard back from it
     std::unique_ptr<FocusWatcher> focusWatcher;
     IconButton stopButton { "stop preview", Icon::stop };
+    IconButton viewButton { "browser options", Icon::panelMenu };
+    void refreshViewButton();
     juce::Slider previewVolume { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     std::unique_ptr<juce::FileChooser> chooser;
     int tab = allTab;
@@ -185,8 +220,13 @@ private:
     std::set<juce::String> openPluginFolders; // the Plugin database folders the user opened (round 142)
 
     AudioEngine& engine;
-    juce::Array<juce::File> roots;
+    Role role = Role::main;
+    browserview::View view;
+    juce::Array<juce::File> roots; // the folder roots shown
     juce::StringArray rootNames;
+    juce::Array<juce::File> allRoots; // every folder root (hidden ones too)
+    juce::StringArray allRootNames;
+    std::vector<browserview::RootKind> allRootKinds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BrowserComponent)
 };

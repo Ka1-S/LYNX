@@ -18,6 +18,12 @@ bool isOwnedByMainWindow (juce::Component& window);
 // True when `window` is above the main window in the z-order (Windows; elsewhere: isOwnedByMainWindow).
 bool isAboveMainWindow (juce::Component& window);
 
+// Keeps a top-level window reachable (round 163, UI zoom 150%+): a resizable window larger than its screen shrinks
+// to it, and the window moves so its title bar and close button are on the screen. keepAboveMainWindow does it the
+// first time; the UI scale change does it for every LYNX window.
+void fitWindowOnScreen (juce::Component& window);
+void fitAllWindowsOnScreen();
+
 // --windowtest only: makes `window` the foreground window even when LYNX was started in the background.
 void forceForegroundForTest (juce::Component& window);
 

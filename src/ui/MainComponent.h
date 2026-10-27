@@ -276,6 +276,9 @@ private:
     void showMetronomeVolume();
     // View > Audio editor: the selected channel's sample when it is a Sampler with one, else an empty editor
     void openAudioEditorForSelection();
+    void connectBrowser (BrowserComponent& b); // the main Browser and the Sample browser window (round 163)
+    void toggleSampleBrowser();
+    void openSampleBrowser();
     void toggleRecording();       // the record button: asks what to record first (unless told not to)
     void armSelectedInsertForAudio(); // "Audio, into the Playlist": arms the selected insert (asks for its input)
     void setControlHints(); // the hint bar text of every toolbar control (markup, see ui/HintBar.h)

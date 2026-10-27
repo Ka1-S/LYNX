@@ -112,7 +112,7 @@ bool apply (Song& song, int clip, const Props& p)
         ch.colour = p.colour;
         ch.sampler.pitch = std::clamp (p.pitch, -24.0f, 24.0f);
         ch.sampler.stretchBeats = std::max (0.0f, p.stretchBeats);
-        ch.sampler.keepPitch = p.keepPitch && ch.sampler.stretchBeats > 0.0f;
+        ch.sampler.keepPitch = p.keepPitch; // (round 163: also "keep length" for a pitched clip without stretch)
     }
     else if (c.kind == ClipKind::automation && validSource (song, c.kind, c.automation) && ! p.name.empty())
         song.automations[(std::size_t) c.automation].name = p.name;

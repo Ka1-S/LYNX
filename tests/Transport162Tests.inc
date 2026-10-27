@@ -104,6 +104,39 @@ TEST (transport162_piano_roll_playhead)
     CHECK (patternPlayhead (song, 7, 10.0) < 0.0 && patternPlayhead (song, 0, -1.0) < 0.0);
 }
 
+TEST (ui163_piano_roll_ruler_seek)
+{
+    using lynx::transportedit::patternSeekTarget;
+    lynx::Song song;
+    song.beatsPerBar = 4;
+    song.patterns.resize (2);
+    const auto bar = (std::int64_t) lynx::ppq * 4;
+    song.mode = lynx::PlayMode::pattern;
+    CHECK (patternSeekTarget (song, 0, 500.0, 0.0) == 500.0);
+    CHECK (patternSeekTarget (song, 0, -5.0, 0.0) == 0.0);
+
+    song.mode = lynx::PlayMode::song;
+    CHECK (patternSeekTarget (song, 0, 500.0, 0.0) < 0.0); // no clip of it
+    lynx::Clip a;
+    a.pattern = 0;
+    a.track = 1;
+    a.start = 4 * bar;
+    a.length = bar;
+    a.offset = 100;
+    lynx::Clip b = a;
+    b.start = 2 * bar;
+    b.offset = 0;
+    song.playlist.push_back (a);
+    song.playlist.push_back (b);
+    // nothing of it plays now: the earliest clip
+    CHECK (patternSeekTarget (song, 0, 500.0, 0.0) == (double) (2 * bar + 500));
+    // the clip under the song position wins; its offset counts; the position stays inside the clip
+    CHECK (patternSeekTarget (song, 0, 500.0, (double) (4 * bar + 10)) == (double) (4 * bar + 400));
+    CHECK (patternSeekTarget (song, 0, 50.0, (double) (4 * bar + 10)) == (double) (4 * bar));
+    CHECK (patternSeekTarget (song, 0, (double) (5 * bar), (double) (4 * bar + 10)) == (double) (5 * bar - 1));
+    CHECK (patternSeekTarget (song, 1, 10.0, 0.0) < 0.0);
+}
+
 TEST (transport162_follow_and_stop)
 {
     using lynx::transportedit::followViewStart;

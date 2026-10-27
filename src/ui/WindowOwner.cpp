@@ -1,5 +1,7 @@
 #include "ui/WindowOwner.h"
 
+#include "core/WindowFit.h"
+
 #include "ui/LogoData.h"
 #include "ui/Theme.h"
 #include "platform/Paths.h"
@@ -258,7 +260,60 @@ void keepAboveMainWindow (juce::Component& window)
     auto& all = keepers();
     auto& keeper = all[&window];
     if (keeper == nullptr)
+    {
         keeper = std::make_unique<OwnershipKeeper> (window);
+        fitWindowOnScreen (window);
+    }
     applyOwnership (window);
+}
+
+void fitWindowOnScreen (juce::Component& window)
+{
+    if (! window.isOnDesktop() || ! window.isVisible())
+        return;
+    auto* resizable = dynamic_cast<juce::ResizableWindow*> (&window);
+    if (resizable != nullptr && (resizable->isFullScreen() || resizable->isMinimised()))
+        return;
+
+    juce::BorderSize<int> frame;
+    if (auto* peer = window.getPeer())
+        if (const auto size = peer->getFrameSizeIfPresent())
+            frame = *size;
+
+    const auto bounds = window.getBounds();
+    const auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = displays.getDisplayForRect (frame.addedTo (bounds));
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+    if (display == nullptr)
+        return;
+    const auto area = display->userArea;
+
+    auto content = bounds;
+    if (resizable != nullptr && resizable->isResizable())
+    {
+        auto w = juce::jmin (content.getWidth(), area.getWidth() - frame.getLeftAndRight());
+        auto h = juce::jmin (content.getHeight(), area.getHeight() - frame.getTopAndBottom());
+        if (auto* limits = resizable->getConstrainer())
+        {
+            w = juce::jmax (w, limits->getMinimumWidth());
+            h = juce::jmax (h, limits->getMinimumHeight());
+        }
+        content.setSize (juce::jmax (1, w), juce::jmax (1, h));
+    }
+    const auto outer = frame.addedTo (content);
+    const auto placed = windowfit::place ({ outer.getX(), outer.getY(), outer.getWidth(), outer.getHeight() },
+                                          { area.getX(), area.getY(), area.getWidth(), area.getHeight() });
+    content.setPosition (placed.x + frame.getLeft(), placed.y + frame.getTop());
+    if (content != bounds)
+        window.setBounds (content);
+}
+
+void fitAllWindowsOnScreen()
+{
+    auto& desktop = juce::Desktop::getInstance();
+    for (int i = desktop.getNumComponents(); --i >= 0;)
+        if (auto* window = dynamic_cast<juce::ResizableWindow*> (desktop.getComponent (i)))
+            fitWindowOnScreen (*window);
 }
 } // namespace lynx

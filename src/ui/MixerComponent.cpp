@@ -1957,6 +1957,7 @@ void EffectsPanel::setTrack (int t)
     track = t;
     const auto* s = slots();
     selectedSlot = s != nullptr && ! s->empty() ? 0 : -1;
+    refit();
     repaint();
 }
 
@@ -2039,19 +2040,65 @@ float eqResponseDb (const TrackEq& eq, double hz, double sampleRate)
 }
 } // namespace
 
+constexpr int eqFoldBarHeight = 20;
+
 bool EffectsPanel::eqShown() const
 {
     return ! engine.getSong().cleanMixer; // clean mixer (round 163): no built-in EQ to show
 }
 
+int EffectsPanel::belowHeight (bool folded) const
+{
+    if (! eqShown()) // clean mixer: only the output row
+        return outputRowHeight + 8;
+    return outputRowHeight + eqFoldBarHeight + (folded ? 4 : eqGraphHeight + eqKnobsHeight + 14);
+}
+
 int EffectsPanel::bottomTop() const
 {
-    return getHeight() - ((eqShown() ? eqGraphHeight + eqKnobsHeight : 0) + outputRowHeight + 22);
+    return getHeight() - belowHeight (eqFolded);
+}
+
+juce::Rectangle<int> EffectsPanel::eqFoldBounds() const
+{
+    if (! eqShown())
+        return {};
+    return { 8, bottomTop(), getWidth() - 16, eqFoldBarHeight };
+}
+
+int EffectsPanel::neededHeight (bool folded) const
+{
+    // the slots and the effect's title row under them always fit; the knobs below may be cut by the EQ
+    return slotsTop + maxEffectSlots * slotHeight + 64 + 6 + belowHeight (folded);
+}
+
+void EffectsPanel::fitToView (int w, int h, int scrollBar)
+{
+    viewWidth = w;
+    viewHeight = h;
+    scrollBarThickness = scrollBar;
+    refit();
+}
+
+void EffectsPanel::refit()
+{
+    if (viewWidth <= 0 || viewHeight <= 0)
+        return;
+    const auto folded = eqFoldChoice == 2 || (eqFoldChoice == 0 && viewHeight < neededHeight (false));
+    const auto need = neededHeight (folded);
+    const auto scrolls = viewHeight < need;
+    const auto changed = folded != eqFolded;
+    eqFolded = folded;
+    const juce::Rectangle<int> size (viewWidth - (scrolls ? scrollBarThickness : 0), juce::jmax (viewHeight, need));
+    if (getWidth() != size.getWidth() || getHeight() != size.getHeight())
+        setSize (size.getWidth(), size.getHeight());
+    else if (changed)
+        repaint();
 }
 
 juce::Rectangle<int> EffectsPanel::eqGraphBounds() const
 {
-    return { 8, bottomTop() + 8, getWidth() - 16 - 3 * 18 - 6, eqGraphHeight };
+    return { 8, bottomTop() + eqFoldBarHeight, getWidth() - 16 - 3 * 18 - 6, eqGraphHeight };
 }
 
 juce::Rectangle<int> EffectsPanel::eqFaderBounds (int band) const
@@ -2083,7 +2130,7 @@ juce::Point<float> EffectsPanel::eqHandle (int band) const
 
 int EffectsPanel::eqControlAt (juce::Point<int> p) const
 {
-    if (slots() == nullptr || ! eqShown())
+    if (slots() == nullptr || eqFolded || ! eqShown())
         return 0;
     for (int b = 0; b < 3; ++b)
     {
@@ -2135,7 +2182,29 @@ void EffectsPanel::paintEq (juce::Graphics& g)
     g.setColour (colour::border);
     g.fillRect (8, top, getWidth() - 16, 1);
 
+    // the title bar: click folds / unfolds the EQ (it folds by itself when the mixer is too short for it)
     if (eqShown())
+    {
+        const auto bar = eqFoldBounds().toFloat();
+        const auto active = eq.gainDb[0] != 0.0f || eq.gainDb[1] != 0.0f || eq.gainDb[2] != 0.0f;
+        auto chevron = bar.withWidth (14.0f).withSizeKeepingCentre (12.0f, 12.0f);
+        {
+            juce::Graphics::ScopedSaveState state (g);
+            if (eqFolded)
+                g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, chevron.getCentreX(), chevron.getCentreY()));
+            icons::draw (g, Icon::chevronDown, chevron, colour::textSecondary);
+        }
+        g.setFont (font (type::small, true));
+        g.setColour (colour::textSecondary);
+        textcache::drawText (g, tr ("EQ"), bar.withTrimmedLeft (18.0f).toNearestInt(), juce::Justification::centredLeft);
+        if (eqFolded && active) // a folded EQ that still changes the sound says so
+        {
+            g.setColour (colour::accent);
+            g.setFont (font (type::caption));
+            textcache::drawText (g, tr ("active"), bar.withTrimmedLeft (44.0f).toNearestInt(), juce::Justification::centredLeft);
+        }
+    }
+    if (! eqFolded && eqShown())
     {
         // the response graph: frequency (log) across, ±18 dB up and down
         const auto graph = eqGraphBounds().toFloat();
@@ -3108,6 +3177,14 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
     if (s == nullptr)
         return;
 
+    if (eqFoldBounds().contains (e.getPosition()) && e.mods.isLeftButtonDown())
+    {
+        eqFoldChoice = eqFolded ? 1 : 2;
+        refit();
+        repaint();
+        return;
+    }
+
     // the built-in EQ and the output target (bottom section)
     if (outputBounds().contains (e.getPosition()))
     {
@@ -3476,6 +3553,13 @@ ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
         const auto band = eqPointBase - eqControl;
         h.text = tr ("EQ: [LMB] drag the band's frequency and level  [Wheel] width  [2xLMB] back to 0 dB");
         h.value = tr ("Band {0}", { juce::String (band + 1) }) + " - " + tr (eqBandNames[band]);
+        return h;
+    }
+
+    if (slots() != nullptr && eqFoldBounds().contains (p))
+    {
+        ui::Hint h;
+        h.text = eqFolded ? tr ("Insert EQ (folded): [LMB] unfold it") : tr ("Insert EQ: [LMB] fold it (it folds by itself when the mixer is short)");
         return h;
     }
 
@@ -4159,6 +4243,7 @@ void EffectsPanel::changeListenerCallback (juce::ChangeBroadcaster*)
     else if (selectedSlot >= (int) s->size())
         selectedSlot = (int) s->size() - 1;
 
+    refit(); // the clean mixer (round 163) changes the height the panel needs
     repaint();
 }
 
@@ -4360,7 +4445,10 @@ MixerComponent::MixerComponent (AudioEngine& e)
     viewport.setViewedComponent (&strips, false);
     viewport.setScrollBarsShown (false, true);
     addAndMakeVisible (viewport);
-    addAndMakeVisible (effects);
+    effectsView.setViewedComponent (&effects, false);
+    effectsView.setScrollBarsShown (true, false);
+    effectsView.setScrollBarThickness (10);
+    addAndMakeVisible (effectsView);
     strips.onSelectionChanged = [this] (int track) { effects.setTrack (track); };
     strips.onEffectDropped = [this] (int track, EffectSlot fx) {
         strips.selectTrack (track);
@@ -4441,7 +4529,8 @@ void MixerComponent::selectTrack (int track)
 void MixerComponent::resized()
 {
     auto area = getLocalBounds();
-    effects.setBounds (area.removeFromRight (effectsWidth));
+    effectsView.setBounds (area.removeFromRight (effectsWidth));
+    effects.fitToView (effectsView.getWidth(), effectsView.getHeight(), effectsView.getScrollBarThickness());
     viewport.setBounds (area);
     strips.setVisibleHeight (area.getHeight() - viewport.getScrollBarThickness());
 }

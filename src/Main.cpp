@@ -654,6 +654,16 @@ public:
             return;
         }
 
+        if (args.contains ("--fittest"))
+        {
+            // LYNX.exe --fittest report.txt [percent]: round 163 — at that UI zoom (default 150) a window taller than
+            // the screen and a big resizable window that grows with a zoom change keep their title bar and close
+            // button on the screen. The windows show for about two seconds.
+            const auto i = args.indexOf ("--fittest");
+            runFitTest (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].getIntValue() : 150);
+            return;
+        }
+
         if (args.contains ("--windowtest"))
         {
             // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor and a plugin-like window
@@ -2204,6 +2214,95 @@ private:
         test->window->setVisible (true);
         test->step ("step=shown");
         test->startTimer (4000);
+    }
+
+    void runFitTest (const juce::String& reportPath, int percent)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        struct FitTest final : juce::Timer
+        {
+            juce::String path, report;
+            bool ok = true;
+            int step = 0, percent = 150;
+            std::unique_ptr<juce::DocumentWindow> tall, big;
+            std::function<void()> done;
+
+            // `whole`: the window must fit entirely (a resizable one); else its title bar and close button must be on the screen
+            void check (const juce::String& what, juce::Component& w, bool whole)
+            {
+                juce::BorderSize<int> frame;
+                if (auto* peer = w.getPeer())
+                    if (const auto f = peer->getFrameSizeIfPresent())
+                        frame = *f;
+                const auto outer = frame.addedTo (w.getBounds());
+                const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (outer);
+                const auto area = display != nullptr ? display->userArea : outer;
+                const auto passed = outer.getY() >= area.getY() && outer.getRight() <= area.getRight() && outer.getX() >= area.getX()
+                                    && (! whole || outer.getBottom() <= area.getBottom() + 1);
+                report << (passed ? "ok   " : "FAIL ") << what << " window=" << outer.toString() << " (frame " << frame.getTop() << ","
+                       << frame.getLeft() << ") screen=" << area.toString() << "\n";
+                ok = ok && passed;
+            }
+
+            void start()
+            {
+                report << "scale=" << percent << "%\n";
+                juce::Desktop::getInstance().setGlobalScaleFactor ((float) percent / 100.0f);
+                // a tool window taller than the screen, centred (its title bar would be above the screen)
+                tall = std::make_unique<juce::DocumentWindow> ("LYNX fit test - tall", lynx::theme::colour::bg2, juce::DocumentWindow::closeButton);
+                tall->setUsingNativeTitleBar (true);
+                auto* content = new juce::Component();
+                const auto area = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+                content->setSize (500, area.getHeight() + 200);
+                tall->setContentOwned (content, true);
+                tall->setCentrePosition (area.getCentre());
+                tall->setVisible (true);
+                lynx::keepAboveMainWindow (*tall);
+                startTimer (700);
+            }
+
+            void timerCallback() override
+            {
+                ++step;
+                if (step == 1)
+                {
+                    check ("tall tool window: title bar and close button on the screen", *tall, false);
+                    tall.reset();
+                    // a resizable window that fits at 100%, then the zoom goes up (the main window's case)
+                    juce::Desktop::getInstance().setGlobalScaleFactor (1.0f);
+                    big = std::make_unique<juce::DocumentWindow> ("LYNX fit test - zoom", lynx::theme::colour::bg2, juce::DocumentWindow::allButtons);
+                    big->setUsingNativeTitleBar (true);
+                    big->setResizable (true, false);
+                    big->setResizeLimits (400, 300, 10000, 10000);
+                    const auto area = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+                    big->setBounds (area.getX() + 40, area.getY() + 60, area.getWidth() * 9 / 10 - 40, area.getHeight() * 9 / 10 - 60);
+                    big->setVisible (true);
+                    return;
+                }
+                if (step == 2)
+                {
+                    juce::Desktop::getInstance().setGlobalScaleFactor ((float) percent / 100.0f);
+                    juce::Timer::callAfterDelay (200, [] { lynx::fitAllWindowsOnScreen(); });
+                    return;
+                }
+                if (step == 3)
+                {
+                    check ("resizable window after the zoom change: fits the screen", *big, true);
+                    big.reset();
+                    report << "result=" << (ok ? "OK" : "FAILED") << "\n";
+                    juce::File (path).replaceWithText (report);
+                    stopTimer();
+                    if (done)
+                        done();
+                }
+            }
+        };
+        static std::unique_ptr<FitTest> test;
+        test = std::make_unique<FitTest>();
+        test->path = reportPath;
+        test->percent = juce::jlimit (50, 300, percent);
+        test->done = [this] { juce::MessageManager::callAsync ([this] { test.reset(); quit(); }); };
+        test->start();
     }
 
     void runWindowTest (const juce::String& reportPath)
@@ -4425,6 +4524,18 @@ private:
                 offline.dispatchPendingMessages();
             }
             saveSnapshot (ui, prefix + "-mixer.png");
+            // round 163: the Mixer at short heights (UI zoom 150%+): the EQ folds, then the effects panel scrolls
+            {
+                const auto size = ui.getBounds();
+                for (auto h : { 450, 560, 680, 820 })
+                {
+                    ui.setSize (size.getWidth(), h);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-mixer163-" + juce::String (h) + ".png");
+                }
+                ui.setBounds (size);
+                offline.dispatchPendingMessages();
+            }
 
             // standalone windows, with the theme background
             auto saveWindow = [&prefix] (std::unique_ptr<juce::Component> c, const juce::String& name) {
@@ -4481,6 +4592,28 @@ private:
                                                      ui.getPlaylistForSnapshot().getTrackMenuForSnapshot (0),
                                                      ui.getMixerForSnapshot().getStripsForSnapshot().buildMenu (1) };
                 saveMenus (juce::StringArray { "Piano roll tools", "Playlist track", "Mixer track" }, menus, prefix + "-menus143.png");
+                // round 163: menu density, compact (default) and comfortable, on a Browser folder menu
+                {
+                    juce::PopupMenu folder;
+                    folder.addSectionHeader ("Documents");
+                    folder.addItem (1, "Expand all");
+                    folder.addItem (2, "Collapse all");
+                    folder.addSeparator();
+                    folder.addItem (3, "Refresh");
+                    folder.addSectionHeader ("System");
+                    folder.addItem (4, "Open");
+                    folder.addItem (5, "Copy the file path");
+                    folder.addSectionHeader ("Tags");
+                    folder.addItem (6, "Starred", true, true);
+                    folder.addSeparator();
+                    folder.addItem (7, "Add folder...");
+                    const auto wasCompact = lynx::theme::menus::compact();
+                    lynx::theme::menus::setCompact (true);
+                    saveMenus (juce::StringArray { "Compact" }, { folder }, prefix + "-menu163-compact.png");
+                    lynx::theme::menus::setCompact (false);
+                    saveMenus (juce::StringArray { "Comfortable" }, { folder }, prefix + "-menu163-comfortable.png");
+                    lynx::theme::menus::setCompact (wasCompact);
+                }
                 // and the clip menus of the first pattern, audio and automation clips of the project
                 juce::StringArray clipNames;
                 std::vector<juce::PopupMenu> clipMenus;
@@ -4505,6 +4638,7 @@ private:
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
             saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
             saveAlert (lynx::makeRecordChoiceDialog(), "-record-dialog.png");
+            saveAlert (lynx::makeSamplePitchDialog (7.25f, true, true), "-sample-pitch.png"); // round 163c
             saveAlert (lynx::makeMidiImportDialog(), "-midi-import-dialog.png"); // File › Import › MIDI file (REA round 143)
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
             saveWindow (lynx::crashreporter::makeDialogForSnapshot (false), "-crash-report.png"); // round 159
@@ -5145,8 +5279,6 @@ private:
         };
         std::vector<Laid> menus;
         const auto border = lf.getPopupMenuBorderSize();
-        const auto itemHeight = 26;
-
         for (int m = 0; m < names.size(); ++m)
         {
             Laid laid { source[(std::size_t) m] };
@@ -5156,7 +5288,8 @@ private:
             {
                 const auto& item = it.getItem();
                 int w = 0, h = 0;
-                lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? 22 : itemHeight, w, h);
+                lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? -1 : 0, w, h);
+                if (item.isSectionHeader) h += h / 2; // as JUCE does
                 if (item.shortcutKeyDescription.isNotEmpty() || item.text.containsChar ('\t'))
                     w += 90;
                 width = juce::jmax (width, w + 10);
@@ -5199,7 +5332,8 @@ private:
                     {
                         const auto& item = it.getItem();
                         int w = 0, h = 0;
-                        lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? 22 : itemHeight, w, h);
+                        lf.getIdealPopupMenuItemSize (item.text, item.isSeparator, item.isSectionHeader ? -1 : 0, w, h);
+                if (item.isSectionHeader) h += h / 2; // as JUCE does
                         const juce::Rectangle<int> r (0, y, l.width, h);
                         auto text = item.text, shortcut = item.shortcutKeyDescription;
                         if (text.containsChar ('\t'))
@@ -5413,6 +5547,7 @@ private:
         {
             setVisible (true);
             lynx::applyWindowChrome (*this);
+            lynx::fitWindowOnScreen (*this); // a size saved at another UI zoom still fits (round 163)
             toFront (true);
             content->grabKeyboardFocus();
         }

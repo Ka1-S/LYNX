@@ -190,7 +190,7 @@ private:
     void normalizeClips (const std::vector<int>& targets);
     juce::PopupMenu buildClipMenu (int index, int mouseX);
     void duplicateSelection();
-    void seekTo (int x);
+    void seekTo (int x, bool snapOn = true); // Alt held while scrubbing: snapOn false (free position, FL)
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
     // Clips a few pixels wide (zoomed far out), gathered and filled per colour at the end (round 151)
     struct SmallClips;

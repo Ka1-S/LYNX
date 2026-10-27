@@ -1513,6 +1513,7 @@ public:
           channel (c)
     {
         setup (pitch, pitchLabel, TR_NOOP ("Pitch"), -24.0, 24.0, 0.01, " st");
+        pitch.setTooltip (tr ("The sample's pitch in semitones (0.5 = 50 cents). The Piano Roll's keys play it chromatically around its root note (Misc › Root note, C5 by default); right-click the channel › Pitch... for semitones + cents"));
         setup (gain, gainLabel, TR_NOOP ("Gain"), -24.0, 24.0, 0.1, " dB");
         gain.textFromValueFunction = [] (double v) { return (v > 0.04 ? "+" : "") + juce::String (std::abs (v) < 0.05 ? 0.0 : v, 1) + " dB"; };
         gain.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("+-0123456789.,").replaceCharacter (',', '.').getDoubleValue(); };
@@ -1545,8 +1546,8 @@ public:
         release.setSkewFactorFromMidPoint (0.4);
         release.setTooltip (tr ("0 = the whole sample plays (one-shot), like FL's steps"));
 
-        keepPitch.setButtonText (tr ("Stretch keeping pitch"));
-        keepPitch.setTooltip (tr ("With \"Stretch\": changes the length without changing the pitch (like FL's Stretch modes)"));
+        keepPitch.setButtonText (tr ("Keep length (stretch engine)"));
+        keepPitch.setTooltip (tr ("On: the pitch, the fine tune and the keys change the pitch without changing the length, and \"Stretch\" changes the length without changing the pitch (like FL's Stretch modes). Off: resample, pitch and speed change together"));
         keepPitch.onClick = [this] { apply(); };
         addAndMakeVisible (keepPitch);
 

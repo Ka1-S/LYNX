@@ -250,6 +250,14 @@ public:
     }
     void openSlotEditor (int slot) { openEditor (slot); }
 
+    // Sizes the panel for a view of `viewWidth` x `viewHeight` (round 163): when the slots and the EQ don't both fit,
+    // the EQ folds to its title bar (click it to unfold); when even that doesn't fit, the panel is taller than the
+    // view and the viewport around it scrolls. Nothing overlaps at any height or UI zoom.
+    void fitToView (int viewWidth, int viewHeight, int scrollBarThickness);
+    bool isEqFolded() const noexcept { return eqFolded; }
+    // the heights the panel needs with the EQ open and folded (the knobs of the selected effect may be cut below)
+    int neededHeight (bool folded) const;
+
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
@@ -283,6 +291,12 @@ private:
     juce::Rectangle<int> ledBounds (int slot) const;   // the slot's on/off LED
     int bottomTop() const;                             // top of the EQ + output section
     bool eqShown() const;                              // false in a clean mixer (round 163)
+    int belowHeight (bool folded) const;               // height of the EQ + output section
+    juce::Rectangle<int> eqFoldBounds() const;         // the EQ's title bar (click: fold / unfold)
+    void refit();
+    bool eqFolded = false;
+    int viewWidth = 0, viewHeight = 0, scrollBarThickness = 0;
+    static inline int eqFoldChoice = 0;                // 0 automatic, 1 open (the user unfolded it), 2 folded by the user
     juce::Rectangle<int> eqGraphBounds() const;
     juce::Rectangle<int> eqFaderBounds (int band) const;
     juce::Rectangle<int> eqKnobBounds (int band, int what) const; // what: 1 = frequency, 2 = width
@@ -370,6 +384,7 @@ private:
     AudioEngine& engine;
     MixerStrips strips;
     juce::Viewport viewport;
+    juce::Viewport effectsView; // the effects panel scrolls when the mixer is short (round 163)
     EffectsPanel effects;
 };
 } // namespace lynx
