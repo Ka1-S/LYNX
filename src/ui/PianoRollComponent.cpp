@@ -1335,6 +1335,14 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // ruler: click or drag = position (FL), Alt = off the grid
+    if (e.y >= rulerTop && e.y < headerHeight && e.x >= keyboardWidth && e.mods.isLeftButtonDown() && ! e.mods.isShiftDown())
+    {
+        drag = Drag::seek;
+        seekAt (e.x, ! e.mods.isAltDown());
+        return;
+    }
+
     if (velocityArea().contains (e.getPosition()) && eventLaneTarget())
     {
         // pattern events: drag draws one event per grid step, right-drag erases
@@ -1828,6 +1836,10 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             listenAt (e.x);
             return;
 
+        case Drag::seek:
+            seekAt (e.x, snapOn);
+            return;
+
         case Drag::drumPaint:
             drumPaintAt (e.getPosition(), snapOn);
             return;
@@ -2023,6 +2035,7 @@ void PianoRollComponent::postDragHint (const juce::MouseEvent& e)
         case Drag::keyZoom: hint.text = tr ("Key height"); hint.value = juce::String (rowHeight) + " px"; break;
         case Drag::pan:
         case Drag::keyboard:
+        case Drag::seek: hint.text = tr ("Position  [Alt] no snap"); break;
         case Drag::listen:
         case Drag::zoomRange:
         case Drag::none: return;
@@ -2248,7 +2261,7 @@ ui::Hint PianoRollComponent::hintAt (juce::Point<int> p)
 
     if (p.y >= rulerTop && p.y < headerHeight && p.x >= keyboardWidth)
     {
-        hint.text = tr ("Ruler: [Ctrl][LMB] drag selects the notes in a time range  [Ctrl][Wheel] zoom  [Shift][Wheel] scroll");
+        hint.text = tr ("Ruler: [LMB] position  [Alt] no snap  [Ctrl][LMB] drag selects the notes in a time range  [Ctrl][Wheel] zoom  [Shift][Wheel] scroll");
         return hint;
     }
 
@@ -2409,6 +2422,21 @@ void PianoRollComponent::zoomOut (int anchorX)
     scrollTicks = juce::jmax (0.0, anchor - (anchorX - keyboardWidth) / pixelsPerTick);
     updateScrollBars();
     repaint();
+}
+
+void PianoRollComponent::seekAt (int x, bool snapOn)
+{
+    const auto& song = engine.getSong();
+    const auto tick = snapOn ? (double) snap (xToTick (x), true) : xToTick (x);
+    const auto target = transportedit::patternSeekTarget (song, song.currentPattern, tick, engine.getTransport().positionTicks.load());
+    if (target < 0.0)
+    {
+        // Song mode and no clip of this pattern: play the pattern on its own from there
+        engine.editSong ([] (Song& s) { s.mode = PlayMode::pattern; }, false);
+        engine.seek (juce::jmax (0.0, tick));
+        return;
+    }
+    engine.seek (target);
 }
 
 void PianoRollComponent::listenAt (int x)

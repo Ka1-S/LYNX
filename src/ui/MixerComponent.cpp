@@ -1924,6 +1924,7 @@ void EffectsPanel::setTrack (int t)
     track = t;
     const auto* s = slots();
     selectedSlot = s != nullptr && ! s->empty() ? 0 : -1;
+    refit();
     repaint();
 }
 
@@ -2006,14 +2007,56 @@ float eqResponseDb (const TrackEq& eq, double hz, double sampleRate)
 }
 } // namespace
 
+constexpr int eqFoldBarHeight = 20;
+
+int EffectsPanel::belowHeight (bool folded) const
+{
+    return outputRowHeight + eqFoldBarHeight + (folded ? 4 : eqGraphHeight + eqKnobsHeight + 14);
+}
+
 int EffectsPanel::bottomTop() const
 {
-    return getHeight() - (eqGraphHeight + eqKnobsHeight + outputRowHeight + 22);
+    return getHeight() - belowHeight (eqFolded);
+}
+
+juce::Rectangle<int> EffectsPanel::eqFoldBounds() const
+{
+    return { 8, bottomTop(), getWidth() - 16, eqFoldBarHeight };
+}
+
+int EffectsPanel::neededHeight (bool folded) const
+{
+    // the slots and the effect's title row under them always fit; the knobs below may be cut by the EQ
+    return slotsTop + maxEffectSlots * slotHeight + 64 + 6 + belowHeight (folded);
+}
+
+void EffectsPanel::fitToView (int w, int h, int scrollBar)
+{
+    viewWidth = w;
+    viewHeight = h;
+    scrollBarThickness = scrollBar;
+    refit();
+}
+
+void EffectsPanel::refit()
+{
+    if (viewWidth <= 0 || viewHeight <= 0)
+        return;
+    const auto folded = eqFoldChoice == 2 || (eqFoldChoice == 0 && viewHeight < neededHeight (false));
+    const auto need = neededHeight (folded);
+    const auto scrolls = viewHeight < need;
+    const auto changed = folded != eqFolded;
+    eqFolded = folded;
+    const juce::Rectangle<int> size (viewWidth - (scrolls ? scrollBarThickness : 0), juce::jmax (viewHeight, need));
+    if (getWidth() != size.getWidth() || getHeight() != size.getHeight())
+        setSize (size.getWidth(), size.getHeight());
+    else if (changed)
+        repaint();
 }
 
 juce::Rectangle<int> EffectsPanel::eqGraphBounds() const
 {
-    return { 8, bottomTop() + 8, getWidth() - 16 - 3 * 18 - 6, eqGraphHeight };
+    return { 8, bottomTop() + eqFoldBarHeight, getWidth() - 16 - 3 * 18 - 6, eqGraphHeight };
 }
 
 juce::Rectangle<int> EffectsPanel::eqFaderBounds (int band) const
@@ -2045,7 +2088,7 @@ juce::Point<float> EffectsPanel::eqHandle (int band) const
 
 int EffectsPanel::eqControlAt (juce::Point<int> p) const
 {
-    if (slots() == nullptr)
+    if (slots() == nullptr || eqFolded)
         return 0;
     for (int b = 0; b < 3; ++b)
     {
@@ -2097,72 +2140,96 @@ void EffectsPanel::paintEq (juce::Graphics& g)
     g.setColour (colour::border);
     g.fillRect (8, top, getWidth() - 16, 1);
 
-    // the response graph: frequency (log) across, ±18 dB up and down
-    const auto graph = eqGraphBounds().toFloat();
-    theme::fillRoundRect (g, graph, radius::sm, colour::bg1);
-    g.setColour (colour::border);
-    g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
-    const auto inner = graph.reduced (4.0f);
-    g.setColour (colour::gridBeat);
-    for (float hz : { 100.0f, 1000.0f, 10000.0f })
+    // the title bar: click folds / unfolds the EQ (it folds by itself when the mixer is too short for it)
     {
-        const auto x = inner.getX() + inner.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
-        g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
-    }
-    g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
-
-    juce::Path curve;
-    const auto sampleRate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
-    for (int i = 0; i <= (int) inner.getWidth(); i += 2)
-    {
-        const auto hz = eqMinHz * std::pow (eqMaxHz / eqMinHz, (float) i / inner.getWidth());
-        const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, eqResponseDb (eq, hz, sampleRate));
-        const auto y = inner.getCentreY() - inner.getHeight() * 0.5f * db / eqRangeDb;
-        if (i == 0)
-            curve.startNewSubPath (inner.getX(), y);
-        else
-            curve.lineTo (inner.getX() + (float) i, y);
-    }
-    g.setColour (eq.active() ? colour::accent : colour::textSecondary.withAlpha (0.6f));
-    g.strokePath (curve, juce::PathStrokeType (1.5f));
-
-    for (int b = 0; b < 3; ++b)
-    {
-        const auto hot = hoverEq == eqPointBase - b || dragParam == eqPointBase - b;
-        const auto handle = eqHandle (b);
-        g.setColour (eqBandColour (b).withAlpha (hot ? 1.0f : 0.8f));
-        g.fillEllipse (juce::Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (handle));
-    }
-
-    // the gain faders (one per band) and the frequency / width knobs under them
-    for (int b = 0; b < 3; ++b)
-    {
-        const auto fader = eqFaderBounds (b).toFloat();
-        const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
-        theme::fillRoundRect (g, fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f, colour::bg0);
-        g.setColour (colour::border);
-        g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
-        const auto v = eqToValue (eq, b, 0);
-        const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
-        theme::fillRoundRect (g, juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f, hot ? colour::textPrimary : colour::textSecondary);
-        g.setColour (eqBandColour (b));
-        g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
-
-        for (int what = 1; what <= 2; ++what)
+        const auto bar = eqFoldBounds().toFloat();
+        const auto active = eq.gainDb[0] != 0.0f || eq.gainDb[1] != 0.0f || eq.gainDb[2] != 0.0f;
+        auto chevron = bar.withWidth (14.0f).withSizeKeepingCentre (12.0f, 12.0f);
         {
-            const auto code = eqParamBase - b * 3 - what;
-            drawKnob (g, eqKnobBounds (b, what).toFloat().reduced (2.0f), eqToValue (eq, b, what), false, eqBandColour (b),
-                      hoverEq == code || dragParam == code);
+            juce::Graphics::ScopedSaveState state (g);
+            if (eqFolded)
+                g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, chevron.getCentreX(), chevron.getCentreY()));
+            icons::draw (g, Icon::chevronDown, chevron, colour::textSecondary);
+        }
+        g.setFont (font (type::small, true));
+        g.setColour (colour::textSecondary);
+        textcache::drawText (g, tr ("EQ"), bar.withTrimmedLeft (18.0f).toNearestInt(), juce::Justification::centredLeft);
+        if (eqFolded && active) // a folded EQ that still changes the sound says so
+        {
+            g.setColour (colour::accent);
+            g.setFont (font (type::caption));
+            textcache::drawText (g, tr ("active"), bar.withTrimmedLeft (44.0f).toNearestInt(), juce::Justification::centredLeft);
         }
     }
+    if (! eqFolded)
+    {
+        // the response graph: frequency (log) across, ±18 dB up and down
+        const auto graph = eqGraphBounds().toFloat();
+        theme::fillRoundRect (g, graph, radius::sm, colour::bg1);
+        g.setColour (colour::border);
+        g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
+        const auto inner = graph.reduced (4.0f);
+        g.setColour (colour::gridBeat);
+        for (float hz : { 100.0f, 1000.0f, 10000.0f })
+        {
+            const auto x = inner.getX() + inner.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
+            g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
+        }
+        g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
 
-    g.setColour (colour::textSecondary);
-    g.setFont (font (type::title));
-    textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
-    g.setFont (font (type::caption));
-    g.setColour (colour::textDisabled);
-    textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
-    textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+        juce::Path curve;
+        const auto sampleRate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
+        for (int i = 0; i <= (int) inner.getWidth(); i += 2)
+        {
+            const auto hz = eqMinHz * std::pow (eqMaxHz / eqMinHz, (float) i / inner.getWidth());
+            const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, eqResponseDb (eq, hz, sampleRate));
+            const auto y = inner.getCentreY() - inner.getHeight() * 0.5f * db / eqRangeDb;
+            if (i == 0)
+                curve.startNewSubPath (inner.getX(), y);
+            else
+                curve.lineTo (inner.getX() + (float) i, y);
+        }
+        g.setColour (eq.active() ? colour::accent : colour::textSecondary.withAlpha (0.6f));
+        g.strokePath (curve, juce::PathStrokeType (1.5f));
+
+        for (int b = 0; b < 3; ++b)
+        {
+            const auto hot = hoverEq == eqPointBase - b || dragParam == eqPointBase - b;
+            const auto handle = eqHandle (b);
+            g.setColour (eqBandColour (b).withAlpha (hot ? 1.0f : 0.8f));
+            g.fillEllipse (juce::Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (handle));
+        }
+
+        // the gain faders (one per band) and the frequency / width knobs under them
+        for (int b = 0; b < 3; ++b)
+        {
+            const auto fader = eqFaderBounds (b).toFloat();
+            const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
+            theme::fillRoundRect (g, fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f, colour::bg0);
+            g.setColour (colour::border);
+            g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
+            const auto v = eqToValue (eq, b, 0);
+            const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
+            theme::fillRoundRect (g, juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f, hot ? colour::textPrimary : colour::textSecondary);
+            g.setColour (eqBandColour (b));
+            g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
+
+            for (int what = 1; what <= 2; ++what)
+            {
+                const auto code = eqParamBase - b * 3 - what;
+                drawKnob (g, eqKnobBounds (b, what).toFloat().reduced (2.0f), eqToValue (eq, b, what), false, eqBandColour (b),
+                          hoverEq == code || dragParam == code);
+            }
+        }
+
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::title));
+        textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
+        g.setFont (font (type::caption));
+        g.setColour (colour::textDisabled);
+        textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
+        textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+    }
 
     // the audio output target
     auto box = outputBounds().toFloat();
@@ -2962,6 +3029,14 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
     if (s == nullptr)
         return;
 
+    if (eqFoldBounds().contains (e.getPosition()) && e.mods.isLeftButtonDown())
+    {
+        eqFoldChoice = eqFolded ? 1 : 2;
+        refit();
+        repaint();
+        return;
+    }
+
     // the built-in EQ and the output target (bottom section)
     if (outputBounds().contains (e.getPosition()))
     {
@@ -3330,6 +3405,13 @@ ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
         const auto band = eqPointBase - eqControl;
         h.text = tr ("EQ: [LMB] drag the band's frequency and level  [Wheel] width  [2xLMB] back to 0 dB");
         h.value = tr ("Band {0}", { juce::String (band + 1) }) + " - " + tr (eqBandNames[band]);
+        return h;
+    }
+
+    if (slots() != nullptr && eqFoldBounds().contains (p))
+    {
+        ui::Hint h;
+        h.text = eqFolded ? tr ("Insert EQ (folded): [LMB] unfold it") : tr ("Insert EQ: [LMB] fold it (it folds by itself when the mixer is short)");
         return h;
     }
 
@@ -4214,7 +4296,10 @@ MixerComponent::MixerComponent (AudioEngine& e)
     viewport.setViewedComponent (&strips, false);
     viewport.setScrollBarsShown (false, true);
     addAndMakeVisible (viewport);
-    addAndMakeVisible (effects);
+    effectsView.setViewedComponent (&effects, false);
+    effectsView.setScrollBarsShown (true, false);
+    effectsView.setScrollBarThickness (10);
+    addAndMakeVisible (effectsView);
     strips.onSelectionChanged = [this] (int track) { effects.setTrack (track); };
     strips.onEffectDropped = [this] (int track, EffectSlot fx) {
         strips.selectTrack (track);
@@ -4295,7 +4380,8 @@ void MixerComponent::selectTrack (int track)
 void MixerComponent::resized()
 {
     auto area = getLocalBounds();
-    effects.setBounds (area.removeFromRight (effectsWidth));
+    effectsView.setBounds (area.removeFromRight (effectsWidth));
+    effects.fitToView (effectsView.getWidth(), effectsView.getHeight(), effectsView.getScrollBarThickness());
     viewport.setBounds (area);
     strips.setVisibleHeight (area.getHeight() - viewport.getScrollBarThickness());
 }

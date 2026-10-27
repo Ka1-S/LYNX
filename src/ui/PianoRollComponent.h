@@ -102,7 +102,7 @@ public:
 
 private:
     enum class Drag { none, move, resize, resizeLeft, erase, keyboard, select, velocity, velocityLine, velocitySet, paint, muting, knife,
-                      zoomRange, listen, pan, keyZoom, keySelect, rulerSelect, drumPaint, stretch, eventDraw, eventErase };
+                      zoomRange, listen, pan, keyZoom, keySelect, rulerSelect, seek, drumPaint, stretch, eventDraw, eventErase };
 
     // Channel selector: the wheel steps through the channels with notes (Ctrl+wheel: all channels).
     class ChannelBox final : public juce::ComboBox
@@ -139,6 +139,7 @@ private:
     void zoomIn (int anchorX);
     void zoomOut (int anchorX);
     void listenAt (int x);
+    void seekAt (int x, bool snapOn); // the ruler: moves the position (Alt: off the grid)
     void stopListening();
     void cutWithKnife (juce::Point<int> from, juce::Point<int> to, bool snapOn);
     void paintNoteAt (std::int64_t start, int key, bool monophonic);
