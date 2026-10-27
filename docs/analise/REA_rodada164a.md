@@ -52,6 +52,10 @@ against FL running.
 - **Project file**: `"layer"` and `"keyRegion"`; **.flp import**: children (0x5E, mapped through the import's channel
   map, FPC splits too), flags, Fade and every channel's key region.
 
+Order in a chunk (merged with round 164b): Layers expand first, then VFX channels run — a Layer's child can be a VFX
+channel (its processor gets the Layer's notes); notes a VFX sends on a port to a Layer are not expanded again [HYP:
+FL's order not checked].
+
 ## 2. X-Y Controller
 
 ### 2.1 FL [DECOMP 0x6C6D90, 0x6C6470, 0x6C5D20; REA_rodada15 §11.1, REA_rodada17 §4]
