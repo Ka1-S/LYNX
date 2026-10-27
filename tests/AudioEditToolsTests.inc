@@ -302,6 +302,13 @@ TEST (audioedittools_vocal_denoise_match_spectrum_round165l)
     const double sr = 44100.0;
     auto noise = noiseDoc (2.0, 0.03f, sr, 5);
     auto tone = sineDoc (300.0, 2.0, sr, 0.3f);
+    // syllables: 150 ms on, 100 ms off (a steady tone would count as noise, like a hum)
+    for (auto& ch : tone.audio.channels)
+        for (std::size_t i = 0; i < ch.size(); ++i)
+        {
+            const auto t = std::fmod ((double) i / sr, 0.25);
+            ch[i] *= (float) (t < 0.15 ? std::sin (3.141592653589793 * t / 0.15) : 0.0);
+        }
     auto d = tone;
     for (int c = 0; c < 2; ++c)
         for (std::size_t i = 0; i < d.audio.channels[0].size(); ++i)
@@ -319,8 +326,8 @@ TEST (audioedittools_vocal_denoise_match_spectrum_round165l)
     }
     CHECK (after < before * 0.35);
     auto n = d;
-    ae::vocalDenoise (n, {}, -1.0); // the noise only: the tone mostly goes
-    CHECK (toneLevel (n.audio.channels[0], a, b, 300.0, sr) < 0.1);
+    ae::vocalDenoise (n, {}, -1.0); // the noise only: the voice mostly goes
+    CHECK (toneLevel (n.audio.channels[0], a, b, 300.0, sr) < 0.5 * toneLevel (d.audio.channels[0], a, b, 300.0, sr));
 
     // match spectrum: white noise matched to a low-passed noise gets darker
     auto ref = noiseDoc (1.0, 0.2f, sr, 11);

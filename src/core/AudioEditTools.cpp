@@ -717,6 +717,8 @@ std::vector<Range> quietParts (const Audio& audio, Range r, float threshold, dou
     std::vector<Range> parts;
     if (audio.empty())
         return parts;
+    if (r.empty())
+        r = { 0, audio.frames() };
     r.start = std::clamp<std::int64_t> (r.start, 0, audio.frames());
     r.end = std::clamp<std::int64_t> (r.end, r.start, audio.frames());
     const auto window = std::max<std::int64_t> (16, (std::int64_t) (audio.sampleRate * 0.005)); // 5 ms
@@ -1592,60 +1594,68 @@ void denoise (Document& doc, Range r, const NoiseProfile& profile, const Denoise
 }
 
 // --- vocal denoise ----------------------------------------------------------------------------------------------------
-// A speech-oriented noise suppressor: the noise floor per bin is tracked by minimum statistics (the lowest
-// smoothed power over the last ~1.5 s, corrected upwards), the speech gain is a decision-directed Wiener gain
-// (Ephraim-Malah style a-priori SNR), with a floor so the result never pumps to silence. mix > 0 blends towards the
-// voice, mix < 0 towards the removed noise.
+// A speech-oriented noise suppressor. The noise power per bin is the 20th percentile of the frame powers over the
+// whole range (speech leaves gaps between syllables, so the lower part of the distribution is the noise; for noise
+// alone the frame power is exponentially distributed and its 20th percentile is 0.223 x the mean, corrected here).
+// The speech gain is a decision-directed Wiener gain (Ephraim-Malah a-priori SNR) with a floor, so the result never
+// pumps to silence. mix > 0 blends towards the voice, mix < 0 towards the removed noise.
 void vocalDenoise (Document& doc, Range r, double mix, Progress* progress)
 {
     r = orAll (doc, r);
     if (r.empty())
         return;
     constexpr int size = 2048, hop = size / 4;
-    const auto sr = doc.audio.sampleRate;
     const auto bins = size / 2 + 1;
     const auto from = r.start - size, to = r.end + size;
     auto parts = excerpt (doc.audio, from, to);
     const auto channels = (int) parts.size();
-    const auto history = std::max (8, (int) std::lround (1.5 * sr / hop));
-    const auto smoothCoef = 0.7;
     mix = std::clamp (mix, -1.0, 1.0);
+    const auto window = sqrtHann (size);
     for (int c = 0; c < channels; ++c)
     {
-        std::vector<double> smoothed ((std::size_t) bins, 0.0), noise ((std::size_t) bins, 0.0), prevClean ((std::size_t) bins, 0.0);
-        std::vector<std::vector<double>> minWindow ((std::size_t) bins);
-        // sub-windows of the minimum tracker (8 of history/8 frames each)
-        const auto sub = std::max (1, history / 8);
-        std::vector<double> subMin ((std::size_t) bins, 1.0e30);
-        std::int64_t frame = 0;
-        auto out = stftProcess (parts[(std::size_t) c], size, [&] (std::vector<double>& re, std::vector<double>& im, std::int64_t) {
+        // pass 1: the noise floor (at most ~400 frames looked at)
+        const auto& x = parts[(std::size_t) c];
+        const auto n = (std::int64_t) x.size();
+        const auto frames = std::max<std::int64_t> (1, (n - size) / hop + 1);
+        const auto stride = std::max<std::int64_t> (1, frames / 400);
+        std::vector<std::vector<float>> powers ((std::size_t) bins);
+        std::vector<double> re ((std::size_t) size), im ((std::size_t) size);
+        for (std::int64_t f = 0; f < frames; f += stride)
+        {
+            for (int i = 0; i < size; ++i)
+            {
+                const auto k = f * hop + i;
+                re[(std::size_t) i] = (k < n ? (double) x[(std::size_t) k] : 0.0) * window[(std::size_t) i];
+                im[(std::size_t) i] = 0.0;
+            }
+            fftInPlace (re, im, false);
+            for (int b = 0; b < bins; ++b)
+                powers[(std::size_t) b].push_back ((float) (re[(std::size_t) b] * re[(std::size_t) b] + im[(std::size_t) b] * im[(std::size_t) b]));
+        }
+        std::vector<double> noise ((std::size_t) bins), prevClean ((std::size_t) bins, 0.0);
+        for (int b = 0; b < bins; ++b)
+        {
+            auto& v = powers[(std::size_t) b];
+            const auto at = v.begin() + (std::ptrdiff_t) (v.size() / 5);
+            std::nth_element (v.begin(), at, v.end());
+            noise[(std::size_t) b] = std::max (1.0e-20, (double) *at * 4.48);
+        }
+        powers.clear();
+        if (stop (progress))
+            return;
+        // pass 2: the gains
+        auto out = stftProcess (x, size, [&] (std::vector<double>& fre, std::vector<double>& fim, std::int64_t) {
             for (int b = 0; b < bins; ++b)
             {
-                const auto power = re[(std::size_t) b] * re[(std::size_t) b] + im[(std::size_t) b] * im[(std::size_t) b];
-                auto& sm = smoothed[(std::size_t) b];
-                sm = frame == 0 ? power : smoothCoef * sm + (1.0 - smoothCoef) * power;
-                subMin[(std::size_t) b] = std::min (subMin[(std::size_t) b], sm);
-                auto& w = minWindow[(std::size_t) b];
-                if (frame % sub == sub - 1)
-                {
-                    w.push_back (subMin[(std::size_t) b]);
-                    if (w.size() > 8)
-                        w.erase (w.begin());
-                    subMin[(std::size_t) b] = 1.0e30;
-                }
-                auto m = subMin[(std::size_t) b];
-                for (auto v : w)
-                    m = std::min (m, v);
-                noise[(std::size_t) b] = std::max (1.0e-20, m * 2.0); // the minimum under-reads the mean noise
+                const auto power = fre[(std::size_t) b] * fre[(std::size_t) b] + fim[(std::size_t) b] * fim[(std::size_t) b];
                 const auto post = power / noise[(std::size_t) b];
                 const auto prior = std::max (0.003, 0.98 * prevClean[(std::size_t) b] / noise[(std::size_t) b] + 0.02 * std::max (0.0, post - 1.0));
-                const auto gain = std::max (0.06, prior / (1.0 + prior));
+                const auto gain = std::max (0.08, prior / (1.0 + prior));
                 prevClean[(std::size_t) b] = gain * gain * power;
                 const auto k = mix >= 0.0 ? (1.0 - mix) + mix * gain : (1.0 + mix) + (-mix) * (1.0 - gain);
-                re[(std::size_t) b] *= k;
-                im[(std::size_t) b] *= k;
+                fre[(std::size_t) b] *= k;
+                fim[(std::size_t) b] *= k;
             }
-            ++frame;
         }, progress, (double) c / channels, 1.0 / channels);
         if (stop (progress))
             return;
