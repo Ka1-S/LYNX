@@ -79,7 +79,8 @@ enum class InstrumentKind : std::uint8_t
     midiOut,    // FL's MIDI Out (REA_rodada16 §1, REA_rodada133 §4): no sound; its notes and MIDI controls go to the plugins whose
                 // MIDI input port is its port (PluginRef::midiInPort). FL's state (channel @4, port @24) in pluginState
     patcher,    // FL's Patcher as a generator (REA_rodada141): a graph of instruments and effects in ChannelDef::patcher
-    soundfont   // LYNX Soundfont (REA_rodada158, core/SoundFont.h): the .sf2 / .sf3 in samplePath, settings in modelParams
+    soundfont,  // LYNX Soundfont (REA_rodada158, core/SoundFont.h): the .sf2 / .sf3 in samplePath, settings in modelParams
+    layer       // FL's Layer channel (REA_rodada164a, core/Layer.h): no sound; its notes play its children (ChannelDef::layer)
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -495,6 +496,20 @@ struct ChannelMisc
     bool operator== (const ChannelMisc&) const = default;
 };
 
+// FL's Layer channel (REA_rodada164a §1, FL's manual "Layer channel settings"): it makes no sound; every note played on
+// it (Piano roll, steps, keyboard) plays its children channels. A child played from its own notes is not affected.
+struct LayerSettings
+{
+    std::vector<int> children; // channel indices ("Set children": the selected channels, in Channel Rack order)
+    bool random = false;     // one child at random per note (else every child)
+    bool crossfade = false;  // the Fade knob crossfades the children, top to bottom
+    bool sequential = false; // the children in turn (round robin), one per note
+    float fade = 0.0f;       // the Fade knob 0..1 (with crossfade)
+    // (the Layer's VOL / PAN are the channel's volume / pan, its PITCH the header's pitch knob: sampler.pitch)
+
+    bool operator== (const LayerSettings&) const = default;
+};
+
 struct ChannelDef
 {
     std::string name;
@@ -524,7 +539,13 @@ struct ChannelDef
     ChannelMisc misc;         // FL's Misc tab: time shift / gate, echo delay, velocity / key tracking (REA round 146b)
     // Piano Roll key labels (FL 2026's custom key labels, REA round 153): MIDI key -> the name shown on that key
     std::map<int, std::string> keyLabels;
+    // FL's key region (the Channel settings keyboard's ruler, REA_rodada164a §2): the channel plays only the notes
+    // from keyLow to keyHigh (MIDI keys); 0…127 = every note. Layer's "Split children" sets one key per child.
+    int keyLow = 0, keyHigh = 127;
+    LayerSettings layer; // instrument == layer: its children and options
 
+    bool hasKeyRegion() const noexcept { return keyLow > 0 || keyHigh < 127; }
+    bool inKeyRegion (int key) const noexcept { return key >= keyLow && key <= keyHigh; }
     bool operator== (const ChannelDef&) const = default;
 };
 

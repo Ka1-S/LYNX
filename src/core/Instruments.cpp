@@ -230,6 +230,7 @@ private:
             case InstrumentKind::plugin:
             case InstrumentKind::controller:
             case InstrumentKind::midiOut:
+            case InstrumentKind::layer:
             case InstrumentKind::patcher:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
@@ -2829,7 +2830,7 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 {
     if (kind == InstrumentKind::controller)
         return std::make_unique<ControllerInstrument>();
-    if (kind == InstrumentKind::midiOut)
+    if (kind == InstrumentKind::midiOut || kind == InstrumentKind::layer) // (a Layer's notes go to its children)
         return std::make_unique<MidiOutInstrument>();
 
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)

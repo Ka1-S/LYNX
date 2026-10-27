@@ -75,6 +75,13 @@ std::string lowercase (std::string s)
 }
 } // namespace
 
+void applyFlLayerFlags (int flags, LayerSettings& layer)
+{
+    // REA_rodada164a §1: bit 0 Random, bit 3 Crossfade
+    layer.random = (flags & 1) != 0;
+    layer.crossfade = (flags & 8) != 0;
+}
+
 InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType type)
 {
     const auto name = lowercase (channelName);
@@ -513,6 +520,20 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
             c.channel = c.channel >= 0 ? shift (c.channel) : c.channel;
     });
 
+    // Layer children (round 164): shifted; a Layer of the kit plays every pad
+    for (auto& l : song.channels)
+    {
+        std::vector<int> kids;
+        for (const auto k : l.layer.children)
+        {
+            kids.push_back (shift (k));
+            if (k == channel)
+                for (int i = 1; i <= inserted; ++i)
+                    kids.push_back (channel + i);
+        }
+        l.layer.children = std::move (kids);
+    }
+
     song.forEachTarget ([&] (AutomationTarget& t) {
         if ((t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan
              || t.kind == AutomationTargetKind::channelParam) && t.index >= 0)
@@ -779,6 +800,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         def.name = c.name.empty() ? "Channel " + std::to_string (c.index + 1) : c.name;
         sampleUser = (c.type == flp::ChannelType::audioClip ? "Audio clip: " : "") + def.name;
         def.instrument = guessInstrument (def.name, c.type);
+        // FL's Layer channel (REA_rodada164a §1): its children (FL's channel indices, mapped below) and options
+        if (c.type == flp::ChannelType::layer)
+        {
+            def.instrument = InstrumentKind::layer;
+            def.layer.children = c.layerChildren;
+            applyFlLayerFlags (c.layerFlags, def.layer);
+        }
 
         // FL synthesizer that becomes the internal synth: a preset matching the name (in FLEX, the name
         // of the preset chosen in the plugin says more than the channel's)
@@ -1848,6 +1876,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         song.channels.push_back (std::move (def));
     }
+
+    // Layer children: FL's channel indices → LYNX's (children that did not become channels are dropped)
+    for (auto& def : song.channels)
+        if (def.instrument == InstrumentKind::layer)
+        {
+            std::vector<int> mapped;
+            for (const auto k : def.layer.children)
+                if (const auto found = channelMap.find (k); found != channelMap.end())
+                    mapped.push_back (found->second);
+            def.layer.children = std::move (mapped);
+            if (options.report != nullptr)
+                ++options.report->converted["Layer"];
+        }
 
     // Mixer: names, mute/solo, routing and levels from the .flp; enough inserts for all
     // routes (minimum 16, like a new project). FL's extra tracks (500/501) are left out.

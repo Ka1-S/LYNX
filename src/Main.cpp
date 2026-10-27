@@ -44,6 +44,7 @@
 #include "core/FlSynths.h"
 #include "ui/Dialogs.h"
 #include "core/RackOps.h"
+#include "core/Layer.h"
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
@@ -4416,6 +4417,27 @@ private:
         settings.port = 1;
         lynx::midictl::writeMidiOut (out.pluginState, settings);
         song.channels.push_back (out);
+        // a Layer (round 164) over three synths split across the keyboard, crossfading
+        for (const auto* name : { "Bass", "Pad", "Lead" })
+        {
+            lynx::ChannelDef c;
+            c.name = name;
+            c.instrument = lynx::InstrumentKind::synth;
+            song.channels.push_back (c);
+        }
+        {
+            lynx::ChannelDef layer;
+            layer.name = "Layer";
+            layer.instrument = lynx::InstrumentKind::layer;
+            song.channels.push_back (layer);
+            const auto self = (int) song.channels.size() - 1;
+            lynx::layer::setChildren (song, self, { 2, 3, 4 });
+            song.channels[2].keyLow = 0, song.channels[2].keyHigh = 47;
+            song.channels[3].keyLow = 36, song.channels[3].keyHigh = 83;
+            song.channels[4].keyLow = 72, song.channels[4].keyHigh = 127;
+            song.channels[(std::size_t) self].layer.crossfade = true;
+            song.channels[(std::size_t) self].layer.fade = 0.35f;
+        }
         song.patterns.emplace_back();
         offline.setSong (std::move (song));
         offline.dispatchPendingMessages();
@@ -4426,6 +4448,8 @@ private:
         };
         shoot (lynx::makeChannelSettingsPanel (offline, 0), "-envelope-controller.png");
         shoot (lynx::makeChannelSettingsPanel (offline, 1), "-midi-out.png");
+        shoot (lynx::makeChannelSettingsPanel (offline, 5), "-layer.png");
+        shoot (lynx::makeChannelSettingsPanel (offline, 3), "-layer-child.png");
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
             for (int part = 0; part < 7; ++part)

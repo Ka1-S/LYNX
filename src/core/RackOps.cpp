@@ -395,6 +395,12 @@ std::vector<int> unusedChannels (const Song& song)
     for (const auto& a : song.automations)
         mark (a.source.channel);
 
+    // a used Layer's children play its notes (round 164)
+    for (std::size_t c = 0; c < song.channels.size(); ++c)
+        if (used[c] && song.channels[c].instrument == InstrumentKind::layer)
+            for (const auto k : song.channels[c].layer.children)
+                mark (k);
+
     std::vector<int> out;
     for (int i = 0; i < (int) used.size(); ++i)
         if (! used[(std::size_t) i])
@@ -507,6 +513,10 @@ void permuteChannels (Song& song, const std::vector<int>& newOrder)
     for (auto& a : song.automations)
         if (a.source.channel >= 0)
             a.source.channel = map (a.source.channel);
+
+    for (auto& c : song.channels) // Layer children (round 164)
+        for (auto& k : c.layer.children)
+            k = map (k);
 }
 
 bool moveChannels (Song& song, std::vector<int>& selection, int delta)

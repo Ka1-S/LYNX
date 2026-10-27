@@ -42,6 +42,7 @@
 #include "core/ProjectContents.h"
 #include "core/FlPatcher.h"
 #include "core/Patcher.h"
+#include "core/Layer.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
@@ -16045,3 +16046,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Workflow163Tests.inc"
 #include "Rec163Tests.inc"
 #include "Ui163Tests.inc"
+#include "Layer164Tests.inc"

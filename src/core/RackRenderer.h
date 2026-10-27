@@ -96,6 +96,8 @@ struct RackState
     // Cut groups: channels each channel cuts when it plays (cutBy == its cutGroup).
     std::vector<std::vector<int>> cutTargets;
     bool hasCutGroups = false;
+    // Layer channels (round 164): their notes play their children (RackRenderer::expandLayers)
+    bool hasLayers = false;
 
     // Mixer: insert processing order and which ones sound with the current solo.
     std::vector<int> mixerOrder;
@@ -347,6 +349,12 @@ private:
     int liveRoutedCount = 0;
     double liveTick = 0.0;
     bool routesLiveNotes (const RackState& state, int channel) const noexcept;
+    // Layer channels (round 164): each note event of a Layer is copied to the children it plays (core/Layer.h). The
+    // child a Random / Sequential note picked is kept per Layer and key so its "off" reaches the same child.
+    void expandLayers (const RackState& state) noexcept;
+    std::vector<std::int16_t> layerPick; // [channel * 128 + key]: the child, −1 none (maxChannels × 128)
+    std::array<int, maxChannels> layerTurn {};
+    std::uint32_t layerRandom = 0x2545F491u;
     void applyLiveControl (const RackState& state, const NoteEvent& e) noexcept;
     WorkerPool* workers = nullptr;
     LiveInput* liveInput = nullptr;

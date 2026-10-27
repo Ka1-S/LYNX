@@ -128,6 +128,7 @@ APP_SOURCES+=(src/core/MidiControls.cpp src/core/FormulaController.cpp src/ui/Co
 APP_SOURCES+=(src/core/VoiceShift.cpp)
 # FL engines usable in native projects (round 142, issue #5)
 APP_SOURCES+=(src/core/NativeEngines.cpp src/ui/NewtoneEditor.cpp)
+APP_SOURCES+=(src/core/Layer.cpp src/ui/LayerEditor.cpp) # FL's Layer channel (round 164)
 # FL's DirectWave (REA round 72)
 APP_SOURCES+=(src/core/DirectWave.cpp)
 # Ogg Vorbis decoding as FL does (REA round 77)

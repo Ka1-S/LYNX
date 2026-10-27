@@ -79,6 +79,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::midiOut: return "MIDI Out";
         case InstrumentKind::patcher: return "Patcher";
         case InstrumentKind::soundfont: return "LYNX Soundfont";
+        case InstrumentKind::layer: return "Layer";
     }
     return "?";
 }
@@ -97,6 +98,7 @@ juce::String instrumentLabel (InstrumentKind k)
         case InstrumentKind::audioClip: return tr ("Audio clip");
         case InstrumentKind::controller: return tr ("Envelope Controller");
         case InstrumentKind::midiOut: return tr ("MIDI Out");
+        case InstrumentKind::layer: return tr ("Layer");
         default: return instrumentName (k);
     }
 }
@@ -2098,6 +2100,14 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
             count += ch.instrument == InstrumentKind::midiOut;
         settings.channel = count % 15 >= 9 ? count % 15 + 1 : count % 15;
         midictl::writeMidiOut (c.pluginState, settings);
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Layer (round 164): plays its children (its settings open: select channels, then Set children)
+    menu.addItem (tr ("Layer"), [this, add] {
+        ChannelDef c;
+        c.name = tr ("Layer").toStdString();
+        c.instrument = InstrumentKind::layer;
         const auto added = add (c);
         openChannelSettings (engine, added);
     });

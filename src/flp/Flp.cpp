@@ -15,6 +15,8 @@ enum : std::uint32_t
     evPanLaw = 0x17,
     evTimeSignatureNumerator = 0x11,
     evChannelSwingMix = 0x61,
+    evLayerChild = 0x5E,  // u16: a Layer channel's child (one event per child; REA_rodada164a §1)
+    evLayerFlags = 0x90,  // u32: a Layer channel's options (REA_rodada164a §1)
     evChannelTimeShift = 0x59,  // u16: Misc › Time › Shift, FL's time-knob value (REA round 146b)
     evChannelEcho = 0xD1,       // i32 feedback, pan, pitch, echoes, time (REA round 146b)
     evChannelEchoModXY = 0x8A,  // u16 mod X, u16 mod Y of the echoes (128 = none)
@@ -476,6 +478,16 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
             case evChannelSwingMix:
                 if (section == Section::channel)
                     channel().swingMix = (int) e.value;
+                break;
+
+            case evLayerChild:
+                if (section == Section::channel)
+                    channel().layerChildren.push_back ((int) e.value);
+                break;
+
+            case evLayerFlags:
+                if (section == Section::channel)
+                    channel().layerFlags = (int) e.value;
                 break;
 
             case evChannelTimeShift:

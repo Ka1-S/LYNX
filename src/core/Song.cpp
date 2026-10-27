@@ -242,6 +242,15 @@ void Song::removeChannel (int index)
         else if (automation.source.channel > index)
             --automation.source.channel;
 
+    for (auto& c : channels) // Layer children (round 164)
+    {
+        auto& kids = c.layer.children;
+        kids.erase (std::remove (kids.begin(), kids.end(), index), kids.end());
+        for (auto& k : kids)
+            if (k > index)
+                --k;
+    }
+
     removeDeadMidiLinks();
 }
 

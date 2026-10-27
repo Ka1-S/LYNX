@@ -115,6 +115,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::midiOut: return "midiOut";
         case InstrumentKind::patcher: return "patcher";
         case InstrumentKind::soundfont: return "soundfont";
+        case InstrumentKind::layer: return "layer";
     }
     return "synth";
 }
@@ -129,7 +130,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
                     InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::flkeys,
-                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut, InstrumentKind::patcher, InstrumentKind::soundfont })
+                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut, InstrumentKind::patcher, InstrumentKind::soundfont, InstrumentKind::layer })
         if (id == instrumentId (k))
             return k;
 
@@ -889,6 +890,22 @@ juce::var channelToVar (const ChannelDef& c)
     }
     if (c.cutGroup != 0 || c.cutBy != 0)
         o->setProperty ("cut", juce::Array<juce::var> { c.cutGroup, c.cutBy });
+    // FL's key region and Layer channels (round 164)
+    if (c.hasKeyRegion())
+        o->setProperty ("keyRegion", juce::Array<juce::var> { c.keyLow, c.keyHigh });
+    if (c.instrument == InstrumentKind::layer)
+    {
+        auto l = std::make_unique<juce::DynamicObject>();
+        juce::Array<juce::var> kids;
+        for (const auto k : c.layer.children)
+            kids.add (k);
+        l->setProperty ("children", kids);
+        l->setProperty ("random", c.layer.random);
+        l->setProperty ("crossfade", c.layer.crossfade);
+        l->setProperty ("sequential", c.layer.sequential);
+        l->setProperty ("fade", c.layer.fade);
+        o->setProperty ("layer", juce::var (l.release()));
+    }
 
     if (! (c.synth == SynthSettings {}))
     {
@@ -1102,6 +1119,22 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
             def.arp.slide = (bool) fl.getProperty ("slide", false);
             def.arp.octaveRepeat = juce::jlimit (0, 16, (int) fl.getProperty ("octaveRepeat", 1));
         }
+    }
+    if (const auto& region = c["keyRegion"]; region.isArray() && region.size() >= 2)
+    {
+        def.keyLow = juce::jlimit (0, 127, (int) region[0]);
+        def.keyHigh = juce::jlimit (def.keyLow, 127, (int) region[1]);
+    }
+    if (const auto& l = c["layer"]; l.isObject())
+    {
+        if (const auto* kids = l["children"].getArray())
+            for (const auto& k : *kids)
+                if ((int) k >= 0)
+                    def.layer.children.push_back ((int) k);
+        def.layer.random = (bool) l.getProperty ("random", false);
+        def.layer.crossfade = (bool) l.getProperty ("crossfade", false);
+        def.layer.sequential = (bool) l.getProperty ("sequential", false);
+        def.layer.fade = juce::jlimit (0.0f, 1.0f, (float) (double) l.getProperty ("fade", 0.0));
     }
     if (const auto& misc = c["misc"]; misc.isObject())
     {

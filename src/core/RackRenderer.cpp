@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/Layer.h"
 #include "core/FacetEq.h"
 #include "core/MidiControls.h"
 #include "core/Patcher.h"
@@ -408,6 +409,9 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                     state->cutTargets[c].push_back ((int) d);
                     state->hasCutGroups = true;
                 }
+    state->hasLayers = std::any_of (channels.begin(), channels.end(), [] (const ChannelDef& c) {
+        return c.instrument == InstrumentKind::layer && ! c.layer.children.empty();
+    });
     const auto audible = state->song.soloAudible();
     state->mixerAudible.assign (audible.begin(), audible.end());
     loadtrace::add ("rack_schedule_graph", loadtrace::msSince (tailStarted));
@@ -1063,6 +1067,7 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
     blockCapacity = std::max (64, maxBlockSize);
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
     hwScratch.assign (2 * (std::size_t) blockCapacity, 0.0f);
+    layerPick.assign ((std::size_t) maxChannels * 128, (std::int16_t) -1);
 
     if (lastState != nullptr)
     {
@@ -1422,7 +1427,9 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         {
             if (e.key >= 0 && e.key < 128)
                 held[(std::size_t) (e.key >> 6)] |= bit;
-            if (! c.muted)
+            // FL's key region (round 164): the channel plays only the notes inside it (audio clips: the key is the clip)
+            const auto inRegion = c.instrument == InstrumentKind::audioClip || c.inKeyRegion (list[index].key);
+            if (! c.muted && inRegion)
             {
                 // Max polyphony: the oldest note is released first
                 if (const auto limit = voiceLimitFor (c.maxPolyphony, c.synth.mono); limit > 0)
@@ -1444,8 +1451,9 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
                 // an echo's volume: the instrument scales the voice, else (engines without it) the velocity
                 auto velocity = e.velocity;
-                if (gains != nullptr && gains[index] != 1.0f && ! instrument.setNextNoteGain (gains[index]))
-                    velocity *= gains[index];
+                const auto gain = e.gain * (gains != nullptr ? gains[index] : 1.0f);
+                if (gain != 1.0f && ! instrument.setNextNoteGain (gain))
+                    velocity *= gain;
                 instrument.noteOnAt (e.key, velocity, e.startSeconds);
             }
         }
@@ -1914,6 +1922,9 @@ void RackRenderer::process (const RackState* state,
                 continue;
             }
             auto& order = voiceOrders[(std::size_t) std::min (e.channel, maxChannels - 1)];
+            if (e.type == NoteEvent::Type::on && (std::size_t) e.channel < state->song.channels.size()
+                && ! state->song.channels[(std::size_t) e.channel].inKeyRegion (e.key))
+                continue; // outside the channel's key region (round 164)
             if (e.type == NoteEvent::Type::on)
             {
                 const auto& def = state->song.channels;
@@ -2071,11 +2082,73 @@ void RackRenderer::applyLiveControl (const RackState& state, const NoteEvent& e)
             }
 }
 
+void RackRenderer::expandLayers (const RackState& state) noexcept
+{
+    const auto& channels = state.song.channels;
+    const auto count = events.size();
+    auto added = false;
+    for (int i = 0; i < count; ++i)
+    {
+        const auto e = events[i];
+        if (e.channel < 0 || e.channel >= (int) channels.size() || e.channel >= maxChannels)
+            continue;
+        const auto& l = channels[(std::size_t) e.channel];
+        if (l.instrument != InstrumentKind::layer || l.layer.children.empty())
+            continue;
+        const auto key = std::clamp (e.key, 0, 127);
+        auto* picked = layerPick.empty() ? nullptr : &layerPick[(std::size_t) e.channel * 128 + (std::size_t) key];
+        auto child = e;
+        child.pan = std::clamp (e.pan + l.pan, -1.0f, 1.0f);
+        child.cents = e.cents + 100.0f * l.sampler.pitch;
+        const auto one = l.layer.random || l.layer.sequential;
+
+        if (e.type == NoteEvent::Type::on)
+        {
+            if (l.muted)
+                continue;
+            std::array<layer::Pick, 64> picks;
+            const auto n = layer::pick (l, channels, key, layerRandom, layerTurn[(std::size_t) e.channel], picks.data(), (int) picks.size());
+            if (one && picked != nullptr)
+                *picked = (std::int16_t) (n > 0 ? picks[0].child : -1);
+            const auto level = layer::levelGain (l);
+            for (int k = 0; k < n; ++k)
+            {
+                child.channel = picks[(std::size_t) k].child;
+                child.gain = e.gain * level * picks[(std::size_t) k].gain;
+                events.add (child);
+                added = true;
+            }
+        }
+        else if (e.type == NoteEvent::Type::off && one)
+        {
+            if (picked != nullptr && *picked >= 0)
+            {
+                child.channel = *picked;
+                *picked = -1;
+                events.add (child);
+                added = true;
+            }
+        }
+        else if (e.type == NoteEvent::Type::off || e.type == NoteEvent::Type::slide || e.type == NoteEvent::Type::choke)
+            for (const auto c : l.layer.children)
+                if (c >= 0 && c < (int) channels.size() && c != e.channel && channels[(std::size_t) c].instrument != InstrumentKind::layer)
+                {
+                    child.channel = c;
+                    events.add (child);
+                    added = true;
+                }
+    }
+    if (added)
+        events.sortByOffset();
+}
+
 bool RackRenderer::routesLiveNotes (const RackState& state, int channel) const noexcept
 {
     const auto c = (std::size_t) channel;
     if (channel < 0 || c >= state.song.channels.size())
         return false;
+    if (state.song.channels[c].instrument == InstrumentKind::layer) // (its children play the note: round 164)
+        return true;
     const auto& misc = state.song.channels[c].misc;
     return (c < state.arpeggiators.size() && state.arpeggiators[c] != nullptr) || (c < state.echoes.size() && state.echoes[c] != nullptr)
            || misc.key.pan != 0.0f || misc.velocity.pan != 0.0f
@@ -2165,6 +2238,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         liveRoutedCount = 0;
         events.sortByOffset();
     }
+
+    // Layer channels play their children (round 164)
+    if (state.hasLayers)
+        expandLayers (state);
 
     // cut groups: each note of a channel "cuts" the channels linked to it, at the same sample
     if (state.hasCutGroups)
