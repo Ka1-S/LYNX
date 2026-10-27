@@ -104,6 +104,12 @@ public:
     void noteOnPort (int port, int key, float velocity, int midiChannel) noexcept;
     void noteOffPort (int port, int key, int midiChannel) noexcept;
     bool takesMidiPort (int port) const noexcept;
+    // a controller's mod wheel, other CCs, channel pressure and pitch wheel played into the Patcher's channel (round
+    // 164e): like FL's Patcher (it takes MIDI input and passes it on), the instruments cabled to "From LYNX" notes get
+    // them as if they were the channel (hosted plugins the MIDI message, LYNX's samplers the bend)
+    void midiMessage (const std::uint8_t* bytes, int size) noexcept;
+    void pitchBend (float semitones) noexcept;
+    void controlChange (int cc, float value) noexcept;
     void allNotesOff() noexcept;
     void slideTo (int key, float cents, float samples) noexcept;
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept;
@@ -134,6 +140,8 @@ public:
 
 private:
     struct Node;
+    template <typename F>
+    void forNoteTargets (F&& f) noexcept;
     struct AudioWire;
     struct ControlWire;
     struct Values;

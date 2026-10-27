@@ -713,6 +713,29 @@ void Graph::noteOffPort (int port, int key, int midiChannel) noexcept
         deliver (patchMidiPortPin (port), false, key, 0.0f, midiChannel);
 }
 
+template <typename F>
+void Graph::forNoteTargets (F&& f) noexcept
+{
+    if (pinTargets.empty())
+        return;
+    for (const auto& t : pinTargets[0])
+        if (auto& i = nodes[(std::size_t) t.node]->instrument)
+            f (*i);
+}
+
+void Graph::midiMessage (const std::uint8_t* bytes, int size) noexcept
+{
+    forNoteTargets ([&] (Instrument& i) { i.midiMessage (bytes, size); });
+}
+void Graph::pitchBend (float semitones) noexcept
+{
+    forNoteTargets ([&] (Instrument& i) { i.pitchBend (semitones); });
+}
+void Graph::controlChange (int cc, float value) noexcept
+{
+    forNoteTargets ([&] (Instrument& i) { i.controlChange (cc, value); });
+}
+
 bool Graph::takesMidiPort (int port) const noexcept
 {
     return port >= 0 && port < patchMidiPorts && ! pinTargets[(std::size_t) patchMidiPortPin (port)].empty();
@@ -1148,6 +1171,9 @@ public:
     void noteOn (int key, float velocity) noexcept override { graph.noteOn (key, velocity); }
     void noteOff (int key) noexcept override { graph.noteOff (key); }
     void allNotesOff() noexcept override { graph.allNotesOff(); }
+    void midiMessage (const std::uint8_t* bytes, int size) noexcept override { graph.midiMessage (bytes, size); }
+    void pitchBend (float semitones) noexcept override { graph.pitchBend (semitones); }
+    void controlChange (int cc, float value) noexcept override { graph.controlChange (cc, value); }
     void noteOnMidi (int key, float velocity, int midiChannel) noexcept override { graph.noteOnMidi (key, velocity, midiChannel); }
     void noteOffMidi (int key, int midiChannel) noexcept override { graph.noteOffMidi (key, midiChannel); }
     void noteOnPort (int port, int key, float velocity, int midiChannel) noexcept override { graph.noteOnPort (port, key, velocity, midiChannel); }
