@@ -65,43 +65,54 @@ TEST (patcher164f_mixer_slot_patcher_notes_land_at_their_sample)
     // a MIDI Out channel on port 4 plays a note at a tick inside a block; a mixer-slot Patcher on insert 1 feeds a
     // synth from its "MIDI port 4" pin. The synth starts at the note's sample, not at the block's start (round 162 put
     // it at the chunk's start).
-    auto song = lynx::Song::makeDefault();
-    song.mixer.resize (3);
-    song.channels.resize (1);
-    song.channels[0] = {};
-    song.channels[0].instrument = lynx::InstrumentKind::midiOut;
-    lynx::midictl::MidiOutSettings s;
-    s.port = 4;
-    lynx::midictl::writeMidiOut (song.channels[0].pluginState, s);
-    song.channels[0].mixerTrack = 1;
-    lynx::EffectSlot slot = lynx::makeEffectSlot (lynx::EffectKind::patcher);
-    slot.patcher.nodes = { generator (lynx::InstrumentKind::synth) };
-    slot.patcher.wires = { patcher162::midi (lynx::patchFromHost, lynx::patchMidiPortPin (4), 0, 0), patcher141::audio (0, lynx::patchToHost) };
-    song.mixer[1].effects = { slot };
-    const std::int64_t noteTick = lynx::ppq / 2; // 0.5 beat
-    lynx::Pattern p;
-    p.notes.push_back ({ noteTick, lynx::ppq, 0, 60, 0.8f });
-    song.patterns = { p };
-    lynx::Clip clip;
-    clip.pattern = 0;
-    clip.length = lynx::ppq * 4;
-    song.playlist = { clip };
-    song.mode = lynx::PlayMode::song;
-
-    auto state = lynx::RackState::build (song, nullptr, 48000.0);
-    lynx::RackRenderer r;
-    r.prepare (48000.0, 512);
-    std::vector<float> all, l (512), rr (512);
-    double tick = 0.0;
-    for (int b = 0; b < 40; ++b, tick += 512.0 * song.bpm * lynx::ppq / 60.0 / 48000.0)
+    // renders the song with its note at `noteTick`; returns the first audible sample
+    const auto render = [] (std::int64_t noteTick)
     {
-        r.process (state.get(), true, tick, 512, l.data(), rr.data(), nullptr);
-        all.insert (all.end(), l.begin(), l.end());
-    }
-    const auto expected = (int) std::ceil ((double) noteTick / lynx::ppq * 60.0 / song.bpm * 48000.0);
-    const auto first = onset (all);
+        auto song = lynx::Song::makeDefault();
+        song.mixer.resize (3);
+        song.channels.resize (1);
+        song.channels[0] = {};
+        song.channels[0].instrument = lynx::InstrumentKind::midiOut;
+        lynx::midictl::MidiOutSettings s;
+        s.port = 4;
+        lynx::midictl::writeMidiOut (song.channels[0].pluginState, s);
+        song.channels[0].mixerTrack = 1;
+        lynx::EffectSlot slot = lynx::makeEffectSlot (lynx::EffectKind::patcher);
+        slot.patcher.nodes = { generator (lynx::InstrumentKind::synth) };
+        slot.patcher.wires = { patcher162::midi (lynx::patchFromHost, lynx::patchMidiPortPin (4), 0, 0), patcher141::audio (0, lynx::patchToHost) };
+        song.mixer[1].effects = { slot };
+        lynx::Pattern p;
+        p.notes.push_back ({ noteTick, lynx::ppq, 0, 60, 0.8f });
+        song.patterns = { p };
+        lynx::Clip clip;
+        clip.pattern = 0;
+        clip.length = lynx::ppq * 4;
+        song.playlist = { clip };
+        song.mode = lynx::PlayMode::song;
+
+        auto state = lynx::RackState::build (song, nullptr, 48000.0);
+        lynx::RackRenderer r;
+        r.prepare (48000.0, 512);
+        std::vector<float> all, l (512), rr (512);
+        double tick = 0.0;
+        for (int b = 0; b < 40; ++b, tick += 512.0 * song.bpm * lynx::ppq / 60.0 / 48000.0)
+        {
+            r.process (state.get(), true, tick, 512, l.data(), rr.data(), nullptr);
+            all.insert (all.end(), l.begin(), l.end());
+        }
+        return std::make_pair (onset (all), (int) std::ceil ((double) noteTick / lynx::ppq * 60.0 / song.bpm * 48000.0));
+    };
+    // the path's own delay to the first audible sample (the synth's attack, the insert's latency compensation): a note
+    // on a block's first sample
+    const auto [reference, referenceAt] = render (0);
+    CHECK (referenceAt == 0 && reference >= 0);
+    // the same note inside a block sounds that long after its own sample (at the block's start it would sound
+    // expected % 512 samples early)
+    const auto [first, expected] = render (lynx::ppq / 2); // 0.5 beat
     CHECK (expected % 512 > 16); // (the note falls inside a block)
-    CHECK (first >= expected - 1 && first <= expected + 8);
+    if (std::abs (first - (expected + reference)) > 1)
+        std::printf ("  patcher164f: onset %d, note at sample %d, reference onset %d\n", first, expected, reference);
+    CHECK (std::abs (first - (expected + reference)) <= 1);
 }
 
 TEST (patcher164f_graph_queued_notes_play_at_their_offset_across_pieces)
