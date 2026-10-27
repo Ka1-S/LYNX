@@ -390,3 +390,55 @@ TEST (voltage165_linked_offset_moves_the_output)
     rig.run (64);
     CHECK (std::abs (rig.left[32] + 0.5f) < 1e-4f);
 }
+
+TEST (dashboard165_links_and_midi_through_the_rack_in_pattern_mode)
+{
+    // FL's fl_dash.flp render (REA_rodada164f-flimport §1.2): a Dashboard's outputs linked to the Voltage Controller's
+    // offsets L / R (sources off) give L = −0.5, R = +0.75 — also while a pattern plays (pattern mode): live links were
+    // applied in song mode only before round 165
+    for (const auto mode : { lynx::PlayMode::pattern, lynx::PlayMode::song })
+    {
+        lynx::Song s;
+        s.mixer = lynx::Song::defaultMixer (2);
+        auto st = *lynx::voltage::parse (volt164::flState);
+        st.source[0] = st.source[1] = lynx::voltage::Source::none;
+        st.params[9] = 65536;
+        lynx::ChannelDef v;
+        v.instrument = lynx::InstrumentKind::voltage;
+        v.pluginState = lynx::voltage::write (st);
+        s.channels.push_back (v);
+        using M = lynx::SurfaceControl::Midi;
+        s.channels.push_back (dash165::dashboard ({ dash165::control (M::none, 0, 0.25f), dash165::control (M::cc, 74, 0.875f) }, {}));
+        lynx::ChannelDef p;
+        p.instrument = lynx::InstrumentKind::plugin;
+        p.plugin.id = "VST3-Synth-1";
+        p.plugin.midiInPort = 0; // (the Dashboard's port)
+        s.channels.push_back (p);
+        s.patterns.emplace_back();
+        s.mode = mode;
+        for (int k = 0; k < 2; ++k)
+        {
+            lynx::Automation a;
+            a.target = { lynx::AutomationTargetKind::channelParam, 0, 0, k };
+            a.source.channel = 1;
+            a.source.output = k;
+            s.automations.push_back (a);
+        }
+        auto recorder = std::make_shared<feat133::Recorder>();
+        lynx::RackState::Factories f;
+        f.pluginInstruments = [&] (const lynx::PluginRef&, double) -> std::shared_ptr<lynx::Instrument> { return recorder; };
+        auto state = lynx::RackState::build (s, nullptr, 48000.0, f);
+        lynx::RackRenderer r;
+        r.prepare (48000.0, 256);
+        std::vector<float> l (256), rr (256);
+        for (int b = 0; b < 4; ++b)
+            r.process (state.get(), true, (double) b * 10.0, 256, l.data(), rr.data(), nullptr);
+        std::printf ("  rack (%s mode): L %.4f R %.4f\n", mode == lynx::PlayMode::pattern ? "pattern" : "song", l[128], rr[128]);
+        CHECK (std::abs (l[128] + 0.5f) < 2e-3f && std::abs (rr[128] - 0.75f) < 2e-3f);
+        // the CC control's MIDI reached the plugin on the port (CC 74 = round (0.875 × 127) = 111)
+        const auto cc = std::any_of (recorder->messages.begin(), recorder->messages.end(), [] (const auto& m) {
+            return m.size() == 3 && m[0] == 0xB0 && m[1] == 74 && m[2] == 111;
+        });
+        CHECK (cc);
+    }
+}

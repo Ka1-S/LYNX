@@ -1258,8 +1258,10 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     if (song.mode != PlayMode::song)
     {
         clearOverriddenValues();
-        if (! state.eventLanes.empty()) // only the plugin parameters driven by pattern events
-            applyPluginParams (state, std::min<int> ((int) song.automations.size(), RackState::maxAutomations));
+        // only the plugin parameters driven by pattern events and by live controllers (links: FL's work in any mode,
+        // round 165)
+        if (! state.eventLanes.empty() || ! state.liveAutomations.empty())
+            applyPluginParams (state, std::min<int> ((int) song.automations.size(), RackState::maxAutomations), true);
         return;
     }
 
@@ -1274,11 +1276,12 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     applyPluginParams (state, 0);
 }
 
-void RackRenderer::applyPluginParams (const RackState& state, int firstSlot) noexcept
+void RackRenderer::applyPluginParams (const RackState& state, int firstSlot, bool andLive) noexcept
 {
     for (const auto& b : state.pluginParams)
     {
-        if (b.automation < firstSlot)
+        if (b.automation < firstSlot
+            && ! (andLive && (std::size_t) b.automation < state.song.automations.size() && state.song.automations[(std::size_t) b.automation].isLive()))
             continue;
 
         const auto v = automationValues[(std::size_t) b.automation];

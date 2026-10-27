@@ -321,7 +321,8 @@ private:
     void updateAutomation (const RackState& state, double startTick) noexcept;
     // ticks from `tick` to the next pattern event (or pattern clip edge) that changes a lane's value; +inf if none
     static double ticksToNextEvent (const RackState& state, double tick) noexcept;
-    void applyPluginParams (const RackState& state, int firstSlot) noexcept; // bindings from this automation slot on
+    // bindings from this automation slot on (andLive: and those of live controllers, the links)
+    void applyPluginParams (const RackState& state, int firstSlot, bool andLive = false) noexcept;
     float automated (int automation, float base) const noexcept;
     float* trackBuffer (int track, int channel) noexcept;
 
