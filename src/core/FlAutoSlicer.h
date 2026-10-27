@@ -1,7 +1,7 @@
 #pragma once
 
 // The "auto slicing" of Image-Line's plugin framework (the slicer Fruity Granulizer runs when its slice mode is
-// "auto"), rebuilt from the behaviour decoded in docs/analise/REA_rodada165g-pitch.md §1 (clean-room; checked against
+// "auto"), rebuilt from the behaviour decoded in docs/analise/REA_rodada165g-flbeta165p.md §1 (clean-room; checked against
 // the installation's DLL run unmodified: identical slice positions on every test sample).
 //
 // Outline: a normalised mono copy at 44.1 kHz, four passes of a gentle high-pass, 128-point Hamming-windowed spectra
