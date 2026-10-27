@@ -19,6 +19,7 @@
 #include "ui/SlotWatch.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
+#include "ui/VisualGl.h"
 #include "ui/WindowOwner.h"
 
 #if JUCE_WINDOWS
@@ -1111,6 +1112,8 @@ struct SceneRenderer::State
     std::vector<ParticleField> particles;
     std::vector<std::vector<Ring>> rings;
     std::vector<float> spin;
+    std::vector<std::array<float, 64>> history; // the spectrum of the last frames (Terrain without the GPU)
+    int historyPos = 0;
     std::map<std::string, juce::Image> images;
     std::map<std::size_t, std::pair<juce::String, juce::Image>> layerImages; // per layer slot: key + picture
     double lastTime = -1.0;
@@ -1160,6 +1163,8 @@ void SceneRenderer::reset()
     state->particles.clear();
     state->rings.clear();
     state->spin.clear();
+    state->history.clear();
+    state->historyPos = 0;
     state->lastTime = -1.0;
 }
 
@@ -1170,6 +1175,16 @@ void SceneRenderer::advance (const scene::Scene& s, const Frame& f, float aspect
     state->rings.resize (n);
     state->spin.resize (n, 0.0f);
     const auto speedKnob = (float) std::pow (4.0, (double) f.params[visualizer::speed] * 2.0 - 1.0);
+    if (std::any_of (s.layers.begin(), s.layers.end(), [] (const scene::Layer& l) { return l.enabled && l.type == scene::LayerType::terrain; }))
+    {
+        if (state->history.size() != 24)
+        {
+            state->history.assign (24, {});
+            state->historyPos = 0;
+        }
+        state->history[(std::size_t) state->historyPos] = f.spectrum;
+        state->historyPos = (state->historyPos + 1) % 24;
+    }
     for (std::size_t i = 0; i < n; ++i)
     {
         const auto& layer = s.layers[i];
@@ -1200,12 +1215,10 @@ void SceneRenderer::advance (const scene::Scene& s, const Frame& f, float aspect
     state->lastTime = f.time;
 }
 
-void SceneRenderer::draw (juce::Graphics& g, juce::Rectangle<float> area, const scene::Scene& s, const Frame& f)
+void SceneRenderer::drawLayer (juce::Graphics& g, juce::Rectangle<float> area, const scene::Scene& s, std::size_t i, const Frame& f)
 {
-    g.saveState();
-    g.reduceClipRegion (area.toNearestInt());
-    g.setColour (juce::Colours::black);
-    g.fillRect (area);
+    if (i >= s.layers.size())
+        return;
     const auto hueShift = f.params[visualizer::hueShift];
     auto colour = [&] (std::uint32_t c, float alpha) {
         auto col = argb (c);
@@ -1213,9 +1226,6 @@ void SceneRenderer::draw (juce::Graphics& g, juce::Rectangle<float> area, const 
             col = col.withRotatedHue (hueShift);
         return col.withMultipliedAlpha (juce::jlimit (0.0f, 1.0f, alpha));
     };
-    const auto zoom = 0.5f + f.params[visualizer::zoom];
-    if (std::abs (zoom - 1.0f) > 0.001f)
-        g.addTransform (juce::AffineTransform::scale (zoom, zoom, area.getCentreX(), area.getCentreY()));
     const auto W = area.getWidth(), H = area.getHeight(), minDim = juce::jmin (W, H);
     auto at = [&] (float x, float y) { return juce::Point<float> (area.getX() + x * W, area.getY() + y * H); };
     auto spectrumAt = [&] (float t) { // 0..1 across the 64 bands, interpolated
@@ -1225,253 +1235,322 @@ void SceneRenderer::draw (juce::Graphics& g, juce::Rectangle<float> area, const 
     };
     auto shape = [] (float v, float react) { return std::pow (juce::jlimit (0.0f, 1.0f, v), 1.6f - react * 1.1f); };
 
-    for (std::size_t i = 0; i < s.layers.size(); ++i)
+    const auto& L = s.layers[i];
+    if (! L.enabled || L.opacity <= 0.0f)
+        return;
+    const auto band = f.bandValue (L.band);
+    const auto a = L.opacity;
+    switch (L.type)
     {
-        const auto& L = s.layers[i];
-        if (! L.enabled || L.opacity <= 0.0f)
-            continue;
-        const auto band = f.bandValue (L.band);
-        const auto a = L.opacity;
-        switch (L.type)
+        case scene::LayerType::background:
         {
-            case scene::LayerType::background:
-            {
-                bool drew = false;
-                if (! L.path.empty())
-                    if (const auto& img = state->image (L.path); img.isValid())
-                    {
-                        // cover the frame; the band pushes it in a little
-                        const auto pulse = 1.0f + band * L.react * 0.08f;
-                        const auto sc = juce::jmax (W / (float) img.getWidth(), H / (float) img.getHeight()) * pulse;
-                        const auto w = (float) img.getWidth() * sc, h = (float) img.getHeight() * sc;
-                        g.setOpacity (a);
-                        g.drawImage (img, juce::Rectangle<float> (w, h).withCentre (area.getCentre()));
-                        g.setOpacity (1.0f);
-                        drew = true;
-                    }
-                // the gradient and the glow are drawn once into images (a blit per frame costs a fraction of a gradient fill)
-                const auto size = area.toNearestInt().getWidth() * 100003 + area.toNearestInt().getHeight();
-                if (! drew)
+            bool drew = false;
+            if (! L.path.empty())
+                if (const auto& img = state->image (L.path); img.isValid())
                 {
-                    auto& cached = state->cached (i * 2, juce::String::toHexString ((juce::int64) L.colourA) + juce::String::toHexString ((juce::int64) L.colourB)
-                                                             + juce::String (a) + juce::String (hueShift) + "/" + juce::String (size),
-                                                  area, [&] (juce::Graphics& cg, juce::Rectangle<float> r) {
-                                                      cg.setGradientFill (juce::ColourGradient (colour (L.colourA, a), r.getX(), r.getY(),
-                                                                                                colour (L.colourB, a), r.getRight(), r.getBottom(), false));
-                                                      cg.fillRect (r);
-                                                  },
-                                                  a >= 0.999f && argb (L.colourA).isOpaque() && argb (L.colourB).isOpaque());
-                    g.drawImageAt (cached, (int) std::round (area.getX()), (int) std::round (area.getY()));
-                }
-                if (L.react > 0.0f && band > 0.004f)
-                {
-                    auto& glow = state->cached (i * 2 + 1, juce::String::toHexString ((juce::int64) L.colourB) + juce::String (hueShift) + "/" + juce::String (size),
-                                                area, [&] (juce::Graphics& cg, juce::Rectangle<float> r) {
-                                                    cg.setGradientFill (juce::ColourGradient (colour (L.colourB, 1.0f), r.getCentreX(), r.getCentreY(),
-                                                                                              colour (L.colourB, 0.0f), r.getCentreX(),
-                                                                                              r.getY() - r.getHeight() * 0.2f, true));
-                                                    cg.fillRect (r);
-                                                });
-                    g.setOpacity (juce::jlimit (0.0f, 1.0f, band * L.react * 0.6f * a));
-                    g.drawImageAt (glow, (int) std::round (area.getX()), (int) std::round (area.getY()));
+                    // cover the frame; the band pushes it in a little
+                    const auto pulse = 1.0f + band * L.react * 0.08f;
+                    const auto sc = juce::jmax (W / (float) img.getWidth(), H / (float) img.getHeight()) * pulse;
+                    const auto w = (float) img.getWidth() * sc, h = (float) img.getHeight() * sc;
+                    g.setOpacity (a);
+                    g.drawImage (img, juce::Rectangle<float> (w, h).withCentre (area.getCentre()));
                     g.setOpacity (1.0f);
+                    drew = true;
                 }
-                break;
-            }
-            case scene::LayerType::bars:
+            // the gradient and the glow are drawn once into images (a blit per frame costs a fraction of a gradient fill)
+            const auto size = area.toNearestInt().getWidth() * 100003 + area.toNearestInt().getHeight();
+            if (! drew)
             {
-                const auto count = juce::jlimit (4, 256, L.count);
-                const auto slot = W / (float) count;
-                const auto barW = juce::jmax (1.0f, slot * (1.0f - L.amount * 0.8f));
-                const auto base = area.getY() + L.y * H;
-                const auto maxH = L.size * H * (L.mirror ? 0.5f : 1.0f);
-                juce::ColourGradient grad (colour (L.colourA, a), 0.0f, base, colour (L.colourB, a), 0.0f, base - maxH, false);
-                g.setGradientFill (grad);
+                auto& cached = state->cached (i * 2, juce::String::toHexString ((juce::int64) L.colourA) + juce::String::toHexString ((juce::int64) L.colourB)
+                                                         + juce::String (a) + juce::String (hueShift) + "/" + juce::String (size),
+                                              area, [&] (juce::Graphics& cg, juce::Rectangle<float> r) {
+                                                  cg.setGradientFill (juce::ColourGradient (colour (L.colourA, a), r.getX(), r.getY(),
+                                                                                            colour (L.colourB, a), r.getRight(), r.getBottom(), false));
+                                                  cg.fillRect (r);
+                                              },
+                                              a >= 0.999f && argb (L.colourA).isOpaque() && argb (L.colourB).isOpaque());
+                g.drawImageAt (cached, (int) std::round (area.getX()), (int) std::round (area.getY()));
+            }
+            if (L.react > 0.0f && band > 0.004f)
+            {
+                auto& glow = state->cached (i * 2 + 1, juce::String::toHexString ((juce::int64) L.colourB) + juce::String (hueShift) + "/" + juce::String (size),
+                                            area, [&] (juce::Graphics& cg, juce::Rectangle<float> r) {
+                                                cg.setGradientFill (juce::ColourGradient (colour (L.colourB, 1.0f), r.getCentreX(), r.getCentreY(),
+                                                                                          colour (L.colourB, 0.0f), r.getCentreX(),
+                                                                                          r.getY() - r.getHeight() * 0.2f, true));
+                                                cg.fillRect (r);
+                                            });
+                g.setOpacity (juce::jlimit (0.0f, 1.0f, band * L.react * 0.6f * a));
+                g.drawImageAt (glow, (int) std::round (area.getX()), (int) std::round (area.getY()));
+                g.setOpacity (1.0f);
+            }
+            break;
+        }
+        case scene::LayerType::bars:
+        {
+            const auto count = juce::jlimit (4, 256, L.count);
+            const auto slot = W / (float) count;
+            const auto barW = juce::jmax (1.0f, slot * (1.0f - L.amount * 0.8f));
+            const auto base = area.getY() + L.y * H;
+            const auto maxH = L.size * H * (L.mirror ? 0.5f : 1.0f);
+            juce::ColourGradient grad (colour (L.colourA, a), 0.0f, base, colour (L.colourB, a), 0.0f, base - maxH, false);
+            g.setGradientFill (grad);
+            for (int b = 0; b < count; ++b)
+            {
+                const auto v = shape (spectrumAt ((float) b / (float) (count - 1)), L.react);
+                const auto h = juce::jmax (1.0f, v * maxH);
+                const auto x = area.getX() + slot * (float) b + (slot - barW) * 0.5f;
+                g.fillRect (x, base - h, barW, h);
+            }
+            if (L.mirror)
+            {
+                juce::ColourGradient down (colour (L.colourA, a * 0.45f), 0.0f, base, colour (L.colourB, 0.0f), 0.0f, base + maxH, false);
+                g.setGradientFill (down);
                 for (int b = 0; b < count; ++b)
                 {
                     const auto v = shape (spectrumAt ((float) b / (float) (count - 1)), L.react);
                     const auto h = juce::jmax (1.0f, v * maxH);
-                    const auto x = area.getX() + slot * (float) b + (slot - barW) * 0.5f;
-                    g.fillRect (x, base - h, barW, h);
+                    g.fillRect (area.getX() + slot * (float) b + (slot - barW) * 0.5f, base, barW, h);
                 }
-                if (L.mirror)
-                {
-                    juce::ColourGradient down (colour (L.colourA, a * 0.45f), 0.0f, base, colour (L.colourB, 0.0f), 0.0f, base + maxH, false);
-                    g.setGradientFill (down);
-                    for (int b = 0; b < count; ++b)
-                    {
-                        const auto v = shape (spectrumAt ((float) b / (float) (count - 1)), L.react);
-                        const auto h = juce::jmax (1.0f, v * maxH);
-                        g.fillRect (area.getX() + slot * (float) b + (slot - barW) * 0.5f, base, barW, h);
-                    }
-                }
-                break;
             }
-            case scene::LayerType::circle:
-            {
-                const auto c = at (L.x, L.y);
-                const auto radius = L.size * minDim * 0.5f * (1.0f + f.beat * 0.08f * L.react);
-                const auto count = juce::jlimit (8, 360, L.count);
-                const auto spin = state->spin.size() > i ? state->spin[i] : 0.0f;
-                juce::Path rays;
-                for (int b = 0; b < count; ++b)
-                {
-                    // the spectrum mirrored round the circle (low frequencies at the top, both sides)
-                    const auto t = (float) b / (float) count;
-                    const auto v = shape (spectrumAt (t < 0.5f ? t * 2.0f : (1.0f - t) * 2.0f), L.react);
-                    const auto angle = t * juce::MathConstants<float>::twoPi + spin;
-                    const auto len = 2.0f + v * radius * 0.9f;
-                    const auto dir = juce::Point<float> (std::sin (angle), -std::cos (angle));
-                    rays.startNewSubPath (c + dir * radius);
-                    rays.lineTo (c + dir * (radius + len));
-                }
-                const auto thick = juce::jmax (1.5f, juce::MathConstants<float>::twoPi * radius / (float) count * 0.55f);
-                if (L.additive)
-                {
-                    g.setColour (colour (L.colourB, a * 0.25f));
-                    g.strokePath (rays, juce::PathStrokeType (thick * 2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-                }
-                g.setColour (colour (L.colourA, a));
-                g.strokePath (rays, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-                g.setColour (colour (L.colourA, a * 0.6f));
-                g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), juce::jmax (1.0f, thick * 0.5f));
-                break;
-            }
-            case scene::LayerType::waveform:
-            {
-                const auto centre = area.getY() + L.y * H;
-                const auto amp = L.size * H * 0.5f * (0.6f + band * L.react);
-                const auto x0 = area.getX() + (L.x - 0.5f) * W;
-                juce::Path p;
-                for (int k = 0; k < 256; ++k)
-                {
-                    const auto v = 0.5f * (f.waveL[(std::size_t) k] + f.waveR[(std::size_t) k]);
-                    const auto px = x0 + (float) k / 255.0f * W, py = centre - juce::jlimit (-1.2f, 1.2f, v) * amp;
-                    k == 0 ? p.startNewSubPath (px, py) : p.lineTo (px, py);
-                }
-                const auto thick = 1.0f + L.amount * 7.0f;
-                if (L.additive)
-                {
-                    g.setColour (colour (L.colourA, a * 0.18f));
-                    g.strokePath (p, juce::PathStrokeType (thick * 4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-                }
-                g.setColour (colour (L.colourA, a));
-                g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-                if (L.mirror)
-                {
-                    p.applyTransform (juce::AffineTransform::verticalFlip (centre * 2.0f));
-                    g.setColour (colour (L.colourB, a * 0.6f));
-                    g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-                }
-                break;
-            }
-            case scene::LayerType::particles:
-            {
-                if (state->particles.size() <= i)
-                    break;
-                const auto dotBase = juce::jmax (1.0f, minDim * 0.012f * (0.3f + L.size * 2.0f));
-                for (const auto& p : state->particles[i].particles())
-                {
-                    const auto alpha = juce::jlimit (0.0f, 1.0f, p.life * 1.4f) * a;
-                    const auto col = colour (L.colourA, 1.0f).interpolatedWith (colour (L.colourB, 1.0f), p.hue).withMultipliedAlpha (alpha);
-                    const auto d = dotBase * p.size * (1.0f + band * L.react * 0.8f);
-                    const auto pos = at (p.x, p.y);
-                    if (L.additive && d > 3.5f)
-                    {
-                        g.setColour (col.withMultipliedAlpha (0.25f));
-                        g.fillEllipse (juce::Rectangle<float> (d * 2.6f, d * 2.6f).withCentre (pos));
-                    }
-                    g.setColour (col);
-                    if (d < 2.5f) // a dot that small looks the same as a square and costs far less
-                        g.fillRect (juce::Rectangle<float> (d, d).withCentre (pos));
-                    else
-                        g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (pos));
-                }
-                break;
-            }
-            case scene::LayerType::rings:
-            {
-                if (state->rings.size() <= i)
-                    break;
-                const auto c = at (L.x, L.y);
-                const auto life = 0.6 + L.speed * 1.4;
-                for (const auto& r : state->rings[i])
-                {
-                    const auto age = (float) ((f.time - r.born) / life);
-                    if (age < 0.0f || age > 1.0f)
-                        continue;
-                    const auto radius = (0.05f + age * L.size) * minDim * 0.75f;
-                    const auto alpha = (1.0f - age) * r.strength * a;
-                    const auto thick = juce::jmax (1.0f, minDim * 0.012f * (1.0f - age) * (0.5f + L.amount));
-                    if (L.additive)
-                    {
-                        g.setColour (colour (L.colourA, alpha * 0.25f));
-                        g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), thick * 3.0f);
-                    }
-                    g.setColour (colour (L.colourA, alpha));
-                    g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), thick);
-                }
-                break;
-            }
-            case scene::LayerType::image:
-            {
-                if (L.path.empty())
-                    break;
-                const auto& img = state->image (L.path);
-                if (! img.isValid())
-                    break;
-                const auto pulse = 1.0f + band * L.react * 0.3f;
-                const auto box = L.size * minDim * pulse;
-                const auto sc = box / (float) juce::jmax (img.getWidth(), img.getHeight());
-                const auto spin = state->spin.size() > i ? state->spin[i] : 0.0f;
-                const auto c = at (L.x, L.y);
-                g.setOpacity (a);
-                g.drawImageTransformed (img, juce::AffineTransform::translation (-img.getWidth() * 0.5f, -img.getHeight() * 0.5f)
-                                                 .scaled (sc)
-                                                 .rotated (spin)
-                                                 .translated (c.x, c.y));
-                g.setOpacity (1.0f);
-                break;
-            }
-            case scene::LayerType::text:
-            {
-                if (L.text.empty())
-                    break;
-                const auto text = juce::String::fromUTF8 (L.text.c_str());
-                const auto lines = juce::StringArray::fromLines (text);
-                const auto pulse = 1.0f + band * L.react * 0.25f;
-                const auto size = juce::jmax (6.0f, L.size * H * 0.35f * pulse);
-                g.setFont (juce::FontOptions (size, juce::Font::bold));
-                const auto lineH = size * 1.15f;
-                const auto c = at (L.x, L.y);
-                auto box = juce::Rectangle<float> (W * 1.5f, lineH * (float) lines.size()).withCentre (c);
-                if (L.amount > 0.01f)
-                {
-                    // glow: the text drawn round itself in the second colour
-                    const auto spread = size * 0.05f * L.amount * (1.0f + band * L.react);
-                    g.setColour (colour (L.colourB, a * 0.22f));
-                    for (const auto& d : { juce::Point<float> (-1, 0), juce::Point<float> (1, 0), juce::Point<float> (0, -1), juce::Point<float> (0, 1),
-                                           juce::Point<float> (-0.7f, -0.7f), juce::Point<float> (0.7f, 0.7f), juce::Point<float> (0.7f, -0.7f),
-                                           juce::Point<float> (-0.7f, 0.7f) })
-                        g.drawFittedText (text, box.translated (d.x * spread * 2.0f, d.y * spread * 2.0f).toNearestInt(), juce::Justification::centred,
-                                          lines.size(), 1.0f);
-                }
-                g.setColour (colour (L.colourA, a));
-                g.drawFittedText (text, box.toNearestInt(), juce::Justification::centred, lines.size(), 1.0f);
-                break;
-            }
-            case scene::LayerType::flash:
-            {
-                const auto alpha = band * L.react * a;
-                if (alpha > 0.004f)
-                {
-                    g.setColour (colour (L.colourA, alpha));
-                    g.fillRect (area);
-                }
-                break;
-            }
+            break;
         }
+        case scene::LayerType::circle:
+        {
+            const auto c = at (L.x, L.y);
+            const auto radius = L.size * minDim * 0.5f * (1.0f + f.beat * 0.08f * L.react);
+            const auto count = juce::jlimit (8, 360, L.count);
+            const auto spin = state->spin.size() > i ? state->spin[i] : 0.0f;
+            juce::Path rays;
+            for (int b = 0; b < count; ++b)
+            {
+                // the spectrum mirrored round the circle (low frequencies at the top, both sides)
+                const auto t = (float) b / (float) count;
+                const auto v = shape (spectrumAt (t < 0.5f ? t * 2.0f : (1.0f - t) * 2.0f), L.react);
+                const auto angle = t * juce::MathConstants<float>::twoPi + spin;
+                const auto len = 2.0f + v * radius * 0.9f;
+                const auto dir = juce::Point<float> (std::sin (angle), -std::cos (angle));
+                rays.startNewSubPath (c + dir * radius);
+                rays.lineTo (c + dir * (radius + len));
+            }
+            const auto thick = juce::jmax (1.5f, juce::MathConstants<float>::twoPi * radius / (float) count * 0.55f);
+            if (L.additive)
+            {
+                g.setColour (colour (L.colourB, a * 0.25f));
+                g.strokePath (rays, juce::PathStrokeType (thick * 2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            g.setColour (colour (L.colourA, a));
+            g.strokePath (rays, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (colour (L.colourA, a * 0.6f));
+            g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), juce::jmax (1.0f, thick * 0.5f));
+            break;
+        }
+        case scene::LayerType::waveform:
+        {
+            const auto centre = area.getY() + L.y * H;
+            const auto amp = L.size * H * 0.5f * (0.6f + band * L.react);
+            const auto x0 = area.getX() + (L.x - 0.5f) * W;
+            juce::Path p;
+            for (int k = 0; k < 256; ++k)
+            {
+                const auto v = 0.5f * (f.waveL[(std::size_t) k] + f.waveR[(std::size_t) k]);
+                const auto px = x0 + (float) k / 255.0f * W, py = centre - juce::jlimit (-1.2f, 1.2f, v) * amp;
+                k == 0 ? p.startNewSubPath (px, py) : p.lineTo (px, py);
+            }
+            const auto thick = 1.0f + L.amount * 7.0f;
+            if (L.additive)
+            {
+                g.setColour (colour (L.colourA, a * 0.18f));
+                g.strokePath (p, juce::PathStrokeType (thick * 4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            g.setColour (colour (L.colourA, a));
+            g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            if (L.mirror)
+            {
+                p.applyTransform (juce::AffineTransform::verticalFlip (centre * 2.0f));
+                g.setColour (colour (L.colourB, a * 0.6f));
+                g.strokePath (p, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            break;
+        }
+        case scene::LayerType::particles:
+        {
+            if (state->particles.size() <= i)
+                break;
+            const auto dotBase = juce::jmax (1.0f, minDim * 0.012f * (0.3f + L.size * 2.0f));
+            for (const auto& p : state->particles[i].particles())
+            {
+                const auto alpha = juce::jlimit (0.0f, 1.0f, p.life * 1.4f) * a;
+                const auto col = colour (L.colourA, 1.0f).interpolatedWith (colour (L.colourB, 1.0f), p.hue).withMultipliedAlpha (alpha);
+                const auto d = dotBase * p.size * (1.0f + band * L.react * 0.8f);
+                const auto pos = at (p.x, p.y);
+                if (L.additive && d > 3.5f)
+                {
+                    g.setColour (col.withMultipliedAlpha (0.25f));
+                    g.fillEllipse (juce::Rectangle<float> (d * 2.6f, d * 2.6f).withCentre (pos));
+                }
+                g.setColour (col);
+                if (d < 2.5f) // a dot that small looks the same as a square and costs far less
+                    g.fillRect (juce::Rectangle<float> (d, d).withCentre (pos));
+                else
+                    g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (pos));
+            }
+            break;
+        }
+        case scene::LayerType::rings:
+        {
+            if (state->rings.size() <= i)
+                break;
+            const auto c = at (L.x, L.y);
+            const auto life = 0.6 + L.speed * 1.4;
+            for (const auto& r : state->rings[i])
+            {
+                const auto age = (float) ((f.time - r.born) / life);
+                if (age < 0.0f || age > 1.0f)
+                    continue;
+                const auto radius = (0.05f + age * L.size) * minDim * 0.75f;
+                const auto alpha = (1.0f - age) * r.strength * a;
+                const auto thick = juce::jmax (1.0f, minDim * 0.012f * (1.0f - age) * (0.5f + L.amount));
+                if (L.additive)
+                {
+                    g.setColour (colour (L.colourA, alpha * 0.25f));
+                    g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), thick * 3.0f);
+                }
+                g.setColour (colour (L.colourA, alpha));
+                g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), thick);
+            }
+            break;
+        }
+        case scene::LayerType::image:
+        {
+            if (L.path.empty())
+                break;
+            const auto& img = state->image (L.path);
+            if (! img.isValid())
+                break;
+            const auto pulse = 1.0f + band * L.react * 0.3f;
+            const auto box = L.size * minDim * pulse;
+            const auto sc = box / (float) juce::jmax (img.getWidth(), img.getHeight());
+            const auto spin = state->spin.size() > i ? state->spin[i] : 0.0f;
+            const auto c = at (L.x, L.y);
+            g.setOpacity (a);
+            g.drawImageTransformed (img, juce::AffineTransform::translation (-img.getWidth() * 0.5f, -img.getHeight() * 0.5f)
+                                             .scaled (sc)
+                                             .rotated (spin)
+                                             .translated (c.x, c.y));
+            g.setOpacity (1.0f);
+            break;
+        }
+        case scene::LayerType::text:
+        {
+            if (L.text.empty())
+                break;
+            const auto text = juce::String::fromUTF8 (L.text.c_str());
+            const auto lines = juce::StringArray::fromLines (text);
+            const auto pulse = 1.0f + band * L.react * 0.25f;
+            const auto size = juce::jmax (6.0f, L.size * H * 0.35f * pulse);
+            g.setFont (juce::FontOptions (size, juce::Font::bold));
+            const auto lineH = size * 1.15f;
+            const auto c = at (L.x, L.y);
+            auto box = juce::Rectangle<float> (W * 1.5f, lineH * (float) lines.size()).withCentre (c);
+            if (L.amount > 0.01f)
+            {
+                // glow: the text drawn round itself in the second colour
+                const auto spread = size * 0.05f * L.amount * (1.0f + band * L.react);
+                g.setColour (colour (L.colourB, a * 0.22f));
+                for (const auto& d : { juce::Point<float> (-1, 0), juce::Point<float> (1, 0), juce::Point<float> (0, -1), juce::Point<float> (0, 1),
+                                       juce::Point<float> (-0.7f, -0.7f), juce::Point<float> (0.7f, 0.7f), juce::Point<float> (0.7f, -0.7f),
+                                       juce::Point<float> (-0.7f, 0.7f) })
+                    g.drawFittedText (text, box.translated (d.x * spread * 2.0f, d.y * spread * 2.0f).toNearestInt(), juce::Justification::centred,
+                                      lines.size(), 1.0f);
+            }
+            g.setColour (colour (L.colourA, a));
+            g.drawFittedText (text, box.toNearestInt(), juce::Justification::centred, lines.size(), 1.0f);
+            break;
+        }
+        case scene::LayerType::flash:
+        {
+            const auto alpha = band * L.react * a;
+            if (alpha > 0.004f)
+            {
+                g.setColour (colour (L.colourA, alpha));
+                g.fillRect (area);
+            }
+            break;
+        }
+        // the GPU layers without OpenGL: Canvas as a soft glow of its colours, Terrain as wire mountains of the
+        // spectrum's history; 3D objects, Feedback and Post-process need the GPU
+        case scene::LayerType::canvas:
+        {
+            const auto size = area.toNearestInt().getWidth() * 100003 + area.toNearestInt().getHeight();
+            auto& img = state->cached (i * 2, "canvas" + juce::String::toHexString ((juce::int64) L.colourA) + juce::String::toHexString ((juce::int64) L.colourB)
+                                                  + juce::String (hueShift) + "/" + juce::String (size) + "/" + juce::String (L.x) + juce::String (L.y),
+                                       area, [&] (juce::Graphics& cg, juce::Rectangle<float> r) {
+                                           const auto c = juce::Point<float> (r.getX() + L.x * r.getWidth(), r.getY() + L.y * r.getHeight());
+                                           cg.setGradientFill (juce::ColourGradient (colour (L.colourA, 1.0f), c.x, c.y, colour (L.colourB, 1.0f), c.x,
+                                                                                     c.y + r.getHeight() * 0.75f, true));
+                                           cg.fillRect (r);
+                                       });
+            g.setOpacity (juce::jlimit (0.0f, 1.0f, a * (0.75f + 0.25f * band * L.react)));
+            g.drawImageAt (img, (int) std::round (area.getX()), (int) std::round (area.getY()));
+            g.setOpacity (1.0f);
+            break;
+        }
+        case scene::LayerType::terrain:
+        {
+            const auto& hist = state->history;
+            if (hist.empty())
+                break;
+            const auto rows = (int) hist.size();
+            const auto horizon = area.getY() + H * (0.35f + (L.y - 0.5f) * 0.4f);
+            const auto height = H * (0.12f + L.size * 0.35f);
+            for (int r = rows - 1; r >= 0; --r) // far (oldest) first; nearer rows cover them
+            {
+                const auto& row = hist[(std::size_t) ((state->historyPos - 1 - r + rows * 2) % rows)];
+                const auto depth = (float) r / (float) rows; // 0 near … 1 far
+                const auto persp = 1.0f / (0.35f + depth * 2.2f);
+                const auto base = horizon + (area.getBottom() - horizon) * (persp - 1.0f / 2.55f) / (1.0f / 0.35f - 1.0f / 2.55f);
+                const auto halfW = W * 0.5f * persp * 1.4f;
+                juce::Path line, fill;
+                for (int k = 0; k <= 64; ++k)
+                {
+                    const auto t = (float) k / 64.0f;
+                    const auto bandPos = std::abs (t * 2.0f - 1.0f); // the lows in the middle
+                    const auto pos = juce::jlimit (0.0f, 62.999f, bandPos * 63.0f);
+                    const auto bi = (int) pos;
+                    const auto v = row[(std::size_t) bi] + (row[(std::size_t) bi + 1] - row[(std::size_t) bi]) * (pos - (float) bi);
+                    const auto px = area.getCentreX() + (t * 2.0f - 1.0f) * halfW, py = base - shape (v, L.react) * height * persp;
+                    k == 0 ? line.startNewSubPath (px, py) : line.lineTo (px, py);
+                }
+                fill = line;
+                fill.lineTo (area.getCentreX() + halfW, base + 2.0f);
+                fill.lineTo (area.getCentreX() - halfW, base + 2.0f);
+                fill.closeSubPath();
+                g.setColour (juce::Colours::black.withAlpha (a));
+                g.fillPath (fill);
+                g.setColour (colour (L.colourA, 1.0f).interpolatedWith (colour (L.colourB, 1.0f), depth).withMultipliedAlpha (a * (1.0f - depth * 0.8f)));
+                g.strokePath (line, juce::PathStrokeType (juce::jmax (1.0f, 2.0f * persp * (0.5f + L.amount))));
+            }
+            break;
+        }
+        case scene::LayerType::object3d:
+        case scene::LayerType::feedback:
+        case scene::LayerType::postprocess:
+            break;
     }
+}
+
+void SceneRenderer::draw (juce::Graphics& g, juce::Rectangle<float> area, const scene::Scene& s, const Frame& f)
+{
+    g.saveState();
+    g.reduceClipRegion (area.toNearestInt());
+    g.setColour (juce::Colours::black);
+    g.fillRect (area);
+    const auto zoom = 0.5f + f.params[visualizer::zoom];
+    if (std::abs (zoom - 1.0f) > 0.001f)
+        g.addTransform (juce::AffineTransform::scale (zoom, zoom, area.getCentreX(), area.getCentreY()));
+    for (std::size_t i = 0; i < s.layers.size(); ++i)
+        drawLayer (g, area, s, i, f);
     g.restoreState();
     const auto brightness = f.params[visualizer::brightness];
     if (brightness < 0.999f)
@@ -1561,6 +1640,117 @@ private:
     int quietFrames = 0, skipped = 0;
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// The live picture: the GPU view (round 165e) when OpenGL works and the user wants it, else the 2D preview. The audio
+// is read and analysed here, on the message thread, for both.
+// ---------------------------------------------------------------------------------------------------------------
+class LivePicture final : public juce::Component
+{
+public:
+    LivePicture (TapFeed& f, std::function<const scene::Scene&()> s, bool fullScreen = false) : feed (f), sceneOf (std::move (s)), full (fullScreen)
+    {
+        setOpaque (true);
+        build (visualgl::enabled() && ! visualgl::failedThisSession());
+    }
+
+    std::function<void()> onDoubleClick, onClick;
+    std::function<void (bool)> onRendererChanged; // true = GPU
+
+    bool usesGpu() const noexcept { return gl != nullptr; }
+    GlSceneView* gpuView() const noexcept { return gl.get(); }
+
+    void useGpu (bool on)
+    {
+        if (on == usesGpu())
+            return;
+        build (on);
+    }
+
+    void restart()
+    {
+        analyzer.reset();
+        if (gl != nullptr)
+            gl->restart();
+        if (flat != nullptr)
+            flat->restart();
+    }
+
+    void setOverlayText (const juce::String& text)
+    {
+        if (gl != nullptr)
+            gl->setOverlayText (text);
+    }
+
+    void resized() override
+    {
+        for (auto* c : getChildren())
+            c->setBounds (getLocalBounds());
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black); }
+
+    // the newest audio analysed into `frame` (message thread); false = skip this tick (a third of the rate in silence)
+    bool produce (Frame& frame, scene::Scene& sceneOut)
+    {
+        if (quietFrames > 90 && ++skipped % 3 != 0)
+            return false;
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto dt = juce::jlimit (0.001, 0.25, (now - lastMs) * 0.001);
+        lastMs = now;
+        time += dt;
+        const auto fresh = feed.pull (l, r, 4096);
+        bool silent = true;
+        for (int i = 4096 - fresh; i < 4096 && silent; ++i)
+            silent = std::abs (l[(std::size_t) i]) < 1.0e-5f && std::abs (r[(std::size_t) i]) < 1.0e-5f;
+        quietFrames = silent ? quietFrames + 1 : 0;
+        frame = analyzer.analyze (l.data(), r.data(), (int) l.size(), feed.sampleRate(), time, dt, feed.params());
+        sceneOut = sceneOf();
+        return true;
+    }
+
+private:
+    void build (bool gpu)
+    {
+        gl.reset();
+        flat.reset();
+        lastMs = juce::Time::getMillisecondCounterHiRes();
+        if (gpu)
+        {
+            gl = std::make_unique<GlSceneView> ([this] (Frame& f, scene::Scene& s) { return produce (f, s); }, full ? 60 : 30, full);
+            gl->onDoubleClick = [this] { if (onDoubleClick) onDoubleClick(); };
+            gl->onClick = [this] { if (onClick) onClick(); };
+            gl->onFailed = [safe = juce::Component::SafePointer<LivePicture> (this)] (const juce::String&) {
+                // (the GL view cannot be destroyed inside its own callback)
+                juce::MessageManager::callAsync ([safe] {
+                    if (safe != nullptr)
+                        safe->build (false);
+                });
+            };
+            addAndMakeVisible (*gl);
+        }
+        else
+        {
+            flat = std::make_unique<ScenePreview> (feed, sceneOf, full);
+            flat->onDoubleClick = [this] { if (onDoubleClick) onDoubleClick(); };
+            flat->setInterceptsMouseClicks (! full, false);
+            addAndMakeVisible (*flat);
+        }
+        resized();
+        if (onRendererChanged)
+            onRendererChanged (gl != nullptr);
+    }
+
+    TapFeed& feed;
+    std::function<const scene::Scene&()> sceneOf;
+    bool full = false;
+    std::unique_ptr<GlSceneView> gl;
+    std::unique_ptr<ScenePreview> flat;
+    FrameAnalyzer analyzer;
+    std::vector<float> l, r;
+    double lastMs = 0.0, time = 0.0;
+    int quietFrames = 0, skipped = 0;
+};
+
 // full screen on the display the editor is on; Esc, a click or a double-click closes it
 class FullScreenView final : public juce::Component,
                              private juce::Timer
@@ -1569,15 +1759,18 @@ public:
     FullScreenView (TapFeed& f, std::function<const scene::Scene&()> s, juce::Rectangle<int> screen) : preview (f, std::move (s), true)
     {
         addAndMakeVisible (preview);
-        preview.setInterceptsMouseClicks (false, false);
+        preview.onClick = [this] { close(); };
+        preview.onDoubleClick = [this] { close(); };
         setWantsKeyboardFocus (true);
         setOpaque (true);
         setBounds (screen);
         addToDesktop (juce::ComponentPeer::windowAppearsOnTaskbar);
+        visualgl::useClassicRendering (*this);
         setAlwaysOnTop (true);
         setVisible (true);
         toFront (true);
         grabKeyboardFocus();
+        preview.setOverlayText (tr ("Esc or a click closes the full screen"));
         startTimer (2500);
     }
 
@@ -1608,6 +1801,7 @@ private:
     {
         stopTimer();
         showHint = false;
+        preview.setOverlayText ({});
         repaint();
     }
     void close()
@@ -1616,7 +1810,7 @@ private:
             juce::MessageManager::callAsync ([cb = onClose] { cb(); });
     }
 
-    ScenePreview preview;
+    LivePicture preview;
     bool showHint = true;
 };
 
@@ -1973,6 +2167,10 @@ public:
         const auto status = useFfmpeg ? tr ("Drawing and encoding the frames...") : tr ("Drawing the frames (PNG images)...");
         FrameAnalyzer analyzer;
         SceneRenderer renderer;
+        // the GPU draws the frames when it can (round 165e); else (or if it stops answering) the 2D renderer
+        usedGpu = gl != nullptr && gl->waitReady (5000);
+        if (usedGpu)
+            gl->reset();
         juce::Image image (juce::Image::ARGB, settings.width, settings.height, true, juce::SoftwareImageType());
         std::vector<juce::uint8> pixels ((std::size_t) settings.width * 4 * (std::size_t) settings.height);
         std::size_t paramAt = 0;
@@ -2000,8 +2198,27 @@ public:
                 params = capture.params[paramAt].values;
             }
             const auto& f = analyzer.analyze (left.data(), right.data(), (int) end, rate, t, 1.0 / settings.fps, params);
-            renderer.advance (scene, f, aspect);
+            bool drawn = false;
+            if (usedGpu)
             {
+                drawn = gl->renderFrame (scene, f, settings.width, settings.height, pixels.data());
+                if (! drawn)
+                {
+                    gpuNote = gl->error;
+                    usedGpu = false; // (the rest with the 2D renderer)
+                }
+                else if (! useFfmpeg)
+                {
+                    // the PNG fallback needs the picture as an image
+                    const juce::Image::BitmapData data (image, juce::Image::BitmapData::writeOnly);
+                    const auto rowBytes = (std::size_t) settings.width * 4;
+                    for (int y = 0; y < settings.height; ++y)
+                        std::memcpy (data.getLinePointer (y), pixels.data() + (std::size_t) y * rowBytes, rowBytes);
+                }
+            }
+            if (! drawn)
+            {
+                renderer.advance (scene, f, aspect);
                 juce::Graphics g (image);
                 renderer.draw (g, image.getBounds().toFloat(), scene, f);
             }
@@ -2015,6 +2232,7 @@ public:
                 }
                 continue;
             }
+            if (! drawn)
             {
                 const juce::Image::BitmapData data (image, juce::Image::BitmapData::readOnly);
                 const auto rowBytes = (std::size_t) settings.width * 4;
@@ -2059,7 +2277,9 @@ public:
     juce::File result, log;
     juce::String error, captureNote;
     int frames = 0;
-    bool usedCapture = false, diagnose = false;
+    bool usedCapture = false, diagnose = false, usedGpu = false;
+    GlFrameExporter* gl = nullptr; // the GPU (null: the 2D renderer)
+    juce::String gpuNote;
     double renderMs = 0.0, drawMs = 0.0;
 
 private:
@@ -2078,6 +2298,26 @@ public:
     VideoExportThread (const VisualTarget& t, const scene::Scene& s, VideoSettings v)
         : juce::ThreadWithProgressWindow (tr ("Exporting video..."), true, true), job (t, s, std::move (v))
     {
+        // the frames are drawn by the GPU of a thumbnail in this window (it shows them as they are made)
+        if (visualgl::enabled() && ! visualgl::failedThisSession())
+        {
+            gpu = std::make_unique<GlFrameExporter>();
+            const auto aspect = (double) job.settings.width / juce::jmax (1, job.settings.height);
+            gpu->setSize (aspect >= 1.0 ? 320 : juce::roundToInt (180 * aspect), aspect >= 1.0 ? juce::roundToInt (320 / aspect) : 180);
+            if (auto* w = getAlertWindow())
+            {
+                w->addCustomComponent (gpu.get());
+                visualgl::useClassicRendering (*w);
+            }
+            job.gl = gpu.get();
+        }
+    }
+
+    ~VideoExportThread() override
+    {
+        stopThread (10000); // (before the GPU thumbnail goes)
+        if (auto* w = getAlertWindow(); w != nullptr && gpu != nullptr)
+            w->removeCustomComponent (0);
     }
 
     void run() override
@@ -2107,6 +2347,7 @@ public:
     }
 
 private:
+    std::unique_ptr<GlFrameExporter> gpu;
     VideoJob job;
     juce::String lastStatus;
 };
@@ -2375,6 +2616,16 @@ public:
             select (selected + 1);
         });
         button (presets, tr ("Scenes"), tr ("LYNX's scenes and FL ZGameEditor presets"), [this] { showPresetMenu(); });
+        button (gpu, "GPU", tr ("Draw the scene with the GPU (OpenGL): needed by the shader layers (Canvas, Terrain, 3D, Feedback, "
+                               "Post-process) and blend modes. Off: the 2D renderer"),
+                [this] {
+                    const auto on = ! preview.usesGpu();
+                    visualgl::setEnabled (on);
+                    preview.useGpu (on);
+                });
+        gpu.setClickingTogglesState (false);
+        preview.onRendererChanged = [this] (bool on) { updateGpuButton (on); };
+        updateGpuButton (preview.usesGpu());
         button (fullScreen, tr ("Full screen"), tr ("Show the scene on the whole screen (Esc closes)"), [this] { openFullScreen(); });
         button (exportVideo, tr ("Export video..."), tr ("Render the song to a video with this scene"), [this] { openExport(); });
 
@@ -2393,7 +2644,23 @@ public:
             changeLayer ([b] (scene::Layer& l) { l.band = b; });
         };
         ui::setHint (bandBox, tr ("What the layer reacts to"));
-        for (auto* c : { &typeBox, &bandBox })
+        effectBox.onChange = [this] {
+            if (loading)
+                return;
+            const auto e = effectBox.getSelectedId() - 1;
+            changeLayer ([e] (scene::Layer& l) { l.effect = juce::jmax (0, e); });
+            loadLayerControls();
+        };
+        for (int b = 0; b < scene::blendCount; ++b)
+            blendBox.addItem (tr (scene::blendName ((scene::Blend) b)), b + 1);
+        blendBox.onChange = [this] {
+            if (loading)
+                return;
+            const auto b = (scene::Blend) (blendBox.getSelectedId() - 1);
+            changeLayer ([b] (scene::Layer& l) { l.blend = b; });
+        };
+        ui::setHint (blendBox, tr ("How the layer mixes with the ones below it (GPU)"));
+        for (auto* c : { &typeBox, &bandBox, &effectBox, &blendBox })
             addAndMakeVisible (*c);
         struct SliderDef { const char* name; float scene::Layer::* field; const char* hint; };
         static const SliderDef defs[] = {
@@ -2494,10 +2761,17 @@ public:
         for (const auto& s : sliders)
             if (s.slider->isVisible())
                 g.drawText (s.name, s.slider->getBounds().withX (propsX).withWidth (70), juce::Justification::centredLeft);
-        for (auto* c : { (juce::Component*) &bandBox, (juce::Component*) &count, (juce::Component*) &colourA })
+        for (auto* c : { (juce::Component*) &bandBox, (juce::Component*) &count, (juce::Component*) &colourA, (juce::Component*) &effectBox,
+                         (juce::Component*) &blendBox })
             if (c->isVisible())
-                g.drawText (c == &bandBox ? tr ("Reacts to") : c == &count ? tr ("Count") : tr ("Colours"), c->getBounds().withX (propsX).withWidth (70),
-                            juce::Justification::centredLeft);
+                g.drawText (c == &bandBox ? tr ("Reacts to") : c == &count ? tr ("Count") : c == &effectBox ? tr ("Effect") : c == &blendBox ? tr ("Blend")
+                                                                                                                                  : tr ("Colours"),
+                            c->getBounds().withX (propsX).withWidth (70), juce::Justification::centredLeft);
+        if (gpuNote.isNotEmpty())
+        {
+            g.setColour (theme::colour::warning);
+            g.drawFittedText (gpuNote, gpuNoteArea, juce::Justification::centredLeft, 2);
+        }
     }
 
     void resized() override
@@ -2510,6 +2784,8 @@ public:
         fullScreen.setBounds (header.removeFromRight (100));
         header.removeFromRight (6);
         presets.setBounds (header.removeFromRight (90));
+        header.removeFromRight (6);
+        gpu.setBounds (header.removeFromRight (52));
 
         auto knobsArea = area.removeFromBottom (knobRow).reduced (10, 6);
         for (auto& k : knobs)
@@ -2527,6 +2803,8 @@ public:
             return r;
         };
         typeBox.setBounds (line());
+        if (effectBox.isVisible())
+            effectBox.setBounds (line().withTrimmedLeft (74));
         {
             auto r = line();
             r.removeFromLeft (74);
@@ -2535,6 +2813,7 @@ public:
             colourB.setBounds (r.removeFromLeft (60));
         }
         bandBox.setBounds (line().withTrimmedLeft (74));
+        blendBox.setBounds (line().withTrimmedLeft (74));
         for (auto& s : sliders)
             if (s.slider->isVisible())
                 s.slider->setBounds (line (22).withTrimmedLeft (74));
@@ -2555,6 +2834,7 @@ public:
             clearImage.setBounds (r.removeFromLeft (100));
         }
         text.setBounds (props.removeFromTop (juce::jmin (90, props.getHeight())));
+        gpuNoteArea = gpuNote.isNotEmpty() ? props.removeFromTop (juce::jmin (34, props.getHeight())) : juce::Rectangle<int>();
 
         // left: the preview at the scene's aspect, the layers under it
         const auto aspect = (double) scene.width / (double) juce::jmax (1, scene.height);
@@ -2635,6 +2915,19 @@ private:
         const auto& l = scene.layers[(std::size_t) selected];
         typeBox.setSelectedId ((int) l.type + 1, juce::dontSendNotification);
         bandBox.setSelectedId ((int) l.band + 1, juce::dontSendNotification);
+        blendBox.setSelectedId ((int) l.blend + 1, juce::dontSendNotification);
+        effectBox.clear (juce::dontSendNotification);
+        for (int e = 0; e < scene::effectCount (l.type); ++e)
+            effectBox.addItem (tr (scene::effectName (l.type, e)), e + 1);
+        if (scene::effectCount (l.type) > 0)
+        {
+            effectBox.setSelectedId (l.effect + 1, juce::dontSendNotification);
+            ui::setHint (effectBox, tr (scene::effectHint (l.type, l.effect)));
+        }
+        gpuNote = scene::isShaderType (l.type) && ! preview.usesGpu()
+                      ? (l.type == scene::LayerType::canvas || l.type == scene::LayerType::terrain ? tr ("Without the GPU this layer is drawn simplified.")
+                                                                                                    : tr ("This layer needs the GPU (turn GPU on)."))
+                      : juce::String();
         for (auto& s : sliders)
             s.slider->setValue (l.*(s.field), juce::dontSendNotification);
         count.setValue (l.count, juce::dontSendNotification);
@@ -2648,7 +2941,9 @@ private:
         using T = scene::LayerType;
         const auto t = l.type;
         auto show = [] (juce::Component& c, bool on) { c.setVisible (on); };
-        show (count, t == T::bars || t == T::circle || t == T::particles || t == T::rings);
+        const auto shader = scene::isShaderType (t);
+        show (effectBox, shader);
+        show (count, t == T::bars || t == T::circle || t == T::particles || t == T::rings || shader);
         show (mirror, t == T::bars || t == T::waveform);
         show (additive, t == T::circle || t == T::waveform || t == T::particles || t == T::rings);
         show (text, t == T::text);
@@ -2658,7 +2953,9 @@ private:
         {
             const auto f = s.field;
             bool on = true;
-            if (f == &scene::Layer::x)
+            if (shader)
+                on = true;
+            else if (f == &scene::Layer::x)
                 on = t != T::background && t != T::bars && t != T::flash;
             else if (f == &scene::Layer::y)
                 on = t != T::background && t != T::flash;
@@ -2675,11 +2972,31 @@ private:
         repaint();
     }
 
+    void addLayerAt (const scene::Layer& l)
+    {
+        const auto at = (std::size_t) juce::jlimit (0, (int) scene.layers.size(), selected + 1);
+        change ([l, at] (scene::Scene& s) { s.layers.insert (s.layers.begin() + (long) at, l); });
+        select ((int) at);
+    }
+
     void showAddMenu()
     {
         juce::PopupMenu menu;
         for (int t = 0; t < scene::layerTypeCount; ++t)
-            menu.addItem (tr (scene::typeName ((scene::LayerType) t)), [this, t] {
+        {
+            const auto type = (scene::LayerType) t;
+            if (scene::isShaderType (type))
+            {
+                // the GPU layers: one entry per effect
+                if (type == scene::LayerType::canvas)
+                    menu.addSectionHeader (tr ("GPU layers"));
+                juce::PopupMenu sub;
+                for (int e = 0; e < scene::effectCount (type); ++e)
+                    sub.addItem (tr (scene::effectName (type, e)), [this, type, e] { addLayerAt (scene::shaderLayer (type, e)); });
+                menu.addSubMenu (tr (scene::typeName (type)), sub);
+                continue;
+            }
+            menu.addItem (tr (scene::typeName (type)), [this, t] {
                 scene::Layer l;
                 l.type = (scene::LayerType) t;
                 if (l.type == scene::LayerType::text)
@@ -2689,10 +3006,9 @@ private:
                     l.band = scene::Band::beat;
                     l.opacity = 0.4f;
                 }
-                const auto at = (std::size_t) juce::jlimit (0, (int) scene.layers.size(), selected + 1);
-                change ([l, at] (scene::Scene& s) { s.layers.insert (s.layers.begin() + (long) at, l); });
-                select ((int) at);
+                addLayerAt (l);
             });
+        }
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addLayer));
     }
 
@@ -2812,14 +3128,26 @@ private:
     TapFeed feed;
     scene::Scene scene;
     juce::Colour accent;
-    ScenePreview preview;
+    LivePicture preview;
     LayerList list;
     int selected = 0, propsX = 0;
     bool loading = false;
     juce::Rectangle<int> layersTitle, propsTitle;
     juce::TextButton addLayer, removeLayer, upLayer, downLayer, duplicateLayer, presets, fullScreen, exportVideo, chooseImage, clearImage;
     juce::TextButton colourA, colourB;
-    juce::ComboBox typeBox, bandBox;
+    juce::ComboBox typeBox, bandBox, effectBox, blendBox;
+    juce::TextButton gpu;
+    juce::String gpuNote;
+    juce::Rectangle<int> gpuNoteArea;
+
+    void updateGpuButton (bool on)
+    {
+        gpu.setButtonText (on ? "GPU" : "2D");
+        gpu.setToggleState (on, juce::dontSendNotification);
+        gpu.setColour (juce::TextButton::buttonOnColourId, accent.withAlpha (0.6f));
+        if (! sliders.empty() && selected >= 0 && selected < (int) scene.layers.size())
+            loadLayerControls();
+    }
     std::vector<LabelledSlider> sliders;
     juce::Slider count;
     juce::ToggleButton mirror, additive;
@@ -2857,6 +3185,14 @@ public:
     }
 
     void closeButtonPressed() override;
+
+    // the Visualizer's GPU view is an OpenGL child window: its window draws with GDI on Windows (round 165e, as plugin
+    // windows since round 157a)
+    void addToDesktop (int styleFlags, void* nativeWindowToAttachTo) override
+    {
+        DocumentWindow::addToDesktop (styleFlags, nativeWindowToAttachTo);
+        visualgl::useClassicRendering (*this);
+    }
 
 private:
     std::unique_ptr<ui::SlotGoneWatcher> gone;
@@ -2997,7 +3333,7 @@ juce::String audioPathCost()
 }
 
 // the drawing cost of each layer type alone and of each built-in scene (1280 x 720, demo signal, 120 frames)
-juce::String drawingCost()
+juce::String drawingCost (const juce::File& folder)
 {
     juce::String out;
     juce::Image image (juce::Image::ARGB, 1280, 720, true, juce::SoftwareImageType());
@@ -3038,7 +3374,17 @@ juce::String drawingCost()
         out << "draw layer " << scene::typeName (layer.type) << ": " << juce::String (run (sc), 2) << " ms per 1280x720 frame\n";
     }
     for (const auto& preset : scene::presets())
+    {
         out << "draw scene " << preset.name << ": " << juce::String (run (preset), 2) << " ms per 1280x720 frame\n";
+        // (the 2D picture of the scene, as without the GPU)
+        juce::FileOutputStream png (folder.getChildFile ("scene2d-" + juce::String (preset.name).toLowerCase().replaceCharacter (' ', '-') + ".png"));
+        if (png.openedOk())
+        {
+            png.setPosition (0);
+            png.truncate();
+            juce::PNGImageFormat().writeImageToStream (image, png);
+        }
+    }
     return out;
 }
 
@@ -3057,7 +3403,7 @@ public:
     VisualTestRun (juce::File f, juce::File p, std::function<void (bool)> d) : folder (std::move (f)), project (std::move (p)), done (std::move (d))
     {
         folder.createDirectory();
-        report << audioPathCost() << drawingCost();
+        report << audioPathCost() << drawingCost (folder);
         for (int m = 1; m < wc::modeCount; ++m)
             cases.push_back ({ juce::String ("wavecandy-") + wc::modeName ((wc::Mode) m), EffectKind::waveCandy,
                                [m] (EffectSlot& fx) { fx.params[wc::mode] = wc::modeValue ((wc::Mode) m); }, 760, 480 });
@@ -3077,6 +3423,7 @@ public:
         if (juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_VIDEO_ONLY", {}).isNotEmpty())
             cases.clear();
         engine = std::make_unique<AudioEngine> (false);
+        report << "visualizer renderer: " << (visualgl::enabled() && ! visualgl::failedThisSession() ? "GPU (OpenGL) wanted" : "2D") << "\n";
         report << "case\tcpu % of one core (animating: demo signal; idle: no audio)\n";
         open();
         startTimer (100);
@@ -3115,6 +3462,18 @@ private:
         t0 = juce::Time::getMillisecondCounterHiRes();
     }
 
+    static GlSceneView* findGl (juce::Component* c)
+    {
+        if (c == nullptr)
+            return nullptr;
+        if (auto* gl = dynamic_cast<GlSceneView*> (c))
+            return gl;
+        for (auto* child : c->getChildren())
+            if (auto* gl = findGl (child))
+                return gl;
+        return nullptr;
+    }
+
     void timerCallback() override
     {
         const auto now = juce::Time::getMillisecondCounterHiRes();
@@ -3122,7 +3481,25 @@ private:
         {
             const auto& c = cases[at];
             auto* content = window->getContentComponent();
-            const auto image = content->createComponentSnapshot (content->getLocalBounds(), true, 1.0f);
+            auto image = content->createComponentSnapshot (content->getLocalBounds(), true, 1.0f);
+            // the GPU picture is not in a component snapshot: read it back and put it where the view is
+            if (auto* gl = findGl (content))
+            {
+                const auto shot = gl->snapshot();
+                if (shot.isValid())
+                {
+                    juce::Graphics g (image);
+                    const auto area = content->getLocalArea (gl, gl->getLocalBounds()).toFloat();
+                    const auto aspect = (float) shot.getWidth() / (float) shot.getHeight();
+                    const auto fit = area.getWidth() / area.getHeight() > aspect ? area.withSizeKeepingCentre (area.getHeight() * aspect, area.getHeight())
+                                                                                  : area.withSizeKeepingCentre (area.getWidth(), area.getWidth() / aspect);
+                    g.setColour (juce::Colours::black);
+                    g.fillRect (area);
+                    g.drawImage (shot, fit);
+                }
+                gl->setTiming (true);
+                gpuViews++;
+            }
             juce::FileOutputStream out (folder.getChildFile (slug (c.name.replace (" (idle)", "-idle")) + ".png"));
             if (out.openedOk())
             {
@@ -3192,10 +3569,21 @@ private:
             }
             return;
         }
+        if (phase == 1)
+            if (auto* gl = findGl (window->getContentComponent()); gl != nullptr && gl->gpuMs() > 0.0)
+            {
+                gpuSum += gl->gpuMs();
+                ++gpuCount;
+            }
         if (phase == 1 && now - t0 > 5000.0)
         {
             const auto cpu = (processCpuSeconds() - c0) / ((now - t0) * 0.001) * 100.0;
-            report << cases[at].name << "\t" << juce::String (cpu, 2) << "\n";
+            report << cases[at].name << "\t" << juce::String (cpu, 2);
+            if (gpuCount > 0)
+                report << "\tGPU " << juce::String (gpuSum / gpuCount, 2) << " ms a frame";
+            report << "\n";
+            gpuSum = 0.0;
+            gpuCount = 0;
             ++at;
             open();
         }
@@ -3287,6 +3675,22 @@ private:
             videoLabel = withFfmpeg ? "ffmpeg" : onMaster ? "master check" : "images";
             job = std::make_unique<VideoJob> (videoTarget, videoScene, v);
             job->diagnose = true;
+            if (visualgl::enabled() && ! visualgl::failedThisSession())
+            {
+                // the GPU exporter in a small window of its own (as in the export's progress window)
+                if (gpuWindow == nullptr)
+                {
+                    gpuWindow = std::make_unique<juce::DocumentWindow> ("LYNX visual test - GPU export", juce::Colours::black, 0);
+                    gpuWindow->setUsingNativeTitleBar (true);
+                    gpuExporter = new GlFrameExporter();
+                    gpuExporter->setSize (320, 180);
+                    gpuWindow->setContentOwned (gpuExporter, true);
+                    gpuWindow->setTopLeftPosition (60, 60);
+                    gpuWindow->setVisible (true);
+                    visualgl::useClassicRendering (*gpuWindow);
+                }
+                job->gl = gpuExporter;
+            }
             finished = false;
             worker = std::thread ([this] {
                 jobResult = job->run ([] (double, const juce::String&) { return true; });
@@ -3307,6 +3711,7 @@ private:
         report << "video (" << videoLabel << "): " << (jobResult ? "OK " : "ERROR ") << job->error << " -> " << job->result.getFullPathName()
                << " frames=" << job->frames << " capture=" << (job->usedCapture ? 1 : 0) << " (" << job->captureNote << ")" << " render_ms=" << juce::roundToInt (job->renderMs)
                << " draw_ms=" << juce::roundToInt (job->drawMs) << " ms_per_frame=" << juce::String (job->frames > 0 ? job->drawMs / job->frames : 0.0, 2)
+               << " gpu=" << (job->usedGpu ? 1 : 0) << (job->gpuNote.isNotEmpty() ? " (" + job->gpuNote + ")" : juce::String())
                << " bytes="
                << (job->result.existsAsFile() ? job->result.getSize() : (juce::int64) job->result.getNumberOfChildFiles (juce::File::findFiles)) << "\n";
         videoOk = videoOk && jobResult;
@@ -3316,6 +3721,8 @@ private:
 
     void finish (bool ok)
     {
+        report << "GPU views: " << gpuViews << (visualgl::failedThisSession() ? ", GPU failed: " + visualgl::failureReason() : juce::String()) << "\n";
+        gpuWindow.reset();
         report << "result=" << (ok ? "OK" : "ERROR") << "\n";
         folder.getChildFile ("report.txt").replaceWithText (report);
         juce::MessageManager::callAsync ([d = done, ok] { d (ok); });
@@ -3329,7 +3736,10 @@ private:
     double t0 = 0.0, c0 = 0.0;
     juce::String report;
     std::unique_ptr<AudioEngine> engine;
-    std::unique_ptr<juce::DocumentWindow> window;
+    std::unique_ptr<juce::DocumentWindow> window, gpuWindow;
+    GlFrameExporter* gpuExporter = nullptr;
+    double gpuSum = 0.0;
+    int gpuCount = 0, gpuViews = 0;
     VisualTarget videoTarget;
     scene::Scene videoScene;
     std::unique_ptr<VideoJob> job;

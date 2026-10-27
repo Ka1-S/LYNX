@@ -29,6 +29,7 @@
 #include "platform/FileTypes.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/VisualGl.h"
 #include "ui/PluginPresetMenu.h"
 #include "ui/PluginWindow.h"
 #include "ui/ClipProperties.h"
@@ -1070,6 +1071,25 @@ public:
                     << lynx::tr ("The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU "
                                  "rendering back on in Options > General settings (after a driver update, for example).",
                                  { cause.driverModule });
+        }
+
+        // round 165e: the Visualizer's GPU view was drawing when the session ended (a driver crash, a hang, the machine
+        // going down): the Visualizer draws with the 2D renderer from now on (its GPU button turns it back on)
+        for (int i = uncleanSteps.size(); --i >= 0;)
+        {
+            if (uncleanSteps[i].contains (lynx::visualgl::stopNote))
+                break;
+            if (uncleanSteps[i].contains (lynx::visualgl::startNote))
+            {
+                if (lynx::visualgl::enabled())
+                {
+                    lynx::visualgl::setEnabled (false);
+                    message << "\n\n"
+                            << lynx::tr ("The Visualizer was drawing with the GPU (OpenGL) when it happened. It now draws without the GPU; its GPU "
+                                         "button turns it back on.");
+                }
+                break;
+            }
         }
 
         const auto session = lynx::crashreporter::parseSession (uncleanSessionText);
