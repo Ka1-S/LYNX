@@ -464,7 +464,19 @@ public:
         dragged = hit (c, e.position);
         if (e.mods.isPopupMenu())
         {
+            if (dragged < 0) // round 165, FL: right-click adds a point there, dragged while the button is held
+            {
+                dragged = addPointAt (e.position);
+                if (dragged >= 0)
+                    return;
+            }
             pointMenu (dragged);
+            dragged = -1;
+            return;
+        }
+        if (e.mods.isAltDown() && dragged >= 0) // FL: Alt+click deletes the point
+        {
+            deletePoint (dragged);
             dragged = -1;
             return;
         }
@@ -503,11 +515,18 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (hit (get(), e.position) < 0)
+            addPointAt (e.position);
+    }
+
+    // a new point at the mouse; its index (−1: the curve is full)
+    int addPointAt (juce::Point<float> position)
+    {
         auto c = get();
-        if (hit (c, e.position) >= 0 || c.count >= (int) c.time.size())
-            return;
+        if (c.count >= (int) c.time.size())
+            return -1;
         const auto limit = axis == Axis::time ? 1.0e6f : 1.0f;
-        const auto t = juce::jlimit (0.0f, limit, fromX (c, e.position.x));
+        const auto t = juce::jlimit (0.0f, limit, fromX (c, position.x));
         int at = c.count;
         for (int i = 0; i < c.count; ++i)
             if (t < c.time[(std::size_t) i])
@@ -522,12 +541,34 @@ public:
             c.tension[(std::size_t) i] = c.tension[(std::size_t) i - 1];
         }
         c.time[(std::size_t) at] = c.count == 0 && axis == Axis::time ? 0.0f : t;
-        c.level[(std::size_t) at] = juce::jlimit (0.0f, 1.0f, fromY (e.position.y));
+        c.level[(std::size_t) at] = juce::jlimit (0.0f, 1.0f, fromY (position.y));
         c.tension[(std::size_t) at] = 0.0f;
         ++c.count;
         if (c.sustain >= at)
             ++c.sustain;
         set (c);
+        return at;
+    }
+
+    void deletePoint (int index)
+    {
+        auto v = get();
+        if (index < 0 || index >= v.count || v.count <= 1)
+            return;
+        for (int i = index; i + 1 < v.count; ++i)
+        {
+            v.time[(std::size_t) i] = v.time[(std::size_t) i + 1];
+            v.level[(std::size_t) i] = v.level[(std::size_t) i + 1];
+            v.tension[(std::size_t) i] = v.tension[(std::size_t) i + 1];
+        }
+        --v.count;
+        if (v.sustain == index)
+            v.sustain = -1;
+        else if (v.sustain > index)
+            --v.sustain;
+        if (v.count > 0 && axis == Axis::time)
+            v.time[0] = 0.0f;
+        set (v);
     }
 
 private:
@@ -575,23 +616,7 @@ private:
         const auto c = get();
         if (index >= 0)
         {
-            menu.addItem (tr ("Delete point"), c.count > 1, false, [this, index] {
-                auto v = get();
-                for (int i = index; i + 1 < v.count; ++i)
-                {
-                    v.time[(std::size_t) i] = v.time[(std::size_t) i + 1];
-                    v.level[(std::size_t) i] = v.level[(std::size_t) i + 1];
-                    v.tension[(std::size_t) i] = v.tension[(std::size_t) i + 1];
-                }
-                --v.count;
-                if (v.sustain == index)
-                    v.sustain = -1;
-                else if (v.sustain > index)
-                    --v.sustain;
-                if (v.count > 0 && axis == Axis::time)
-                    v.time[0] = 0.0f;
-                set (v);
-            });
+            menu.addItem (tr ("Delete point"), c.count > 1, false, [this, index] { deletePoint (index); });
             if (sustainable)
                 menu.addItem (tr ("Sustain point (holds while the key is down)"), true, c.sustain == index, [this, index] {
                     auto v = get();
@@ -605,7 +630,7 @@ private:
             });
             menu.addSeparator();
         }
-        menu.addItem (tr ("Double-click adds a point, drag moves it, Alt+drag bends a segment"), false, false, [] {});
+        menu.addItem (tr ("Right-click or double-click adds a point, drag moves it, Alt+click deletes it, Alt+drag bends a segment"), false, false, [] {});
         menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
     }
 
