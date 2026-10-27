@@ -11,6 +11,7 @@
 #include "core/NativeEngines.h"
 #include "core/SoundFont.h"
 #include "core/Patcher.h"
+#include "core/Vfx.h"
 #include "engine/PluginHost.h"
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
@@ -20,6 +21,7 @@
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 #include "ui/ToolWindow.h"
+#include "ui/VfxEditors.h"
 
 namespace lynx
 {
@@ -817,8 +819,20 @@ private:
         };
         if (ports.midiIn)
             add (false, PatchWire::Kind::midi, 0, tr ("Notes"));
-        if (ports.midiOut) // a MIDI Out node's notes (round 162)
-            add (true, PatchWire::Kind::midi, 0, tr ("MIDI out"));
+        if (ports.midiOut) // a MIDI Out node's notes (round 162); a VFX node's voice outputs (round 164b)
+        {
+            const auto kind = vfx::kindOf (node.channel);
+            const auto shown = kind ? patcher::shownMidiOutputs (d, n) : 1;
+            std::optional<vfx::KeyboardSplitterSettings> zones; // (the Keyboard Splitter's outputs carry the zones' names)
+            if (kind == vfx::Kind::keyboardSplitter)
+                if (const auto st = vfx::readState (node.channel.pluginState))
+                    zones = vfx::parseKeyboardSplitter (st->fl);
+            for (int o = 0; o < shown; ++o)
+                add (true, PatchWire::Kind::midi, o,
+                     zones && o < 16 && ! zones->zones[(std::size_t) o].name.empty() ? juce::String::fromUTF8 (zones->zones[(std::size_t) o].name.c_str())
+                     : kind ? juce::String (vfx::outputName (*kind, o))
+                            : tr ("MIDI out"));
+        }
         for (int i = 0; i < ports.audioIns; ++i)
             add (false, PatchWire::Kind::audio, i, i == 0 ? tr ("In") : tr ("Side-chain"));
         const auto splitter = ! node.generator && node.effect.kind == EffectKind::frequencySplitter && node.busHeads.empty();
@@ -881,7 +895,8 @@ private:
         else
         {
             const auto ports = patcher::nodePorts (d.nodes[(std::size_t) n]);
-            rows = std::max ({ 1, ports.audioIns + (ports.midiIn ? 1 : 0), ports.audioOuts + ports.controlOuts + (ports.midiOut ? 1 : 0) });
+            const auto midiOuts = ! ports.midiOut ? 0 : vfx::kindOf (d.nodes[(std::size_t) n].channel) ? patcher::shownMidiOutputs (d, n) : 1;
+            rows = std::max ({ 1, ports.audioIns + (ports.midiIn ? 1 : 0), ports.audioOuts + ports.controlOuts + midiOuts });
         }
         return { at.x, at.y, nodeWidth, headerHeight + (float) rows * pinSpacing + 4.0f };
     }
@@ -1238,6 +1253,14 @@ public:
                                                                addNode (n, at);
                                                            } });
 
+        // FL's VFX note processors (round 164b): FL files them under Effects / Patcher
+        for (const auto kind : vfx::allKinds)
+            effects[tr ("Patcher")].push_back ({ vfx::flName (kind), true, [addChannel, kind] {
+                                                   ChannelDef c;
+                                                   vfx::makeChannel (c, kind);
+                                                   addChannel (c);
+                                               } });
+
         juce::PopupMenu pluginEffects, pluginInstruments;
         addPluginItems (pluginEffects, engine, false, [this, at] (PluginRef ref) {
             PatchNode n;
@@ -1252,7 +1275,7 @@ public:
             n.channel.name = ref.name;
             n.channel.plugin = ref;
             addNode (n, at);
-        }, this);
+        }, this, addChannel);
 
         juce::PopupMenu add;
         float rows = 0.0f; // (a section header is a bit taller than an item)
@@ -1329,6 +1352,14 @@ private:
     void pickPlugin (bool instruments, juce::Point<float> at)
     {
         juce::Component::SafePointer<PatcherEditor> safe (this);
+        auto builtIn = [safe, at] (ChannelDef c) {
+            if (safe == nullptr)
+                return;
+            PatchNode n;
+            n.generator = true;
+            n.channel = std::move (c);
+            safe->addNode (n, at);
+        };
         showPluginPicker (engine, instruments, [safe, instruments, at] (PluginRef ref) {
             if (safe == nullptr)
                 return;
@@ -1346,7 +1377,7 @@ private:
                 n.effect.plugin = ref;
             }
             safe->addNode (n, at);
-        });
+        }, builtIn);
     }
 
     void chooseSampleNode (juce::Point<float> at)
@@ -1733,6 +1764,11 @@ private:
         if (node.generator && node.channel.instrument == InstrumentKind::midiOut)
         {
             openToolWindow (makeMidiOutEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (node.generator && node.channel.instrument == InstrumentKind::vfx)
+        {
+            openToolWindow (makeVfxEditor (engine, locate, -1), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         if (node.generator && node.channel.instrument == InstrumentKind::controller && ! parseKeyboardController (node.channel.controllerState))

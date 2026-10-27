@@ -25,6 +25,7 @@
 #include "ui/AudioEditor.h"
 #include "core/RackOps.h"
 #include "core/SoundFont.h"
+#include "core/Vfx.h"
 #include "ui/SoundFontEditor.h"
 
 namespace lynx
@@ -79,6 +80,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::midiOut: return "MIDI Out";
         case InstrumentKind::patcher: return "Patcher";
         case InstrumentKind::soundfont: return "LYNX Soundfont";
+        case InstrumentKind::vfx: return "VFX";
     }
     return "?";
 }
@@ -2110,6 +2112,18 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         });
         menu.addSubMenu (tr ("FL engines"), engines);
     }
+    // FL's VFX note processors (round 164b): no sound of their own, their outputs go out on MIDI ports
+    {
+        juce::PopupMenu vfxMenu;
+        for (const auto kind : vfx::allKinds)
+            vfxMenu.addItem (vfx::flName (kind), [this, add, kind] {
+                ChannelDef c;
+                vfx::makeChannel (c, kind);
+                const auto added = add (c);
+                openChannelSettings (engine, added);
+            });
+        menu.addSubMenu (tr ("VFX (note effects)"), vfxMenu);
+    }
     // FL's Patcher as a generator (REA_rodada141): an empty graph, its editor opens
     menu.addItem (tr ("Patcher"), [this, add] {
         ChannelDef c;
@@ -2137,7 +2151,10 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         const auto added = add (c);
         openPluginWindow (added); // the plugin opens when added
         openEditorRow = added;
-    }, this);
+    }, this, [this, add] (ChannelDef c) {
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 }
 
