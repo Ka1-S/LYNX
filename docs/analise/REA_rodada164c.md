@@ -21,6 +21,15 @@ first — a visualizer must not raise the audio CPU.
   in these categories (count of uses): HUD 1835, Postprocess 765, Image effects 636, Background 412, Misc 351,
   Text 238, Peak Effects 157, Canvas effects 99, Feedback 70, Particles 55, Terrain 53, Blend 28, Object Arrays 26,
   Scenes 7, Physics 2. Most are GLSL shader programs (ZGameEditor scripts) — a GPU scene engine.
+- [FL] Side by side (FL 2025 on this machine, Wave Candy added to the master of the "Future House" demo while
+  playing): FL shows the picture in a separate floating, rounded display over the workspace and the settings in the
+  plugin window (Input gain / fade-out / freeze, Appearance, Colors, then the page's own row: Oscilloscope Update /
+  Window / Stereo separation; Spectrum Update / Max res / Scale / dB range, natural weighting; Meter Scale / Hold
+  time / Mode / Decay speed; Vectorscope Update / Thickness / Mode "Tube"). Its spectrum page defaults to a hot
+  (red-yellow) spectrogram; its vectorscope draws mono as a vertical line, like LYNX's. LYNX keeps the display and
+  the knobs in one resizable window (own layout) and the same per-page knob sets. FL's Visual category also holds
+  Big Clock, dB Meter, NoteBook(s), Spectroman, Razer Chroma and Tuner (LYNX has its own clock / meter / tuner
+  elsewhere; not part of this round).
 - [FL] **Fruity Dance** is a generator (an animated dancer driven by the notes, character art + moves). LYNX already
   imports it as a silent visual channel (InstrumentKind::fruitydance). Not reproduced (see §5).
 
@@ -87,7 +96,26 @@ first — a visualizer must not raise the audio CPU.
 - Wave Candy's FL colour scheme / custom font and the Leq(A) mode (LYNX meters LUFS momentary instead).
 
 ## 6. Measurements
-(filled in below by the round)
+Linux (WSLg) build, `--visualtest` and `--editorcpu`-style runs:
+- Audio thread: the tap adds 0.004–0.02 % of real time per slot (60 s of stereo in 256-frame blocks; within the
+  noise of the reference loop), also with the export capture armed. No allocation or lock on the audio thread.
+- Editors (UI thread, animating with the test signal): Wave Candy 7–15 % of one core depending on the page
+  (spectrum the most), the Visualizer preview 9–18 % (Pulse circle the most). In silence they stop repainting (scope
+  after 3 frames, spectrum / vectorscope after 90, spectrogram after 80, meter once below its floor; the Visualizer
+  preview drops to a third of its rate): 2.2 % (Wave Candy), 4 % (Visualizer) — the process baseline is ~2 %.
+- Drawing one 1280×720 Visualizer frame off-screen: 3.4–12.9 ms depending on the scene (cached background and glow
+  images, small particles as rectangles; measured while a Windows build ran) — a 3-minute 30 fps video is drawn in
+  about real time or faster.
+- Video: MP4 1280×720 30 fps h264 + AAC with ffmpeg 7.0.2; PNG + audio.wav fallback without ffmpeg; the captured
+  input matches the rendered WAV sample for sample (correlation of the first block 1.000).
+
+## Fix found on the way: Export lost the start of the song
+`AudioEngine::renderOffline` prepared the JUCE AudioProcessorGraph on the export's worker thread; JUCE then rebuilds
+the graph's render sequence asynchronously on the message thread, so the first 0.05–2 s of the song were rendered
+silent while the transport already moved on (the Export window's file started late into the song). The graph is now
+prepared on the message thread (handshake with a 10 s timeout and a fallback); `--visualtest` checks that the first
+sound of a plain export comes before 0.1 s.
 
 ## Where I stopped
-(filled in below by the round)
+Everything in §2–§4 landed with unit tests (tests/Visual164Tests.inc), `--visualtest` and `--opentest` passing.
+Left for a next round: §5 (ZGE shader engine / GPU path, Fruity Dance, Wave Candy's FL colour themes and Leq(A)).
