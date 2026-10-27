@@ -347,6 +347,12 @@ void DanceStage::scan()
     }
 }
 
+void DanceStage::update()
+{
+    scanCountdown = 0;
+    timerCallback();
+}
+
 void DanceStage::timerCallback()
 {
     if (--scanCountdown <= 0)

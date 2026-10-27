@@ -382,6 +382,7 @@ public:
     void noteOff (int) noexcept override {}
     void allNotesOff() noexcept override {}
     void render (float*, float*, int, float, float) noexcept override {}
+    bool idle() const noexcept override { return true; } // (never a voice: its render can be skipped)
 
     Signals signals;
 };

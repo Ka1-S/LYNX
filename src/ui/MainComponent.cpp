@@ -1669,6 +1669,8 @@ void MainComponent::selectTabForSnapshot (int tab)
 void MainComponent::showDesktopForSnapshot (bool extraPanels)
 {
     workspace.resetLayout();
+    if (auto* stage = dynamic_cast<DanceStage*> (danceStage.get()))
+        stage->update(); // (the project's dancers now: no timer runs before the picture)
 
     if (extraPanels)
     {

@@ -1040,7 +1040,7 @@ const std::vector<Scene>& presets()
             s.name = "Retro road";
             s.layers.push_back (black());
             s.layers.push_back (fx (LayerType::terrain, "road"));
-            auto title = make (LayerType::text, 0xffffffff, 0xffff2d95, 0.5f, 0.2f, 0.12f, Band::beat, 0.3f);
+            auto title = make (LayerType::text, 0xffffffff, 0xffff2d95, 0.5f, 0.87f, 0.11f, Band::beat, 0.3f);
             title.text = "LYNX";
             title.amount = 0.7f;
             s.layers.push_back (title);

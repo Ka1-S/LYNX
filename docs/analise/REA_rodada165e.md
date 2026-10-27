@@ -72,3 +72,22 @@ art (procedural dancer, moves picked by notes), FL's Fruity Dance channels impor
 - Full screen and video export use the same renderer; the export draws each frame off-screen at the export size
   (1080p included) through a thumbnail context in the progress window, read back with glReadPixels; if the GPU
   stops answering (15 s) the rest of the export is drawn in 2D.
+
+## 3. LYNX Dance (FL's Fruity Dance) [DECOMP + CODE]
+
+- FL (Fruity dance_x64.dll, Ghidra project r68_dance): TriggerVoice `FUN_0071b630` maps the key through a 128-entry
+  table and kills the voice at once (no sound, `Gen_Render` `FUN_0071b7c0` is empty). The table is filled in
+  `FUN_0071a410`: keys 59 (B4) up = move 0, 1, … (as many as the loaded dance has), keys 48 (C4) down = the same
+  moves mirrored (stored as −1 − move), key 53 (F4) = 0x10000 → parameter 2 (shown) = 0, key 54 (F#4) = 0x10001 →
+  shown = 1. A move key also sets parameter 1 (mirrored) when it changes. LYNX: `dance::actionForKey`, the same keys.
+- State (REA_rodada68 §8): int version; move, mirrored, shown, scale (/64), speed, x, y; display options; version 2
+  adds a picture path. LYNX reads it on .flp import (`dance::fromFl`) and writes its own text state once edited.
+- LYNX's character: its own lynx (tufted ears, cheek ruffs, bob tail, a shirt in the outfit colour) drawn from a pose
+  with vector shapes; 11 moves (Freestyle, Waiting, Stepping, Jumping, Zombie, Waving, Hula, Windmill, Flailing,
+  Spinning, Pose) as pose functions of a cycle (one cycle = two beats at speed 1), Freestyle picks a move every two
+  cycles, changes blend over 180 ms. The clock follows the song while playing, 120 BPM free-running when stopped.
+- Where: a transparent stage over the main window (only the dancers take the mouse: drag to place, right-click for
+  moves / mirrored / hide / settings), repainting only the dancer's box at 30 frames a second (2 a second when the
+  project has no dance channel). The channel's editor (live preview, move, mirrored, shown, size, speed, outfit
+  colour, put back, the key map) replaces the old "silent" page. Channel Rack › Add › Fruity Dance makes one.
+- The audio thread only stores the note's key in a 16-entry lock-free ring (`dance::Signals`); the UI reads it.

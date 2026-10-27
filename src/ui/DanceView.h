@@ -40,6 +40,7 @@ public:
     void mouseUp (const juce::MouseEvent& e) override;
 
     int dancerCount() const noexcept { return (int) dancers.size(); }
+    void update(); // scan the song and move the dancers on now (snapshots; the timer does it live)
 
 private:
     struct Dancer
