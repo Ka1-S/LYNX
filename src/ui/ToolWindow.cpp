@@ -54,7 +54,7 @@ juce::DocumentWindow* openToolWindow (std::unique_ptr<juce::Component> content, 
             delete old;
 
     auto* window = new ToolWindow (title, key);
-    window->setContentOwned (content.release(), true);
+    window->setContentOwned (fitContentToScreen (std::move (content)).release(), true); // (scrolls when taller than the screen)
     window->setResizable (false, false);
 
     if (auto* main = juce::TopLevelWindow::getActiveTopLevelWindow())

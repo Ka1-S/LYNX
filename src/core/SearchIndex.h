@@ -27,6 +27,25 @@ struct FolderListing
     std::vector<std::string> subfolders; // names of the subfolders
 };
 
+// Which indexed folders hold, at any depth, a file a filter accepts (round 164: the Browser's content filter hides the
+// folders it would show empty). A folder that is not indexed, or not inside a tree walked to the end, is unknown.
+struct FolderMatches
+{
+    enum class Contents
+    {
+        unknown,
+        none,
+        some
+    };
+    std::set<std::string> some, none;
+    std::uint64_t generation = 0; // Index::generation() when it was worked out
+
+    Contents of (const std::string& folder) const
+    {
+        return some.count (folder) > 0 ? Contents::some : none.count (folder) > 0 ? Contents::none : Contents::unknown;
+    }
+};
+
 struct FileSystem
 {
     std::function<std::int64_t (const std::string& folder)> folderTime; // −1 when the folder no longer exists
@@ -53,10 +72,21 @@ public:
     {
         folders.clear();
         complete.clear();
+        ++gen;
     }
 
+    // Changes whenever the index does (round 164: what was worked out from it is out of date).
+    std::uint64_t generation() const noexcept { return gen; }
+
+    // The folders holding (directly or below) a file `accept` takes, and those of the complete trees holding none.
+    FolderMatches folderMatches (const std::function<bool (const std::string& fileName)>& accept) const;
+
     // A folder tree walked to the end (round 162): searching it needs no walk first. A folder inside one counts too.
-    void markComplete (const std::string& root) { complete.insert (root); }
+    void markComplete (const std::string& root)
+    {
+        if (complete.insert (root).second)
+            ++gen;
+    }
     bool isComplete (const std::string& folder) const;
 
     static bool isUnder (const std::string& path, const std::string& root);
@@ -74,6 +104,7 @@ private:
     };
     std::map<std::string, Folder> folders; // full path -> contents
     std::set<std::string> complete;
+    std::uint64_t gen = 0;
     static std::string join (const std::string& folder, const std::string& name, char separator);
     void drop (const std::string& folder, char separator);
 };
