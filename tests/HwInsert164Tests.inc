@@ -240,3 +240,35 @@ TEST (hw164_ping_measures_its_own_path)
         CHECK (std::abs (fx->controlOutput (hwinsert::pingState) - 0.625f) < 1e-6f);
     }
 }
+
+TEST (hw164_cost_per_block)
+{
+    using namespace lynx;
+    // the DSP cost of one routed insert (stereo send + return, 100 % wet, round trip 512) per 256-sample block;
+    // printed for the round doc, the bound is loose (a slow CI box must pass)
+    LiveInput input;
+    HardwareOutput bus;
+    std::vector<float> inA (256, 0.25f), inB (256, -0.25f), o0 (256), o1 (256), o2 (256), o3 (256);
+    input.numChannels = 2;
+    input.channels[0] = inA.data();
+    input.channels[1] = inB.data();
+    bus.active.store (true);
+    float* outs[] { o0.data(), o1.data(), o2.data(), o3.data() };
+    auto p = hw164::routed (512);
+    auto fx = makeEffect (makeEffectSlot (EffectKind::hardwareInsert));
+    fx->prepare (48000.0);
+    std::vector<float> l (256, 0.1f), r (256, -0.1f);
+    constexpr int blocks = 20000;
+    double busy = 0.0;
+    for (int b = 0; b < blocks; ++b)
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        fx->setHardwareIo (&input, &bus, 0);
+        fx->process (l.data(), r.data(), 256, p, 120.0);
+        busy += std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count();
+        bus.drainInto (outs, 4, [] (int c) { return c < 4 ? c : -1; }, 256);
+    }
+    const auto perBlock = busy / blocks;
+    std::printf ("  hardware insert: %.2f us per 256-sample block (%.3f %% of a 5.33 ms block)\n", perBlock, perBlock / 5333.3 * 100.0);
+    CHECK (perBlock < 200.0);
+}
