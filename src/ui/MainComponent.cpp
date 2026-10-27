@@ -1,4 +1,5 @@
 #include "ui/ColourPicker.h"
+#include "core/NoteNames.h"
 #include "ui/ProjectLoading.h"
 #include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
@@ -1341,6 +1342,10 @@ void MainComponent::loadUiSettings()
             skin::setReducedEffects (on);
         else if (key == "waveStereo")
             ui::WaveformCache::stereo = on;
+        else if (key == "noteNames")
+            notenames::currentStyle.store (juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "noteFlats")
+            notenames::currentFlats.store (on);
         else if (key == "rememberSeek")
             EditorGlobals::get().rememberSeek = on;
         else if (key == "followPlaylist" || key == "followPianoRoll")
@@ -1368,6 +1373,8 @@ void MainComponent::loadUiSettings()
             askUnusedRecordings = on;
         else if (key == "autosaveKeep")
             autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "metronomeSound")
+            engine.getTransport().metronomeSound.store (juce::jlimit (0, 5, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
         else if (key == "metronomeVolume")
             engine.getTransport().metronomeVolume.store ((float) controls::clampUtilityVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue()));
         else if (key == "previewVolume")
@@ -1436,6 +1443,8 @@ void MainComponent::saveUiSettings()
                                       + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0)
                                       + "\nwaveSpectral=" + juce::String (ui::WaveformCache::spectral ? 1 : 0)
                                       + "\nwaveStereo=" + juce::String (ui::WaveformCache::stereo ? 1 : 0)
+                                      + "\nnoteNames=" + juce::String (notenames::currentStyle.load())
+                                      + "\nnoteFlats=" + juce::String (notenames::currentFlats.load() ? 1 : 0)
                                       + "\nreducedEffects=" + juce::String (skin::reducedEffects() ? 1 : 0)
                                       + "\npluginStyle=" + juce::String (skin::forcedStyle() < 0 ? "Automatic" : skin::styleName ((skin::Style) skin::forcedStyle()))
                                       + "\npluginStyleOverrides=" + skin::overridesToString()
@@ -1453,6 +1462,7 @@ void MainComponent::saveUiSettings()
                                       + "\naskUnusedRecordings=" + juce::String (askUnusedRecordings ? 1 : 0)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\nmetronomeVolume=" + juce::String (engine.getTransport().metronomeVolume.load(), 2)
+                                      + "\nmetronomeSound=" + juce::String (engine.getTransport().metronomeSound.load())
                                       + "\npreviewVolume=" + juce::String (engine.getPreviewVolume(), 2)
                                       + "\neditorVolume=" + juce::String (engine.getEditorVolume(), 2)
                                       + "\nrackPianoRollView=" + juce::String (rack.isPianoRollView() ? 1 : 0)
@@ -2038,6 +2048,16 @@ void MainComponent::showMetronomeMenu()
                 saveUiSettings();
             });
         menu.addSubMenu (tr ("Volume"), levels);
+    }
+    // FL's Metronome sound section (REA round 165f), LYNX's own synthesized sounds
+    menu.addSectionHeader (tr ("Metronome sound"));
+    {
+        const char* names[] = { TR_NOOP ("Click"), TR_NOOP ("Hi-hat"), TR_NOOP ("Tick"), TR_NOOP ("Beep"), TR_NOOP ("Cowbell"), TR_NOOP ("Pulse") };
+        for (int i = 0; i < 6; ++i)
+            menu.addItem (tr (names[i]), true, transport.metronomeSound.load() == i, [this, i] {
+                engine.getTransport().metronomeSound.store (i);
+                saveUiSettings();
+            });
     }
     menu.addSeparator();
     menu.addItem (tr ("Count-in before recording") + shortcutText ("record.countIn"), true, engine.getRecordOptions().countInBars > 0,
@@ -3697,6 +3717,8 @@ void MainComponent::openSettings (int page)
         o.compactMenus = theme::menus::compact();
         o.waveSpectral = ui::WaveformCache::spectral;
         o.waveStereo = ui::WaveformCache::stereo;
+        o.noteNames = notenames::currentStyle.load();
+        o.noteFlats = notenames::currentFlats.load();
         o.reducedEffects = skin::reducedEffects();
         o.gpuRendering = gpuRenderingEnabled();
         o.pluginStyle = skin::forcedStyle();
@@ -3733,6 +3755,13 @@ void MainComponent::openSettings (int page)
             skin::setReducedEffects (o.reducedEffects);
             skin::setForcedStyle (o.pluginStyle);
             for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) // open editors redraw at once
+                if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
+        }
+        if (o.noteNames != notenames::currentStyle.load() || o.noteFlats != notenames::currentFlats.load())
+        {
+            notenames::currentStyle.store (juce::jlimit (0, 2, o.noteNames));
+            notenames::currentFlats.store (o.noteFlats);
+            for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) // the keyboards redraw with the new names
                 if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
         }
         if (o.gpuRendering != gpuRenderingEnabled())

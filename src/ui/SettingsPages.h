@@ -20,6 +20,8 @@ struct GeneralOptions
     int uiScale = 100;          // percent
     bool compactMenus = true;   // menu density: compact (native-like rows) or comfortable (round 163)
     bool waveSpectral = false, waveStereo = false;
+    int noteNames = 0;          // notenames::Style: English, Germanic, Solfège (round 165f)
+    bool noteFlats = false;     // black notes as flats
     bool splash = true, startupSound = true, scanAtStart = true;
     bool menuEntry = false;     // Linux AppImage: LYNX in the applications menu + the .lynx file type (round 161)
     bool typingPiano = false, keepEditorsOpen = false, rememberSeek = false;

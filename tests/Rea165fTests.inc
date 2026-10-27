@@ -52,3 +52,43 @@ TEST (score_log_dump_follows_fl)
     CHECK (n.size() == 1 && n[0].key == 62 && n[0].start == 0);
     CHECK (dump ({}, o).empty());
 }
+
+#include "core/Timecode.h"
+
+TEST (smpte_timecode_labels)
+{
+    using namespace lynx::timecode;
+    CHECK (format (0.0, 5) == "00:00:00:00");
+    CHECK (format (3723.5, 2) == "01:02:03:12");  // 25 fps: half a second = frame 12
+    CHECK (format (1.0, 1) == "00:00:01:00");
+    // 29.97 drop frame (index 3): frame 1800 is labelled 00:01:00;02 (frames 0 and 1 of minute 1 are skipped)
+    auto l = label (1800, rates[3]);
+    CHECK (l.minutes == 1 && l.seconds == 0 && l.frames == 2);
+    l = label (17982, rates[3]); // ten minutes: no skip at minute 10
+    CHECK (l.minutes == 10 && l.seconds == 0 && l.frames == 0);
+    l = label (1799, rates[3]);
+    CHECK (l.minutes == 0 && l.seconds == 59 && l.frames == 29);
+    // one real hour of 29.97 drop frame reads 01:00:00;00 (that is the point of drop frame)
+    CHECK (format (3600.0, 3) == "01:00:00;00");
+    // non-drop 29.97 runs slow: an hour reads 00:59:56:12
+    CHECK (format (3600.0, 4) == "00:59:56:12");
+    // 59.94 drop: 4 frames skipped
+    l = label (3600, rates[8]);
+    CHECK (l.minutes == 1 && l.frames == 4);
+    CHECK (std::string (format (1.0, 3)).find (';') != std::string::npos);
+}
+
+#include "core/NoteNames.h"
+
+TEST (note_names_english_germanic_solfege)
+{
+    using namespace lynx::notenames;
+    CHECK (pitchName (10, Style::english, false) == "A#" && pitchName (10, Style::english, true) == "Bb");
+    CHECK (pitchName (11, Style::germanic, false) == "H" && pitchName (10, Style::germanic, true) == "B");
+    CHECK (pitchName (0, Style::solfege, false) == "Do" && pitchName (7, Style::solfege, false) == "Sol" && pitchName (3, Style::solfege, true) == "Mib");
+    CHECK (pitchName (-1, Style::english, false) == "B");
+    currentStyle.store ((int) Style::solfege);
+    CHECK (keyName (60) == "Do5" && keyName (69) == "La5");
+    currentStyle.store (0);
+    CHECK (keyName (60) == "C5");
+}
