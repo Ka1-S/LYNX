@@ -113,3 +113,5 @@ changes (a knob moved by hand wins again); `.flp` links to parameters ≥ 16 are
   the live links' bindings are applied too (`applyPluginParams (…, andLive)`); song mode was already right.
   [TEST] `dashboard165_links_and_midi_through_the_rack_in_pattern_mode` (both modes, plus the Dashboard's CC reaching a
   plugin on its port).
+  After the fix LYNX renders FL's own `fl_dash.flp` as L = −0.49999997, R = +0.74999994 for the whole render (raw
+  float output of renderwav with a debug print) — FL's −0.500 / +0.750 [FL render vs RUN].
