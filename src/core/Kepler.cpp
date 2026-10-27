@@ -60,18 +60,148 @@ struct NearestMode
 };
 #endif
 
-// pow: the render's powers of two (pitch, cutoff) with exp2, the parameter laws in extended precision rounded to double.
-// The DLL's library differs from both by single ulps on some values (§6.2; exp2 and the extended pow give identical
-// renders in the tests, exp2 at a fraction of the cost)
+// pow with base 2 as the DLL's statically linked library computes it (REA_rodada165g-kepler §1): the engine calls pow
+// (double) for the oscillator increment and powf for the cutoff inside the render, where the rounding mode is "toward
+// zero"; both libraries' results then differ from exp2 by one unit in the last place on ~0.1–2 % of the inputs, which
+// self-oscillating patches amplify. The exponential is rebuilt step by step: x·ln 2 (as a head/tail pair for pow), the
+// index n = x·64/ln 2 converted in the current rounding mode, the reduced argument r = x − n·ln 2/64 (fused on CPUs
+// with FMA, the path FL takes on them), a Taylor polynomial (degree 3 for powf, 6 for pow) and the 2^(j/64) table
+// (pow: head + tail; heads truncated to 24 bits) read from the user's engine DLL. Bit-exact against the DLL's pow/powf
+// on 10⁶ random inputs in both rounding modes [EXEC].
+struct CrtExp
+{
+    std::array<double, 64> full {}, head {}, tail {};
+};
+std::atomic<const CrtExp*> crtExp { nullptr };
+
+// the polynomial steps are fused multiply-adds: hardware FMA where the CPU has it (x86: selected at run time; ARM64:
+// always), std::fma otherwise
+#define LYNX_KEPLER_CRT_POW(NAME, FMA, ATTR)                                                                               \
+    ATTR double NAME##D (const CrtExp& t, double y) noexcept                                                                \
+    {                                                                                                                    \
+        constexpr double ln2h = 0x1.62e42ep-1, ln2t = 0x1.efa39ef35793cp-25, k64 = 0x1.71547652b82fep+6,                \
+                         c64h = 0x1.62e42fp-7, c64t = -0x1.df473de6af278p-32;                                           \
+        auto top = [] (double d) noexcept {                                                                              \
+            std::uint64_t u;                                                                                             \
+            std::memcpy (&u, &d, 8);                                                                                     \
+            u &= 0xfffffffff8000000ull;                                                                                  \
+            std::memcpy (&d, &u, 8);                                                                                     \
+            return d;                                                                                                    \
+        };                                                                                                               \
+        /* log(2) as head + tail, then y·log(2) as zh + zl */                                                            \
+        const double L = ln2h + ln2t, Lh = top (L);                                                                      \
+        double l = ln2h - L;                                                                                             \
+        l = l + ln2t;                                                                                                    \
+        l = l + (L - Lh);                                                                                                \
+        const double yh = top (y), yl = y - yh;                                                                          \
+        double a = yl * l;                                                                                               \
+        a = a + yl * Lh;                                                                                                 \
+        a = a + l * yh;                                                                                                  \
+        const double hh = Lh * yh, zh = hh + a;                                                                          \
+        double zl = hh - zh;                                                                                             \
+        zl = zl + a;                                                                                                     \
+        const double kk = zh * k64;                                                                                      \
+        if (! (kk <= 65536.0 && kk >= -68800.0))                                                                         \
+            return std::exp2 (y);                                                                                        \
+        const int n = (int) std::lrint (kk);                                                                             \
+        const double dn = (double) n;                                                                                    \
+        const int j = n & 63, m = (n - j) >> 6;                                                                          \
+        double r = FMA (-dn, c64h, zh) + dn * c64t;                                                                      \
+        r = r + zl;                                                                                                      \
+        double p = FMA (0x1.6c16c16c16c17p-10, r, 0x1.1111111111111p-7);                                                \
+        p = FMA (p, r, 0x1.5555555555555p-5);                                                                            \
+        p = FMA (p, r, 0x1.5555555555555p-3);                                                                            \
+        p = FMA (p, r, 0.5);                                                                                             \
+        p = FMA (p, r, 1.0);                                                                                             \
+        const double q = p * r;                                                                                          \
+        double s5 = t.tail[(std::size_t) j] * q;                                                                         \
+        double s1 = t.head[(std::size_t) j] * q;                                                                         \
+        s5 = s5 + t.tail[(std::size_t) j];                                                                               \
+        s1 = s1 + s5;                                                                                                    \
+        s1 = s1 + t.head[(std::size_t) j];                                                                               \
+        if (m <= -1022 || m >= 1024)                                                                                     \
+            return std::ldexp (s1, m);                                                                                   \
+        const std::uint64_t sc = (std::uint64_t) (m + 0x3ff) << 52;                                                      \
+        double scale;                                                                                                    \
+        std::memcpy (&scale, &sc, 8);                                                                                    \
+        return s1 * scale;                                                                                               \
+    }                                                                                                                    \
+    ATTR float NAME##F (const CrtExp& t, float y) noexcept                                                                \
+    {                                                                                                                    \
+        const double z = (double) y * 0x1.62e42fefa39efp-1;                                                              \
+        if (! (z <= 88.72283935546875 && z > -103.2789306640625))                                                        \
+            return (float) std::exp2 ((double) y);                                                                       \
+        const int n = (int) std::lrint (z * 0x1.71547652b82fep+6);                                                       \
+        const double dn = (double) n;                                                                                    \
+        const double r = FMA (-dn, 0x1.62e42fefa39efp-7, z);                                                             \
+        double p = FMA (0x1.5555555555555p-3, r, 0.5);                                                                   \
+        p = FMA (p, r, 1.0);                                                                                             \
+        const double q = r * p;                                                                                          \
+        const double T = t.full[(std::size_t) (n & 63)];                                                                 \
+        double v = FMA (q, T, T);                                                                                        \
+        std::uint64_t u;                                                                                                 \
+        std::memcpy (&u, &v, 8);                                                                                         \
+        u += (std::uint64_t) (std::int64_t) (n >> 6) << 52;                                                              \
+        std::memcpy (&v, &u, 8);                                                                                         \
+        return (float) v;                                                                                                \
+    }
+
+LYNX_KEPLER_CRT_POW (crtPow2Sw, std::fma, )
+#if (defined(__x86_64__) || defined(_M_X64)) && (defined(__clang__) || defined(__GNUC__))
+#define LYNX_KEPLER_HW_FMA 1
+LYNX_KEPLER_CRT_POW (crtPow2Hw, __builtin_fma, __attribute__ ((target ("fma"))))
+bool detectFma() noexcept
+{
+    // CPUID.1:ECX bit 12 (FMA) and bit 27 (OSXSAVE), and the OS saving the YMM state (XCR0 bits 1, 2)
+    unsigned a = 1, b = 0, c = 0, d = 0;
+    __asm__ ("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
+    (void) b, (void) d;
+    if ((c & (1u << 12)) == 0 || (c & (1u << 27)) == 0)
+        return false;
+    unsigned lo = 0, hi = 0;
+    __asm__ ("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+    return (lo & 6u) == 6u;
+}
+const bool cpuHasFma = detectFma();
+#endif
+#undef LYNX_KEPLER_CRT_POW
+
+double crtPow2 (const CrtExp& t, double y) noexcept
+{
+#ifdef LYNX_KEPLER_HW_FMA
+    if (cpuHasFma)
+        return crtPow2HwD (t, y);
+#endif
+    return crtPow2SwD (t, y);
+}
+
+float crtPow2f (const CrtExp& t, float y) noexcept
+{
+#ifdef LYNX_KEPLER_HW_FMA
+    if (cpuHasFma)
+        return crtPow2HwF (t, y);
+#endif
+    return crtPow2SwF (t, y);
+}
+
+// powers of two through the library above once a DLL's tables are loaded (exp2 before that); other bases (parameter
+// laws, outside the render) in extended precision rounded to double
 double powD (double a, double b) noexcept
 {
     if (a == 2.0)
+    {
+        if (const auto* t = crtExp.load (std::memory_order_acquire))
+            return crtPow2 (*t, b);
         return std::exp2 (b);
+    }
     return (double) std::pow ((long double) a, (long double) b);
 }
 
 float powF (float a, float b) noexcept
 {
+    if (a == 2.0f)
+        if (const auto* t = crtExp.load (std::memory_order_acquire))
+            return crtPow2f (*t, b);
     return (float) powD ((double) a, (double) b);
 }
 float tanF (float x) noexcept
@@ -238,6 +368,18 @@ std::shared_ptr<const Tables> loadTables (const std::string& path)
         return nullptr;
     t->noise.resize ((std::size_t) noisePoints);
     std::memcpy (t->noise.data(), b.data() + no, 2 * (std::size_t) noisePoints);
+    // the library's 2^(j/64) tables (§1 of REA_rodada165g-kepler): powf's rounded values, pow's 24-bit heads and tails
+    if (crtExp.load (std::memory_order_acquire) == nullptr)
+    {
+        const auto fo = offset (0xF19B0), ho = offset (0xF1BB0), to = offset (0xF1DB0);
+        if (fo + 512 > b.size() || ho + 512 > b.size() || to + 512 > b.size())
+            return nullptr;
+        static CrtExp crt;
+        std::memcpy (crt.full.data(), b.data() + fo, 512);
+        std::memcpy (crt.head.data(), b.data() + ho, 512);
+        std::memcpy (crt.tail.data(), b.data() + to, 512);
+        crtExp.store (&crt, std::memory_order_release);
+    }
     t->blit = blitRows();
     cache[path] = t;
     return t;
