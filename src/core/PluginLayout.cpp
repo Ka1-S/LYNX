@@ -1813,27 +1813,35 @@ Layout aetherLayout()
 }
 
 // round 136: Ember's Classic voicing (core/EmberClassic.h) — with Voicing on, Ember's own controls hide and the
-// Classic ones (the reference's laws and texts) show; added around emberLayout() so that layout stays as it is
+// Classic ones (the reference's laws and texts) show; added around emberLayout() so that layout stays as it is.
+// Round 165 (REA_rodada165ha §3): the reference's one-screen arrangement in LYNX's widgets — Punish top left, the VU
+// (output level) top centre, Output with its Auto link top right, the big Drive left, Low cut (+ Thump), Tone,
+// High cut (+ Steep) and Mix in a row, the five styles one click each along the bottom
 Layout withEmberClassic (Layout l)
 {
     for (auto& it : l.items)
         if (it.whenParam == nullptr)
             it = when (it, "Voicing", 0.0f, 0.5f);
     auto add = [&l] (LayoutItem it) { l.items.push_back (when (it, "Voicing", 0.5f, 1.0f)); };
-    add (section (4, 4, 200, 222, TR_NOOP ("Style")));
-    auto styles = radio (12, 30, 184, 120, "Classic style", TR_NOOP ("A|E|N|T|P"));
-    add (styles);
-    add (toggle (12, 166, 184, 22, "Classic punish", TR_NOOP ("Punish")));
-    add (section (208, 4, 308, 222, TR_NOOP ("Classic")));
-    add (dial (266, 86, 70, "Classic drive", TR_NOOP ("Drive"), big));
-    add (dial (380, 60, 36, "Classic tone", TR_NOOP ("Tone"), bipolar));
-    add (dial (460, 60, 36, "Classic mix", TR_NOOP ("Mix")));
-    add (dial (340, 148, 30, "Classic low cut", TR_NOOP ("Low cut")));
-    add (dial (410, 148, 30, "Classic high cut", TR_NOOP ("High cut")));
-    add (dial (480, 148, 30, "Classic output", TR_NOOP ("Output")));
-    add (toggle (216, 200, 80, 20, "Classic thump", TR_NOOP ("Thump")));
-    add (toggle (300, 200, 80, 20, "Classic steep", TR_NOOP ("Steep")));
-    add (toggle (400, 200, 108, 20, "Voicing", TR_NOOP ("Classic")));
+    add (section (4, 4, 512, 432, TR_NOOP ("Classic")));
+    add (toggle (24, 44, 104, 28, "Classic punish", TR_NOOP ("Punish")));
+    auto vu = display (152, 28, 216, 136, "vumeter");
+    vu.steps = 0;
+    add (vu);
+    add (dial (434, 84, 56, "Classic output", TR_NOOP ("Output")));
+    add (toggle (400, 156, 68, 20, "Classic auto", TR_NOOP ("Auto")));
+    add (dial (86, 222, 104, "Classic drive", TR_NOOP ("Drive"), big));
+    add (dial (204, 268, 50, "Classic low cut", TR_NOOP ("Low cut")));
+    add (dial (300, 268, 50, "Classic tone", TR_NOOP ("Tone"), bipolar));
+    add (dial (396, 268, 50, "Classic high cut", TR_NOOP ("High cut")));
+    add (dial (474, 222, 50, "Classic mix", TR_NOOP ("Mix")));
+    add (toggle (168, 336, 72, 20, "Classic thump", TR_NOOP ("Thump")));
+    add (toggle (360, 336, 72, 20, "Classic steep", TR_NOOP ("Steep")));
+    add (label (24, 368, 280, 14, TR_NOOP ("Style")));
+    add (tabs (24, 384, 300, 32, "Classic style", TR_NOOP ("A|E|N|T|P")));
+    // projects saved before round 165 keep round 136's Punish until switched to the measured law
+    add (when (tabs (344, 360, 152, 20, "Classic law", TR_NOOP ("Old|Measured")), "Classic law", 0.0f, 0.5f));
+    add (toggle (344, 392, 152, 24, "Voicing", TR_NOOP ("Classic")));
     return l;
 }
 

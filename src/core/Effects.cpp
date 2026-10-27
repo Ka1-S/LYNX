@@ -3513,6 +3513,9 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 152: Ember saved before the effect characters' measured law keeps the static stand-ins
     if (slot.kind == EffectKind::ember && savedCount <= (std::size_t) mixsuite::ember::effectLaw)
         slot.params[(std::size_t) mixsuite::ember::effectLaw] = 0.0f;
+    // round 165: … and before Punish's measured law keeps round 136's Classic Punish
+    if (slot.kind == EffectKind::ember && savedCount <= (std::size_t) mixsuite::ember::classicLaw)
+        slot.params[(std::size_t) mixsuite::ember::classicLaw] = 0.0f;
     if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
         && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)
         slot.params[(std::size_t) echosuite::echoform::voicingStereo] = 0.0f;

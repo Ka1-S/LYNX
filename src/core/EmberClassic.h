@@ -35,6 +35,9 @@ struct StyleModel
     double envAttackMs = 5.0, envReleaseMs = 50.0;
     double dcHz = 13.0;                         // DC blocker after the curve
     std::array<double, styleFirTaps> fir { 1.0 }; // the style's own linear colour (base rate, causal)
+    // round 165 [EXEC trial, REA_rodada165ha §1]: Punish's measured law — it adds punishLawDb + punishLawPerUnitDb × drive
+    // before the curve (round 136's constant punishDb was fitted on a reading the trial gets wrong right after a toggle)
+    double punishLawDb = 14.0, punishLawPerUnitDb = 0.4;
 };
 
 constexpr int styleCount = 5;                   // A, E, N, T, P
@@ -48,6 +51,12 @@ double highCutHz (float v) noexcept;            // 1 … 20 kHz (log)
 double outputDb (float v) noexcept;             // −24 … 0 dB
 int styleOf (float v) noexcept;
 
+// round 165 [EXEC: her 63 saved states]: the reference's Auto moves the Output knob opposite to Drive in its editor
+// (−1.6 dB per Drive unit; the audio path itself is unchanged). The Output value (0 … 1) after Drive moves from
+// `driveFrom` to `driveTo` (0 … 1), clamped to the knob's range.
+constexpr double autoDbPerUnit = -1.6;
+float autoOutput (float output, float driveFrom, float driveTo) noexcept;
+
 struct Settings
 {
     int style = 0;
@@ -56,6 +65,7 @@ struct Settings
     double lowCutHz = 20.0, toneDb = 0.0, highCutHz = 20000.0;
     double mix = 1.0;                           // 0 … 1, linear
     double outputDb = 0.0;
+    bool measuredPunish = true;                 // round 165: Punish's measured law (false = round 136's +9.75 dB)
     bool operator== (const Settings&) const = default;
 };
 
