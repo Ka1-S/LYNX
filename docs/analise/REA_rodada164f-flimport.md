@@ -81,3 +81,6 @@ LYNX implements), not decompiled yet — left as it was.
 - Left: Dashboard MIDI-sending records (CC / program to a MIDI port), the X-Y-Z output-curve tension (needs FL's
   envelope tension formula), LYNX links to the Voltage Controller's own parameters (FL can link its offsets; LYNX's
   `channelParam` binding skips the voltage kind).
+- Screenshots not taken: the coordinator paused all Windows desktop use (the user was on the PC). `LYNX.exe
+  --controllershot <prefix>` (build-win-patcher164v) now also writes `-dashboard-fl-<preset>.png` for each FL Dashboard
+  preset of this PC's FL install — run it (and screenshot FL's Dashboard with the same preset) once the desktop is free.
