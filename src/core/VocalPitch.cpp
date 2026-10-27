@@ -6,12 +6,6 @@
 
 namespace lynx::vocal
 {
-int experiment = 0;
-float experimentRelaxed = 0.35f;
-float experimentBridgeMs = 25.0f;
-float experimentLock = 0.15f;
-float experimentNormLo = 0.5f;
-
 namespace
 {
 constexpr double pi = 3.14159265358979323846;
@@ -298,22 +292,6 @@ void PitchDetector::analyse() noexcept
         }
         tau = bestTau;
     }
-    // EXPERIMENT E1: voicing hysteresis — no dip under the threshold, but the last estimate was voiced a moment ago
-    // and the difference function still dips clearly at (about) that period: the note goes on (a breathy or rough
-    // stretch), not an unvoiced gap
-    if (! found && harmonicGuard && (experiment & 1) != 0 && sinceVoiced <= guardMemory / 2 && lastTau > 0.0)
-    {
-        const auto lo = std::max (tauMin + 1, (int) std::floor (lastTau * 0.9)), hi = std::min (tauMax - 2, (int) std::ceil (lastTau * 1.1));
-        int t2 = -1;
-        for (int t = lo; t <= hi; ++t)
-            if (diff[(std::size_t) t] <= diff[(std::size_t) t - 1] && diff[(std::size_t) t] <= diff[(std::size_t) t + 1] && (t2 < 0 || diff[(std::size_t) t] < diff[(std::size_t) t2]))
-                t2 = t;
-        if (t2 > 0 && diff[(std::size_t) t2] < experimentRelaxed)
-        {
-            tau = t2;
-            found = true;
-        }
-    }
     if (! found)
     {
         tau = tauMin;
@@ -419,7 +397,7 @@ std::vector<PitchFrame> analysePitch (const float* x, int n, double sampleRate, 
 // ---------------------------------------------------------------------------------------------------------------------
 // TD-PSOLA
 
-Psola::Psola() : env ((std::size_t) ringSize, 0.0f), hfEnv ((std::size_t) ringSize, 0.0f), wsum ((std::size_t) ringSize, 0.0f)
+Psola::Psola() : env ((std::size_t) ringSize, 0.0f), wsum ((std::size_t) ringSize, 0.0f)
 {
     for (int c = 0; c < 2; ++c)
     {
@@ -446,10 +424,8 @@ void Psola::reset() noexcept
         std::fill (acc[c].begin(), acc[c].end(), 0.0f);
     }
     std::fill (env.begin(), env.end(), 0.0f);
-    std::fill (hfEnv.begin(), hfEnv.end(), 0.0f);
     std::fill (wsum.begin(), wsum.end(), 0.0f);
-    envZ = hpZ = hfZ = 0.0f;
-    hfLead = (int) std::lround (sr / (2.0 * pi * 160.0));
+    envZ = 0.0f;
     now = 0;
     nextMark = 0.0;
     nextSynth = 0.0;
@@ -458,7 +434,6 @@ void Psola::reset() noexcept
     voiced = false;
     lastVoiced = false;
     lastMark = 0.0;
-    voicedAt = -(1 << 30);
     ratio = formant = 1.0;
 }
 
@@ -471,10 +446,7 @@ void Psola::setPitch (double p, bool v) noexcept
 {
     voiced = v && p >= 2.0 && p <= maxP * 1.5;
     if (voiced)
-    {
         period = p;
-        voicedAt = now;
-    }
 }
 
 void Psola::setShift (double r, double f) noexcept
@@ -517,10 +489,7 @@ void Psola::placeMarks() noexcept
         ++markCount;
     };
 
-    // EXPERIMENT E2: a short voicing dropout (under bridgeMs) keeps pitch-synchronous marks at the last period
-    const bool bridged = ! voiced && (experiment & 2) != 0 && period > 0.0 && lastMark > 0.0 && (double) (now - voicedAt) < experimentBridgeMs * 0.001 * sr;
-    const bool asVoiced = (voiced || bridged) && period > 0.0;
-    if (! asVoiced)
+    if (! voiced || period <= 0.0)
     {
         if (nextMark <= last)
         {
@@ -530,9 +499,7 @@ void Psola::placeMarks() noexcept
     }
     else if (peakAlign)
     {
-        // EXPERIMENT E3: a phrase's first mark (no previous mark a period back) searches the whole period
-        const bool chain = lastMark > 0.0 && std::abs ((nextMark - lastMark) - period) < 0.5 * period;
-        const auto reach = period * ((experiment & 4) != 0 && ! chain ? 0.5 : 0.25);
+        const auto reach = period * 0.25;
         if (nextMark + reach <= last)
         {
             constexpr auto m = ringSize - 1;
@@ -554,7 +521,7 @@ void Psola::placeMarks() noexcept
             const auto stride = std::max (1, span / 256);
             auto score = [&] (std::int64_t i) {
                 if (! corr)
-                    return (experiment & 4) != 0 ? (double) hfEnv[(std::size_t) ((i + hfLead) & m)] : (double) env[(std::size_t) (i & m)];
+                    return (double) env[(std::size_t) (i & m)];
                 double sxy = 0.0;
                 for (int j = -span; j <= 0; j += stride)
                     sxy += (double) env[(std::size_t) ((i + j) & m)] * (double) env[(std::size_t) ((pm + j) & m)];
@@ -582,17 +549,6 @@ void Psola::placeMarks() noexcept
             }
             if (corr)
                 pos += prev - (double) pm; // the lag is measured from the previous mark's own (fractional) position
-            // EXPERIMENT E5: a slow phase lock of the tracked marks onto the high-frequency energy peak (the pulse)
-            if (corr && (experiment & 8) != 0)
-            {
-                const auto c0 = (std::int64_t) std::lround (pos);
-                const auto w = (std::int64_t) std::max (1.0, period * 0.25);
-                auto bi = c0;
-                for (auto i = c0 - w; i <= c0 + w; ++i)
-                    if (i + hfLead <= now - 1 && hfEnv[(std::size_t) ((i + hfLead) & m)] > hfEnv[(std::size_t) ((bi + hfLead) & m)])
-                        bi = i;
-                pos += experimentLock * (double) (bi - c0);
-            }
             push (pos, (float) period, true);
             lastMark = pos;
             nextMark = pos + period;
@@ -626,15 +582,6 @@ void Psola::process (const float* x, float* y, int channels) noexcept
     if (! std::isfinite (envZ))
         envZ = 0.0f;
     env[(std::size_t) (now & m)] = envZ;
-    // EXPERIMENT E3: the high-frequency energy envelope (above ~1.5 kHz, smoothed ~1 ms): its peak is the glottal pulse
-    {
-        const auto ah = (float) (1.0 - std::exp (-2.0 * pi * 1500.0 / sr)), ae = (float) (1.0 - std::exp (-2.0 * pi * 160.0 / sr));
-        hpZ += ah * (mono - hpZ);
-        const auto h = mono - hpZ;
-        hfZ += ae * (h * h - hfZ);
-        if (! std::isfinite (hfZ) || ! std::isfinite (hpZ)) hfZ = hpZ = 0.0f;
-        hfEnv[(std::size_t) (now & m)] = hfZ;
-    }
     ++now;
 
     placeMarks();
@@ -699,7 +646,7 @@ void Psola::process (const float* x, float* y, int channels) noexcept
             const auto src = ta + ((double) o - ts) * f;
             for (int c = 0; c < channels; ++c)
                 acc[c][(std::size_t) (o & m)] += w * readIn (c, src);
-            wsum[(std::size_t) (o & m)] += w; // EXPERIMENT E6
+            wsum[(std::size_t) (o & m)] += w;
         }
         // unshifted voiced grains drift toward their marks, so a voice already on its note comes out as the input
         // itself (delayed), not displaced by up to half a period. Round 148: faded in over the last 3.4 cents of
@@ -727,13 +674,16 @@ void Psola::process (const float* x, float* y, int channels) noexcept
         y[c] = slot;
         slot = 0.0f;
     }
-    // EXPERIMENT E6: the overlap-add normalised by the summed windows (grains of uneven length / spacing)
+    // Round 165j (setNormalise): the overlap-add divided by the sum of the grain windows that reached this sample. In a
+    // steady note the windows already sum to ~1 (the f / r grain gain); where grains of different lengths or spacings
+    // meet — voiced onsets and ends, voicing dropouts, note changes, the switch between voiced and unvoiced grains —
+    // the sum dips or bulges and the level with it ([RUN] REA_rodada165j §4: her takes, bursts 40.9 -> 39.4 / min).
     if (e >= 0)
     {
         auto& ws = wsum[(std::size_t) (e & m)];
-        if ((experiment & 16) != 0 && ws > 1e-3f)
+        if (normalise && ws > 1e-3f)
         {
-            const auto g = 1.0f / std::clamp (ws, experimentNormLo, 2.0f);
+            const auto g = 1.0f / std::clamp (ws, 0.5f, 2.0f);
             for (int c = 0; c < channels; ++c)
                 y[c] *= g;
         }

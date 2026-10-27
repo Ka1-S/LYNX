@@ -22,12 +22,6 @@
 
 namespace lynx::vocal
 {
-extern int experiment;          // EXPERIMENT (round 165j tuning, removed before landing)
-extern float experimentRelaxed;
-extern float experimentBridgeMs;
-extern float experimentLock;
-extern float experimentNormLo;
-
 // ---------------------------------------------------------------------------------------------------------------------
 // Scales
 
@@ -160,6 +154,9 @@ public:
     // Marks align to the waveform near the predicted position (pitch-synchronous): where it best repeats the period at
     // the previous mark (round 148), the strongest peak for a phrase's first mark. Default on.
     void setPeakAlign (bool on) noexcept { peakAlign = on; }
+    // Round 165j: divide the overlap-add by the summed grain windows (no level dips / bulges where grains of different
+    // lengths or spacings meet). Off by default (LYNX Tune turns it on).
+    void setNormalise (bool on) noexcept { normalise = on; }
     // Marks are placed this many samples behind the newest input (the centre of the pitch detector's window, so the
     // period and shift given with setPitch / setShift describe the signal where the mark lies). Clamped so that the
     // grains stay within the latency.
@@ -184,14 +181,11 @@ private:
     double nextSynth = 0.0;      // next synthesis mark (absolute, output timeline = input timeline)
     double lastMark = 0.0;       // the last voiced mark placed (absolute; 0 = none): the next one correlates with it
     double period = 0.0, ratio = 1.0, formant = 1.0;
-    std::int64_t voicedAt = -(1 << 30); // EXPERIMENT E2
-    bool voiced = false, peakAlign = true, lastVoiced = false;
+    bool voiced = false, peakAlign = true, lastVoiced = false, normalise = false;
     std::array<Mark, maxMarks> marks {};
     int markHead = 0, markCount = 0;
     std::vector<float> in[2], acc[2], env; // input history, output accumulators, a low-passed copy for peak search
+    std::vector<float> wsum;               // round 165j: the summed grain windows per output sample
     float envZ = 0.0f;
-    std::vector<float> hfEnv, wsum; // EXPERIMENT E3 / E6
-    float hpZ = 0.0f, hfZ = 0.0f;
-    int hfLead = 44;
 };
 } // namespace lynx::vocal
