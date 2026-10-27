@@ -2250,11 +2250,20 @@ private:
                 if (auto* peer = w.getPeer())
                     if (const auto f = peer->getFrameSizeIfPresent())
                         frame = *f;
-                const auto outer = frame.addedTo (w.getBounds());
+                auto outer = frame.addedTo (w.getBounds());
                 const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (outer);
                 const auto area = display != nullptr ? display->userArea : outer;
-                const auto passed = outer.getY() >= area.getY() && outer.getRight() <= area.getRight() && outer.getX() >= area.getX()
-                                    && (! whole || outer.getBottom() <= area.getBottom() + 1);
+               #if JUCE_LINUX
+                // round 164: a compositor that draws the frame itself (WSLg's Weston) reports its invisible shadow in
+                // the frame (59 px on top, 38 around at 100%): only what is visible is checked, give or take 4 px
+                const auto shadow = frame.getLeft() >= 16 ? frame.getLeft() : 0;
+                outer = outer.reduced (shadow);
+                const auto slack = shadow > 0 ? 4 : 0;
+               #else
+                const auto slack = 0;
+               #endif
+                const auto passed = outer.getY() >= area.getY() - slack && outer.getRight() <= area.getRight() + slack && outer.getX() >= area.getX() - slack
+                                    && (! whole || outer.getBottom() <= area.getBottom() + 1 + slack);
                 report << (passed ? "ok   " : "FAIL ") << what << " window=" << outer.toString() << " (frame " << frame.getTop() << ","
                        << frame.getLeft() << ") screen=" << area.toString() << "\n";
                 ok = ok && passed;
@@ -5231,6 +5240,26 @@ private:
             saveSnapshot (ui, prefix + "-browser-plugins.png");
             ui.getBrowserForSnapshot().setTab (lynx::BrowserComponent::allTab);
             saveWindow (ui.getBrowserForSnapshot().makeFoldersPanelForSnapshot(), "-browser-folders.png"); // round 164
+            {
+                // round 164: the content filter leaves out the folders with nothing to list (a small library)
+                const auto lib = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("lynx-snapshot-library");
+                lib.deleteRecursively();
+                for (const auto* path : { "Drums/Kicks/kick 1.wav", "Drums/Kicks/kick 2.wav", "Drums/snare.wav", "Keys/pad.sf2", "Presets/Synth/lead.fst",
+                                          "Projects/beat.flp", "Projects/MIDI/chords.mid", "Notes/readme.txt", "Empty/Nothing/.keep" })
+                    lib.getChildFile (path).create();
+                ui.showDesktopForSnapshot (false);
+                ui.getBrowserForSnapshot().showFilterForSnapshot (lib, lynx::browserview::ContentFilter::all);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-browser164-all.png");
+                ui.getBrowserForSnapshot().showFilterForSnapshot (lib, lynx::browserview::ContentFilter::samples);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-browser164-samples.png");
+                ui.getBrowserForSnapshot().showFilterForSnapshot (lib, lynx::browserview::ContentFilter::projects);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-browser164-projects.png");
+                lib.deleteRecursively();
+                ui.getBrowserForSnapshot().resetViewForSnapshot();
+            }
 
             // the undo history after a few edits
             offline.editSong ([] (lynx::Song& s) { s.bpm += 1.0; });

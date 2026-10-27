@@ -653,6 +653,15 @@ public:
 
     // FL's folder "Expand all": the folder and its sub-folders open (on disk: down to `depth` levels, so a big
     // library is not scanned at once)
+    // --snapshot: opens the top-level folder `f` and its sub-folders (round 164)
+    void expandTop (const juce::File& f, int depth)
+    {
+        if (root != nullptr)
+            for (auto& c : root->children)
+                if (c->kind == Kind::fsFolder && c->file == f)
+                    expandFolder (*c, depth);
+    }
+
     void expandFolder (Node& n, int depth)
     {
         n.expanded = true;
@@ -3009,6 +3018,36 @@ void BrowserComponent::selectFirstSampleForSnapshot()
         strip->show (tree->selectedFile(), false);
         tree->setHovered (row + 1 < tree->numRows() ? row + 1 : -1);
     }
+}
+
+void BrowserComponent::showFilterForSnapshot (const juce::File& folder, browserview::ContentFilter filter)
+{
+    // a folder of the user's (not saved) listed under `filter` once the index knows it (nothing saved either)
+    if (! allRoots.contains (folder))
+    {
+        allRoots.add (folder);
+        allRootNames.add (folder.getFileName());
+        allRootKinds.push_back (browserview::RootKind::user);
+    }
+    roots.clear();
+    roots.add (folder);
+    view.filter = filter;
+    view.setShown (browserview::projectRootId, false);
+    view.setShown (browserview::pluginsRootId, false);
+    searcher->service->refresh (toPaths ({ folder }));
+    searcher->service->waitIdle (60000);
+    prunedGeneration = 0;
+    setTab (allTab);
+    rebuildTree();
+    tree->expandTop (folder, 3);
+    refreshViewButton();
+}
+
+void BrowserComponent::resetViewForSnapshot()
+{
+    viewLoaded = false; // (read again: the snapshot's changes were never saved)
+    prunedGeneration = 0;
+    rebuildRoots();
 }
 
 void BrowserComponent::showPluginDatabaseForSnapshot()

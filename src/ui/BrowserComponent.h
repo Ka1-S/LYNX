@@ -123,7 +123,10 @@ public:
     void selectFirstSampleForSnapshot();
     // --snapshot: the PROJECT tab with the patterns, generators and samples open, a sample selected
     void showProjectForSnapshot();
-    void showPluginDatabaseForSnapshot(); // its Generators / Effects FL engines open (round 142)
+    void showPluginDatabaseForSnapshot();
+    // --snapshot (round 164): only `folder`, opened, listed under `filter` (folders with nothing to list left out)
+    void showFilterForSnapshot (const juce::File& folder, browserview::ContentFilter filter);
+    void resetViewForSnapshot(); // its Generators / Effects FL engines open (round 142)
     // --snapshot: shows this audio file in the preview strip (without playing it)
     void showPreviewForSnapshot (const juce::File& file);
     // Up/Down (load = false) or Shift+Up/Down (load = true); Enter = loadSelected()
