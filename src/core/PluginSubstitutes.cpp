@@ -1633,7 +1633,8 @@ int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot
     p[r::hfBell] = at (22, 0.0) > 0.5 ? 1.0f : 0.0f;
     p[r::eqOn] = at (25, 0.0) > 0.5 ? 0.0f : 1.0f;
     const auto ratio = std::max (1.0, at (1, 1.0));
-    p[r::compRatio] = ratio > 1000.0 ? 1.0f : (float) std::sqrt (std::clamp ((ratio - 1.0) / 19.0, 0.0, 0.998));
+    // round 165 [EXEC]: the console's ∞ : 1 is stored as 100 (it played as 20 : 1 here, 3 … 5 dB too loud)
+    p[r::compRatio] = ratio >= 99.0 ? 1.0f : (float) std::sqrt (std::clamp ((ratio - 1.0) / 19.0, 0.0, 0.998));
     p[r::compThreshold] = linNorm (at (0, 0.0), -20.0, 10.0);
     p[r::compRelease] = logNorm (std::clamp (at (3, 0.4), 0.1, 4.0), 0.1, 4.0);
     p[r::compFastAttack] = at (2, 2.0) == 1.0 ? 1.0f : 0.0f;
