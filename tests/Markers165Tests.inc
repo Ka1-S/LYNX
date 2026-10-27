@@ -60,7 +60,13 @@ inline Played play (const lynx::Song& song, int blocks, double from = 0.0, std::
             n = step.samples;
             // the beats this sub-block plays through
             const auto next = position + n * tps;
-            for (auto beat = (std::int64_t) std::ceil (position / lynx::ppq); (double) beat * lynx::ppq < next; ++beat)
+            // the last sample may run a fraction past the jump: a beat exactly on the jump point is not played
+            auto limit = std::min (next, end);
+            if (step.userJump && next >= pendingAt - 1e-6)
+                limit = pendingAt;
+            else if (step.jump != nullptr && next >= (double) step.jump->at - 1e-6)
+                limit = (double) step.jump->at;
+            for (auto beat = (std::int64_t) std::ceil (position / lynx::ppq); (double) beat * lynx::ppq < limit; ++beat)
                 out.beats.push_back ((int) beat);
             position = next;
             if (step.userJump && position >= pendingAt - 1e-6)
@@ -116,7 +122,7 @@ TEST (markers165_transport_follows_fl_sequences)
         const auto p = play (song, 2000);
         CHECK (p.paused && p.beats == range (0, 4) + range (12, 20));
         // Play again from the pause: on to the song's end, then from the start
-        const auto again = play (song, 400, (double) bar (6));
+        const auto again = play (song, 1300, (double) bar (6));
         CHECK (startsWith (again.beats, range (20, 32) + range (0, 4) + range (12, 20)));
     }
     // fl_marker_loop_section.png: Marker loop at bar 3, "End" at bar 5 -> 1..4, then 3, 4, 3, 4...
@@ -124,7 +130,7 @@ TEST (markers165_transport_follows_fl_sequences)
         auto song = eightBars();
         song.addMarker (marker (bar (3), lynx::Marker::markerLoop));
         song.addMarker (marker (bar (5), lynx::Marker::none));
-        const auto p = play (song, 1000); // 10.7 s = 21 beats
+        const auto p = play (song, 1200); // 12.8 s = 25 beats
         CHECK (startsWith (p.beats, range (0, 16) + range (8, 16)));
         CHECK (! p.paused && p.beats.size() >= 21 && p.beats[20] == 12);
     }
@@ -133,13 +139,13 @@ TEST (markers165_transport_follows_fl_sequences)
         auto song = eightBars();
         song.addMarker (marker (bar (2), lynx::Marker::start));
         song.addMarker (marker (bar (5), lynx::Marker::songLoop));
-        const auto p = play (song, 1500);
+        const auto p = play (song, 2400);
         CHECK (startsWith (p.beats, range (4, 32) + range (16, 32) + range (16, 20)));
     }
     // fl_quantized_marker_click.png: Quantize song jumps = Bars, a jump to bar 4 asked mid bar 1 happens at bar 2
     {
         const auto song = eightBars();
-        const auto p = play (song, 300, 0.0, { 50, (double) bar (4), 2 }); // block 50 = beat 1.07
+        const auto p = play (song, 400, 0.0, { 50, (double) bar (4), 2 }); // block 50 = beat 1.07
         CHECK (startsWith (p.beats, range (0, 4) + range (12, 16)));
         const auto now = play (song, 300, 0.0, { 50, (double) bar (4), 0 }); // off: right away
         CHECK (startsWith (now.beats, range (0, 2) + range (12, 16)));
@@ -150,7 +156,7 @@ TEST (markers165_transport_follows_fl_sequences)
         song.addMarker (marker (bar (3), lynx::Marker::markerLoop));
         std::int64_t music = 0, loop = 0;
         const auto render = lynx::exportopts::makeRenderSong (song, {}, 0, music, loop);
-        CHECK (startsWith (play (render, 1600).beats, range (0, 32) + range (0, 4)));
+        CHECK (startsWith (play (render, 1700).beats, range (0, 32) + range (0, 4)));
     }
 }
 
@@ -215,7 +221,7 @@ TEST (markers165_quantize_song_jumps)
     // off: right away
     CHECK (lynx::markers::quantizedJumpTick (song, 100.0, 0) == 100);
     // beats: the next beat
-    CHECK (lynx::markers::quantizedJumpTick (song, 100.0, 1) == 2 * lynx::ppq);
+    CHECK (lynx::markers::quantizedJumpTick (song, 100.0, 1) == lynx::ppq);
     CHECK (lynx::markers::quantizedJumpTick (song, (double) lynx::ppq, 1) == 2 * lynx::ppq);
     // bars: the next bar line; 2 / 4 / 8 bars: the next one of bars 1, 3, 5... / 1, 5, 9... / 1, 9...
     CHECK (lynx::markers::quantizedJumpTick (song, 100.0, 2) == bar (2));
