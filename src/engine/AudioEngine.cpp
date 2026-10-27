@@ -1,6 +1,7 @@
 #include "engine/AudioEngine.h"
 #include "engine/AudioLogger.h"
 
+#include "core/HardwareInsert.h"
 #include "core/Patcher.h"
 #include "core/ValueMath.h"
 #include "platform/Paths.h"
@@ -1907,9 +1908,9 @@ void AudioEngine::setSong (Song newSong)
             t.flInput = -1;
         }
     }
-    // hardware output targets: their channels open with the project (the ones the device has)
+    // hardware output targets and hardware inserts: their channels open with the project (the ones the device has)
     if (prefetcher != nullptr)
-        openTargetedOutputs();
+        openHardwareInsertIo();
 
     publishSong();
 }
@@ -3484,6 +3485,14 @@ void AudioEngine::setTrackOutput (int track, int channel, OutputMode mode)
     openTargetedOutputs();
 }
 
+void AudioEngine::openHardwareInsertIo()
+{
+    openTargetedOutputs();
+    if (hwinsert::returnsFromInput (song) && ! hasAudioInput())
+        if (const auto result = openAudioInput(); result.issue != InputIssue::none)
+            notify (result.issue, 0, result.detail);
+}
+
 void AudioEngine::openTargetedOutputs()
 {
     auto* device = deviceManager.getCurrentAudioDevice();
@@ -3501,6 +3510,15 @@ void AudioEngine::openTargetedOutputs()
         for (int c = first; c < first + count; ++c)
             if (c < available)
                 wanted.setBit (c);
+        // the hardware inserts' sends (round 164d)
+        for (const auto& fx : t.effects)
+            if (fx.kind == EffectKind::hardwareInsert)
+            {
+                const auto [from, n] = outputChannelsOf (hwinsert::channelOf (fx.params[hwinsert::output]), hwinsert::outputModeOf (fx.params));
+                for (int c = from; c < from + n; ++c)
+                    if (c < available)
+                        wanted.setBit (c);
+            }
     }
 
     if (wanted == before)

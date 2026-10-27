@@ -1543,6 +1543,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::apexLimiter: return {};
         case EffectKind::formulaController: return { "Fruity Formula Controller" }; // LYNX's own effects: no FL counterpart
         case EffectKind::voiceShift: return {}; // LYNX's own effect: no FL counterpart
+        case EffectKind::hardwareInsert: return {}; // LYNX's own effect (round 164d): FL has none
         case EffectKind::emphasizer: return { "Emphasizer" };
         case EffectKind::flFrequencyShifter: return { "Frequency Shifter" };
         case EffectKind::flLowLifter: return { "Low Lifter" };

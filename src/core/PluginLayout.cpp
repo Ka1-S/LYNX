@@ -2569,6 +2569,39 @@ Layout voiceShiftLayout()
     return l;
 }
 
+// round 164d: the hardware insert's panel (LYNX's own; the roles: Pro Tools' H/W Insert and Nuendo's External FX): left
+// to right the way the signal goes — SEND (where it leaves, how loud), RETURN (where it comes back, how loud, phase),
+// their levels, the ROUND TRIP (the ping and its read-out) and the MIX.
+Layout hardwareInsertLayout()
+{
+    Layout l;
+    l.width = 784;
+    l.height = 236;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 186, 228, TR_NOOP ("Send")));
+    v.push_back (label (16, 28, 162, 14, TR_NOOP ("Output"), alignLeft));
+    v.push_back (choiceMenu (16, 44, 162, 26, "Output", TR_NOOP ("Output"), "None|Out 1"));
+    v.push_back (toggle (16, 80, 162, 18, "Output mono", TR_NOOP ("Mono (L+R to one output)")));
+    v.push_back (dial (97, 148, 62, "Send", TR_NOOP ("Send"), big));
+    v.push_back (section (194, 4, 186, 228, TR_NOOP ("Return")));
+    v.push_back (label (206, 28, 162, 14, TR_NOOP ("Input"), alignLeft));
+    v.push_back (choiceMenu (206, 44, 162, 26, "Input", TR_NOOP ("Input"), "None|In 1"));
+    v.push_back (toggle (206, 80, 162, 18, "Input stereo", TR_NOOP ("Stereo pair")));
+    v.push_back (dial (256, 148, 62, "Return", TR_NOOP ("Return"), big));
+    v.push_back (toggle (304, 138, 66, 22, "Invert", TR_NOOP ("Invert")));
+    v.push_back (section (384, 4, 114, 228, TR_NOOP ("Levels")));
+    auto io = display (392, 26, 98, 198, "iometer");
+    io.steps = 2; // send / return peaks
+    v.push_back (io);
+    v.push_back (section (502, 4, 180, 228, TR_NOOP ("Round trip")));
+    v.push_back (display (510, 26, 164, 96, "hwping"));
+    v.push_back (toggle (510, 130, 164, 26, "Ping", TR_NOOP ("Ping"), momentary));
+    v.push_back (stepper (510, 184, 164, 34, "Round trip", TR_NOOP ("Delay (samples)"), 65536));
+    v.push_back (section (686, 4, 94, 228, TR_NOOP ("Mix")));
+    v.push_back (dial (733, 100, 62, "Dry/wet", TR_NOOP ("Dry/wet"), big));
+    return l;
+}
+
 // --- LYNX's reverbs (REA round 100): own panels, the same conventions as the mixing suite. The algorithm / type
 // menu sits top-left with the Mix, the time controls (pre-delay, decay, size) in the middle, colour and
 // modulation to the right. -------------------------------------------------------------------------------------
@@ -3234,7 +3267,7 @@ const std::vector<EffectKind>& ownLayoutKinds()
                                                  EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                                                  EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
                                                  EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::compressor,
-                                                 EffectKind::voiceShift, EffectKind::autoPan };
+                                                 EffectKind::voiceShift, EffectKind::autoPan, EffectKind::hardwareInsert };
     return kinds;
 }
 
@@ -3315,6 +3348,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::quellDenoiser: l = quellDenoiser(); break;
         case EffectKind::geminiDoubler: l = geminiDoubler(); break;
         case EffectKind::voiceShift: l = voiceShiftLayout(); break;
+        case EffectKind::hardwareInsert: l = hardwareInsertLayout(); break;
         case EffectKind::autoPan: l = withRhythmVoicing (autoPanLayout()); break;
         default: l = generated (kind); break;
     }

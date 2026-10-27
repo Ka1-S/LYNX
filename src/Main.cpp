@@ -3,6 +3,7 @@
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
+#include "core/HardwareInsert.h"
 #include "core/EchoSuite.h"
 #include "core/LynxTune.h"
 #include "core/FlEffects.h"
@@ -319,6 +320,22 @@ public:
             const auto seconds = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].getDoubleValue() : 20.0;
             runRecordTest (juce::File (args[i + 1].unquoted()), seconds > 0.0 ? seconds : 20.0, option ("--type"), option ("--device"), option ("--input"),
                            args.contains ("--loop") ? 1 : args.contains ("--punch") ? 2 : 0, option ("--pdc").getIntValue(), option ("--buffer").getIntValue());
+            return;
+        }
+
+        if (args.contains ("--hwinserttest"))
+        {
+            // LYNX --hwinserttest report.txt [seconds] [--type T] [--device D] [--input I] [--buffer N] (round 164d): a
+            // hardware insert through a loopback cable (output pair 1-2 -> input pair 1-2; the Master plays nowhere, so
+            // the cable carries the send only). The same click track plays on two inserts: Insert 1 through the
+            // hardware insert (panned left), Insert 2 dry (panned right). The insert's own ping measures the round
+            // trip, PDC delays the dry path by it, and every click of the Master's left side must sit on the same
+            // sample as the right side's.
+            const auto i = args.indexOf ("--hwinserttest");
+            const auto option = [&args] (const char* name) { return args.contains (name) ? args[args.indexOf (name) + 1].unquoted() : juce::String(); };
+            const auto seconds = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].getDoubleValue() : 10.0;
+            runHwInsertTest (juce::File (args[i + 1].unquoted()), seconds > 0.0 ? seconds : 10.0, option ("--type"), option ("--device"), option ("--input"),
+                             option ("--buffer").getIntValue());
             return;
         }
 
@@ -3714,6 +3731,253 @@ private:
                         step (juce::String ("result=") + (ok ? "OK" : "FAILED"));
                         finish (ok ? 0 : 1);
                     });
+                });
+            });
+        });
+    }
+
+    // --hwinserttest (round 164d): see the command line above.
+    void runHwInsertTest (const juce::File& report, double seconds, const juce::String& deviceType, const juce::String& deviceName,
+                          const juce::String& inputName, int bufferSize)
+    {
+        engine = std::make_unique<lynx::AudioEngine>();
+        savedDeviceState = engine->getDeviceManager().createStateXml();
+        auto text = std::make_shared<juce::String>();
+        auto step = [report, text] (const juce::String& line) { *text << line << "\n"; report.replaceWithText (*text); };
+        auto finish = [this] (int code) {
+            if (engine != nullptr)
+                engine->getMeters().capture.setSource (lynx::AudioCapture::off);
+            restoreSavedDeviceState();
+            setApplicationReturnValue (code);
+            quit();
+        };
+        auto& devices = engine->getDeviceManager();
+        if (deviceType.isNotEmpty() && devices.getCurrentAudioDeviceType() != deviceType)
+            devices.setCurrentAudioDeviceType (deviceType, true);
+        {
+            auto setup = devices.getAudioDeviceSetup();
+            if (deviceName.isNotEmpty())
+                setup.outputDeviceName = deviceName;
+            if (bufferSize > 0)
+                setup.bufferSize = bufferSize;
+            if (const auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+                step ("device_error=" + error);
+        }
+        if (const auto r = engine->openAudioInput (inputName.isNotEmpty() ? inputName : deviceName); r.issue != lynx::AudioEngine::InputIssue::none)
+            step ("input_error=" + juce::String ((int) r.issue) + " " + r.detail);
+        auto* device = devices.getCurrentAudioDevice();
+        if (device == nullptr || engine->getInputChannelNames().empty())
+        {
+            step ("result=ERROR no device / no input");
+            finish (1);
+            return;
+        }
+        const auto rate = device->getCurrentSampleRate();
+        step ("device=" + device->getTypeName() + " | " + device->getName() + " | " + juce::String (rate) + " Hz | block " + juce::String (device->getCurrentBufferSizeSamples()));
+
+        // the click track: the ping's pulse on every beat at 120 bpm
+        const auto beats = (int) std::ceil (seconds * 2.0) + 8;
+        const auto clickFile = report.getSiblingFile (report.getFileNameWithoutExtension() + "-clicks.wav");
+        {
+            lynx::takes::WavTakeWriter w;
+            w.open (clickFile.getFullPathName().toStdString(), rate, 1, lynx::takes::SampleFormat::float32);
+            const auto total = (juce::int64) std::llround ((double) beats * rate / 2.0);
+            std::vector<float> block (4096);
+            for (juce::int64 at = 0; at < total; at += (juce::int64) block.size())
+            {
+                std::fill (block.begin(), block.end(), 0.0f);
+                for (int k = 0; k < (int) block.size(); ++k)
+                {
+                    const auto f = at + k;
+                    const auto beat = (juce::int64) std::floor ((double) f / (rate / 2.0));
+                    const auto rel = f - (juce::int64) std::llround ((double) beat * rate / 2.0);
+                    static constexpr float shape[] { 0.25f, 0.75f, 1.0f, 0.75f, 0.25f };
+                    if (rel >= 0 && rel < 5)
+                        block[(std::size_t) k] = 0.5f * shape[rel];
+                }
+                const float* d[] { block.data() };
+                w.write (d, (int) std::min<juce::int64> ((juce::int64) block.size(), total - at));
+            }
+            w.close();
+        }
+
+        lynx::Song song = lynx::Song::makeDefault();
+        song.bpm = 120.0;
+        song.mode = lynx::PlayMode::song;
+        song.playlist.clear();
+        song.channels.clear();
+        for (int k = 0; k < 2; ++k)
+        {
+            lynx::ChannelDef c;
+            c.name = k == 0 ? "Wet" : "Dry";
+            c.instrument = lynx::InstrumentKind::audioClip;
+            c.samplePath = clickFile.getFullPathName().toStdString();
+            c.mixerTrack = k + 1;
+            c.volume = 1.0f;
+            song.channels.push_back (c);
+            lynx::Clip clip;
+            clip.kind = lynx::ClipKind::audio;
+            clip.channel = k;
+            clip.track = k;
+            clip.start = 0;
+            clip.length = (std::int64_t) beats * lynx::ppq;
+            song.playlist.push_back (clip);
+        }
+        song.mixer[0].outputChannel = lynx::outputNone; // (the cable carries the send only)
+        for (auto& fx : song.mixer[0].effects)          // (no Master effects: the default limiter's PDC would hide nothing, but keep it plain)
+            fx.enabled = false;
+        song.mixer[1].pan = -1.0f;
+        song.mixer[2].pan = 1.0f;
+        auto hw = lynx::makeEffectSlot (lynx::EffectKind::hardwareInsert);
+        hw.params[lynx::hwinsert::output] = lynx::hwinsert::channelValue (0);
+        hw.params[lynx::hwinsert::input] = lynx::hwinsert::channelValue (0);
+        hw.params[lynx::hwinsert::inputStereo] = 1.0f;
+        song.mixer[1].effects.clear();
+        song.mixer[1].effects.push_back (hw);
+        engine->setSong (std::move (song));
+        const auto meter = [this] (int output) {
+            const auto* times = engine->getProcessTimes();
+            const auto key = (std::size_t) (1 * lynx::maxEffectSlots + 0) * lynx::ProcessTimes::meterOutputs + (std::size_t) output;
+            return times != nullptr && key < times->effectMeters.size() ? times->effectMeters[key].load() : 0.0f;
+        };
+
+        // 1) the insert's ping (as its Ping button: a momentary value flipped)
+        juce::Timer::callAfterDelay (500, [this, report, step, finish, seconds, rate, meter] {
+            if (engine == nullptr)
+                return;
+            engine->editSong ([] (lynx::Song& s) { s.mixer[1].effects[0].params[lynx::hwinsert::ping] = 1.0f; });
+            juce::Timer::callAfterDelay (3500, [this, report, step, finish, seconds, rate, meter] {
+                if (engine == nullptr)
+                    return;
+                const auto state = meter (lynx::hwinsert::pingState);
+                const auto samples = lynx::hwinsert::roundTripOf (meter (lynx::hwinsert::pingSamples));
+                step ("ping_state=" + juce::String (state, 3) + (std::abs (state - 0.5f) < 0.01f ? " (ok)" : " (FAILED)") + " round_trip=" + juce::String (samples)
+                      + " status_flags=" + juce::String (juce::roundToInt (meter (lynx::hwinsert::status) * 16.0f)));
+                if (std::abs (state - 0.5f) >= 0.01f)
+                {
+                    step ("result=FAILED ping");
+                    finish (1);
+                    return;
+                }
+                engine->editSong ([samples] (lynx::Song& s) { s.mixer[1].effects[0].params[lynx::hwinsert::roundTrip] = lynx::hwinsert::roundTripValue (samples); });
+
+                // 2) play, capturing the Master
+                juce::Timer::callAfterDelay (500, [this, report, step, finish, seconds, rate, samples] {
+                    if (engine == nullptr)
+                        return;
+                    step ("pdc_total=" + juce::String (engine->getLatencySamples()) + " (expected " + juce::String (samples) + ")");
+                    // saved in the project: the slot comes back the same (routing, round trip), and its latency with it — also an
+                    // odd round trip (12345 samples: the project keeps it to the sample)
+                    {
+                        auto odd = engine->getSong();
+                        odd.mixer[1].effects[0].params[lynx::hwinsert::roundTrip] = lynx::hwinsert::roundTripValue (12345);
+                        juce::String error;
+                        auto same = true;
+                        for (const auto* song : { &engine->getSong(), (const lynx::Song*) &odd })
+                        {
+                            const auto file = report.getSiblingFile (report.getFileNameWithoutExtension() + (song == &odd ? "-odd.lynx" : ".lynx"));
+                            const auto saved = lynx::ProjectFile::save (*song, file, error);
+                            const auto loaded = saved ? lynx::ProjectFile::load (file, error) : std::nullopt;
+                            same = same && loaded && loaded->mixer.size() > 1 && ! loaded->mixer[1].effects.empty()
+                                   && loaded->mixer[1].effects[0].kind == lynx::EffectKind::hardwareInsert
+                                   && loaded->mixer[1].effects[0].params == song->mixer[1].effects[0].params
+                                   && lynx::makeEffect (loaded->mixer[1].effects[0])->latencySamples() == (song == &odd ? 12345 : samples);
+                        }
+                        const auto file = report.getSiblingFile (report.getFileNameWithoutExtension() + ".lynx");
+                        step (juce::String ("project_round_trip=") + (same ? "same" : "DIFFERENT " + error) + " (" + file.getFileName() + ")");
+                        if (! same)
+                        {
+                            step ("result=FAILED project");
+                            finish (1);
+                            return;
+                        }
+                    }
+                    auto left = std::make_shared<std::vector<float>>(), right = std::make_shared<std::vector<float>>();
+                    engine->stop();
+                    engine->rewind();
+                    engine->getMeters().capture.setSource (0);
+                    engine->play();
+                    auto pulls = std::make_shared<int> ((int) (seconds * 5.0));
+                    auto pull = std::make_shared<std::function<void()>>();
+                    *pull = [this, report, step, finish, seconds, rate, samples, left, right, pulls, pull] {
+                        if (engine == nullptr)
+                            return;
+                        engine->getMeters().capture.pull (*left, *right);
+                        if (*pulls == 10) // the insert's editor while it plays (next to the report)
+                            for (const auto scale : { 1.0f, 1.5f })
+                            {
+                                auto editor = lynx::makeNativeEffectEditor (*engine, 1, 0, scale, 0);
+                                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                                {
+                                    juce::Graphics g (image);
+                                    g.fillAll (lynx::theme::panel);
+                                    editor->paintEntireComponent (g, false);
+                                }
+                                const auto file = report.getSiblingFile (report.getFileNameWithoutExtension() + (scale > 1.0f ? "-editor150.png" : "-editor.png"));
+                                file.deleteFile();
+                                juce::PNGImageFormat png;
+                                if (auto stream = file.createOutputStream())
+                                    png.writeImageToStream (image, *stream);
+                            }
+                        if (--*pulls > 0)
+                        {
+                            juce::Timer::callAfterDelay (200, *pull);
+                            return;
+                        }
+                        engine->stop();
+                        const auto dropped = engine->getMeters().capture.droppedFrames();
+                        engine->getMeters().capture.setSource (lynx::AudioCapture::off);
+                        // the clicks of each side (peaks above -12 dBFS, one per 1/8 s at most)
+                        auto peaksOf = [rate] (const std::vector<float>& x) {
+                            std::vector<juce::int64> peaks;
+                            for (std::size_t f = 1; f + 1 < x.size(); ++f)
+                                if (std::abs (x[f]) > 0.25f && std::abs (x[f]) >= std::abs (x[f - 1]) && std::abs (x[f]) > std::abs (x[f + 1])
+                                    && (peaks.empty() || (juce::int64) f - peaks.back() > (juce::int64) (rate / 8)))
+                                    peaks.push_back ((juce::int64) f);
+                            return peaks;
+                        };
+                        const auto wet = peaksOf (*left), dry = peaksOf (*right);
+                        int pairs = 0;
+                        juce::int64 worst = 0;
+                        double gainSum = 0.0, residual = 0.0, energy = 0.0;
+                        for (const auto w : wet)
+                        {
+                            auto best = std::min_element (dry.begin(), dry.end(), [w] (juce::int64 a, juce::int64 b) { return std::abs (a - w) < std::abs (b - w); });
+                            if (best == dry.end() || std::abs (*best - w) > (juce::int64) (rate / 8))
+                                continue;
+                            ++pairs;
+                            worst = std::max (worst, std::abs (*best - w));
+                            gainSum += (*left)[(std::size_t) w] / (*right)[(std::size_t) *best];
+                        }
+                        const auto gain = pairs > 0 ? gainSum / pairs : 1.0;
+                        // dry clicks with no wet click beside them (a dropout of the cable / device), listed
+                        juce::String unmatched;
+                        for (const auto d : dry)
+                            if (std::none_of (wet.begin(), wet.end(), [d, rate] (juce::int64 w) { return std::abs (w - d) <= (juce::int64) (rate / 8); }))
+                                unmatched << " " << (juce::int64) d << " (" << juce::String ((*left)[(std::size_t) d], 3) << ")";
+                        if (unmatched.isNotEmpty())
+                            step ("dry_clicks_without_wet=" + unmatched);
+                        // the null test: left − gain · right around each click (both sides aligned → only the cable's colour remains)
+                        for (const auto w : wet)
+                            for (juce::int64 f = std::max<juce::int64> (0, w - 16); f < std::min<juce::int64> ((juce::int64) left->size(), w + 16); ++f)
+                            {
+                                const auto d = (double) (*left)[(std::size_t) f] - gain * (double) (*right)[(std::size_t) f];
+                                residual += d * d;
+                                energy += (double) (*left)[(std::size_t) f] * (*left)[(std::size_t) f];
+                            }
+                        const auto nullDb = energy > 0.0 ? 10.0 * std::log10 (std::max (1e-30, residual / energy)) : 0.0;
+                        step ("captured=" + juce::String ((int) left->size()) + " frames dropped=" + juce::String (dropped) + " wet_clicks=" + juce::String ((int) wet.size())
+                              + " dry_clicks=" + juce::String ((int) dry.size()) + " pairs=" + juce::String (pairs));
+                        step ("alignment_error_samples=max " + juce::String ((int) worst) + " cable_gain=" + juce::String (gain, 4) + " null_residual_db=" + juce::String (nullDb, 1));
+                        auto* dev = engine->getDeviceManager().getCurrentAudioDevice();
+                        const auto xruns = dev != nullptr ? dev->getXRunCount() : -1;
+                        step ("device_xruns=" + juce::String (xruns) + " (a dropout loses what was on the cable then: its clicks are excused)");
+                        const auto excused = xruns > 0 ? 2 * xruns : 0;
+                        const auto ok = pairs >= (int) (seconds * 2.0) - 2 - excused && worst == 0 && dropped == 0 && engine->getLatencySamples() == samples;
+                        step (juce::String ("result=") + (ok ? "OK" : "FAILED"));
+                        finish (ok ? 0 : 1);
+                    };
+                    juce::Timer::callAfterDelay (200, *pull);
                 });
             });
         });

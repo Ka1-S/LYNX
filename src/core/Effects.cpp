@@ -52,6 +52,8 @@
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
 
+#include "core/HardwareInsert.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -2901,6 +2903,14 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                            { "Multiband", 0.0f }, { "High band", 1.0f }, { "Low band", 1.0f } } };
             return info;
         }
+        case EffectKind::hardwareInsert:
+        {
+            // round 164d: no channels chosen at first (nothing reaches a device output before the user picks one)
+            static const EffectInfo info { "Hardware Insert", { { "Send", 0.5f }, { "Return", 0.5f }, { "Dry/wet", 1.0f }, { "Invert", 0.0f },
+                                                                { "Output", 0.0f }, { "Output mono", 0.0f }, { "Input", 0.0f },
+                                                                { "Input stereo", 1.0f }, { "Round trip", 0.0f }, { "Ping", 0.0f } } };
+            return info;
+        }
         case EffectKind::waveCandy:
         {
             // round 164c (core/VisualFx.h wavecandy::Param): a new one shows the spectrum, like FL's Default preset's analyser
@@ -3416,6 +3426,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return fsfl::paramText (param, v);
         case EffectKind::flLowLifter:
             return lowlifter::paramText (param, v);
+        case EffectKind::hardwareInsert:
+            return hwinsert::paramText (param, v);
         case EffectKind::waveCandy:
             return visualfx::wavecandy::paramText (param, v);
         case EffectKind::visualizer:
@@ -3547,6 +3559,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return std::make_unique<ParametricEq> (slot.params);
     if (slot.kind == EffectKind::frequencySplitter)
         return fsplit::make (slot.params);
+    if (slot.kind == EffectKind::hardwareInsert) // its round trip (latency) known before the first block (round 164d)
+        return std::make_unique<hwinsert::HardwareInsertFx> (&slot.params);
     if (slot.kind == EffectKind::flLowLifter) // its look-ahead (latency) known before the first block (round 154)
         return lowlifter::make (slot.params[4] >= 0.5f);
     if (slot.kind == EffectKind::hushDeEsser) // its look-ahead (latency) known before the first block (round 128)
@@ -3675,6 +3689,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::emphasizer: return emphasizer::make(); // round 154
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::flLowLifter: return lowlifter::make(); // round 154
+        case EffectKind::hardwareInsert: return std::make_unique<hwinsert::HardwareInsertFx>(); // round 164d
         case EffectKind::waveCandy:
         case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
         case EffectKind::xyController:
