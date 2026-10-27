@@ -163,9 +163,9 @@ bool Song::insertInUse (int t) const
         }))
         return true;
     return std::any_of (automations.begin(), automations.end(), [t] (const Automation& a) {
-        return a.source.track == t || (a.target.kind == AutomationTargetKind::mixerVolume || a.target.kind == AutomationTargetKind::mixerPan
-                || a.target.kind == AutomationTargetKind::effectParam || a.target.kind == AutomationTargetKind::effectMix)
-               && a.target.index == t;
+        const auto onTrack = a.target.kind == AutomationTargetKind::mixerVolume || a.target.kind == AutomationTargetKind::mixerPan
+                             || a.target.kind == AutomationTargetKind::effectParam || a.target.kind == AutomationTargetKind::effectMix;
+        return a.source.track == t || (onTrack && a.target.index == t);
     });
 }
 
