@@ -26,6 +26,7 @@ extern int experiment;          // EXPERIMENT (round 165j tuning, removed before
 extern float experimentRelaxed;
 extern float experimentBridgeMs;
 extern float experimentLock;
+extern float experimentNormLo;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Scales
@@ -189,7 +190,7 @@ private:
     int markHead = 0, markCount = 0;
     std::vector<float> in[2], acc[2], env; // input history, output accumulators, a low-passed copy for peak search
     float envZ = 0.0f;
-    std::vector<float> hfEnv; // EXPERIMENT E3
+    std::vector<float> hfEnv, wsum; // EXPERIMENT E3 / E6
     float hpZ = 0.0f, hfZ = 0.0f;
     int hfLead = 44;
 };

@@ -10,6 +10,7 @@ int experiment = 0;
 float experimentRelaxed = 0.35f;
 float experimentBridgeMs = 25.0f;
 float experimentLock = 0.15f;
+float experimentNormLo = 0.5f;
 
 namespace
 {
@@ -418,7 +419,7 @@ std::vector<PitchFrame> analysePitch (const float* x, int n, double sampleRate, 
 // ---------------------------------------------------------------------------------------------------------------------
 // TD-PSOLA
 
-Psola::Psola() : env ((std::size_t) ringSize, 0.0f), hfEnv ((std::size_t) ringSize, 0.0f)
+Psola::Psola() : env ((std::size_t) ringSize, 0.0f), hfEnv ((std::size_t) ringSize, 0.0f), wsum ((std::size_t) ringSize, 0.0f)
 {
     for (int c = 0; c < 2; ++c)
     {
@@ -446,6 +447,7 @@ void Psola::reset() noexcept
     }
     std::fill (env.begin(), env.end(), 0.0f);
     std::fill (hfEnv.begin(), hfEnv.end(), 0.0f);
+    std::fill (wsum.begin(), wsum.end(), 0.0f);
     envZ = hpZ = hfZ = 0.0f;
     hfLead = (int) std::lround (sr / (2.0 * pi * 160.0));
     now = 0;
@@ -697,6 +699,7 @@ void Psola::process (const float* x, float* y, int channels) noexcept
             const auto src = ta + ((double) o - ts) * f;
             for (int c = 0; c < channels; ++c)
                 acc[c][(std::size_t) (o & m)] += w * readIn (c, src);
+            wsum[(std::size_t) (o & m)] += w; // EXPERIMENT E6
         }
         // unshifted voiced grains drift toward their marks, so a voice already on its note comes out as the input
         // itself (delayed), not displaced by up to half a period. Round 148: faded in over the last 3.4 cents of
@@ -723,6 +726,18 @@ void Psola::process (const float* x, float* y, int channels) noexcept
         auto& slot = acc[c][(std::size_t) (e & m)];
         y[c] = slot;
         slot = 0.0f;
+    }
+    // EXPERIMENT E6: the overlap-add normalised by the summed windows (grains of uneven length / spacing)
+    if (e >= 0)
+    {
+        auto& ws = wsum[(std::size_t) (e & m)];
+        if ((experiment & 16) != 0 && ws > 1e-3f)
+        {
+            const auto g = 1.0f / std::clamp (ws, experimentNormLo, 2.0f);
+            for (int c = 0; c < channels; ++c)
+                y[c] *= g;
+        }
+        ws = 0.0f;
     }
 }
 } // namespace lynx::vocal
