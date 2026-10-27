@@ -11859,7 +11859,7 @@ TEST (harmor_installation_presets)
     const auto a = lynx::harmor::renderReference (st, notes, 44100.0, 4096);
     const std::int32_t zero = 0;
     for (int part = 0; part < 2; ++part)
-        std::memcpy (st.data() + lynx::harmorParamOffset (st, part, 89), &zero, 4); // image gain mix 0
+        std::memcpy (st.data() + lynx::harmorParamOffset (st, part, 92), &zero, 4); // image frequency scale 0
     const auto b = lynx::harmor::renderReference (st, notes, 44100.0, 4096);
     CHECK (a.size() == b.size() && a != b);
 }
