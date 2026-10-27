@@ -92,3 +92,24 @@ changes (a knob moved by hand wins again); `.flp` links to parameters ≥ 16 are
   [DATA: FL presets bend them by 0.65, ±0.28, −0.725]; the input curves are identity in every FL file seen [DATA].
 - UI: X-Y-Z editor, a **Curve** box next to the X / Y / Z tabs; the curve view samples per pixel (stairs stay sharp).
   [TEST] `flcurve165_ends_straight_and_counts`, `xyz165_curve_modes`, `xyz165_fl_state_curve_tension_and_mode`.
+
+## 5. Voltage Controller velocity curve and links vs FL's renders
+
+- **Velocity** [FL render vs RUN]: FL's own render of `/mnt/d/lynx-work/patcher164v/fl_volt10.flp` (main L = velocity,
+  main R = pitch; REA_rodada164f-flimport §2) against LYNX's render of the same .flp through the whole import + rack
+  path (`build-local/renderwav`, which normalises the peak 1.0 to −1 dBFS, × 0.891 — undone below):
+
+  | velocity (FL) | 1 | 16 | 32 | 64 | 100 | 128 |
+  |---|---|---|---|---|---|---|
+  | FL main L | 0.00781 | 0.12500 | 0.25000 | 0.50000 | 0.78122 | 0.99997 |
+  | LYNX main L (÷ 0.891) | 0.00781 | 0.12498 | 0.24997 | 0.49997 | 0.78119 | 0.99995 |
+
+  and main R (1 V/oct pitch) −0.2 … +0.3 the same. The curve is FL's: **linear, velocity / 128** — nothing to change.
+- **Links** [FL render vs RUN]: `fl_dash.flp` (a Dashboard's outputs 3 / 7 linked to the Voltage Controller's offsets
+  L / R) renders L = −0.500, R = +0.750 in FL. LYNX rendered **silence**: the live links were imported right (debug
+  print: output 3 → offset L, output 7 → offset R) but `RackRenderer::updateAutomation` applied plugin / instrument
+  parameters in **pattern mode** only for pattern event lanes — every controller link to a parameter (Dashboard →
+  Voltage, Peak / Envelope / X-Y → a plugin's parameter) did nothing while a pattern played. Fixed: in pattern mode
+  the live links' bindings are applied too (`applyPluginParams (…, andLive)`); song mode was already right.
+  [TEST] `dashboard165_links_and_midi_through_the_rack_in_pattern_mode` (both modes, plus the Dashboard's CC reaching a
+  plugin on its port).
