@@ -1,6 +1,7 @@
 #include "ui/SettingsPages.h"
 #include "platform/Paths.h"
 #include "platform/FileTypes.h"
+#include "platform/Package.h"
 
 #include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
@@ -822,6 +823,9 @@ private:
             case prefs::DriverKind::asio:
                 return tr ("Low-latency drivers. LYNX ASIO, FL Studio ASIO and ASIO4ALL work with any device; a manufacturer's ASIO driver works with its own device.");
             case prefs::DriverKind::lynxAsio:
+                if (platform::runningPackaged()) // the Store build: the package folder moves with every update
+                    return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
+                               "To use it in other programs, install LYNX from lynx-share.com (the installer registers it).");
                 return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
                            "For other programs, run \"Register LYNX ASIO\" in LYNX's folder once.");
             case prefs::DriverKind::coreAudio:

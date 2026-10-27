@@ -1,6 +1,7 @@
 #include "platform/Paths.h"
 
 #include "core/FlpImport.h"
+#include "platform/Package.h"
 
 #include <iterator>
 #include <string>
@@ -33,6 +34,9 @@ juce::File xdgFolder (const char* variable, const char* fallback)
 juce::File settingsFolder()
 {
    #if JUCE_WINDOWS
+    // the Microsoft Store build: the real path of the package's redirected %APPDATA%\LYNX (platform/Package.h)
+    if (const auto packaged = packagedSettingsFolder(); packaged != juce::File())
+        return packaged;
     auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX");
    #elif JUCE_MAC
     auto folder = home().getChildFile ("Library/Application Support/LYNX");
@@ -133,7 +137,8 @@ bool relaunchFromAsciiPath (int& exitCode)
         return false;
 
     const auto isAscii = [] (const wchar_t* text) { for (; *text != 0; ++text) if (*text > 127) return false; return true; };
-    if (isAscii (exe) || GetEnvironmentVariableW (L"LYNX_SHORT_PATH_RELAUNCH", nullptr, 0) > 0)
+    // (a package's WindowsApps path is ASCII anyway; and a packaged exe started by its path loses the package identity)
+    if (runningPackaged() || isAscii (exe) || GetEnvironmentVariableW (L"LYNX_SHORT_PATH_RELAUNCH", nullptr, 0) > 0)
         return false;
 
     wchar_t shortExe[MAX_PATH * 4] {};

@@ -27,6 +27,7 @@
 #include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
+#include "platform/Package.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
 #include "ui/PluginPresetMenu.h"
@@ -365,6 +366,15 @@ public:
             lynx::crashguard::quietCrashReports();
             lynx::PluginHost::scanOneFile (args[i + 1].unquoted(), args[i + 2].unquoted(), juce::File (args[i + 3].unquoted()));
             lynx::crashguard::exitNow (0);
+        }
+
+        if (args.contains ("--packageinfo"))
+        {
+            // round 165n: the Microsoft Store (MSIX) build's identity and folders (platform/Package.h); the release
+            // workflow runs it inside the installed test package
+            juce::File (args[args.indexOf ("--packageinfo") + 1].unquoted()).replaceWithText (lynx::platform::packageReport());
+            quit();
+            return;
         }
 
         if (args.contains ("--paths"))
