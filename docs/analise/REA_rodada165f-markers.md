@@ -85,11 +85,28 @@ audio thread copies it when the version changes, splits the block at the jump's 
 position (the renderer sees a position jump: held notes are released and audio clips resume mid-way, as for the loop
 wrap). No locks or allocations on the audio thread.
 
+## 2. What LYNX does now [CODE]
+- `core/MarkerPlan.*`: the marker table for the audio thread (`makeMarkerPlan`, `markerStep`), Quantize song jumps
+  (`markers::quantizedJumpTick`), the menu commands (`setAction`, `addEvery`, `addJumpToNextBar`,
+  `changeToMarkerLoop`).
+- `engine/AudioEngine`: follows the table while playing in Song mode (skip, pause, marker loop, Loop / Start wrap);
+  Play from 0 starts at the Start marker; `jumpTo` / `jumpToMarker` / `jumpToNextMarker` wait for the quantize grid
+  while playing; MIDI "Song marker jump" (Settings › MIDI: off / channel 1-16, note 0 = first marker [HYP]).
+- Playlist ruler: action markers drawn with their symbol and name; the marker's menu has FL's action list (None,
+  Start, Loop, Marker loop, Marker skip, Marker pause, Time signature, Start / Stop recording) and "Place loop";
+  the ruler menu has "Time markers" (Add one every 1/2/4/8 bars, Add jump to next bar, Change to marker loop) and
+  "Quantize song jumps"; clicking a marker's tag jumps to it. Alt+Numpad * / Alt+Numpad / = next / previous marker.
+- Export drops the actions (linear, like FL's render). `.flp` import keeps the type; `.lynx` save/load already
+  round-trips `action`; edits are undoable ("Markers").
+- Tests: `tests/Markers165Tests.inc` (incl. a block-by-block simulation checked against FL's observed beat orders).
+
+## 3. Not done / open
+- FL renumbers the ruler and the time display from the Start marker in Song mode (`fl_start_ruler.png`): not done.
+- Pattern length / Bar override / Loop length / Key/Scale are Piano Roll pattern markers in FL: kept, no effect.
+- Time markers › Add auto, Add two..., Add key marker, Move content left / right: not done.
+- [HYP]: the MIDI note → marker mapping, "Change to marker loop" details, the Start-marker wrap without a Loop marker.
+- The audio-clip stream prefetcher may underrun once right after a marker jump far away (as after a ruler click).
+
 ## Where I stopped
-- 16:15 — PAUSED by the coordinator (machine load). Done: briefs read; LYNX code located (Song.h `Marker`,
-  FlpImport.cpp ~3300, ProjectFile.cpp ~1680/1957, Recorder.cpp punchRanges, AudioEngine signature table ~2490);
-  own Ghidra scripts in `tmp/rea165m/gh` (g.sh, Str.java, Ptrs.java, Dec.java); marker type table decoded (§1.1);
-  demo projects scanned (§1.2). No code changes yet.
-- Next: decompile the transport's marker handling (find reads of the marker type field, e.g. from the
-  `EEMarkerMode*Menu` handlers / the 0x94 loader), FL renders of small test .flp (base project with pitched notes
-  per beat + markers of each type) via `FL64.exe /R /Ewav` under the FL lock, then implement in AudioEngine.
+- 17:15 — code complete; waiting for the build slot for build-local (FL Data) and the Windows build, then
+  screenshots, render comparison, landing.
