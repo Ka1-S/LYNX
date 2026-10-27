@@ -10,6 +10,7 @@
 #include "core/SearchQuery.h"
 #include "core/SearchService.h"
 #include "core/ValueMath.h"
+#include "core/Vfx.h"
 #include "platform/Paths.h"
 
 #include <mutex>
@@ -451,6 +452,14 @@ public:
                 if (natives::available (e, fl))
                     generatorEntry (*flGens, flEngineName (e), tr ("built-in FL engine"), Icon::keyboard,
                                     [kind = e.kind] { return std::optional<ChannelDef> (natives::makeChannel (kind, flStudioAccess())); });
+            // FL's VFX note processors (round 164b): channels with no sound, they play other channels / Patcher nodes
+            auto vfxGens = folder (gens.get(), tr ("VFX (note effects)"), Icon::folder);
+            for (const auto kind : vfx::allKinds)
+                generatorEntry (*vfxGens, vfx::flName (kind), tr ("built-in"), Icon::keyboard, [kind] {
+                    ChannelDef c;
+                    vfx::makeChannel (c, kind);
+                    return std::optional<ChannelDef> (c);
+                });
             auto installed = folder (gens.get(), tr ("Installed"), Icon::folder);
             for (const auto& t : types)
                 if (t.isInstrument)
@@ -463,7 +472,7 @@ public:
                                         c.plugin.name = name;
                                         return std::optional<ChannelDef> (c);
                                     });
-            for (auto* f : { &lynxGens, &flGens, &installed })
+            for (auto* f : { &lynxGens, &flGens, &vfxGens, &installed })
                 if (! (*f)->children.empty())
                     gens->children.push_back (std::move (*f));
             root->children.push_back (std::move (gens));

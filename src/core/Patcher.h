@@ -23,6 +23,7 @@
 #include "core/Effects.h"
 #include "core/Instruments.h"
 #include "core/Song.h"
+#include "core/Vfx.h"
 
 namespace lynx::patcher
 {
@@ -47,7 +48,10 @@ struct NodePorts
     int audioIns = 1, audioOuts = 1, controlOuts = 0;
     bool midiIn = false;
     bool midiOut = false; // a MIDI Out node: its notes leave on its MIDI output pin (round 162)
+    int midiOuts = 0;     // MIDI output pins (a MIDI Out: 1; a VFX node: its voice outputs, round 164b)
 };
+// The voice outputs a VFX node shows (FL activates the first few; LYNX shows one free pin past the last cabled one)
+int shownMidiOutputs (const PatcherDoc& doc, int node);
 NodePorts nodePorts (const PatchNode& node);
 
 // MIDI through the I/O nodes (round 162, FL's "MIDI port N" pins).
@@ -109,6 +113,10 @@ public:
     void allNotesOff() noexcept;
     void slideTo (int key, float cents, float samples) noexcept;
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept;
+    // the next note's other properties, for the VFX nodes (round 164b)
+    void setNextNoteModulation (float modX, float modY) noexcept;
+    void setNextNoteRelease (float velocity) noexcept;
+    void setNextNoteColour (int colour) noexcept;
     bool hasInstruments() const noexcept;
     bool instrumentsIdle() const noexcept;
 
@@ -149,9 +157,33 @@ private:
     struct MidiTarget
     {
         int node = 0, midiChannel = -1; // −1 = the incoming channel (a MIDI Out node on the way sets its own)
+        bool vfx = false;               // a VFX node: the voice goes into its processor
     };
+    // what a node's MIDI output pin `pin` (or a "From LYNX" pin) reaches, through MIDI Out nodes
+    std::vector<MidiTarget> midiTargetsOf (const PatcherDoc& doc, int from, int pin) const;
     std::vector<std::vector<MidiTarget>> pinTargets; // ["From LYNX" pin: 0 Notes, 1 + port] the instruments it reaches
     void deliver (int pin, bool on, int key, float velocity, int midiChannel) noexcept;
+
+    // VFX nodes (round 164b): their processors run at the start of each piece on the voices that reached them, and
+    // what they send out plays the instruments on their outputs at the exact sample (the piece is split there)
+    struct VfxQueue;
+    struct NoteOut;
+    std::vector<int> vfxOrder;                // VFX nodes, sources before the nodes they feed
+    std::vector<std::unique_ptr<VfxQueue>> vfxQueues; // [node] (null: not a VFX node)
+    std::vector<NoteOut> noteOuts;            // what the VFX nodes play in the current piece (capacity reserved)
+    bool hasVfx = false;
+    struct PendingVoice
+    {
+        float pan = 0.0f, cents = 0.0f, modX = 0.5f, modY = 0.5f, release = 0.5f;
+        int colour = 0;
+        bool porta = false;
+    } nextVoice;
+    double ticks = 0.0;
+    bool playing = false;
+    void runVfx (int n, double bpm) noexcept;
+    void routeVfxOutput (int node, const vfx::Event& e) noexcept;
+    void playNoteOut (const NoteOut& o) noexcept;
+    void renderNodes (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int start, int n, double bpm) noexcept;
     std::vector<PatchParam> published;
     std::vector<float> publishedValues; // built-in targets: the latest automation value (NaN = none), applied each block
     std::vector<std::vector<int>> outputs; // [bus of "To LYNX"] its cables

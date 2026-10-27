@@ -14,5 +14,8 @@ namespace lynx
 // favourite star (click it), name, vendor, format and category; typing filters (every word must match). Double-click
 // or Enter adds the highlighted plugin; "Manage plugins..." opens the Plugin manager, "Scan" looks for new ones.
 // One picker at a time (a tool window); `onChosen` runs once, then the picker closes.
-void showPluginPicker (AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen);
+// `onBuiltIn` (instruments only): LYNX's built-in note effects (FL's VFX, round 164b) are listed too, as "LYNX"
+// entries; choosing one hands over a new channel of it.
+void showPluginPicker (AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen,
+                       std::function<void (ChannelDef)> onBuiltIn = nullptr);
 } // namespace lynx

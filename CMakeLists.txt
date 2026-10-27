@@ -127,6 +127,8 @@ add_library(lynx_core STATIC
     src/core/LynxVerbs.cpp
     src/core/FlPatcher.cpp
     src/core/Patcher.cpp
+    src/core/Vfx.cpp
+    src/core/VfxSequencer.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
     src/core/SoundFont.cpp
@@ -316,6 +318,7 @@ if(LYNX_BUILD_APP)
         src/ui/Controllers164.cpp
         src/ui/VoltageEditor.cpp
         src/ui/SoundFontEditor.cpp
+        src/ui/VfxEditors.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
         src/ui/ThemeSettings.cpp

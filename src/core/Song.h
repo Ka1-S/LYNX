@@ -82,8 +82,9 @@ enum class InstrumentKind : std::uint8_t
     soundfont,  // LYNX Soundfont (REA_rodada158, core/SoundFont.h): the .sf2 / .sf3 in samplePath, settings in modelParams
     layer,      // FL's Layer channel (REA_rodada164a, core/Layer.h): no sound; its notes play its children (ChannelDef::layer)
     dashboard,  // FL's Dashboard (REA_rodada164a, core/ControlSurface.h): no sound; a panel of controls in patcher.surface
-    voltage     // FL's Voltage Controller (REA_rodada164a, core/VoltageController.h): its notes as control voltages; FL's
+    voltage,    // FL's Voltage Controller (REA_rodada164a, core/VoltageController.h): its notes as control voltages; FL's
                 // state in pluginState
+    vfx         // FL's VFX note processors (round 164b, core/Vfx.h): kind, output port and FL's state in pluginState; no sound
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.

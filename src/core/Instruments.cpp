@@ -1,6 +1,7 @@
 #include "core/Instruments.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
+#include "core/Vfx.h"
 #include "core/Scheduler.h"
 
 #include "core/DirectWave.h"
@@ -235,6 +236,7 @@ private:
             case InstrumentKind::layer:
             case InstrumentKind::dashboard:
             case InstrumentKind::voltage:
+            case InstrumentKind::vfx:
             case InstrumentKind::patcher:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
@@ -688,6 +690,7 @@ struct SynthVoice
     std::array<LfoState, lfoTargets> lfo {};
     float lfoGain = 1.0f, lfoGainStep = 0.0f; // volume LFO, ramped between ticks
     float basePan = 0.0f;                     // note pan (the pan LFO adds to it)
+    float cents = 0.0f;                       // the note's fine pitch (a VFX may move it while it sounds)
     SvfCoefficients filter; // this voice's (only with a cutoff envelope)
     double pitchMul = 1.0;
     float fmLevel = 1.0f;   // FM index envelope (1 -> fmSustain)
@@ -823,6 +826,7 @@ public:
                 v.stage = 0;
                 v.age = 0;
                 const auto target = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+                v.cents = nextCents;
                 glide (v, v.phaseDelta, target);
                 lastPhaseDelta = target;
                 for (auto& m : v.mod)
@@ -855,6 +859,7 @@ public:
         target->key = key;
         target->velocity = velocity;
         const auto delta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
+        target->cents = nextCents;
         glide (*target, lastPhaseDelta, delta); // with porta, starts from the previous note's pitch
         lastPhaseDelta = delta;
         voicePan (nextPan, target->panL, target->panR);
@@ -873,6 +878,29 @@ public:
         nextPan = pan;
         nextCents = cents;
         nextPorta = porta;
+    }
+
+    // a VFX changes a sounding note (round 164b): its fine pitch, pan or volume
+    void voiceProperty (int key, int prop, float value) noexcept override
+    {
+        if (! std::isfinite (value))
+            return;
+        for (auto& v : voices)
+            if (v.active && ! v.releasing && v.key == key)
+            {
+                if (prop == (int) vfx::Prop::pitch && v.phaseDelta > 0.0)
+                {
+                    v.phaseDelta *= std::exp2 ((double) (value - v.cents) / 1200.0);
+                    v.cents = value;
+                }
+                else if (prop == (int) vfx::Prop::pan)
+                {
+                    v.basePan = std::clamp (value, -1.0f, 1.0f);
+                    voicePan (v.basePan, v.panL, v.panR);
+                }
+                else if (prop == (int) vfx::Prop::velocity)
+                    v.velocity = std::clamp (value, 0.0f, 1.0f);
+            }
     }
 
     void slideTo (int key, float cents, float samples) noexcept override
@@ -1402,6 +1430,7 @@ struct SamplerVoice
     std::array<LfoState, lfoTargets> lfo {};
     float lfoGain = 1.0f, lfoGainStep = 0.0f;
     float basePan = 0.0f;
+    float cents = 0.0f; // the note's fine pitch (a VFX may move it while it sounds)
     const SampleData* data = nullptr; // this voice's sample (the chosen zone, in multi-sample)
     float zoneGain = 1.0f;
     double loopStart = 0.0, loopEnd = 0.0; // loopEnd > loopStart: the voice jumps back to the loop start
@@ -1742,6 +1771,7 @@ public:
         }
         voicePan (clipMode ? 0.0f : nextPan, target->panL, target->panR);
         target->basePan = clipMode ? 0.0f : nextPan;
+        target->cents = clipMode ? 0.0f : nextCents;
 
         for (std::size_t i = 0; i < lfoTargets; ++i)
             if (lfos[i].active && ! clipMode)
@@ -1908,6 +1938,30 @@ public:
     void pitchBend (float semitones) noexcept override
     {
         bendMul = clipMode || ! std::isfinite (semitones) ? 1.0 : std::exp2 ((double) std::clamp (semitones, -48.0f, 48.0f) / 12.0);
+    }
+
+    // a VFX changes a sounding note (round 164b): its fine pitch, pan or volume
+    void voiceProperty (int key, int prop, float value) noexcept override
+    {
+        if (! std::isfinite (value))
+            return;
+        for (auto& v : voices)
+            if (v.active && v.stage != 3 && v.key == key)
+            {
+                if (prop == (int) vfx::Prop::pitch)
+                {
+                    const auto ratio = std::exp2 ((double) (value - v.cents) / 1200.0);
+                    v.rate *= ratio;
+                    v.cents = value;
+                }
+                else if (prop == (int) vfx::Prop::pan)
+                {
+                    v.basePan = v.notePan = std::clamp (value, -1.0f, 1.0f);
+                    voicePan (v.basePan, v.panL, v.panR);
+                }
+                else if (prop == (int) vfx::Prop::velocity)
+                    v.velocity = std::clamp (value, 0.0f, 1.0f);
+            }
     }
 
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override
@@ -2821,6 +2875,50 @@ public:
     void render (float*, float*, int, float, float) noexcept override {}
     bool idle() const noexcept override { return true; }
 };
+
+// A VFX note processor in the Channel Rack or a Patcher (round 164b): no sound; the renderer / the graph run its
+// processor on the notes and send what it plays to the instruments on its outputs.
+class VfxInstrument final : public Instrument
+{
+public:
+    void prepare (double sampleRate) noexcept override
+    {
+        rate = sampleRate;
+        if (processor != nullptr)
+            processor->prepare (sampleRate);
+    }
+    void noteOn (int, float) noexcept override {}
+    void noteOff (int) noexcept override {}
+    void allNotesOff() noexcept override {}
+    void render (float*, float*, int, float, float) noexcept override {}
+    bool idle() const noexcept override { return true; }
+    vfx::Processor* noteProcessor() noexcept override { return processor.get(); }
+    // (UI thread: the first call builds the processor before the instrument reaches the audio thread; later ones only
+    // hand the new settings over)
+    void configure (const ChannelDef& channel, double) noexcept override
+    {
+        const auto state = vfx::readState (channel.pluginState);
+        if (! state)
+            return;
+        if (processor == nullptr || processor->kind() != state->kind)
+        {
+            if (processor == nullptr)
+            {
+                processor = vfx::makeProcessor (state->kind, state->fl);
+                processor->prepare (rate);
+            }
+            return;
+        }
+        if (state->fl != lastState)
+            processor->configure (state->fl);
+        lastState = state->fl;
+    }
+
+private:
+    std::unique_ptr<vfx::Processor> processor;
+    std::vector<std::uint8_t> lastState;
+    double rate = 44100.0;
+};
 } // namespace
 
 float samplerGain (float db) noexcept
@@ -2840,6 +2938,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return surface::makeDashboard();
     if (kind == InstrumentKind::voltage) // its notes as control voltages (round 164)
         return voltage::makeInstrument();
+    if (kind == InstrumentKind::vfx)
+        return std::make_unique<VfxInstrument>();
 
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
         return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);
