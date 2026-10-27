@@ -82,5 +82,34 @@ start from the same shapes (the numbers, not the files).
   LYNX: `lossyNormalize` = the same search with an analytic-signal (Hilbert) rotation `x cos t + H(x) sin t`, then
   normalize; returns the ratio. (Was a soft-clip guess before.)
 - **Generate noise (WDelMenuClick tag 10)**: fills the selection with noise then normalizes it to 1.0.
-- **Claw machine (0xcd2070)**: the form is modal; OK runs the core (0xc7b460) on the selection under one undo step
-  named "claw machine".
+- **Claw machine (0xcd2070 → core 0xc7b460)**: the "Trash every" value (separators not counted) gives m = 4 (0..3),
+  3 (4..6), 2 (7..8) and the part n; Period = {1/4, 1/2, 1, 2, 4, 8, 16} beats (a float table). From a beat grid
+  anchored at the sample's start, each period loses the n-th of its m parts; with Snap to markers the cut's end moves to
+  the nearest marker within half a cut. Each join: the 15 ms before the cut are mixed (ramp) with the last 15 ms of
+  the removed part, so the audio flows into what follows. Then, if Amount > 0, the whole edited range is stretched
+  by `1 + (m/(m-1) - 1) * amount/1000` (clamped 0.01..100), by resampling or by the chosen élastique mode, with 25 ms
+  edge fades for some modes. LYNX: `clawMachine` does the same (cuts from the last, ramp mix, one global stretch;
+  WSOLA in place of élastique).
+- **Paste mix (envelope) (WDelMenuClick tag 11 → 0xce28f0)**: every frame of the whole sample becomes
+  `clip * e + original * (1 - e)`, e = Edison's 4th envelope (the one the editor's selector calls "scratching
+  envelope", evaluated over the sample's original length; outside the clip the clip counts as silence); the sample
+  grows when the clip goes past its end; the envelope is reset and the editor goes back to the waveform. LYNX: Edit ›
+  Paste mix (envelope) shows that envelope ("Edit: Paste mix", flat 0.5 to start), the second click applies
+  (`pasteMixEnvelope`), one undo step.
+- **Paste mix (spectral) (tag 12 → 0xce2de0)**: opens the EQ form in its mask mode, processes the source (the
+  clipboard) and the target (the audio under it) with it, then mixes them. FL's default mask map is flat at 1.
+  LYNX: the tool window "Paste mix (spectral)" with a mask curve (y = share of the clipboard per frequency, the
+  original gets 1 - y), default flat 1 (`pasteMixSpectral`).
+- **Scratch (envelope) (ScratchMenu 0xce30d0 → 0xce23b0)**: the same 4th envelope is the play position: output frame
+  i reads the original at `env(i) * length` through a resampler, in blocks of 16 frames, the resampler's filter set
+  from the smallest step in the block. LYNX: Tools › Time › Scratch (envelope) shows a position envelope (a rising
+  diagonal = unchanged), the second click renders it (`scratch`: interpolation when slower than normal speed, the
+  average over the span played when faster, so fast moves do not alias).
+- **EQ "Phases"** [DATA hint "Edit phases instead of magnitudes"]: LYNX keeps a second curve; y 0.5 = no change,
+  0 / 1 = −/+180° per frequency.
+- **Declipper "Model" General / Vocal and "Safe mode"** [DATA]: LYNX: the general model rebuilds peaks up to +12 dB
+  over the clip level, the vocal one a rounder bump up to +3 dB; safe mode never goes over full scale.
+- **Time stretcher / pitch shifter form** [DATA TMEStretchToolForm]: now a full tool window: pitch coarse/fine,
+  time mul / length / target tempo (one setting three ways), method Stretch / Resample, Insert, Formant
+  preservation (shift coarse/fine, order 8..512 = 128, Copy from pitch). Formants: a cepstral envelope (order/4
+  coefficients of a 2048 frame) of the original at the same moment replaces the processed one's (`correctFormants`).
