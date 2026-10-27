@@ -947,6 +947,15 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                         if (std::isfinite (h) && h > 0.05f && h < 10.0f)
                             t.heightScale = h;
                     }
+                    if (e.data.size() >= 46)
+                    {
+                        t.motion = (int) readLE<std::uint32_t> (e.data, 22);
+                        t.press = (int) readLE<std::uint32_t> (e.data, 26);
+                        t.triggerSync = (int) readLE<std::uint32_t> (e.data, 30);
+                        t.queue = readLE<std::uint32_t> (e.data, 34) != 0;
+                        t.tolerant = readLE<std::uint32_t> (e.data, 38) != 0;
+                        t.positionSync = (int) readLE<std::uint32_t> (e.data, 42);
+                    }
                     if (e.data.size() >= 62)
                     {
                         t.grouped = e.data[46] != 0;

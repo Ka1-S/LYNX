@@ -92,6 +92,11 @@ public:
                                   const std::function<bool (double)>& progress, int& latency);
 
     void play() noexcept;
+
+    // Performance mode (round 165m, core/Performance.h): launch / release / stop zone clips (message thread). The
+    // clips start on the next block, quantized by their track's Performance settings; nothing launches while stopped.
+    void performanceCommand (const perf::Command& command) noexcept { performanceLive->commands.push (command); }
+    const perf::Live& performanceState() const noexcept { return *performanceLive; }
     void stop() noexcept; // also cancels a count-in or a wait for the first note
 
     // Recording options (docs/WORKFLOW_FL.md P2: recording set). UI thread.
@@ -122,6 +127,9 @@ public:
         // FL's recording filter "Automation" (REA round 143): moved parameters become automation (song mode: automation
         // clips; pattern mode: the pattern's events); Quantize › "Automations" puts their points on the snap
         bool recordAutomation = true;
+        // FL's recording filter "Clips" (REA round 146 B5, round 165m): Performance mode's launched clips are written
+        // into the arrangement where they played
+        bool recordClips = true;
         bool quantiseAutomation = false;
         // round 163 (Pro Tools / Nuendo): punch in/out on the Playlist's loop region (instead of loop recording; the
         // song plays straight through it), pre-roll before the punch-in (or before the position recording starts at)
@@ -592,6 +600,8 @@ private:
     bool automationOverrideActive = false; // touched targets override their automation in the renderer
     std::vector<AutomationWrite> takeWrites; // per target: where this take writes (its own clip grows)
     bool takeHasUndoStep = false;
+    bool perfTakeHasUndoStep = false; // the first clip a performance recording writes is the take's undo step
+    void updatePerformanceRecording();
     RecordOptions recordOptions;
     std::vector<int> takeClearedChannels; // replace mode: channels already cleared in this take
     double takeStartPosition = 0.0;
@@ -655,6 +665,7 @@ private:
     std::unique_ptr<Drainer> drainer;
     juce::SpinLock takeLock;                       // the audio thread only tries (never waits)
     LiveInput liveInput;
+    std::unique_ptr<perf::Live> performanceLive = std::make_unique<perf::Live>(); // Performance mode (round 165m)
     HardwareOutput hwOutput;                              // inserts' hardware outputs (renderer -> callback)
     std::array<int, HardwareOutput::maxChannels> outputSlot {}; // device output channel -> callback output index (-1: closed)
     std::atomic<int> masterOutChannel { outputDefault };  // the Master's target (UI -> audio)

@@ -116,6 +116,8 @@
 #include "core/DelphiMath.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
+#include "core/Patcherize.h"
+#include "core/Performance.h"
 #include "core/Scheduler.h"
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
@@ -16058,3 +16060,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Misc164Tests.inc"
 #include "Visual164Tests.inc"
 #include "Patcher164fTests.inc"
+#include "Perf165Tests.inc"
