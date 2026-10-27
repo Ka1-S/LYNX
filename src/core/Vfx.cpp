@@ -1667,7 +1667,7 @@ private:
             }
             if (volume != sourceVolume)
                 now.velocity = (float) std::clamp (std::log (10.0 * volume + 1.0) / std::log (11.0) / 1.28, 0.0, 1.0);
-            now.cents = (float) std::clamp (cents, -6000.0 - v.source.key * 100.0, 6700.0 - v.source.key * 100.0);
+            now.cents = (float) std::clamp (cents, -v.source.key * 100.0, 12000.0 - v.source.key * 100.0); // (FL: Init.Pitch 0…12000)
             now.pan = (float) pan;
             now.modX = (float) std::clamp (modX * 0.5 + 0.5, 0.0, 1.0);
             now.modY = (float) std::clamp (modY * 0.5 + 0.5, 0.0, 1.0);
