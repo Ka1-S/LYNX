@@ -127,6 +127,10 @@ Score = user value × (1 / effort). Evidence: [DFM] for all; [DECOMP] added wher
 | — | Stem separation / AI tools, FL Cloud, FL Studio Remote, Gopher | ⛔ | | decision / out of scope |
 
 ## Where I stopped
-- 16:10 — resumed after the BSOD (the first agent had written nothing). DFM inventory extracted
-  (`tmp/rea165/menus.txt`, `forms.txt`); first comparison against LYNX's code done (§1). Next: rank (§2), REA the
-  marker actions and MIDI sync, start the builds.
+- PAUSED by the coordinator (machine load 33). Audit done: §1 inventory ([DFM] of all 105 FLEngine forms, tmp/rea165/menus.txt),
+  §2 ranking. Sub-rounds launched and paused: rea165-markers (gap 1), rea165-midisync (gap 2) in their own worktrees.
+- Lead, gap 3 (score logger) in progress: [DECOMP] FUN_0124c060 (dump: ms→ticks at the project tempo, held notes dropped,
+  window back from the last note end, first note at tick 0, silences > 2 bars shortened to 2 bars, min length = step/6,
+  Merge / Replace / Cancel when the pattern has notes, menu Last 2/5/10/20/30 minutes + Clear log). Written:
+  src/core/ScoreLog.{h,cpp} (in build-local + CMake), not built yet. Next: engine hook (AudioEngine MIDI push lambda +
+  sendLiveNote record=true, SpinLock-guarded Log), Tools menu, tests; then gaps 4–6.
