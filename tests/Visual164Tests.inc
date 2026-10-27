@@ -319,6 +319,22 @@ TEST (visual164_frames_and_beats)
         const auto& f = quiet.analyze (zero.data(), zero.data(), 4096, rate, frame / fps, 1.0 / fps, params);
         CHECK (! f.onset && f.level == 0.0f && f.bass == 0.0f);
     }
+    // a quiet mix (-26 dB, 80 Hz) still draws a wave: the waveform's automatic gain brings it up within ~3 s
+    {
+        FrameAnalyzer agc;
+        std::vector<float> sine (8192);
+        float peak = 0.0f;
+        for (int frame = 0; frame < 120; ++frame)
+        {
+            for (int i = 0; i < 8192; ++i)
+                sine[(std::size_t) i] = 0.05f * (float) std::sin (2.0 * 3.14159265 * 80.0 * ((double) frame * 1600 + i) / rate);
+            const auto& f = agc.analyze (sine.data(), sine.data(), 8192, rate, frame / fps, 1.0 / fps, params);
+            if (frame == 119)
+                for (const auto v : f.waveL)
+                    peak = std::max (peak, std::abs (v));
+        }
+        CHECK (peak > 0.25f && peak < 0.75f);
+    }
     // particles: deterministic, a burst on a beat
     scene::Layer layer;
     layer.type = scene::LayerType::particles;

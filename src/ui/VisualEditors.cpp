@@ -510,7 +510,7 @@ private:
             silent = std::abs (l[(std::size_t) i]) < 1.0e-5f && std::abs (r[(std::size_t) i]) < 1.0e-5f;
         silentFrames = silent ? silentFrames + 1 : 0;
         const auto settle = mode == wc::Mode::oscilloscope ? 3
-                            : mode == wc::Mode::spectrogram ? getWidth() / juce::jmax (1, wc::spectrogramPixelsPerFrame (feed.param (wc::specSpeed))) + 3
+                            : mode == wc::Mode::spectrogram ? 80 // (2 s of silence scrolled in, then the picture stays)
                             : mode == wc::Mode::peakMeter ? (juce::jmax (meter.peakDb (0), meter.peakDb (1), meter.levelDb (0), meter.levelDb (1))
                                                                      > (float) wc::meterFloorDb (feed.param (wc::meterScale)) - 1.0f
                                                                  ? 1 << 30
@@ -1112,7 +1112,25 @@ struct SceneRenderer::State
     std::vector<std::vector<Ring>> rings;
     std::vector<float> spin;
     std::map<std::string, juce::Image> images;
+    std::map<std::size_t, std::pair<juce::String, juce::Image>> layerImages; // per layer slot: key + picture
     double lastTime = -1.0;
+
+    // a picture of `area`'s size drawn by `paint` once, again only when `key` changes
+    const juce::Image& cached (std::size_t slot, const juce::String& key, juce::Rectangle<float> area,
+                               const std::function<void (juce::Graphics&, juce::Rectangle<float>)>& paint, bool opaque = false)
+    {
+        auto& entry = layerImages[slot];
+        if (entry.first != key || ! entry.second.isValid())
+        {
+            const auto w = juce::jmax (1, (int) std::round (area.getWidth())), h = juce::jmax (1, (int) std::round (area.getHeight()));
+            // (an opaque picture is copied, not blended, when drawn)
+            entry.second = juce::Image (opaque ? juce::Image::RGB : juce::Image::ARGB, w, h, true, juce::SoftwareImageType());
+            juce::Graphics g (entry.second);
+            paint (g, juce::Rectangle<float> ((float) w, (float) h));
+            entry.first = key;
+        }
+        return entry.second;
+    }
 
     const juce::Image& image (const std::string& path)
     {
@@ -1231,17 +1249,32 @@ void SceneRenderer::draw (juce::Graphics& g, juce::Rectangle<float> area, const 
                         g.setOpacity (1.0f);
                         drew = true;
                     }
+                // the gradient and the glow are drawn once into images (a blit per frame costs a fraction of a gradient fill)
+                const auto size = area.toNearestInt().getWidth() * 100003 + area.toNearestInt().getHeight();
                 if (! drew)
                 {
-                    g.setGradientFill (juce::ColourGradient (colour (L.colourA, a), area.getX(), area.getY(), colour (L.colourB, a), area.getRight(),
-                                                             area.getBottom(), false));
-                    g.fillRect (area);
+                    auto& cached = state->cached (i * 2, juce::String::toHexString ((juce::int64) L.colourA) + juce::String::toHexString ((juce::int64) L.colourB)
+                                                             + juce::String (a) + juce::String (hueShift) + "/" + juce::String (size),
+                                                  area, [&] (juce::Graphics& cg, juce::Rectangle<float> r) {
+                                                      cg.setGradientFill (juce::ColourGradient (colour (L.colourA, a), r.getX(), r.getY(),
+                                                                                                colour (L.colourB, a), r.getRight(), r.getBottom(), false));
+                                                      cg.fillRect (r);
+                                                  },
+                                                  a >= 0.999f && argb (L.colourA).isOpaque() && argb (L.colourB).isOpaque());
+                    g.drawImageAt (cached, (int) std::round (area.getX()), (int) std::round (area.getY()));
                 }
-                if (L.react > 0.0f && band > 0.0f)
+                if (L.react > 0.0f && band > 0.004f)
                 {
-                    g.setGradientFill (juce::ColourGradient (colour (L.colourB, band * L.react * 0.6f * a), area.getCentreX(), area.getCentreY(),
-                                                             colour (L.colourB, 0.0f), area.getCentreX(), area.getY() - H * 0.2f, true));
-                    g.fillRect (area);
+                    auto& glow = state->cached (i * 2 + 1, juce::String::toHexString ((juce::int64) L.colourB) + juce::String (hueShift) + "/" + juce::String (size),
+                                                area, [&] (juce::Graphics& cg, juce::Rectangle<float> r) {
+                                                    cg.setGradientFill (juce::ColourGradient (colour (L.colourB, 1.0f), r.getCentreX(), r.getCentreY(),
+                                                                                              colour (L.colourB, 0.0f), r.getCentreX(),
+                                                                                              r.getY() - r.getHeight() * 0.2f, true));
+                                                    cg.fillRect (r);
+                                                });
+                    g.setOpacity (juce::jlimit (0.0f, 1.0f, band * L.react * 0.6f * a));
+                    g.drawImageAt (glow, (int) std::round (area.getX()), (int) std::round (area.getY()));
+                    g.setOpacity (1.0f);
                 }
                 break;
             }
@@ -1809,6 +1842,7 @@ public:
         o.maxTailSeconds = 4.0;
         wav = juce::File::createTempFile (".wav");
         job = std::make_unique<ExportJob> (t.engine->getSong(), o, wav);
+        runningIn = t.runningIn;
         if (t.runningIn)
             effect = t.runningIn (job->getEngine());
         if (tapOf (effect.get()) != nullptr)
@@ -1850,22 +1884,63 @@ public:
         double rate = reader->sampleRate;
         std::vector<float> left, right;
         captureNote = effect == nullptr ? juce::String ("no effect") : tapOf (effect.get()) == nullptr ? juce::String ("not a visual effect")
-                    : "captured " + juce::String ((juce::int64) capture.used) + " of " + juce::String ((juce::int64) length)
+                    : "captured " + juce::String ((juce::int64) capture.used) + " of " + juce::String ((juce::int64) length) + ", processed "
+                          + juce::String ((juce::int64) capture.seen) + (runningIn && runningIn (job->getEngine()) != effect ? ", REPLACED" : "") + ", peak "
+                          + juce::String (capture.used > 0 ? juce::FloatVectorOperations::findMaximum (capture.left.data(), (int) capture.used) : 0.0f, 3)
                           + (capture.overflow ? " (overflow)" : "");
-        if (effect != nullptr && ! capture.overflow && capture.used >= length)
+        // the capture starts with the render (play() comes first) and stops where the transport stops (the song's end;
+        // the tail is not "playing"): it lines up with the WAV after the start trim, and the WAV fills the tail
+        const auto trim = (std::size_t) juce::jmax<juce::int64> (0, (juce::int64) job->getEngine().getLastRenderStats().trimmedSamples);
+        juce::AudioBuffer<float> buffer (2, (int) length);
+        reader->read (&buffer, 0, (int) length, 0, true, true);
+        left.assign (buffer.getReadPointer (0), buffer.getReadPointer (0) + length);
+        right.assign (buffer.getReadPointer (1), buffer.getReadPointer (1) + length);
+        if (effect != nullptr && ! capture.overflow && capture.used > trim)
         {
-            const auto skip = capture.used - length;
-            captureOffset = skip;
-            left.assign (capture.left.begin() + (long) skip, capture.left.begin() + (long) capture.used);
-            right.assign (capture.right.begin() + (long) skip, capture.right.begin() + (long) capture.used);
+            const auto n = juce::jmin (length, capture.used - trim);
+            // (--visualtest: where the capture lines up with the WAV — block envelopes, ±400 blocks of 512)
+            if (diagnose)
+            {
+                auto envelope = [] (const float* x, std::size_t count) {
+                    std::vector<float> e (count / 512);
+                    for (std::size_t b = 0; b < e.size(); ++b)
+                    {
+                        float sum = 0.0f;
+                        for (std::size_t k = 0; k < 512; ++k)
+                            sum += x[b * 512 + k] * x[b * 512 + k];
+                        e[b] = std::sqrt (sum / 512.0f);
+                    }
+                    return e;
+                };
+                const auto ec = envelope (capture.left.data(), capture.used), ew = envelope (left.data(), length);
+                double best = -1.0;
+                int bestLag = 0;
+                for (int lag = -400; lag <= 400; ++lag)
+                {
+                    double sum = 0.0, a2 = 0.0, b2 = 0.0;
+                    for (std::size_t b = 0; b < ec.size(); ++b)
+                    {
+                        const auto w = (long) b + lag;
+                        if (w < 0 || w >= (long) ew.size())
+                            continue;
+                        sum += (double) ec[b] * ew[(std::size_t) w];
+                        a2 += (double) ec[b] * ec[b];
+                        b2 += (double) ew[(std::size_t) w] * ew[(std::size_t) w];
+                    }
+                    const auto r = a2 > 0.0 && b2 > 0.0 ? sum / std::sqrt (a2 * b2) : 0.0;
+                    if (r > best)
+                    {
+                        best = r;
+                        bestLag = lag;
+                    }
+                }
+                captureNote << ", WAV peak " << juce::String (juce::FloatVectorOperations::findMaximum (left.data(), (int) length), 3)
+                            << ", capture block 0 = WAV block " << bestLag << " (r=" << juce::String (best, 3) << "), trim " << (int) trim;
+            }
+            std::copy (capture.left.begin() + (long) trim, capture.left.begin() + (long) (trim + n), left.begin());
+            std::copy (capture.right.begin() + (long) trim, capture.right.begin() + (long) (trim + n), right.begin());
+            captureOffset = trim;
             usedCapture = true;
-        }
-        else
-        {
-            juce::AudioBuffer<float> buffer (2, (int) length);
-            reader->read (&buffer, 0, (int) length, 0, true, true);
-            left.assign (buffer.getReadPointer (0), buffer.getReadPointer (0) + length);
-            right.assign (buffer.getReadPointer (1), buffer.getReadPointer (1) + length);
         }
         reader.reset();
         auto seconds = (double) left.size() / rate;
@@ -1984,11 +2059,12 @@ public:
     juce::File result, log;
     juce::String error, captureNote;
     int frames = 0;
-    bool usedCapture = false;
+    bool usedCapture = false, diagnose = false;
     double renderMs = 0.0, drawMs = 0.0;
 
 private:
     std::array<float, shownParams> slotParams {};
+    std::function<std::shared_ptr<Effect> (AudioEngine&)> runningIn;
     std::unique_ptr<ExportJob> job;
     std::shared_ptr<Effect> effect;
     Capture capture;
@@ -2920,6 +2996,52 @@ juce::String audioPathCost()
     return out;
 }
 
+// the drawing cost of each layer type alone and of each built-in scene (1280 x 720, demo signal, 120 frames)
+juce::String drawingCost()
+{
+    juce::String out;
+    juce::Image image (juce::Image::ARGB, 1280, 720, true, juce::SoftwareImageType());
+    std::vector<float> l (8192), r (8192);
+    auto run = [&] (const scene::Scene& sc) {
+        FrameAnalyzer analyzer;
+        SceneRenderer renderer;
+        std::array<float, shownParams> params {};
+        for (int i = 0; i < visualizer::count; ++i)
+            params[(std::size_t) i] = effectInfo (EffectKind::visualizer).params[(std::size_t) i].defaultValue;
+        double ms = 0.0;
+        for (int k = 0; k < 120; ++k)
+        {
+            const auto at = (std::int64_t) k * 1600;
+            for (int i = 0; i < 4096; ++i)
+            {
+                l[(std::size_t) i] = demoSample (at + i, 48000.0, 0);
+                r[(std::size_t) i] = demoSample (at + i, 48000.0, 1);
+            }
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            const auto& f = analyzer.analyze (l.data(), r.data(), 4096, 48000.0, k / 30.0, 1.0 / 30.0, params);
+            renderer.advance (sc, f, 1280.0f / 720.0f);
+            juce::Graphics g (image);
+            renderer.draw (g, image.getBounds().toFloat(), sc, f);
+            ms += juce::Time::getMillisecondCounterHiRes() - t0;
+        }
+        return ms / 120.0;
+    };
+    for (int t = 0; t < scene::layerTypeCount; ++t)
+    {
+        scene::Scene sc;
+        scene::Layer layer;
+        layer.type = (scene::LayerType) t;
+        layer.text = "LYNX";
+        layer.additive = true;
+        layer.count = 64;
+        sc.layers.push_back (layer);
+        out << "draw layer " << scene::typeName (layer.type) << ": " << juce::String (run (sc), 2) << " ms per 1280x720 frame\n";
+    }
+    for (const auto& preset : scene::presets())
+        out << "draw scene " << preset.name << ": " << juce::String (run (preset), 2) << " ms per 1280x720 frame\n";
+    return out;
+}
+
 class VisualTestRun final : private juce::Timer
 {
 public:
@@ -2935,7 +3057,7 @@ public:
     VisualTestRun (juce::File f, juce::File p, std::function<void (bool)> d) : folder (std::move (f)), project (std::move (p)), done (std::move (d))
     {
         folder.createDirectory();
-        report << audioPathCost();
+        report << audioPathCost() << drawingCost();
         for (int m = 1; m < wc::modeCount; ++m)
             cases.push_back ({ juce::String ("wavecandy-") + wc::modeName ((wc::Mode) m), EffectKind::waveCandy,
                                [m] (EffectSlot& fx) { fx.params[wc::mode] = wc::modeValue ((wc::Mode) m); }, 760, 480 });
@@ -2952,6 +3074,8 @@ public:
                 c.demo = false;
                 cases.push_back (c);
             }
+        if (juce::SystemStats::getEnvironmentVariable ("LYNX_VISUALTEST_VIDEO_ONLY", {}).isNotEmpty())
+            cases.clear();
         engine = std::make_unique<AudioEngine> (false);
         report << "case\tcpu % of one core (animating: demo signal; idle: no audio)\n";
         open();
@@ -3009,6 +3133,54 @@ private:
             phase = 1;
             t0 = now;
             c0 = processCpuSeconds();
+            return;
+        }
+        if (phase == 3)
+        {
+            if (now - t0 > 3000.0)
+            {
+                stopTimer();
+                // (diagnostics: a plain audio export as the Export window runs it — a worker thread, the message loop free)
+                exportopts::Options o;
+                o.sampleRate = 48000.0;
+                plainJob = std::make_unique<ExportJob> (engine->getSong(), o, folder.getChildFile ("plain.wav"));
+                finished = false;
+                worker = std::thread ([this] {
+                    juce::String error;
+                    jobResult = plainJob->run ([] (double) { return true; }, error);
+                    finished = true;
+                });
+                phase = 4;
+                startTimer (100);
+                return;
+            }
+            return;
+        }
+        if (phase == 4)
+        {
+            if (! finished)
+                return;
+            stopTimer();
+            worker.join();
+            plainJob.reset();
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (folder.getChildFile ("plain.wav")));
+            juce::int64 first = -1;
+            if (reader != nullptr)
+            {
+                juce::AudioBuffer<float> b (2, (int) reader->lengthInSamples);
+                reader->read (&b, 0, (int) reader->lengthInSamples, 0, true, true);
+                for (int k = 0; k < b.getNumSamples() && first < 0; ++k)
+                    if (std::abs (b.getSample (0, k)) > 1.0e-3f)
+                        first = k;
+            }
+            report << "plain export (worker thread): " << (jobResult ? "OK" : "ERROR") << ", first sound at " << juce::String ((double) first / 48000.0, 3) << " s\n";
+            videoOk = videoOk && jobResult && first >= 0 && first < 4800; // (this project starts at once: before round 164c the
+                                                                        // Export window's thread lost its first ~0.05–2 s)
+            {
+                nextVideo();
+            }
             return;
         }
         if (phase == 2)
@@ -3075,30 +3247,46 @@ private:
             report << "  layer " << scene::typeName (l.type) << (l.text.empty() ? "" : " \"" + juce::String::fromUTF8 (l.text.c_str()) + "\"") << "\n";
         videoTarget = target;
         videoScene = sc;
-        nextVideo();
+        // (as a person would: the project has been open a moment before the export)
+        phase = 3;
+        t0 = juce::Time::getMillisecondCounterHiRes();
+        startTimer (100);
     }
 
     // one export on a worker thread; the timer waits for it (the export engine was built here, on the message thread)
     void nextVideo()
     {
-        while (videoStep < 2)
+        while (videoStep < 3)
         {
             const auto withFfmpeg = videoStep == 0;
+            const auto onMaster = videoStep == 2; // the capture's alignment: a Visualizer last on the master hears the WAV itself
             ++videoStep;
+            if (onMaster)
+            {
+                auto slot = makeEffectSlot (EffectKind::visualizer);
+                slot.state = scene::toState (videoScene);
+                engine->editSong ([slot] (Song& song) {
+                    if (! song.mixer.empty())
+                        song.mixer[0].effects.push_back (slot);
+                }, false);
+                engine->dispatchPendingMessages();
+                videoTarget = VisualTarget::mixerSlot (*engine, 0, (int) engine->getSong().mixer[0].effects.size() - 1);
+            }
             VideoSettings v;
             v.width = 1280;
             v.height = 720;
             v.fps = 30;
-            v.maxSeconds = withFfmpeg ? 12.0 : 2.0;
+            v.maxSeconds = withFfmpeg ? 12.0 : onMaster ? 0.5 : 2.0;
             v.ffmpeg = withFfmpeg ? findFfmpeg() : juce::File();
             if (withFfmpeg && ! v.ffmpeg.existsAsFile())
             {
                 report << "video (ffmpeg): ffmpeg not found, skipped\n";
                 continue;
             }
-            v.output = folder.getChildFile (withFfmpeg ? "video.mp4" : "video");
-            videoLabel = withFfmpeg ? "ffmpeg" : "images";
+            v.output = folder.getChildFile (withFfmpeg ? "video.mp4" : onMaster ? "master" : "video");
+            videoLabel = withFfmpeg ? "ffmpeg" : onMaster ? "master check" : "images";
             job = std::make_unique<VideoJob> (videoTarget, videoScene, v);
+            job->diagnose = true;
             finished = false;
             worker = std::thread ([this] {
                 jobResult = job->run ([] (double, const juce::String&) { return true; });
@@ -3145,6 +3333,7 @@ private:
     VisualTarget videoTarget;
     scene::Scene videoScene;
     std::unique_ptr<VideoJob> job;
+    std::unique_ptr<ExportJob> plainJob;
     std::thread worker;
     std::atomic<bool> finished { false };
     bool jobResult = false, videoOk = true;

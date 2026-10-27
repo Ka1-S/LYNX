@@ -362,8 +362,38 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     setHqForAllPlugins (options.hqAllPlugins);
     setPluginsRenderMode (true); // and hosted plugins are told an export is running (FL: "notify about rendering mode")
     transport.sampleRate.store (sampleRate);
-    graph.setPlayConfigDetails (0, 2, sampleRate, blockSize);
-    graph.prepareToPlay (sampleRate, blockSize);
+    // round 164c: JUCE's graph builds its render sequence on the message thread. Prepared from the Export window's
+    // thread it rebuilt later (asynchronously) and rendered silence until then: the first ~0.05–2 s of the song were
+    // lost (the transport kept moving). It is prepared on the message thread, and the render waits for that.
+    {
+        auto prepareGraph = [this, sampleRate] {
+            graph.setPlayConfigDetails (0, 2, sampleRate, blockSize);
+            graph.prepareToPlay (sampleRate, blockSize);
+        };
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        if (mm == nullptr || mm->isThisTheMessageThread())
+            prepareGraph();
+        else
+        {
+            struct Handshake
+            {
+                juce::WaitableEvent done;
+                std::atomic<bool> abandoned { false };
+            };
+            auto handshake = std::make_shared<Handshake>();
+            juce::MessageManager::callAsync ([prepareGraph, handshake] {
+                if (handshake->abandoned.load())
+                    return;
+                prepareGraph();
+                handshake->done.signal();
+            });
+            if (! handshake->done.wait (10000)) // (a message thread that is blocked: as before)
+            {
+                handshake->abandoned = true;
+                prepareGraph();
+            }
+        }
+    }
 
     if (rackProcessor != nullptr)
         rackProcessor->setMetering (false); // nobody looks at the meters during the render

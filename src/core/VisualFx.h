@@ -45,6 +45,7 @@ struct Capture
     std::vector<ParamPoint> params; // one per processed block while playing (reserved by the exporter)
     std::size_t paramsUsed = 0;
     bool overflow = false;
+    std::size_t seen = 0; // frames processed while armed, playing or not (diagnostics)
 
     void reserve (std::size_t frames);
 };

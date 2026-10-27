@@ -90,7 +90,10 @@ public:
 
         // the video export's recording (only while the song plays: the warm-up's silent blocks are not the song)
         auto* c = capture.load (std::memory_order_acquire);
-        if (c == nullptr || ! playing || c->overflow)
+        if (c == nullptr)
+            return;
+        c->seen += (std::size_t) n;
+        if (! playing || c->overflow)
             return;
         if (c->used + (std::size_t) n > c->left.size() || c->paramsUsed >= c->params.size())
         {
@@ -1088,8 +1091,8 @@ const Frame& FrameAnalyzer::analyze (const float* left, const float* right, int 
         float peak = 0.0f;
         for (int i = start; i < std::min (size, start + span); ++i)
             peak = std::max ({ peak, std::abs (l[(std::size_t) i]), std::abs (r[(std::size_t) i]) });
-        // a slow automatic gain, so a quiet mix still draws a wave (up to +16 dB; a louder peak pulls it down at once)
-        const auto wanted = std::clamp (0.7f / std::max (peak, 1.0e-4f), 1.0f, 6.0f);
+        // a slow automatic gain, so a quiet mix still draws a wave (up to +24 dB; a louder peak pulls it down at once)
+        const auto wanted = std::clamp (0.7f / std::max (peak, 1.0e-4f), 1.0f, 16.0f);
         waveGain = wanted < waveGain ? wanted : waveGain + (wanted - waveGain) * (float) (1.0 - std::exp (-dt / 1.5));
         for (int p = 0; p < 256; ++p)
         {
