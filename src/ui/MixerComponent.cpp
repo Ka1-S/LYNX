@@ -1861,6 +1861,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::voiceShift, // LYNX's voice tools
                                       EffectKind::formulaController, EffectKind::peakController, // controllers (link their output to any knob)
                                       EffectKind::patcher, // FL's Patcher: a graph of effects / instruments / plugins (REA_rodada141)
+                                      EffectKind::hardwareInsert, // outboard gear through device outputs / inputs, pinged round trip (round 164d)
                                       EffectKind::fruityLimiter, EffectKind::fruityCompressor,
                                       EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper,
                                       EffectKind::reeverb2, EffectKind::reeverb1,

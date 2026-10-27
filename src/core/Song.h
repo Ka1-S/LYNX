@@ -625,10 +625,11 @@ enum class EffectKind : std::uint8_t
     voiceShift,      // LYNX's Voice Shift (REA_rodada135s, core/VoiceShift.h): pitch / formant / quantize / robot + drive
     emphasizer,      // FL's Emphasizer, exact (REA_rodada154, core/EmphasizerFx.h): FL's 6 controls / max
     flFrequencyShifter, // FL's Frequency Shifter, exact (REA_rodada154, core/FreqShifterFl.h): FL's 10 controls (raw − min) / range
-    flLowLifter      // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
+    flLowLifter,     // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
+    hardwareInsert   // LYNX's hardware insert (REA_rodada164d, core/HardwareInsert.h): send to device outputs, return from inputs, pinged round trip
 };
 // the last EffectKind (loops over every kind; update when one is appended)
-constexpr EffectKind lastEffectKind = EffectKind::flLowLifter;
+constexpr EffectKind lastEffectKind = EffectKind::hardwareInsert;
 
 constexpr int maxEffectParams = 160; // round 150: Prism Multiband 155, Ember 133. LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
 constexpr int maxEffectSlots = 10; // as in FL

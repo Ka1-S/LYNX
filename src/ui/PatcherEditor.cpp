@@ -1229,14 +1229,15 @@ public:
                                                                 } });
         // effects
         for (const auto kind : addableEffects())
-            effects[tr (effectCategory (kind))].push_back ({ addableEffectName (kind), addableEffectAvailable (kind), [this, kind, at] {
-                                                               const auto fx = newAddableEffect (kind, engine.getSong().bpm);
-                                                               if (! fx)
-                                                                   return;
-                                                               PatchNode n;
-                                                               n.effect = *fx;
-                                                               addNode (n, at);
-                                                           } });
+            if (kind != EffectKind::hardwareInsert) // (its device I/O and round trip live in the mixer's own chain, not inside a Patcher)
+                effects[tr (effectCategory (kind))].push_back ({ addableEffectName (kind), addableEffectAvailable (kind), [this, kind, at] {
+                                                                   const auto fx = newAddableEffect (kind, engine.getSong().bpm);
+                                                                   if (! fx)
+                                                                       return;
+                                                                   PatchNode n;
+                                                                   n.effect = *fx;
+                                                                   addNode (n, at);
+                                                               } });
 
         juce::PopupMenu pluginEffects, pluginInstruments;
         addPluginItems (pluginEffects, engine, false, [this, at] (PluginRef ref) {

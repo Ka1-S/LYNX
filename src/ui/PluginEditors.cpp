@@ -27,6 +27,7 @@
 #include "core/EquoFx.h"
 #include "core/MultibandDelayFx.h"
 #include "core/Vocodex.h"
+#include "core/HardwareInsert.h"
 #include "engine/Text.h"
 #include "ui/DynamicsDisplays.h"
 #include "ui/I18n.h"
@@ -103,7 +104,7 @@ public:
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
                 && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
-                    || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0
+                    || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0 || std::strcmp (item.display, "hwping") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
                 startTimerHz (30);
@@ -217,7 +218,7 @@ public:
     // wide option menus of LYNX's own panels get step arrows at both ends (round 114)
     bool hasStepArrows (const LayoutItem& item) const
     {
-        return item.type == Item::menu && item.w >= 110.0f && kind != EffectKind::parametricEq && kind != EffectKind::fruitySend
+        return item.type == Item::menu && item.w >= 110.0f && kind != EffectKind::parametricEq && kind != EffectKind::fruitySend && kind != EffectKind::hardwareInsert
                && std::find (plugui::ownLayoutKinds().begin(), plugui::ownLayoutKinds().end(), kind) != plugui::ownLayoutKinds().end();
     }
 
@@ -324,7 +325,75 @@ public:
             return utf8 (stateTable().text (fx->state, plugui::stateIndex (kind, param), plugui::stateRaw (kind, param, value)).c_str());
         if (kind == EffectKind::fruitySend && param == 3)
             return flbasic::sendTrack (value) > 0 ? insertName (flbasic::sendTrack (value)) : tr ("None");
+        if (kind == EffectKind::hardwareInsert && (param == hwinsert::output || param == hwinsert::input))
+            return hwChannelText (param == hwinsert::output, fx->params);
         return utf8 (formatEffectParam (kind, param, value, engine.getSong().bpm, fx->params).c_str());
+    }
+
+    // the hardware insert's output / input as the device names it ("Out 3 - Out 4", "In 2"; "None")
+    juce::String hwChannelText (bool out, const EffectParams& p) const
+    {
+        const auto channel = hwinsert::channelOf (p[out ? hwinsert::output : hwinsert::input]);
+        if (channel < 0)
+            return tr ("None");
+        if (out)
+        {
+            const auto mode = hwinsert::outputModeOf (p);
+            const auto names = engine.getOutputChannelNames();
+            auto text = juce::String::fromUTF8 (outputTargetName (channel, mode, names, false).c_str());
+            return text.replace ("(mono)", tr ("(mono)")).replace ("(missing)", tr ("(missing)"));
+        }
+        const auto stereo = p[hwinsert::inputStereo] >= 0.5f;
+        const auto names = engine.getInputChannelNames();
+        return juce::String::fromUTF8 (inputSourceName (channel, stereo, names).c_str());
+    }
+
+    // the hardware insert's channel menus: the device's pairs, then every channel alone (as the mixer lists them)
+    void showHwChannelMenu (bool out, juce::Rectangle<float> r)
+    {
+        const auto* fx = current();
+        if (fx == nullptr)
+            return;
+        juce::PopupMenu menu;
+        const auto chosen = hwinsert::channelOf (fx->params[out ? hwinsert::output : hwinsert::input]);
+        const auto apply = [this] (std::vector<std::pair<int, float>> changes) {
+            setParams (changes);
+            engine.openHardwareInsertIo(); // (the device opens the channels: no trip to Audio settings)
+        };
+        if (out)
+        {
+            const auto mono = fx->params[hwinsert::outputMono] >= 0.5f;
+            menu.addItem (tr ("None"), true, chosen < 0, [apply] { apply ({ { hwinsert::output, 0.0f } }); });
+            const auto names = engine.getOutputChannelNames();
+            if (names.empty())
+                menu.addItem (tr ("No audio device is open"), false, false, [] {});
+            for (const auto& t : outputTargets (names))
+            {
+                const auto isMono = t.mode != OutputMode::stereo;
+                const auto busy = t.channel < 2 && engine.getSong().mixer[0].outputChannel == outputDefault; // the Master's own pair
+                auto name = juce::String::fromUTF8 (t.name.c_str()) + (isMono ? " " + tr ("(mono)") : juce::String());
+                if (busy)
+                    name += "  " + tr ("(the Master plays here)");
+                menu.addItem (name, true, chosen == t.channel && mono == isMono,
+                              [apply, t, isMono] { apply ({ { hwinsert::output, hwinsert::channelValue (t.channel) }, { hwinsert::outputMono, isMono ? 1.0f : 0.0f } }); });
+            }
+        }
+        else
+        {
+            const auto stereo = fx->params[hwinsert::inputStereo] >= 0.5f;
+            menu.addItem (tr ("None"), true, chosen < 0, [apply] { apply ({ { hwinsert::input, 0.0f } }); });
+            const auto names = engine.getInputChannelNames();
+            if (names.empty())
+                menu.addItem (tr ("Open the audio input"), true, false, [this] {
+                    if (const auto result = engine.openAudioInput(); result.issue != AudioEngine::InputIssue::none)
+                        ui::flashValueTip (*this, getLocalBounds().withHeight (40), tr ("No audio input could be opened (Options > Audio settings)"));
+                    repaint();
+                });
+            for (const auto& source : inputSources (names))
+                menu.addItem (juce::String::fromUTF8 (source.name.c_str()), true, chosen == source.channel && stereo == source.stereo,
+                              [apply, source] { apply ({ { hwinsert::input, hwinsert::channelValue (source.channel) }, { hwinsert::inputStereo, source.stereo ? 1.0f : 0.0f } }); });
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
     }
 
     // an insert's name as the mixer shows it
@@ -799,6 +868,8 @@ public:
                     g.setFont (font (juce::jmax (9.0f, juce::jmin (12.0f * s, r.getHeight() * 0.55f)), true));
                     if (kind == EffectKind::lynxTune && param == lynxtune::scale && fx.params[lynxtune::moreScales] >= 0.25f)
                         g.drawFittedText (tr (fx.params[lynxtune::moreScales] >= 0.75f ? "Diminished" : "Whole tone"), textArea.toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                    else if (kind == EffectKind::hardwareInsert) // the device's channel names (round 164d)
+                        g.drawFittedText (valueText (param, value), textArea.reduced (4.0f * s, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.6f);
                     else if (chosen < (int) labels.size())
                         g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) chosen].c_str())), textArea.toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
@@ -1516,6 +1587,81 @@ public:
             return tuneRemove ? tr ("Click a key: change the status of this key only") : tr ("Click a key: bypass / correct this key only");
         return tuneRemove ? tr ("Click a key: change that note's status in every octave") : tr ("Click a key: bypass / correct that note in every octave");
     }
+    // the hardware insert's round-trip read-out (round 164d): the delay in samples and ms, then what the ping says or what
+    // is missing for the insert to work
+    void paintHwPing (juce::Graphics& g, juce::Rectangle<float> r, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto s = scale();
+        g.setColour (colour::bg0);
+        g.fillRoundedRectangle (r, radius::sm * s);
+        auto area = r.reduced (8.0f * s, 6.0f * s);
+        const auto samples = hwinsert::roundTripOf (fx.params[hwinsert::roundTrip]);
+        const auto rate = engine.getTransport().sampleRate.load();
+        g.setColour (samples > 0 ? colour::textPrimary : colour::textSecondary);
+        g.setFont (font (juce::jmax (12.0f, 22.0f * s), true));
+        g.drawText (juce::String (samples) + " " + tr ("smp"), area.removeFromTop (28.0f * s), juce::Justification::centred, false);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (juce::jmax (8.0f, 11.0f * s)));
+        g.drawText (rate > 0.0 ? juce::String (1000.0 * samples / rate, 2) + " ms" : juce::String(), area.removeFromTop (16.0f * s), juce::Justification::centred, false);
+
+        // the state (newest first): the ping running or its outcome, then what the routing lacks
+        const auto ping = liveMeter (hwinsert::pingState);
+        const auto flags = juce::roundToInt (liveMeter (hwinsert::status) * 16.0f);
+        const auto outCh = hwinsert::channelOf (fx.params[hwinsert::output]), inCh = hwinsert::channelOf (fx.params[hwinsert::input]);
+        juce::String text;
+        auto warn = false;
+        if (engine.getTransport().sampleRate.load() <= 0.0 || engine.getOutputChannelNames().empty())
+            text = tr ("No audio device is open"), warn = true;
+        else if (outCh < 0 || inCh < 0)
+            text = tr ("Choose the output and the input your gear is wired to"), warn = true;
+        else if ((flags & 2) != 0)
+            text = tr ("The output is not open on this device"), warn = true;
+        else if ((flags & 4) != 0)
+            text = tr ("The input is not open on this device"), warn = true;
+        else if (ping > 0.2f && ping < 0.3f)
+            text = tr ("Pinging...");
+        else if (ping > 0.6f && ping < 0.7f)
+            text = tr ("Ping failed: no click came back (check the cable and the return level)"), warn = true;
+        else if (ping > 0.7f && ping < 0.8f)
+            text = tr ("Ping failed: clicks were missing"), warn = true;
+        else if (ping > 0.8f)
+            text = tr ("Ping failed: the round trip was not stable"), warn = true;
+        else if (samples == 0)
+            text = tr ("Not measured yet: press Ping"), warn = true;
+        else if (ping > 0.4f && ping < 0.6f)
+            text = tr ("Measured: delay compensated");
+        else
+            text = tr ("Delay compensated (PDC)");
+        g.setColour (warn ? juce::Colour (0xffe5a03b) : colour::textSecondary);
+        g.setFont (font (juce::jmax (8.0f, 10.0f * s)));
+        g.drawFittedText (text, area.toNearestInt(), juce::Justification::centred, 3, 0.8f);
+    }
+
+    // applies a ping's result once (the round trip becomes the slot's delay: undoable, saved with the project)
+    void hwPingTick()
+    {
+        const auto serial = juce::roundToInt (liveMeter (hwinsert::pingSerial) * 1024.0f);
+        if (hwSerial < 0)
+        {
+            hwSerial = serial;
+            return;
+        }
+        if (serial == hwSerial)
+            return;
+        hwSerial = serial;
+        if (std::abs (liveMeter (hwinsert::pingState) - 0.5f) < 0.01f)
+        {
+            const auto samples = hwinsert::roundTripOf (liveMeter (hwinsert::pingSamples));
+            setValue (hwinsert::roundTrip, hwinsert::roundTripValue (samples));
+            for (const auto& item : activeLayout().items)
+                if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "hwping") == 0)
+                    ui::flashValueTip (*this, rectOf (item).toNearestInt(), tr ("Round trip: {0} samples", { juce::String (samples) }));
+        }
+        repaint();
+    }
+    int hwSerial = -1; // the last ping result seen (−1: not read yet)
+
     void paintAutoKey (juce::Graphics& g, juce::Rectangle<float> r)
     {
         using namespace theme;
@@ -2049,6 +2195,11 @@ public:
             paintAutoKey (g, r);
             return;
         }
+        else if (id == "hwping") // the hardware insert (round 164d): the round trip, the ping's state, what is missing
+        {
+            paintHwPing (g, r, fx);
+            return;
+        }
         else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
         {
             const auto amount = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps));
@@ -2148,6 +2299,8 @@ public:
             }
             const auto w = bars.getWidth() / 2.0f;
             const char* names[] = { TR_NOOP ("In"), TR_NOOP ("Out") };
+            if (kind == EffectKind::hardwareInsert) // round 164d: what goes to the gear and what comes back
+                names[0] = TR_NOOP ("Send"), names[1] = TR_NOOP ("Return");
             for (int k = 0; k < 2; ++k)
             {
                 const auto bar = juce::Rectangle<float> (bars.getX() + w * (float) k, bars.getY(), w, bars.getHeight()).reduced (3.0f * s, 0.0f);
@@ -3244,6 +3397,11 @@ public:
                 peqview::showBandMenu (*this, current()->params, item.colour, [this] (std::vector<std::pair<int, float>> changes) { setParams (changes); });
                 return;
             }
+            if (kind == EffectKind::hardwareInsert && (param == hwinsert::output || param == hwinsert::input))
+            {
+                showHwChannelMenu (param == hwinsert::output, r);
+                return;
+            }
             if (kind == EffectKind::fruitySend) // FL's list: no destination, then every other insert by name
             {
                 juce::PopupMenu menu;
@@ -3748,6 +3906,8 @@ private:
     {
         if (! isShowing()) return; // a hidden editor costs nothing
         learnScaleFromMidi();
+        if (kind == EffectKind::hardwareInsert)
+            hwPingTick();
         // an idle display (silent track: meters unchanged for longer than the longest history) is not redrawn
         float meters = 0.0f;
         for (int k = 0; k < 6; ++k) meters += liveMeter (k) * (float) (k + 1);

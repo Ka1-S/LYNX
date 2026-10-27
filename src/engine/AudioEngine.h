@@ -281,6 +281,9 @@ public:
     void setTrackOutput (int track, int channel, OutputMode mode);
     // Opens the device output channels the song's targets need (that the device has). UI thread.
     void openTargetedOutputs();
+    // The hardware inserts' channels (round 164d): opens their outputs and, when one returns from an input, the device
+    // input. UI thread.
+    void openHardwareInsertIo();
     // Input level of an insert's source since the last call (0..1, per side). UI thread.
     // (the Mixer's strips take it 30 times a second; other views peek at the last value taken)
     float takeInputPeak (int track, int side) noexcept
