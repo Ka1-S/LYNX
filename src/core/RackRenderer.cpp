@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/HardwareInsert.h"
 #include "core/Layer.h"
 #include "core/Vfx.h"
 #include "core/FacetEq.h"
@@ -513,8 +514,9 @@ void RackState::buildMixerGraph()
         for (const auto t : mixerLayers[d])
         {
             const auto& effects = song.mixer[(std::size_t) t].effects;
+            // (and the hardware inserts, round 164d: the device-output buses they write are not shared between threads)
             const auto pinned = ! song.mixer[(std::size_t) t].threaded || std::any_of (effects.begin(), effects.end(),
-                                             [] (const EffectSlot& e) { return e.kind == EffectKind::plugin && ! e.plugin.threaded; });
+                                             [] (const EffectSlot& e) { return (e.kind == EffectKind::plugin && ! e.plugin.threaded) || e.kind == EffectKind::hardwareInsert; });
             (pinned ? audioThreadLayers : threadedLayers)[d].push_back (t);
         }
 }
@@ -1565,6 +1567,7 @@ static bool hasLiveMeters (EffectKind kind) noexcept
            || kind == EffectKind::apexLimiter || voicetools::isVoiceKind (kind) || kind == EffectKind::compressor
            || kind == EffectKind::echoform // round 135w: Echoform's output meter
            || kind == EffectKind::autoPan || kind == EffectKind::voiceShift // round 135: the pan position, the shifter's notes
+           || kind == EffectKind::hardwareInsert // round 164d: send / return levels, the ping
            || kind == EffectKind::xyController || kind == EffectKind::xyzController; // round 164: the pad's target and outputs
 }
 
@@ -1642,6 +1645,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         if (key < smartDisable.size() && slots[i].smartDisable && ! (isPlugin && ! slots[i].plugin.allowSmartDisable)
             && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
             && slots[i].kind != EffectKind::newtime
+            && slots[i].kind != EffectKind::hardwareInsert // (nor the hardware insert: outboard gear has its own tails and noise)
             // (nor a controller: its outputs move whatever the sound — a silent insert is their usual place; round 164)
             && slots[i].kind != EffectKind::formulaController
             && slots[i].kind != EffectKind::xyController && slots[i].kind != EffectKind::xyzController
@@ -1680,7 +1684,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         }
 
         // dry/wet: keep the dry signal to mix later
-        const auto partial = wet < 0.999f;
+        // (not the hardware insert: its dry path is delayed by its round trip inside it, so the slot's mix scales its own
+        // dry/wet instead — round 164d)
+        const auto partial = wet < 0.999f && slots[i].kind != EffectKind::hardwareInsert;
 
         if (partial)
         {
@@ -1690,6 +1696,10 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
         const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->effectNs[std::min (key, units->effectNs.size() - 1)],
                                &units->effectMaxNs[std::min (key, units->effectNs.size() - 1)]);
+
+        // the hardware insert (round 164d): this piece's device input and output buses (none during an export)
+        if (slots[i].kind == EffectKind::hardwareInsert)
+            effects[i]->setHardwareIo (liveInput, hwOut != nullptr && hwOut->active.load (std::memory_order_relaxed) ? hwOut : nullptr, liveInputOffset);
 
         // Fruity Send: what it sends goes to its own buffer, pulled by the destination insert (processed later)
         if (slots[i].kind == EffectKind::fruitySend || slots[i].kind == EffectKind::patcher)
@@ -1708,7 +1718,20 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                 effects[i]->setSendOutput (nullptr, nullptr);
         }
 
-        if (state.hasAutomation && ! isPlugin)
+        if (slots[i].kind == EffectKind::hardwareInsert && wet < 0.999f)
+        {
+            auto params = slots[i].params; // copy without allocation
+            if (state.hasAutomation)
+            {
+                const auto& autos = state.effectParamAuto[(std::size_t) track][i];
+                const auto used = std::min (params.size(), effectInfo (slots[i].kind).params.size());
+                for (std::size_t p = 0; p < used; ++p)
+                    params[p] = automated (autos[p], params[p]);
+            }
+            params[(std::size_t) hwinsert::dryWet] *= wet;
+            timed (key, [&] { effects[i]->process (l, r, n, params, bpm); });
+        }
+        else if (state.hasAutomation && ! isPlugin)
         {
             auto params = slots[i].params; // copy without allocation
             const auto& autos = state.effectParamAuto[(std::size_t) track][i];

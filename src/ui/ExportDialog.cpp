@@ -1,6 +1,7 @@
 #include "ui/ExportDialog.h"
 
 #include "core/PlaylistOps.h"
+#include "core/HardwareInsert.h"
 #include "platform/Paths.h"
 #include "ui/WindowOwner.h"
 
@@ -582,6 +583,8 @@ private:
             warning = tr ("The Master insert is muted: the file will be silent");
         else if (options.range == Range::selection && ! hasSelection (song))
             warning = tr ("There is no Playlist selection: the whole song is rendered");
+        else if (hwinsert::countActive (song) > 0) // round 164d: outboard gear can't run faster than real time
+            warning = tr ("Hardware inserts pass their dry signal in an export (record their return to keep it)");
         warningLabel.setText (warning, juce::dontSendNotification);
         resized();
         repaint();

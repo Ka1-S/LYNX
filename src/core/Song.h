@@ -656,10 +656,11 @@ enum class EffectKind : std::uint8_t
     visualizer,      // LYNX's Visualizer in FL's ZGameEditor Visualizer role (REA_rodada164c): no sound; scene in EffectSlot::state
     xyController,    // FL's X-Y Controller (REA_rodada164a, core/XyController.h): no sound; outputs X, Y follow a pad
     xyzController,   // FL's X-Y-Z Controller (REA_rodada164a, core/XyController.h): the same with a Z axis (mouse wheel)
-    controlSurface   // FL's Control Surface (REA_rodada164a, core/ControlSurface.h): a user panel; output k = params[k]
+    controlSurface,  // FL's Control Surface (REA_rodada164a, core/ControlSurface.h): a user panel; output k = params[k]
+    hardwareInsert   // LYNX's hardware insert (REA_rodada164d, core/HardwareInsert.h): send to device outputs, return from inputs, pinged round trip
 };
 // the last EffectKind (loops over every kind; update when one is appended)
-constexpr EffectKind lastEffectKind = EffectKind::controlSurface;
+constexpr EffectKind lastEffectKind = EffectKind::hardwareInsert;
 
 constexpr int maxEffectParams = 160; // round 150: Prism Multiband 155, Ember 133. LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
 constexpr int maxEffectSlots = 10; // as in FL

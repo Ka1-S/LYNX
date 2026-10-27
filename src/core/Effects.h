@@ -13,6 +13,9 @@
 
 namespace lynx
 {
+struct LiveInput;
+struct HardwareOutput;
+
 // Parameter description for the UI (all values are 0..1 in the model).
 struct EffectParamInfo
 {
@@ -110,6 +113,9 @@ public:
     virtual void setSendOutput (float* /*left*/, float* /*right*/) noexcept {}
     // Latency the effect introduces (plugins), in samples. Used by PDC.
     virtual int latencySamples() const noexcept { return 0; }
+    // The hardware insert (round 164d): the device's input of the current callback piece and the device-output buses,
+    // with where the next process() starts within that piece. `out` is null when no device plays live (an export).
+    virtual void setHardwareIo (const LiveInput* /*in*/, HardwareOutput* /*out*/, int /*offset*/) noexcept {}
 };
 
 // Auto-pan's rhythmic-panner sources (round 135, the PanMan role; appended after FL's Love Philter LFO parameters 0–6,

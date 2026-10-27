@@ -242,6 +242,7 @@ const char* effectId (EffectKind k)
         case EffectKind::emphasizer: return "emphasizer";
         case EffectKind::flFrequencyShifter: return "flFrequencyShifter";
         case EffectKind::flLowLifter: return "flLowLifter";
+        case EffectKind::hardwareInsert: return "hardwareInsert";
         case EffectKind::waveCandy: return "waveCandy";
         case EffectKind::visualizer: return "visualizer";
         case EffectKind::xyController: return "xyController";
@@ -539,8 +540,10 @@ juce::var effectToVar (const EffectSlot& slot)
     e->setProperty ("on", slot.enabled);
     juce::Array<juce::var> params;
     const auto used = slot.kind == EffectKind::plugin ? 0 : effectInfo (slot.kind).params.size();
+    // (the hardware insert's are exact: its round trip is a sample count over 65536 steps, round 164d)
+    const auto exact = slot.kind == EffectKind::hardwareInsert;
     for (std::size_t i = 0; i < used && i < slot.params.size(); ++i)
-        params.add (juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
+        params.add (exact ? (double) slot.params[i] : juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
     e->setProperty ("params", params);
 
     if (slot.mix < 1.0f)
@@ -702,7 +705,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
                     EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter, EffectKind::waveCandy, EffectKind::visualizer,
-                    EffectKind::xyController, EffectKind::xyzController, EffectKind::controlSurface })
+                    EffectKind::xyController, EffectKind::xyzController, EffectKind::controlSurface, EffectKind::hardwareInsert })
         if (id == effectId (k))
             return k;
 
