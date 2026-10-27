@@ -52,8 +52,9 @@ void MidiSyncIo::configure (const prefs::MidiPrefs& prefs, bool devices, bool dr
         clockName = juce::String::fromUTF8 (prefs.clockInput.c_str());
     }
     clockOffsetMs.store (juce::jlimit (-1000, 1000, prefs.clockOffsetMs));
+    // (the receiver belongs to the MIDI thread: it resets itself on its next message)
     if (following.exchange (! prefs.clockInput.empty()) != ! prefs.clockInput.empty())
-        clockIn.reset();
+        resetReceiver.store (true);
 
     // the outputs that need a device: sync or notes off on
     std::vector<prefs::MidiOutputPrefs> wanted;
@@ -136,6 +137,11 @@ void MidiSyncIo::beginBlock (Transport& transport, double callbackMs, int numSam
 
     if (! following.load (std::memory_order_relaxed))
     {
+        midisync::Receiver::Command stale;
+        double at = 0.0;
+        while (clockIn.popCommand (stale, at)) // (nothing old is applied when following starts again)
+        {
+        }
         if (wasFollowing)
             transport.externalBpm.store (0.0, std::memory_order_relaxed);
         wasFollowing = false;
@@ -304,6 +310,8 @@ bool MidiSyncIo::handleInput (const juce::String& device, const juce::MidiMessag
         if (device != clockName)
             return false;
     }
+    if (resetReceiver.exchange (false))
+        clockIn.reset();
     // (JUCE time-stamps input in seconds on Time::getMillisecondCounterHiRes()'s clock)
     return clockIn.feed (m.getRawData(), m.getRawDataSize(), m.getTimeStamp());
 }

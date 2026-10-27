@@ -101,7 +101,7 @@ private:
     midisync::Receiver clockIn;
     juce::SpinLock clockNameLock;
     juce::String clockName;                  // under clockNameLock
-    std::atomic<bool> following { false };
+    std::atomic<bool> following { false }, resetReceiver { false };
     std::atomic<int> clockOffsetMs { 0 };
     bool waitingFirstPulse = false;          // audio thread: Start / Continue received, play on the first pulse
     bool wasFollowing = false;
