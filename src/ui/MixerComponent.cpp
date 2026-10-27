@@ -1,3 +1,4 @@
+#include "platform/Paths.h"
 #include "ui/ColourPicker.h"
 #include "ui/MixerComponent.h"
 #include "ui/UiTrace.h"
@@ -1460,7 +1461,7 @@ namespace
 {
 juce::File mixerStatesFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Mixer states");
+    return lynx::platform::documentsFolder().getChildFile ("LYNX/Mixer states");
 }
 
 juce::Array<juce::File> savedMixerStates()
