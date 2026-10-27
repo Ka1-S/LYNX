@@ -849,8 +849,8 @@ const DL = {
 };
 // Microsoft Store page (docs/STORE.md): once set, Windows' main button opens the Store ("recommended": signed by
 // Microsoft, no SmartScreen warning, updates itself) and the installer / zip move to "More formats".
-// Replace STORE_PRODUCT_ID with the listing's product id (Partner Center › Product identity › Store ID) when it is live.
-const STORE_URL = 'https://apps.microsoft.com/detail/STORE_PRODUCT_ID';
+// LYNX SHARE's Store ID (Partner Center › Product identity); deploy this only once the listing is live.
+const STORE_URL = 'https://apps.microsoft.com/detail/9NQRFBFDCX6N';
 if (STORE_URL) DL.win = Object.assign({}, DL.win, {store:{en:'Microsoft Store', pt:'Microsoft Store', ext:''},
                                                   inst:DL.win.main});
 const dlUrl = {};   // 'win.main' -> browser_download_url
