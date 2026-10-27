@@ -74,8 +74,9 @@ public:
         accelKnob = makeKnob (xy::acceleration (kind), tr ("Accel"), tr ("Acceleration: how quickly the target reaches its speed"), 0.5);
         selectAxis (0);
         engine.addChangeListener (this);
+        timerCallback(); // (the outputs before the first tick)
         startTimerHz (30);
-        setSize (axes == 3 ? 600 : 560, 380);
+        setSize (axes == 3 ? 640 : 600, 380);
     }
 
     ~XyEditor() override { engine.removeChangeListener (this); }
@@ -175,11 +176,12 @@ public:
             axisButtons[(std::size_t) a].setBounds (tabs.removeFromLeft (40).reduced (2, 0));
         right.removeFromTop (8);
         auto row = right.removeFromTop (72);
+        const auto knobWidth = juce::jmin (62, row.getWidth() / 4);
         for (int a = 0; a < axes; ++a)
         {
             auto r = row;
             for (auto& k : axisKnobs[(std::size_t) a])
-                k->setBounds (r.removeFromLeft (r.getWidth() >= 4 * 62 ? 62 : r.getWidth() / 4));
+                k->setBounds (r.removeFromLeft (knobWidth));
         }
         right.removeFromTop (curveArea().getHeight() + 30);
         auto bottom = right.removeFromTop (72);

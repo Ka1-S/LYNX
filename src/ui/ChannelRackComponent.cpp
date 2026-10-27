@@ -4,6 +4,7 @@
 #include "ui/TextCache.h"
 #include "ui/ChannelRackComponent.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 
 #include "core/MixerOps.h"
 
@@ -82,6 +83,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::soundfont: return "LYNX Soundfont";
         case InstrumentKind::layer: return "Layer";
         case InstrumentKind::dashboard: return "Dashboard";
+        case InstrumentKind::voltage: return "Voltage Controller";
     }
     return "?";
 }
@@ -102,6 +104,7 @@ juce::String instrumentLabel (InstrumentKind k)
         case InstrumentKind::midiOut: return tr ("MIDI Out");
         case InstrumentKind::layer: return tr ("Layer");
         case InstrumentKind::dashboard: return "Dashboard";
+        case InstrumentKind::voltage: return "Voltage Controller";
         default: return instrumentName (k);
     }
 }
@@ -2120,6 +2123,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         c.name = "Dashboard";
         c.instrument = InstrumentKind::dashboard;
         c.patcher.surface = surface::starterControls();
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Voltage Controller (round 164): its notes as control voltages for modular gear
+    menu.addItem ("Voltage Controller", [this, add] {
+        ChannelDef c;
+        c.name = "Voltage Controller";
+        c.instrument = InstrumentKind::voltage;
+        c.pluginState = voltage::write (voltage::Settings {});
         const auto added = add (c);
         openChannelSettings (engine, added);
     });

@@ -3,6 +3,7 @@
 #include "ui/UiTrace.h"
 
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "core/FlpImport.h"
 #include "core/ProjectContents.h"
 #include "core/SearchIndex.h"
@@ -435,6 +436,13 @@ public:
                 c.name = "Dashboard";
                 c.instrument = InstrumentKind::dashboard;
                 c.patcher.surface = surface::starterControls();
+                return std::optional<ChannelDef> (c);
+            });
+            generatorEntry (*lynxGens, "Voltage Controller", tr ("built-in"), Icon::keyboard, [] {
+                ChannelDef c;
+                c.name = "Voltage Controller";
+                c.instrument = InstrumentKind::voltage;
+                c.pluginState = voltage::write (voltage::Settings {});
                 return std::optional<ChannelDef> (c);
             });
             auto flGens = folder (gens.get(), tr ("FL engines"), Icon::folder);

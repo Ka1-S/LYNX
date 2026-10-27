@@ -1,4 +1,4 @@
-# Round 164a (REA + features) — Layer, X-Y / X-Y-Z Controller, Control Surface, Dashboard
+# Round 164a (REA + features) — Layer, X-Y / X-Y-Z Controller, Control Surface, Dashboard, Voltage Controller
 
 FL's Layer generator and its controller plugins, reproduced clean-room: behaviour and file formats from FL's manual,
 FL's own projects and a static decompilation of FL Studio 2026 (`FLEngine_x64.dll`, image base 0x400000, and the
@@ -115,6 +115,33 @@ as a **Channel Rack channel** (its controls in `channel.patcher.surface`, the va
 — linkable like an Envelope Controller's) and as a Patcher generator node. FL Dashboard **state import is not done**
 (the record ↔ control mapping is not resolved).
 
+## 5b. Voltage Controller
+
+### 5b.1 FL [DECOMP 0x702BD0 … 0x706180; TEST FL render]
+A generator that turns its notes into control voltages for modular hardware through a DC-coupled audio interface.
+Eight outputs: the channel's own stereo pair (main L / R) and three more pairs sent to chosen mixer inserts. Each
+output has a source (0 pitch, 1 gate, 2 trigger, 3 velocity, 4 volume, 5 pan, 6 Mod X, 7 Mod Y, 8 clock, 9 none),
+an offset (0…65536, 32768 = 0), a scale (0…65536, 65536 = × 1, 0 = × −1) and a polarity; the interface range
+(±10 V / ±5 V / 0…10 V, full scale 1.0 = 10 V) and pitch standard (1 V/oct, 1.2 V/oct) are global, with the clock's
+PPQ and the trigger/clock pulse length (samples). `out = range (scale · (source + offset))`. State versions 1…3
+(103 / 115 / 123 bytes): 16 × i32 params, 8 source bytes, enable, range, standard, 8 polarities, 3 tracks, clock PPQ,
+pulse length, f64 pitch factor (v3 adds 8 per-output voice bytes). A new one starts **off** (silence).
+
+FL render of a test project (`/mnt/d/lynx-work/layer164/fl/volt.flp` → `volt.wav`, FL64 `/R`): notes C0, C1 … C10
+then C5 — main L steps −0.5 … +0.5 by exactly 0.1 per octave (1 V/oct at 10 V full scale, 0 V at C5) and **holds**
+after the note ends (monophonic, last note); main R = gate × 0.5 (scale 49152) [TEST FL render]. The channel's
+volume (78 %) does not scale the voltages.
+
+### 5b.2 LYNX (`core/VoltageController.{h,cpp}`, `InstrumentKind::voltage`, `ui/VoltageEditor.cpp`)
+FL's state bytes are the channel's settings (`pluginState`, written as v3); .flp channels with FL's plugin import as
+this kind. The instrument copies the settings with a seqlock (UI thread `configure` → audio thread, no lock, no
+allocation), tracks held notes for the last-note pitch/gate, makes sample-accurate trigger and clock pulses (clock only
+while the song position moves), writes the main pair into the channel and the other pairs into the instrument's extra
+mixer outputs (`auxOutputData`, the same path as a generator Patcher's "To LYNX" outputs). Off = idle (the mixer skips
+it). Editor: on/off, range, pitch standard, clock PPQ, pulse length, and per output source / offset (in volts) /
+scale / polarity, with the insert of each extra pair. [HYP] FL's 1.2 V/oct formula decompiles to 10 × the standard's
+value; LYNX uses the standard (0.1 V per semitone). Velocity, pan and Mod X/Y use LYNX's 0…1 / −1…1 values.
+
 ## 6. Where they appear
 
 Channel Rack ▸ add (Layer, Dashboard), the quick-add palette and the Browser's plugin database (Layer, Dashboard and
@@ -129,18 +156,13 @@ controller" (`controllerOutputs`: X / Y / Z, every panel output by its control's
 split and reset; a sampler's pitch on split; children follow channel edits; FL flag bits and Layer pitch; X-Y shape
 and output; X-Y / X-Y-Z follow the goal (smooth, monotonic, arrive; faster speed arrives sooner); FL X-Y state and the
 old constant output agree; Control Surface outputs / params / Patcher pins / Dashboard outputs; FL's Trap template:
-its Control Surface imports with live links.
+its Control Surface imports with live links; Voltage Controller: FL's state, FL's render values (pitch steps, held
+pitch, gate × 0.5), trigger / clock pulses, ranges, extra outputs, off = idle.
 
 ## Where I stopped
 
-- **Fruity Voltage Controller** — researched (§ below), **not implemented**: a generator that turns its notes into
-  CV audio (pitch 1 V/oct or 1.2 V/oct, gate, trigger, velocity, volume, pan, Mod X/Y, clock) on 4 stereo pairs, 3 of
-  them sent to chosen mixer inserts. It needs a channel with several audio outputs into the mixer and a per-voice
-  state; FL's own open points (the 1.2 V/oct formula, the velocity curve) want FL running. State (v3): 16 × i32
-  (offsets 0…7 default 32768, scales 8…15 default 65536; L/R main, out 2…4), 8 sources (0 pitch, 1 gate, 2 trigger,
-  3 velocity, 4 volume, 5 pan, 6 Mod X, 7 Mod Y, 8 clock, 9 none), enable, range (±10 / ±5 / 0…10 V), pitch standard,
-  8 polarities, 3 mixer tracks, clock PPQ, pulse length, pitch factor; `out = range (scale·(source + offset))`
-  [DECOMP 0x702BD0 … 0x706180].
+- **Voltage Controller**: per-output voice (FL v3 "mod source") is kept but LYNX follows the last note; the 1.2 V/oct
+  value and the velocity curve still want a side-by-side FL render.
 - **Dashboard .flp import**: the panel block parses (§5) but which control drives which record is not resolved.
 - **Control Surface decorations** (bevels, labels) and its other control types (check box, digits, keyboard, XY id
   numbers) were not seen in FL's files; the X-Y-Z's curve tensions / input curve are not mapped.

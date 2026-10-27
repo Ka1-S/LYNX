@@ -1,5 +1,6 @@
 #include "core/FlpImport.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "core/XyController.h"
 #include "core/Patcher.h"
 #include <filesystem>
@@ -1274,6 +1275,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.instrument = InstrumentKind::midiOut;
             def.pluginState = c.pluginState;
         }
+        // Voltage Controller (REA_rodada164a §6): its notes as control voltages; FL's state kept as its settings
+        if (c.pluginName == "Fruity Voltage Controller" && voltage::parse (c.pluginState))
+        {
+            def.instrument = InstrumentKind::voltage;
+            def.pluginState = c.pluginState;
+        }
 
         // Fruit Kick, MiniSynth, ... (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
         bool adoptedFromPlugin = false;
@@ -1877,7 +1884,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.converted[c.pluginName];
             else if (plugin == "fruity wrapper" && def.plugin.foreign.format == ForeignPlugin::Format::none)
                 ++r.unsupported["Fruity Wrapper (plugin state not readable)"]; // e.g. a wrapper version newer than 12
-            else if (plugin == "midi out" && def.instrument == InstrumentKind::midiOut)
+            else if ((plugin == "midi out" && def.instrument == InstrumentKind::midiOut)
+                     || (plugin == "fruity voltage controller" && def.instrument == InstrumentKind::voltage))
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)

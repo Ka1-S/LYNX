@@ -81,7 +81,9 @@ enum class InstrumentKind : std::uint8_t
     patcher,    // FL's Patcher as a generator (REA_rodada141): a graph of instruments and effects in ChannelDef::patcher
     soundfont,  // LYNX Soundfont (REA_rodada158, core/SoundFont.h): the .sf2 / .sf3 in samplePath, settings in modelParams
     layer,      // FL's Layer channel (REA_rodada164a, core/Layer.h): no sound; its notes play its children (ChannelDef::layer)
-    dashboard   // FL's Dashboard (REA_rodada164a, core/ControlSurface.h): no sound; a panel of controls in patcher.surface
+    dashboard,  // FL's Dashboard (REA_rodada164a, core/ControlSurface.h): no sound; a panel of controls in patcher.surface
+    voltage     // FL's Voltage Controller (REA_rodada164a, core/VoltageController.h): its notes as control voltages; FL's
+                // state in pluginState
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.

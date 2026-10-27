@@ -170,13 +170,15 @@ public:
             b->setBounds (controls.removeFromTop (28));
             controls.removeFromTop (6);
         }
-        controls.removeFromTop (6);
+        controls.removeFromTop (4);
+        // the three modes on the left, the crossfade's Fade knob beside them (clear of the key map below)
+        auto modes = controls.removeFromTop (78);
+        fade->setBounds (modes.removeFromRight (66).withSizeKeepingCentre (66, 70));
         for (auto* t : { &random, &sequential, &crossfade })
         {
-            t->setBounds (controls.removeFromTop (24));
-            controls.removeFromTop (2);
+            t->setBounds (modes.removeFromTop (24));
+            modes.removeFromTop (2);
         }
-        fade->setBounds (controls.removeFromTop (70).withSizeKeepingCentre (70, 70));
     }
 
     void mouseMove (const juce::MouseEvent& e) override

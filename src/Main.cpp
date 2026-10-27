@@ -47,6 +47,7 @@
 #include "core/Layer.h"
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "ui/Controllers164.h"
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
@@ -4478,6 +4479,19 @@ private:
             dash.patcher.surface = lynx::surface::starterControls();
             song.channels.push_back (dash);
         }
+        {
+            lynx::ChannelDef volt; // channel 7: FL's render-test settings (main L pitch, R gate × 0.5) with Out 2 on insert 3
+            volt.name = "Voltage Controller";
+            volt.instrument = lynx::InstrumentKind::voltage;
+            lynx::voltage::Settings v;
+            v.enabled = true;
+            v.params[9] = 49152;
+            v.unipolar[2] = true;
+            v.tracks = { 3, 0, 0 };
+            v.source[6] = lynx::voltage::Source::clock;
+            volt.pluginState = lynx::voltage::write (v);
+            song.channels.push_back (volt);
+        }
         song.patterns.emplace_back();
         offline.setSong (std::move (song));
         offline.dispatchPendingMessages();
@@ -4489,7 +4503,7 @@ private:
         shoot (lynx::makeChannelSettingsPanel (offline, 0), "-envelope-controller.png");
         shoot (lynx::makeChannelSettingsPanel (offline, 1), "-midi-out.png");
         shoot (lynx::makeChannelSettingsPanel (offline, 5), "-layer.png");
-        shoot (lynx::makeChannelSettingsPanel (offline, 3), "-layer-child.png");
+        shoot (lynx::makeChannelFrame (offline, 3, -1), "-layer-child-misc.png"); // (the key-region ruler over the root keyboard)
         {
             const auto slotOf = [] (int k) -> lynx::SlotLocator {
                 return [k] (lynx::Song& s) { return &s.mixer[1].effects[(std::size_t) k]; };
@@ -4499,6 +4513,7 @@ private:
             shoot (lynx::makeXyControllerEditor (offline, slotOf (2), nullptr, target), "-xyz-controller.png");
             shoot (lynx::makeControlSurfaceEditor (offline, slotOf (3), target), "-control-surface.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
+            shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
         }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))

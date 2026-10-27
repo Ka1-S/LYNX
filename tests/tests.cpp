@@ -45,6 +45,7 @@
 #include "core/Layer.h"
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"

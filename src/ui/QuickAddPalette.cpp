@@ -1,5 +1,6 @@
 #include "ui/QuickAddPalette.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 
 #include "core/Effects.h"
 #include "core/PluginSubstitutes.h"
@@ -142,6 +143,13 @@ public:
                                         c.name = "Dashboard";
                                         c.instrument = InstrumentKind::dashboard;
                                         c.patcher.surface = surface::starterControls();
+                                        targets.addInstrument (c);
+                                    } });
+        instruments.all.push_back ({ "Voltage Controller", tr ("built-in"), [this] {
+                                        ChannelDef c;
+                                        c.name = "Voltage Controller";
+                                        c.instrument = InstrumentKind::voltage;
+                                        c.pluginState = voltage::write (voltage::Settings {});
                                         targets.addInstrument (c);
                                     } });
 

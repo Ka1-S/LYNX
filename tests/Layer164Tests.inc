@@ -369,3 +369,125 @@ TEST (layer164_fl_flags_and_pitch)
     layer.sampler.pitch = -1.0f;
     CHECK (std::abs (lynx::layer::pitchCents (layer) - 300.0f) < 1e-3f);
 }
+
+namespace volt164
+{
+// FL's state of the Voltage Controller in the render test (REA_rodada164a §6): version 2, on, main L = pitch,
+// main R = gate × 0.5 (scale 49152), clock 24 PPQ, pulses of 15 samples
+const std::vector<std::uint8_t> flState {
+    0x02,0x00,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,
+    0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x80,0x00,0x00,0x00,0x00,0x01,0x00,0x00,0xc0,0x00,0x00,0x00,0x00,0x01,0x00,
+    0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x00,0x00,0x01,0x03,0x05,
+    0x06,0x07,0x09,0x09,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x18,0x00,0x00,0x00,0x0f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xf0,0x3f };
+
+struct Rig
+{
+    std::unique_ptr<lynx::Instrument> instrument = lynx::voltage::makeInstrument();
+    std::vector<float> left, right;
+    explicit Rig (const lynx::voltage::Settings& s, double bpm = 120.0)
+    {
+        lynx::ChannelDef c;
+        c.instrument = lynx::InstrumentKind::voltage;
+        c.pluginState = lynx::voltage::write (s);
+        instrument->prepare (44100.0);
+        instrument->configure (c, bpm);
+    }
+    void run (int n, double ticks = 0.0)
+    {
+        left.assign ((std::size_t) n, 0.0f);
+        right.assign ((std::size_t) n, 0.0f);
+        instrument->setSongPosition (ticks);
+        instrument->beginChunk (n);
+        instrument->render (left.data(), right.data(), n, 1.0f, 1.0f);
+    }
+};
+} // namespace volt164
+
+TEST (voltage164_fl_state)
+{
+    const auto s = lynx::voltage::parse (volt164::flState);
+    CHECK (s.has_value());
+    if (! s)
+        return;
+    CHECK (s->enabled && s->range == 0 && s->pitchStandard == 0 && s->clockPpq == 24 && s->pulseLength == 15);
+    CHECK (s->source[0] == lynx::voltage::Source::pitch && s->source[1] == lynx::voltage::Source::gate);
+    CHECK (s->source[2] == lynx::voltage::Source::velocity && s->source[7] == lynx::voltage::Source::none);
+    CHECK (s->params[9] == 49152 && s->params[8] == 65536 && s->params[0] == 32768);
+    CHECK (std::abs (lynx::voltage::scaleOf (*s, 1) - 0.5f) < 1e-6f && std::abs (lynx::voltage::offsetOf (*s, 0)) < 1e-6f);
+    // LYNX writes version 3, which reads back the same
+    const auto again = lynx::voltage::parse (lynx::voltage::write (*s));
+    CHECK (again.has_value() && *again == *s);
+    CHECK (! lynx::voltage::parse ({ 0x07, 0x00 }).has_value());
+}
+
+TEST (voltage164_matches_fl_render)
+{
+    // FL's render of the test project: C0, C1 … C10 one after the other, then C5 — main L steps −0.5 … +0.5 by 0.1
+    // (1 V / octave at 10 V full scale) and holds after the note ends; main R is the gate × 0.5
+    volt164::Rig rig (*lynx::voltage::parse (volt164::flState));
+    for (int octave = 0; octave <= 10; ++octave)
+    {
+        rig.instrument->noteOn (12 * octave, 0.8f);
+        rig.run (64);
+        CHECK (std::abs (rig.left[63] - (-0.5f + 0.1f * (float) octave)) < 1e-5f);
+        CHECK (std::abs (rig.right[63] - 0.5f) < 1e-6f);
+        rig.instrument->noteOff (12 * octave);
+        rig.run (64);
+        CHECK (std::abs (rig.left[63] - (-0.5f + 0.1f * (float) octave)) < 1e-5f); // (pitch holds)
+        CHECK (rig.right[63] == 0.0f);
+    }
+    rig.instrument->noteOn (60, 0.8f);
+    rig.run (16);
+    CHECK (std::abs (rig.left[15]) < 1e-6f);
+    // the channel's volume does not scale the voltages (FL's test channel was at 78 %); muted = silent
+    rig.instrument->noteOn (72, 0.8f);
+    std::vector<float> l (16, 0.0f), r (16, 0.0f);
+    rig.instrument->beginChunk (16);
+    rig.instrument->render (l.data(), r.data(), 16, 0.4f, 0.3f);
+    CHECK (std::abs (l[15] - 0.1f) < 1e-5f && std::abs (r[15] - 0.5f) < 1e-6f);
+    std::fill (l.begin(), l.end(), 0.0f);
+    rig.instrument->beginChunk (16);
+    rig.instrument->render (l.data(), r.data(), 16, 0.0f, 0.0f);
+    CHECK (l[15] == 0.0f);
+}
+
+TEST (voltage164_pulses_ranges_and_outputs)
+{
+    using namespace lynx::voltage;
+    Settings s;
+    s.enabled = true;
+    s.source = { Source::trigger, Source::clock, Source::velocity, Source::none, Source::none, Source::none, Source::none, Source::none };
+    s.pulseLength = 15;
+    s.clockPpq = 4;
+    s.tracks = { 3, 0, 0 };
+    volt164::Rig rig (s);
+    // a trigger: one pulse of 15 samples at the note's start
+    rig.instrument->noteOn (60, 0.5f);
+    rig.run (100);
+    int high = 0;
+    for (const auto v : rig.left)
+        high += v > 0.5f ? 1 : 0;
+    CHECK (high == 15 && rig.left[0] > 0.5f && rig.left[15] < 0.5f);
+    // velocity on Out 2 L, fed to insert 3 (the rack adds that output there)
+    CHECK (rig.instrument->auxOutputCount() == 3 && rig.instrument->auxOutputTrack (0) == 3 && rig.instrument->auxOutputTrack (1) == -1);
+    CHECK (std::abs (rig.instrument->auxOutputData (0, 0)[50] - 0.5f) < 1e-6f);
+    // the clock: 4 pulses per quarter note while the song plays (120 BPM: 22050 samples per beat → 4 pulses)
+    int pulses = 0;
+    double ticks = 960.0;
+    for (int chunk = 0; chunk < 44; ++chunk) // 44 × 512 ≈ one beat past the first chunk
+    {
+        rig.run (512, ticks);
+        for (int i = 0; i < 512; ++i)
+            pulses += rig.right[(std::size_t) i] > 0.5f && (i == 0 ? false : rig.right[(std::size_t) i - 1] <= 0.5f) ? 1 : 0;
+        ticks += 512.0 * 960.0 * 120.0 / (60.0 * 44100.0);
+    }
+    CHECK (pulses >= 3 && pulses <= 5);
+    // the ranges (full scale 1.0 = 10 V)
+    CHECK (applyRange (0, 1.5f) == 1.0f && applyRange (1, 1.0f) == 0.5f && applyRange (2, -1.0f) == 0.0f && applyRange (2, 1.0f) == 1.0f);
+    // off (FL's default for a new one): silence and idle
+    volt164::Rig off (Settings {});
+    off.instrument->noteOn (72, 1.0f);
+    off.run (32);
+    CHECK (off.instrument->idle() && off.left[31] == 0.0f && off.right[31] == 0.0f);
+}

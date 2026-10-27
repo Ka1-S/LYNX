@@ -1,5 +1,7 @@
 #include "ui/PatcherEditor.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
+#include "ui/VoltageEditor.h"
 #include "core/XyController.h"
 #include "ui/Controllers164.h"
 
@@ -1219,6 +1221,7 @@ public:
                  [] (ChannelDef& c) { c.controllerState = writeEnvelopeController (defaultEnvelopeController()); });
         builtIn ("Controller", InstrumentKind::controller, tr ("Keyboard Controller"), [] (ChannelDef& c) { c.controllerState = defaultKeyboardController(); });
         builtIn ("Controller", InstrumentKind::dashboard, "Dashboard", [] (ChannelDef& c) { c.patcher.surface = surface::starterControls(); });
+        builtIn ("Controller", InstrumentKind::voltage, "Voltage Controller", [] (ChannelDef& c) { c.pluginState = voltage::write (voltage::Settings {}); });
         for (const auto kind : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap })
             builtIn ("Drum", kind, juce::String (effectNameOf (kind)));
         builtIn ("MIDI", InstrumentKind::midiOut, "MIDI Out", [] (ChannelDef& c) { midictl::writeMidiOut (c.pluginState, midictl::MidiOutSettings {}); });
@@ -1755,6 +1758,11 @@ private:
         if (node.generator && node.channel.instrument == InstrumentKind::dashboard) // round 164
         {
             openToolWindow (makeDashboardEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (node.generator && node.channel.instrument == InstrumentKind::voltage) // round 164
+        {
+            openToolWindow (makeVoltageControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         if (node.generator && node.channel.instrument == InstrumentKind::midiOut)
