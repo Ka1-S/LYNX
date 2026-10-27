@@ -923,11 +923,47 @@ int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<boo
     return found;
 }
 
+namespace
+{
+// A file of the plugin folders is a module or a bundle folder (VST3 / CLAP / LV2); some plugins in a VST3 bundle
+// are listed by the module inside it (Contents\x86_64-win\<name>.vst3 — Antares, sonible…). Round 165i: those
+// listings never matched the bundle folder, so every start-up's background scan described all of them again (a
+// child process loading each plugin, ~4 s and 100–400 MB apiece, with their licence helpers).
+bool listedInside (const juce::KnownPluginList& known, juce::AudioPluginFormat& format, const juce::String& file)
+{
+    const juce::File bundle (file);
+    if (! juce::File::isAbsolutePath (file) || ! bundle.isDirectory())
+        return false;
+    auto any = false;
+    for (const auto& d : known.getTypes())
+    {
+        if (d.pluginFormatName != format.getName() || ! juce::File::isAbsolutePath (d.fileOrIdentifier)
+            || ! juce::File (d.fileOrIdentifier).isAChildOf (bundle))
+            continue;
+        if (format.pluginNeedsRescanning (d))
+            return false;
+        any = true;
+    }
+    return any;
+}
+} // namespace
+
+bool PluginHost::sameModule (const juce::PluginDescription& d, const juce::String& file)
+{
+    return d.fileOrIdentifier == file
+        || (juce::File::isAbsolutePath (file) && juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (file).isDirectory()
+            && juce::File (d.fileOrIdentifier).isAChildOf (juce::File (file)));
+}
+
 int PluginHost::scanFiles (const juce::StringArray& files, const std::function<bool (float, const juce::String&)>& progress)
 {
     const std::scoped_lock lock (scanLock);
     stopScan = false;
     const auto before = known.getNumTypes();
+    // what was found so far is saved as the scan goes (at most every few seconds): LYNX closed in the middle of a
+    // background scan used to lose it all, and the next start described the same files again
+    auto lastSave = juce::Time::getMillisecondCounter();
+    auto unsaved = false;
     for (int i = 0; i < files.size() && ! stopScan; ++i)
     {
         const auto& file = files[i];
@@ -939,9 +975,18 @@ int PluginHost::scanFiles (const juce::StringArray& files, const std::function<b
         {
             if (! format->canScanForPlugins() || ! format->fileMightContainThisPluginType (file))
                 continue;
-            if (! known.isListingUpToDate (file, *format) && ! emptyScanIsCurrent (file))
+            if (! known.isListingUpToDate (file, *format) && ! listedInside (known, *format, file) && ! emptyScanIsCurrent (file))
+            {
                 scanOne (*format, file);
+                unsaved = true;
+            }
             break;
+        }
+        if (unsaved && juce::Time::getMillisecondCounter() - lastSave > 5000)
+        {
+            save();
+            lastSave = juce::Time::getMillisecondCounter();
+            unsaved = false;
         }
     }
     save();
@@ -967,7 +1012,7 @@ void PluginHost::startBackgroundScanOfFiles (const juce::StringArray& files)
 void PluginHost::forgetFile (const juce::String& file)
 {
     for (const auto& t : known.getTypes())
-        if (t.fileOrIdentifier == file)
+        if (sameModule (t, file))
             known.removeType (t);
     known.removeFromBlacklist (file);
     {
