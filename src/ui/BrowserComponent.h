@@ -92,6 +92,8 @@ public:
     // The sample preview volume knob beside the search box (0..125%, engine.setPreviewVolume): follows the engine.
     void refreshPreviewVolume();
     void stopPreview(); // the Stop button beside it
+    // F2 on a Plugin database entry: rename it (FL's renamed plugins, issue #11); false when no plugin is selected
+    bool renameSelectedPlugin();
 
     // The search index (round 162): a background pass over every Browser folder (rebuild: from scratch), and its
     // state in words ("12,345 files in 678 folders, checked 14:03").

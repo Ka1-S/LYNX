@@ -1146,6 +1146,11 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("browser.load")) browser.loadSelected();
     else if (is ("browser.closeFolder")) browser.openFolder (false);
     else if (is ("browser.openFolder")) browser.openFolder (true);
+    else if (is ("browser.rename"))
+    {
+        if (! browser.renameSelectedPlugin()) // not a plugin: F2's global action (rename the pattern)
+            showRenamePattern (engine.getSong().currentPattern);
+    }
     else if (id.rfind ("pianoRoll.", 0) == 0) return pianoRoll.runAction (id);
     else if (id.rfind ("playlist.", 0) == 0) return playlist.runAction (id);
     else if (id.rfind ("mixer.", 0) == 0) return mixer.runAction (id);
@@ -1514,6 +1519,8 @@ void MainComponent::stopAndRewind (bool toStart)
     // "Remember seek time" sends the first Stop to the ruler mark (round 162, issue #9)
     const auto alreadyStopped = toStart || ! (engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn());
     engine.stop();
+    // FL: the transport's Stop also ends a Browser sample preview (issue #11)
+    browser.stopPreview(); // (the engine's one preview voice: the Sample browser window's preview stops too)
     const auto& globals = EditorGlobals::get();
     const auto back = transportedit::stopTarget (alreadyStopped, globals.rememberSeek && engine.getSong().mode == PlayMode::song, globals.seekMark);
 
@@ -1560,8 +1567,8 @@ void MainComponent::fitChannelRack (bool width)
     // compact like FL's rack: at most two bars of steps are shown, longer patterns scroll sideways, so the
     // rack does not cover the Playlist after a project with long patterns is opened
     const auto maxWidth = juce::jmin (juce::jmax (300, workspace.getWidth() - 2 * 16 - 260), rack.widthForSteps (32));
-    const auto contentWidth = juce::jmin (rack.getWidth(), maxWidth);
-    const auto needsHorizontal = rack.getWidth() > contentWidth;
+    const auto contentWidth = juce::jmin (rack.naturalWidth(), maxWidth); // the ghost steps only fill a wider rack
+    const auto needsHorizontal = rack.naturalWidth() > contentWidth;
     workspace.fitPanelContent (Panel::channelRack, width ? contentWidth + scrollbar : 0, rack.getHeight() + (needsHorizontal ? scrollbar : 0));
     fittedChannelCount = (int) engine.getSong().channels.size();
 }

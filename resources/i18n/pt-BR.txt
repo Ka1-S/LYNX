@@ -965,7 +965,7 @@ countries: br
 "Curve: [LMB] adds a point" = "Curva: [LMB] adiciona um ponto"
 "Fade: [LMB] drag sets its length" = "Fade: [LMB] arrastar ajusta a duração"
 "Ghost note of {0}: double [RMB] edits that channel  [Alt][V] hides ghost notes" = "Nota fantasma de {0}: duplo [RMB] edita esse canal  [Alt][V] oculta as notas fantasmas"
-"Keyboard: [LMB] hear the key  [Ctrl][LMB] select its notes  [MMB] drag: taller / shorter keys" = "Teclado: [LMB] ouve a tecla  [Ctrl][LMB] seleciona as notas dela  [MMB] arrastar: teclas mais altas / baixas"
+"Keyboard: [LMB] hear the key (further right = louder)  [Ctrl][LMB] select its notes  [MMB] drag: taller / shorter keys" = "Teclado: [LMB] ouve a tecla (mais à direita = mais forte)  [Ctrl][LMB] seleciona as notas dela  [MMB] arrastar: teclas mais altas / baixas"
 "Note end: [LMB] drag resizes" = "Fim da nota: [LMB] arrastar redimensiona"
 "Note start: [LMB] drag resizes, the end stays" = "Início da nota: [LMB] arrastar redimensiona, o fim fica"
 "Note: [LMB] drag moves  [Shift][LMB] copies  [2xLMB] properties  [RMB] deletes  [Alt][Wheel] velocity" = "Nota: [LMB] arrastar move  [Shift][LMB] copia  [2xLMB] propriedades  [RMB] apaga  [Alt][Wheel] velocity"
@@ -5193,3 +5193,7 @@ countries: br
 "Thickness" = "Espessura"
 "Beat threshold" = "Limiar da batida"
 "Hue shift" = "Rotação de matiz"
+
+# --- Round 165a (issue #11: FL muscle memory)
+"Hearing the key: further right on a key = louder" = "Ouvindo a tecla: mais à direita na tecla = mais forte"
+"vel {0}" = "vel {0}"

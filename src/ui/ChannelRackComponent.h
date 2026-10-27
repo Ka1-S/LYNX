@@ -110,6 +110,7 @@ public:
 
     // Width that shows the controls and at most `maxSteps` steps (the panel scrolls for longer patterns).
     int widthForSteps (int maxSteps) const { return gridLeft() + juce::jmin (numSteps(), maxSteps) * stepWidth + 8; }
+    int naturalWidth() const { return gridLeft() + numSteps() * stepWidth + 8; } // without the ghost steps
 
     // The menu of instruments and plugins to add as a new channel (also the toolbar's plugin picker).
     void showAddChannelMenu (int insertAt = -1);
@@ -144,7 +145,10 @@ private:
     Area areaAt (int x, int y, int& row) const;
     void moved() override;
     int stickyX = 0; // how far the viewport scrolled the rack sideways (the controls column stays in view)
-    int numSteps() const;
+    int numSteps() const;   // the pattern's steps
+    int shownSteps() const; // plus FL's ghost steps: the free width after the pattern's end (issue #11)
+    int ghostSteps = 0;
+    void parentSizeChanged() override { updateSize(); }
     int nameLeft() const noexcept { return muteWidth + 2 * knobWidth + routeWidth + 2; }
     int selectLeft() const noexcept { return nameLeft() + nameWidth + 4; }
     int gridLeft() const noexcept { return selectLeft() + selectWidth + 8; }

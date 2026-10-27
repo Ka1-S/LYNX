@@ -169,6 +169,7 @@ std::vector<Action> makeActions()
         { "browser.load", TR_NOOP ("Load the file into the selected channel"), Context::browser, { chord (enter) } },
         { "browser.closeFolder", TR_NOOP ("Close the folder (or go to the parent folder)"), Context::browser, { chord (left) } },
         { "browser.openFolder", TR_NOOP ("Open the folder"), Context::browser, { chord (right) } },
+        { "browser.rename", TR_NOOP ("Rename the selected plugin (Plugin database)"), Context::browser, { chord (f2) } },
 
         // Mixer (focused)
         { "mixer.moveLeft", TR_NOOP ("Move the selected inserts left"), Context::mixer, { chord (left, alt) } },
@@ -176,6 +177,7 @@ std::vector<Action> makeActions()
         { "mixer.linkChannels", TR_NOOP ("Link the selected channels to the selected insert"), Context::mixer, { chord ('L', ctrl) } },
         { "mixer.linkChannelsFrom", TR_NOOP ("Link the selected channels to inserts starting from the selected one"), Context::mixer, { chord ('L', ctrl | shift) } },
         { "mixer.selectLinkedChannels", TR_NOOP ("Select the channels linked to the selected insert"), Context::mixer, { chord ('L', alt) } },
+        { "mixer.deleteEffect", TR_NOOP ("Delete the selected effect slot's plugin"), Context::mixer, { chord (del) } },
     };
 
     // numeric keypad 1-9: select patterns 1-9
