@@ -734,8 +734,9 @@ private:
                 const auto mix = slider (tr ("Mix"), 0, 100, 1, 100, percent);
                 const auto h = header (tr ("Impulse"));
                 auto& c = curve (h);
-                c.envelope.points = { { 0.0, 1.0, 0.0f }, { 1.0, 0.0, 0.6f } };
-                c.caption = tr ("level over the blur's length");
+                // FL's default map: a bell centred on the sound
+                c.envelope.points = { { 0.0, 0.0, 0.0f }, { 0.5, 1.0, -0.6f }, { 1.0, 0.0, 0.6f } };
+                c.caption = tr ("level over the blur's length (the middle = the sound itself)");
                 describe = [this, amount, where] { return where + "\n" + tr ("Smears the sound over {0} s with the impulse's shape.", { juce::String (0.02 + 1.98 * value (amount) / 100.0, 2) }); };
                 makeProcess = [=, this, &c] {
                     ae::BlurSettings s;
@@ -999,7 +1000,7 @@ private:
                 thresholdI = slider (tr ("Decimation"), 0, 100, 0.1, 50, percent);
                 const auto h = header (tr ("Impulse"));
                 auto& c = curve (h);
-                c.envelope.points = { { 0.0, 0.0, 0.0f }, { 0.5, 1.0, -0.5f }, { 1.0, 0.0, 0.5f } };
+                c.envelope.points = { { 0.0, 0.0, 0.0f }, { 0.5, 1.0, 0.0f }, { 1.0, 0.0, 0.0f } }; // FL's default: a triangle
                 describe = [] { return tr ("Filters the envelope with the impulse's shape (a smoother envelope)."); };
                 break;
             }

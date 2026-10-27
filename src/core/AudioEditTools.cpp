@@ -971,10 +971,11 @@ void blur (Document& doc, Range r, const BlurSettings& s, Progress* progress)
     const auto shift = (int) std::lround (std::clamp (s.offset, -1.0, 1.0) * taps);
     std::vector<double> kernel ((std::size_t) taps);
     double sum = 0.0;
+    // the impulse spans the blur's length centred on the sound (x 0.5 = the sound's own moment, like FL's maps)
     for (int k = 0; k < taps; ++k)
     {
-        const auto x = taps > 1 ? (double) k / (taps - 1) : 0.0;
-        const auto w = s.impulse.empty() ? std::exp (-4.0 * x) : std::max (0.0, s.impulse.at (x));
+        const auto x = taps > 1 ? (double) k / (taps - 1) : 0.5;
+        const auto w = s.impulse.empty() ? 0.5 - 0.5 * std::cos (2.0 * pi * x) : std::max (0.0, s.impulse.at (x));
         kernel[(std::size_t) k] = w;
         sum += w;
     }
@@ -1012,7 +1013,7 @@ void blur (Document& doc, Range r, const BlurSettings& s, Progress* progress)
                 double m = 0.0;
                 for (int k = 0; k < taps; ++k)
                 {
-                    const auto src = f - k + shift;
+                    const auto src = f - (k - taps / 2) - shift;
                     if (src >= 0 && src < frames)
                         m += mags[(std::size_t) src][(std::size_t) b] * kernel[(std::size_t) k];
                 }

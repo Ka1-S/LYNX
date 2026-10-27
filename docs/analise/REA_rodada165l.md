@@ -7,8 +7,12 @@ undoable, previewable, computed off the audio thread; nulls vs FL where the tool
 
 ## Where I stopped
 
-- 2026-10-27 16:40: worktree `../lynx-wt-edison165` on `feature/edison165` from main 5ed718d1; inventory of the
-  tool forms from r165f's DFM dump (`tmp/rea165/dfm/TME*.dfm.txt`) started.
+- 2026-10-27 17:05: core `src/core/AudioEditTools.{h,cpp}` (all tools), UI `src/ui/AudioEditorTools.{h,cpp}` (tool
+  windows + curve editor), AudioEditor integration (envelope edit mode, Tools menu in FL's groups, host), `--edisonshot`,
+  tests `tests/AudioEditToolsTests.inc`, pt-BR — written, NOT yet compiled (build slots busy). Ghidra decompile of the
+  Edison menu handlers queued (`tmp/edison165/g.sh`, output `tmp/edison165/menus1.c`).
+- Next: compile + tests (mini harness in the scratchpad, then build-local), Windows build `build-win-edison165`,
+  `--edisonshot` PNGs, compare with the decompiled tool code and adjust, FL side-by-side shots (wingui + FL lock).
 
 ## 1. Inventory: Edison tool forms vs LYNX (before this round)
 
@@ -39,3 +43,28 @@ code is also in `Plugins/Fruity/Effects/Edison/Edison_x64.dll`, the same forms a
 | (no form) | — | Tools › Envelope: Cancel all envelopes, Add points at selection / regions, Flip, Normalize levels, Turn all points smooth; Amp › Mixdown amp envelopes; Time › Scratch (envelope) | ❌ |
 | (no form) | — | Amp › Lossy normalize; Channels › Convert mono signal to mono format; Synthesis › Generate noise; Noise gating › Acquire noise threshold, Gate noise, Trim side noise, Trim all noise & slice up; Regions › Normalize / Declick in / Declick out / Perfect all regions | ❌ |
 | TMEWAVPropForm "Sample properties" | title, comments, format, rate, channels, middle note, fine tune, tempo / beats, tempo detection | Format › Edit properties... | ⚠️ |
+
+## 2. FL's default maps [DATA]
+
+`Plugins/Fruity/Effects/Edison/Data/Maps/*.fnv` (FL's envelope files: int version (3 = time, 7 = frequency in Hz),
+int ?, int point count; then per point double Δx, double y, float tension, int curve mode): Blur default = a bell centred
+on the sound (0 → 1 at x 0.5 → 0), Env filter default = a triangle, EQ / Denoiser default = flat at 0.5 (0.5 = unity /
+unchanged threshold; EQ "40Hz cut" = y 0 up to 40 Hz, then 0.5), Spectral mask default = flat at 1. LYNX's tool windows
+start from the same shapes (the numbers, not the files).
+
+## 3. LYNX's implementation
+
+- Core (`core/AudioEditTools`, JUCE-free, tests `tests/AudioEditToolsTests.inc`): point envelopes (`Envelope` in
+  `core/AudioEdit.h`, carried by the `Document` for the amp envelopes, so they are in the undo history), the envelope tools,
+  amp envelopes mixdown, Amp (L/R volume, circular/triangular pan law, stereo separation), lossy normalize, mono-if-mono,
+  noise generation, noise gating (threshold, gate, trim side noise, trim all & slice into regions), region batch tools,
+  an STFT (sqrt-Hann, hop N/4) for Equalize / Match spectrum / Blur / Clean up / Vocal denoise, FFT convolution for the
+  reverb, the declipper / declicker, Claw machine, Drum(loop) stretch (slices keep their attacks, fill / tail methods),
+  Loop tuner (period-matched loop end + crossfade with tension and blur).
+- UI (`ui/AudioEditorTools`): one window per tool, sections like FL's form, LYNX's controls; curve editors (frequency
+  axis with the selection's spectrum or the noise profile behind the curve); Reset / Preview (Space) / Accept (Enter) /
+  Cancel; the audio tools run on a worker thread (progress bar, Stop), Accept = one undo step; the envelope tools edit the
+  envelope over the audio live and Cancel puts it back.
+- The editor: "Edit: Wave / Volume / Panning / Stereo sep" (E) like Edison's edit selector; the envelopes are heard when
+  playing and mixed down by Tools › Mixdown amp envelopes; Tools menu in FL's groups (Envelope, Amp, Waveform, Time,
+  Channels, Synthesis, Noise gating, Spectral, Regions).

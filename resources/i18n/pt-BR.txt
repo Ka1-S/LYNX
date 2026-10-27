@@ -5280,7 +5280,7 @@ countries: br
 "Draw the gain over frequency (centre line = unchanged). Right-click deletes a point, Alt+drag bends." = "Desenhe o ganho pela frequência (linha central = sem mudança). Botão direito apaga um ponto, Alt+arrastar curva."
 "Use data outside selection" = "Usar o áudio fora da seleção"
 "Impulse" = "Impulso"
-"level over the blur's length" = "nível ao longo do blur"
+"level over the blur's length (the middle = the sound itself)" = "nível ao longo do blur (o meio = o próprio som)"
 "Smears the sound over {0} s with the impulse's shape." = "Espalha o som por {0} s com o formato do impulso."
 "Add tail" = "Adicionar cauda"
 "drawn impulse: level over its length" = "impulso desenhado: nível ao longo dele"
