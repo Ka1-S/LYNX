@@ -88,6 +88,22 @@ Gap #2 of docs/analise/REA_rodada165f.md. Clean-room: behaviour and names only.
 - CLI: `LYNX --midisync-test report.txt ["output"] ["input"]` (loopback in memory, sender timing, a real loopback
   when both devices are given); `--devices` now lists `midi-in=` / `midi-out=`.
 
+## Measurements [MEASURED]
+- `LYNX --midisync-test` (Linux build, WSL, machine under load from other rounds): generator → receiver in memory at
+  90 / 120 / 174 BPM with ±0.5 ms time-stamp jitter: tempo error 0.000 BPM, position error < 1 tick (of 960 per beat).
+- Sender thread (dry run, 48 kHz / 256 frames simulated callbacks, 5 s at 120 BPM, 241 messages, machine at load
+  11–16 from other rounds, process niced): late p50 0.000 ms, p95 0.105 ms, p99 1.98 ms, mean 0.10 ms, max 11 ms
+  (one outlier). (A first version slept up to 1 s when its queue emptied: 487 ms mean — found by this test, fixed.)
+  FL's sync thread polls with `Sleep (1)`: about 1 ms of jitter by design.
+- Audio-thread cost of the sync per block (one output sending MIDI clock): mean 1.15 µs, max 5 µs; nothing when no
+  output has master sync (one relaxed atomic load).
+- [SHOT] /mnt/d/lynx-work/rea165-midisync/compare-midi-sync.png: FL 2026 Options › MIDI (left, shot from round 143)
+  next to LYNX's Settings › MIDI (`--snapshot`, Linux/Xvfb).
+- No MIDI hardware or loopback here: WSL has no ALSA sequencer (`/dev/snd/seq` missing, `snd-virmidi` needs root),
+  Windows lists no loopMIDI / virtual port. The end-to-end check is the in-memory loopback (unit test
+  `midisync165_generator_feeds_receiver_loopback` + `--midisync-test`).
+- build-local with FL Data: 1 762 037 checks, 0 failures (10 new midisync165 tests).
+
 ## Plan
 core/MidiSync.{h,cpp} (pure, unit-tested): clock generator (24 PPQN, sample offsets in the block, Start/Continue/
 Stop/SPP), MTC quarter-frame / full-frame encoder (all 6 fps incl. drop-frame), clock receiver (smoothed tempo,
