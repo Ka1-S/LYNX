@@ -233,12 +233,13 @@ TEST (browser162_search_is_served_before_a_background_pass)
     service.refresh ({ "/lib" }, true);
     std::this_thread::sleep_for (std::chrono::milliseconds (200));
     CHECK (service.status().busy);
+    const int listedAtSearch = big.lists.load();
     const auto t = std::chrono::steady_clock::now();
     service.search ("kick 1-", { "/lib/a1" }, 500, inbox.sink());
     while (inbox.take().empty() && b162::msSince (t) < 5000)
         std::this_thread::sleep_for (std::chrono::milliseconds (2));
     const auto answeredMs = b162::msSince (t);
-    std::printf ("  [b162] search answered in %.1f ms during a rebuild\n", answeredMs);
+    std::printf ("  [b162] search answered in %.1f ms during a rebuild (%d folders listed in the first 200 ms)\n", answeredMs, listedAtSearch);
     CHECK (answeredMs < 500);
     CHECK (service.waitIdle (30000));
     CHECK (service.status().folders == 2551 && ! service.status().busy);
