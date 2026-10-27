@@ -37,7 +37,7 @@ Windows, macOS and Linux.</p>
 
 <p align="center">
   <img src="docs/img/workspace.png" alt="The LYNX workspace: browser, playlist, piano roll, channel rack and mixer" width="100%">
-  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>) in the 0.1.5 workspace: browser, Piano Roll, Channel Rack and Mixer.</sub>
+  <br><sub>LYNX's own demo project (<code>LYNX.exe --showcase</code>) in the 0.1.18 workspace: browser, Piano Roll, Channel Rack and Mixer.</sub>
 </p>
 
 ---
@@ -123,7 +123,7 @@ Configurable snap, chords and scales, 16 note colors, note groups, a chord reado
 <img src="docs/img/mixer.png" alt="Mixer">
 
 ### Mixer
-Up to 127 inserts, sends with levels, 10 effect slots with dry/wet per track, built-in EQ, PDC, smart disable and **sidechain** (here the bass compressor listening to the kick).
+Up to 127 inserts, sends with levels, 10 effect slots with dry/wet per track, built-in EQ (or a **clean mixer** with none), PDC, smart disable and **sidechain** (here the bass compressor listening to the kick). Choose how many inserts new projects start with and show only the used ones.
 
 </td>
 <td width="50%" valign="top">
@@ -182,7 +182,8 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Native `.lynx` format (JSON) with autosave
 - Imports `.flp` and `.mid`; FL `.fst` presets
 - Exports WAV 16/24/32f, FLAC and OGG, song or pattern, with dither
-- Note recording (PC keyboard and MIDI) and audio input recording
+- Note recording (PC keyboard and MIDI) and audio recording, sample-accurate with a round-trip ping, punch in/out with pre/post-roll, loop takes and comping, crash-safe takes
+- Themes (accent color, background, workspace image) and plugin presets
 - Undo/redo on every edit
 - Opt-in crash and freeze reports (anonymous), or a prefilled GitHub bug report
 - Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO on Windows; Core Audio on macOS; PipeWire (native), JACK and ALSA on Linux
