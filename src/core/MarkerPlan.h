@@ -51,6 +51,17 @@ struct MarkerPlan
 
 MarkerPlan makeMarkerPlan (const Song& song);
 
+// One step of the audio thread's transport (Song mode, playing): how many of the `n` samples to play before a marker
+// jump / pause or the user's quantized jump (`pendingAt`, < 0 = none) falls due, and what happens after them.
+// Real-time safe (no allocation).
+struct MarkerStep
+{
+    int samples = 0;                    // play this many samples, then:
+    const MarkerJump* jump = nullptr;   // this marker jump / pause is due, or
+    bool userJump = false;              // the user's quantized jump is due
+};
+MarkerStep markerStep (const MarkerPlan& plan, double position, int n, double ticksPerSample, double pendingAt) noexcept;
+
 namespace markers
 {
 // "Quantize song jumps" (FL's Playlist menu): 0 Off, 1 Beats, 2 Bars, 3 2 bars, 4 4 bars, 5 8 bars. The tick where a

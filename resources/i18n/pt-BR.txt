@@ -5214,3 +5214,4 @@ countries: br
 "Notes on this channel move the song to a marker instead of playing: note 0 goes to the first marker, the next one to the second... (Playlist › Quantize song jumps applies while playing)." = "Notas neste canal levam a música a um marcador em vez de tocar: a nota 0 vai ao primeiro marcador, a seguinte ao segundo... (Playlist › Quantizar saltos da música vale durante a reprodução)."
 "Jump to the next song marker (Quantize song jumps while playing)" = "Saltar para o próximo marcador da música (Quantizar saltos da música durante a reprodução)"
 "Jump to the previous song marker" = "Saltar para o marcador anterior da música"
+"Marker: [LMB] jump to it (while playing: at the next Quantize song jumps step)  [RMB] action, rename, delete" = "Marcador: [LMB] saltar até ele (tocando: no próximo passo de Quantizar saltos da música)  [RMB] ação, renomear, excluir"

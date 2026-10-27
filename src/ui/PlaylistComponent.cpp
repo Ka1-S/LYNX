@@ -3966,6 +3966,17 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
     if (p.y >= rulerTop && p.y < headerHeight && p.x >= headerWidth)
     {
+        // over a marker's tag: its action, and that a click jumps there (FL)
+        if (const auto m = markerTagAt (p.x, p.y); m >= 0)
+        {
+            const auto& marker = song.markers()[(std::size_t) m];
+            hint.text = tr ("Marker: [LMB] jump to it (while playing: at the next Quantize song jumps step)  [RMB] action, rename, delete");
+            hint.value = markerLabel (marker);
+            if (const auto* action = markers::actionName (marker.isSignature() ? Marker::timeSignature : marker.action); *action != 0)
+                hint.value += " (" + tr (action) + ")";
+            hint.hasMenu = true;
+            return hint;
+        }
         hint.text = tr ("Ruler: [LMB] song position  [Ctrl][LMB] drag: time selection (loop)  [Shift][LMB] drag in it: move  [2xLMB] clear  [RMB] markers  [Alt] no snap");
         hint.hasMenu = true;
         return hint;

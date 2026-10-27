@@ -47,10 +47,43 @@ Shots in `D:\lynx-work\rea165-markers\shots`.
   "Skip - marker skip at 2:01:00", Delete, Rename..., Move content left / right, **Action**: None, Start, Loop,
   Marker loop, Marker skip, Marker pause, Time signature, Start recording, Stop recording (9 actions: Pattern length,
   Bar override and Key/Scale are only offered for the Piano Roll's pattern markers).
-- `fl_combo2_*.png` (Start at 1:09, plain "From" at bar 2, Marker loop at bar 3): the ruler is drawn **relative to the
-  Start marker** (bar 1 = the Start marker; the other markers appear 2 beats earlier), Play from the beginning starts
-  at the Start marker and Stop returns there; the marker loop did not jump when reached; at the song's end playback
-  went back to the Marker loop marker (display 8:09 → 2:09 = absolute end 3072 → 768).
+- `fl_combo2_*.png` (Start at 1:09, plain "From" at bar 2, Marker loop at bar 3, no marker after it): Play from the
+  beginning starts at the Start marker and Stop returns there; reaching the Marker loop marker does nothing; at the
+  song's end playback goes back to the Marker loop marker (absolute 3072 → 768).
+- `fl_marker_loop_section.png` (Marker loop at bar 3, plain "End" at bar 5): 1…4:15 → **3:03**, then 3–4 forever.
+  **Marker loop repeats the section from the marker to the next marker (or the song's end).**
+- `fl_start_loop_play.png` + `fl_start_ruler.png` (Start at bar 2, Loop at bar 5): in Song mode FL numbers the ruler
+  and the song position **from the Start marker** (the clip starts before "bar 1"); Play starts there; at the song's
+  end playback goes back to the **Loop** marker (display 7:14 → 4:02 = absolute bar 9 → bar 5), every time.
+- `fl_time_markers_menu.png`: Playlist menu › Time markers: Add one... (Alt+T), Add auto (Ctrl+T), Add two...,
+  Add one every ▸, Add jump to next bar, Add time signature change... (Shift+Alt+T), Add key marker ▸, Place loop
+  (Shift+T), Delete, Change to marker loop. `fl_quantize_song_jumps.png`: Quantize song jumps ▸ Off (default), Beats,
+  Bars, 2 bars, 4 bars, 8 bars.
+- `fl_quantized_marker_click.png` (Quantize song jumps = Bars): a click on the "Lp" marker's tag at display 1:09
+  while playing → the song goes on to **2:01, then jumps to the marker (4:01)**. `fl_quantized_ruler_click.png`: a
+  click on the ruler (display 6:05) waits for the next bar line too (4:16 → 6:05): every song-position change
+  while playing is quantized, and the target is kept as clicked.
+- `fl_add_jump_next_bar*.png`: "Add jump to next bar" with the song position at 6:05 adds a **Marker skip at the
+  position and a plain marker one bar later** (7:05; its menu: "at 8:05:00", action None) — that bar is skipped.
+
+### 1.5 Semantics implemented (LYNX, `core/MarkerPlan.*`)
+| FL action (type) | LYNX playback | evidence |
+|---|---|---|
+| None (0) | nothing | — |
+| Marker loop (1) | at the next marker (or the song's end) → back to this marker, forever | [SHOT] |
+| Marker skip (2) | at this marker → the next marker (or the song's end, where the song starts over) | [SHOT] |
+| Marker pause (3) | playback stops on the marker; Play goes on from it (not fired again) | [SHOT] |
+| Loop (4) | the song's end goes back to this marker (no loop region on) | [SHOT] |
+| Start (5) | Play from the song's beginning (position 0) starts here; without a Loop marker the song's end comes back here | [SHOT] / [HYP] for the wrap |
+| Pattern length (6), Bar override (7), Loop length (11), Key/Scale (12) | kept (import / save), shown with their name; no playback effect — FL offers them only for the Piano Roll's pattern markers (`fl_marker_menu.png`) | [SHOT] |
+| Time signature (8) | bars (existing) | — |
+| Start / Stop recording (9 / 10) | punch in / out (existing, round 139) | — |
+| Export | linear from bar 1 to the end: the actions above are dropped from the render song | [FL render] |
+
+Real time: the plan is a fixed table (64 jumps) published by the UI under a seqlock (`Transport::publishMarkers`); the
+audio thread copies it when the version changes, splits the block at the jump's sample (`markerStep`), then moves the
+position (the renderer sees a position jump: held notes are released and audio clips resume mid-way, as for the loop
+wrap). No locks or allocations on the audio thread.
 
 ## Where I stopped
 - 16:15 — PAUSED by the coordinator (machine load). Done: briefs read; LYNX code located (Song.h `Marker`,

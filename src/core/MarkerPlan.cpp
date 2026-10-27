@@ -27,6 +27,7 @@ MarkerPlan makeMarkerPlan (const Song& song)
     const auto& list = sorted (song);
     const auto songEnd = song.songLength();
     plan.songEnd = songEnd;
+    auto hasLoop = false;
 
     for (std::size_t i = 0; i < list.size(); ++i)
     {
@@ -51,9 +52,12 @@ MarkerPlan makeMarkerPlan (const Song& song)
                 jump.kind = MarkerJump::Kind::pause;
                 break;
             case Marker::songLoop:
+                // the song's end goes back here [SHOT fl_start_loop_play.png]
                 plan.wrapTo = m.tick;
+                hasLoop = true;
                 continue;
             case Marker::start:
+                // Play from the song's beginning starts here [SHOT fl_start_loop_play.png, fl_combo2_first.png]
                 if (plan.start < 0)
                     plan.start = m.tick;
                 continue;
@@ -69,8 +73,32 @@ MarkerPlan makeMarkerPlan (const Song& song)
             plan.jumps[(std::size_t) plan.count++] = jump;
     }
 
+    // without a Loop marker the song starts over at the Start marker (FL numbers the bars from it) [HYP]
+    if (! hasLoop && plan.start > 0)
+        plan.wrapTo = plan.start;
+
     std::stable_sort (plan.jumps.begin(), plan.jumps.begin() + plan.count, [] (const MarkerJump& a, const MarkerJump& b) { return a.at < b.at; });
     return plan;
+}
+
+MarkerStep markerStep (const MarkerPlan& plan, double position, int n, double tps, double pendingAt) noexcept
+{
+    MarkerStep step;
+    step.samples = n;
+    if (n <= 0 || tps <= 0.0)
+        return step;
+    const auto end = position + n * tps;
+    step.jump = plan.firstIn (position, end);
+    if (pendingAt >= 0.0 && pendingAt <= end && (step.jump == nullptr || pendingAt <= (double) step.jump->at))
+    {
+        // the user's jump comes first; a marker after it is reached from the new place
+        step.jump = nullptr;
+        step.userJump = true;
+        step.samples = std::clamp ((int) std::ceil (std::max (0.0, pendingAt - position) / tps), 1, n);
+    }
+    else if (step.jump != nullptr)
+        step.samples = std::clamp ((int) std::ceil (((double) step.jump->at - position) / tps), 1, n);
+    return step;
 }
 
 namespace markers

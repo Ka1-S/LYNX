@@ -3365,19 +3365,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         // FL's marker actions (Song mode): the block ends where the position reaches a marker jump / pause, or a
         // quantized jump the user asked for; it is made after the block (below), like the loop's wrap
         const MarkerJump* markerJump = nullptr;
-        auto pendingAt = transport.pendingJumpAt.load (std::memory_order_relaxed);
+        const auto pendingAt = transport.pendingJumpAt.load (std::memory_order_relaxed);
         auto pendingDue = false;
         if (playing && tps > 0.0 && transport.songMode.load (std::memory_order_relaxed))
         {
-            const auto position = transport.positionTicks.load (std::memory_order_relaxed);
-            const auto end = position + n * tps;
-            if (pendingAt >= 0.0 && pendingAt <= end)
-            {
-                pendingDue = true;
-                n = juce::jlimit (1, n, (int) std::ceil (juce::jmax (0.0, pendingAt - position) / tps));
-            }
-            else if ((markerJump = rtMarkers.firstIn (position, end)) != nullptr)
-                n = juce::jlimit (1, n, (int) std::ceil (((double) markerJump->at - position) / tps));
+            const auto step = markerStep (rtMarkers, transport.positionTicks.load (std::memory_order_relaxed), n, tps, pendingAt);
+            n = step.samples;
+            markerJump = step.jump;
+            pendingDue = step.userJump;
         }
 
         for (int ch = 0; ch < numInputChannels; ++ch)

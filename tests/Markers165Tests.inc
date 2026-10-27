@@ -24,7 +24,135 @@ inline lynx::Song eightBars()
 }
 
 constexpr std::int64_t bar (int n) { return (std::int64_t) (n - 1) * 4 * lynx::ppq; }
+
+// The audio thread's Song-mode transport (AudioEngine::audioDeviceIOCallbackWithContext) over `blocks` blocks of 512
+// samples at 120 BPM / 48 kHz: the beats (0-based) whose start the position plays through, in order, and whether a
+// pause stopped playback. `userJump` = { block, target tick, quantize } asks for a jump like a ruler click.
+struct Played
+{
+    std::vector<int> beats;
+    bool paused = false;
+};
+inline Played play (const lynx::Song& song, int blocks, double from = 0.0, std::tuple<int, double, int> userJump = { -1, 0.0, 0 })
+{
+    const auto plan = lynx::makeMarkerPlan (song);
+    const double tps = 120.0 * lynx::ppq / (60.0 * 48000.0);
+    const double end = (double) song.songLength();
+    double position = from;
+    if (position <= 0.0 && plan.start > 0) // AudioEngine::play: the Start marker
+        position = (double) plan.start;
+    double pendingAt = -1.0, pendingTo = -1.0;
+    Played out;
+    for (int b = 0; b < blocks && ! out.paused; ++b)
+    {
+        if (std::get<0> (userJump) == b)
+        {
+            pendingTo = std::get<1> (userJump);
+            pendingAt = std::get<2> (userJump) > 0 ? (double) lynx::markers::quantizedJumpTick (song, position, std::get<2> (userJump)) : position;
+        }
+        for (int done = 0; done < 512 && ! out.paused;)
+        {
+            auto n = 512 - done;
+            if (position >= end)
+                position = (double) plan.wrapTo;
+            n = std::clamp (n, 1, (int) std::ceil ((end - position) / tps));
+            const auto step = lynx::markerStep (plan, position, n, tps, pendingAt);
+            n = step.samples;
+            // the beats this sub-block plays through
+            const auto next = position + n * tps;
+            for (auto beat = (std::int64_t) std::ceil (position / lynx::ppq); (double) beat * lynx::ppq < next; ++beat)
+                out.beats.push_back ((int) beat);
+            position = next;
+            if (step.userJump && position >= pendingAt - 1e-6)
+            {
+                position = pendingTo;
+                pendingAt = -1.0;
+            }
+            else if (step.jump != nullptr && position >= (double) step.jump->at - 1e-6)
+            {
+                if (step.jump->kind == lynx::MarkerJump::Kind::pause)
+                {
+                    position = (double) step.jump->at;
+                    out.paused = true;
+                }
+                else
+                    position = (double) step.jump->to;
+            }
+            else if (position >= end - 1e-6)
+                position = (double) plan.wrapTo;
+            done += n;
+        }
+    }
+    return out;
+}
+
+inline std::vector<int> range (int from, int to) // [from, to)
+{
+    std::vector<int> v;
+    for (int i = from; i < to; ++i)
+        v.push_back (i);
+    return v;
+}
+inline std::vector<int> operator+ (std::vector<int> a, const std::vector<int>& b)
+{
+    a.insert (a.end(), b.begin(), b.end());
+    return a;
+}
+inline bool startsWith (const std::vector<int>& v, const std::vector<int>& prefix)
+{
+    return v.size() >= prefix.size() && std::equal (prefix.begin(), prefix.end(), v.begin());
+}
 } // namespace markers165
+
+TEST (markers165_transport_follows_fl_sequences)
+{
+    using namespace markers165;
+    // fl_skip_pause_play.png: Skip at bar 2, "Here" at bar 4, Pause at bar 6 -> bar 1, bars 4-5, stop at bar 6
+    {
+        auto song = eightBars();
+        song.addMarker (marker (bar (2), lynx::Marker::markerSkip));
+        song.addMarker (marker (bar (4), lynx::Marker::none));
+        song.addMarker (marker (bar (6), lynx::Marker::markerPause));
+        const auto p = play (song, 2000);
+        CHECK (p.paused && p.beats == range (0, 4) + range (12, 20));
+        // Play again from the pause: on to the song's end, then from the start
+        const auto again = play (song, 400, (double) bar (6));
+        CHECK (startsWith (again.beats, range (20, 32) + range (0, 4) + range (12, 20)));
+    }
+    // fl_marker_loop_section.png: Marker loop at bar 3, "End" at bar 5 -> 1..4, then 3, 4, 3, 4...
+    {
+        auto song = eightBars();
+        song.addMarker (marker (bar (3), lynx::Marker::markerLoop));
+        song.addMarker (marker (bar (5), lynx::Marker::none));
+        const auto p = play (song, 1000); // 10.7 s = 21 beats
+        CHECK (startsWith (p.beats, range (0, 16) + range (8, 16)));
+        CHECK (! p.paused && p.beats.size() >= 21 && p.beats[20] == 12);
+    }
+    // fl_start_loop_play.png: Start at bar 2, Loop at bar 5 -> plays from bar 2 to the end, then from bar 5
+    {
+        auto song = eightBars();
+        song.addMarker (marker (bar (2), lynx::Marker::start));
+        song.addMarker (marker (bar (5), lynx::Marker::songLoop));
+        const auto p = play (song, 1500);
+        CHECK (startsWith (p.beats, range (4, 32) + range (16, 32) + range (16, 20)));
+    }
+    // fl_quantized_marker_click.png: Quantize song jumps = Bars, a jump to bar 4 asked mid bar 1 happens at bar 2
+    {
+        const auto song = eightBars();
+        const auto p = play (song, 300, 0.0, { 50, (double) bar (4), 2 }); // block 50 = beat 1.07
+        CHECK (startsWith (p.beats, range (0, 4) + range (12, 16)));
+        const auto now = play (song, 300, 0.0, { 50, (double) bar (4), 0 }); // off: right away
+        CHECK (startsWith (now.beats, range (0, 2) + range (12, 16)));
+    }
+    // FL's export: none of it (straight through)
+    {
+        auto song = eightBars();
+        song.addMarker (marker (bar (3), lynx::Marker::markerLoop));
+        std::int64_t music = 0, loop = 0;
+        const auto render = lynx::exportopts::makeRenderSong (song, {}, 0, music, loop);
+        CHECK (startsWith (play (render, 1600).beats, range (0, 32) + range (0, 4)));
+    }
+}
 
 TEST (markers165_skip_jumps_to_the_next_marker_and_pause_stops_on_it)
 {
@@ -74,6 +202,10 @@ TEST (markers165_start_and_loop_markers)
     CHECK (plan.start == bar (3));
     CHECK (plan.wrapTo == bar (5));
     CHECK (plan.count == 0);
+    // without a Loop marker the song starts over at the Start marker
+    auto startOnly = eightBars();
+    startOnly.addMarker (marker (bar (3), lynx::Marker::start));
+    CHECK (lynx::makeMarkerPlan (startOnly).wrapTo == bar (3));
 }
 
 TEST (markers165_quantize_song_jumps)
