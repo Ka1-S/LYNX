@@ -11,9 +11,22 @@
 #include <memory>
 #include <mutex>
 #include <regex>
-#include <semaphore>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#elif defined(__APPLE__)
+ #include <dispatch/dispatch.h>
+#else
+ #include <semaphore.h>
+#endif
 
 extern "C"
 {
@@ -535,10 +548,42 @@ bool reNames (int argc, py_StackRef argv)
 
 // --- the Python thread ---------------------------------------------------------------------------------------------
 
+// The audio thread's wake-up: an OS semaphore, woken by the kernel at once (std::counting_semaphore polls with
+// Sleep() in Zig's libc++ for Windows: 1–8 ms late, longer than an audio block)
+#if defined(_WIN32)
+struct WakeSemaphore
+{
+    HANDLE handle = CreateSemaphoreW (nullptr, 0, 0x7fffffff, nullptr);
+    ~WakeSemaphore() { CloseHandle (handle); }
+    void release() noexcept { ReleaseSemaphore (handle, 1, nullptr); }
+    void acquire() noexcept { WaitForSingleObject (handle, INFINITE); }
+};
+#elif defined(__APPLE__)
+struct WakeSemaphore
+{
+    dispatch_semaphore_t handle = dispatch_semaphore_create (0);
+    ~WakeSemaphore() { dispatch_release (handle); }
+    void release() noexcept { dispatch_semaphore_signal (handle); }
+    void acquire() noexcept { dispatch_semaphore_wait (handle, DISPATCH_TIME_FOREVER); }
+};
+#else
+struct WakeSemaphore
+{
+    sem_t handle;
+    WakeSemaphore() { sem_init (&handle, 0, 0); }
+    ~WakeSemaphore() { sem_destroy (&handle); }
+    void release() noexcept { sem_post (&handle); }
+    void acquire() noexcept
+    {
+        while (sem_wait (&handle) != 0) {} // (EINTR)
+    }
+};
+#endif
+
 struct Host
 {
     std::thread thread, supervisor;
-    std::counting_semaphore<1 << 20> wakeUp { 0 };
+    WakeSemaphore wakeUp;
     std::atomic<bool> stopping { false };
 
     std::mutex jobsLock;
@@ -578,6 +623,10 @@ struct Host
     void run()
     {
         pythonThread = std::this_thread::get_id();
+#if defined(_WIN32)
+        // (the audio thread waits for this thread's answers: it runs above the UI, below the audio threads)
+        SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+#endif
         py_initialize();
         used[0] = true;
         install();

@@ -35,8 +35,13 @@ class _Context:
         self.PPQ = 96
         self.isPlaying = False
         self.tempo = 120.0
-        self.voices = []
+        self._voices = []
         self.form = None
+
+    # a snapshot: a script may release voices while it walks them (FL's tutorial scripts do)
+    @property
+    def voices(self):
+        return list(self._voices)
 
 context = _Context()
 _clock = [0]
@@ -85,13 +90,13 @@ class Voice:
         if self.length > 0 and n < 1:
             n = 1
         self._until = _clock[0] + n if n > 0 else 0
-        context.voices.append(self)
+        context._voices.append(self)
 
     def release(self):
         i = getattr(self, '_id', 0)
         if i <= 0:
             raise RuntimeError('Trying to release a voice that never been triggered.')
-        vs = context.voices
+        vs = context._voices
         for k in range(len(vs)):
             if vs[k] is self:
                 vs.pop(k)
@@ -218,7 +223,7 @@ def _in_prop(i, which, value):
         v.fres = value
 
 def _sync():
-    for v in context.voices:
+    for v in context._voices:
         s = v._sent
         if s is None:
             continue
@@ -243,7 +248,7 @@ def _tick(t):
     context.ticks = t
     _clock[0] += 1
     c = _clock[0]
-    vs = context.voices
+    vs = context._voices
     if len(vs) > 0:
         for v in [x for x in vs if x._until > 0 and x._until <= c]:
             v.release()
@@ -254,9 +259,9 @@ def _set(ppq, tempo, playing):
     context.isPlaying = playing
 
 def _clear():
-    for v in context.voices:
+    for v in context._voices:
         _host.off(v._id, float(v.releaseVelocity))
-    context.voices.clear()
+    context._voices.clear()
     _incoming.clear()
 )PY";
 
