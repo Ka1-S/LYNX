@@ -14,6 +14,7 @@
 #include <cstring>
 
 #include "core/Instruments.h"
+#include "core/StateHandoff.h"
 
 #if defined(__clang__)
 #pragma clang fp contract(off)
@@ -906,6 +907,164 @@ std::vector<std::int16_t> shaperTable (const std::vector<WsPoint>& points, bool 
     return T;
 }
 
+// ------------------------------------------------------------------------------------------------ curve editor
+WaveShaperState waveShaperForEditing (const std::vector<std::uint8_t>& state, const float* params)
+{
+    if (auto s = parseWaveShaper (state))
+    {
+        if (s->points.empty())
+            s->points = defaultCurve();
+        return *s;
+    }
+    WaveShaperState s;
+    s.points = defaultCurve();
+    if (params != nullptr)
+    {
+        s.pre = rawFrom (params[0], 64, 192);
+        s.mix = rawFrom (params[1], 0, 128);
+        s.post = rawFrom (params[2], 0, 128);
+        s.oversampling = rawFrom (params[3], 0, 4);
+        s.hq = params[4] >= 0.5f;
+        s.smooth = params[5] >= 0.5f;
+        s.center = params[6] >= 0.5f;
+        s.unipolar = params[7] >= 0.5f;
+    }
+    return s;
+}
+
+std::vector<std::uint8_t> writeWaveShaper (const WaveShaperState& s, const std::vector<std::uint8_t>& base)
+{
+    // what is kept from an FL state: the map's kind, its 20-byte header and the editor flag (§2.1)
+    std::int32_t mapKind = 3, editorFlag = 1;
+    std::array<std::uint8_t, 20> header {};
+    {
+        const std::int32_t defaults[5] = { 0, -1, -1, -1, -1 };
+        std::memcpy (header.data(), defaults, sizeof (defaults));
+    }
+    if (const auto old = parseWaveShaper (base))
+    {
+        const std::size_t o = 22;
+        const auto n = (std::size_t) i32At (base, o + 8);
+        const auto end = o + 12 + 24 * n;
+        mapKind = i32At (base, o);
+        std::memcpy (header.data(), base.data() + end, header.size());
+        if (old->version > 1 && base.size() >= end + 24)
+            editorFlag = i32At (base, end + 20);
+    }
+
+    std::vector<std::uint8_t> b;
+    b.reserve (60 + 24 * s.points.size());
+    auto i32 = [&b] (std::int32_t v) { for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * k))); };
+    auto f64 = [&b] (double v) { std::uint64_t u; std::memcpy (&u, &v, 8); for (int k = 0; k < 8; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    auto f32 = [&b] (float v) { std::uint32_t u; std::memcpy (&u, &v, 4); for (int k = 0; k < 4; ++k) b.push_back ((std::uint8_t) (u >> (8 * k))); };
+    i32 (0x40003);
+    i32 (s.pre), i32 (s.mix), i32 (s.post);
+    b.push_back (s.unipolar ? 1 : 0), b.push_back (s.center ? 1 : 0);
+    i32 (s.oversampling);
+    const auto& pts = s.points.empty() ? defaultCurve() : s.points;
+    i32 (mapKind), i32 (3), i32 ((std::int32_t) pts.size());
+    for (const auto& p : pts)
+    {
+        f64 ((double) std::max (0.0f, p.dt)), f64 ((double) p.y), f32 (p.tension);
+        b.push_back (p.mode), b.push_back (0), b.push_back (0), b.push_back (0);
+    }
+    b.insert (b.end(), header.begin(), header.end());
+    i32 (editorFlag);
+    b.push_back (s.hq ? 1 : 0), b.push_back (s.smooth ? 1 : 0);
+    return b;
+}
+
+std::vector<float> waveShaperTimes (const std::vector<WsPoint>& points)
+{
+    std::vector<float> t;
+    t.reserve (points.size());
+    double at = 0.0;
+    for (const auto& p : points)
+    {
+        at += (double) std::max (0.0f, p.dt);
+        t.push_back ((float) at);
+    }
+    return t;
+}
+
+namespace
+{
+void setTimes (std::vector<WsPoint>& points, const std::vector<float>& t)
+{
+    for (std::size_t i = 0; i < points.size(); ++i)
+        points[i].dt = i == 0 ? 0.0f : std::max (0.0f, t[i] - t[i - 1]);
+}
+} // namespace
+
+int addWaveShaperPoint (std::vector<WsPoint>& points, float x, float y)
+{
+    if (points.size() < 2)
+        points = defaultCurve();
+    auto t = waveShaperTimes (points);
+    x = std::clamp (x, 0.0f, 1.0f);
+    y = std::clamp (y, 0.0f, 1.0f);
+    // after every point at or before x, never before the first nor after the last
+    std::size_t at = 1;
+    while (at < points.size() - 1 && t[at] <= x)
+        ++at;
+    x = std::clamp (x, t[at - 1], t[at]);
+    WsPoint p;
+    p.y = y;
+    p.mode = points[at].mode; // the segment it splits keeps its shape on both sides
+    points.insert (points.begin() + (std::ptrdiff_t) at, p);
+    t.insert (t.begin() + (std::ptrdiff_t) at, x);
+    setTimes (points, t);
+    return (int) at;
+}
+
+int moveWaveShaperPoint (std::vector<WsPoint>& points, int index, float x, float y)
+{
+    if (index < 0 || index >= (int) points.size())
+        return -1;
+    auto t = waveShaperTimes (points);
+    const auto i = (std::size_t) index;
+    if (i == 0)
+        x = 0.0f;
+    else if (i == points.size() - 1)
+        x = t.back();
+    else
+        x = std::clamp (x, t[i - 1], t[i + 1]);
+    t[i] = x;
+    points[i].y = std::clamp (y, 0.0f, 1.0f);
+    setTimes (points, t);
+    return index;
+}
+
+bool removeWaveShaperPoint (std::vector<WsPoint>& points, int index)
+{
+    if (index <= 0 || index >= (int) points.size() - 1)
+        return false; // the ends stay
+    auto t = waveShaperTimes (points);
+    points.erase (points.begin() + index);
+    t.erase (t.begin() + index);
+    setTimes (points, t);
+    return true;
+}
+
+float waveShaperLevelAt (const std::vector<std::int16_t>& table, bool unipolar, float x) noexcept
+{
+    if (table.size() < 4)
+        return std::clamp (x, 0.0f, 1.0f);
+    const auto n = (double) (table.size() - 3);
+    const auto i = (std::size_t) std::clamp ((long) std::lround ((double) std::clamp (x, 0.0f, 1.0f) * n), 0L, (long) n) + 1;
+    return unipolar ? (float) table[i] / 65535.0f + 0.5f : (float) table[i] / 32767.0f;
+}
+
+const std::vector<WsModeName>& waveShaperModes()
+{
+    // FL's point menu, in its order
+    static const std::vector<WsModeName> m { { 0, "Single curve" }, { 2, "Hold" },          { 10, "Smooth" },        { 7, "Single curve 2" },
+                                             { 11, "Single curve 3" }, { 1, "Double curve" }, { 8, "Double curve 2" }, { 12, "Double curve 3" },
+                                             { 9, "Half sine" },      { 3, "Stairs" },       { 4, "Smooth stairs" },  { 5, "Pulse" },
+                                             { 6, "Wave" } };
+    return m;
+}
+
 // ----------------------------------------------------------------------------------------------------- engine
 struct WaveShaperEngine::Impl
 {
@@ -1056,6 +1215,12 @@ void WaveShaperEngine::setCurve (const std::vector<WsPoint>& points)
     d->tables[1] = shaperTable (points, true);
 }
 
+void WaveShaperEngine::swapCurve (std::vector<std::int16_t>& bipolar, std::vector<std::int16_t>& unipolar) noexcept
+{
+    d->tables[0].swap (bipolar);
+    d->tables[1].swap (unipolar);
+}
+
 void WaveShaperEngine::prepare (double sampleRate) noexcept
 {
     d->rate = sampleRate > 0 ? sampleRate : 44100.0;
@@ -1098,18 +1263,50 @@ namespace
 class WaveShaperEffect final : public Effect
 {
 public:
-    explicit WaveShaperEffect (const std::vector<WsPoint>& points) { engine.setCurve (points); }
+    explicit WaveShaperEffect (const std::vector<WsPoint>& points)
+    {
+        engine.setCurve (points);
+        next.t[0].assign (16386, 0); // the sizes of the tables they will be swapped with (no allocation in process)
+        next.t[1].assign (32770, 0);
+    }
     void prepare (double sampleRate) noexcept override { engine.prepare (sampleRate); }
     void reset() noexcept override { engine.reset(); }
+    // the editor moved a point (round 165): the new tables are built here, off the audio thread, and swapped in at
+    // the start of a later block, so the oversampling filters and the DC tracker keep running
+    bool acceptState (const std::vector<std::uint8_t>& bytes) noexcept override
+    {
+        try
+        {
+            const auto s = parseWaveShaper (bytes);
+            if (! s)
+                return false;
+            Tables x;
+            x.t[0] = shaperTable (s->points, false);
+            x.t[1] = shaperTable (s->points, true);
+            return x.t[0].size() == next.t[0].size() && x.t[1].size() == next.t[1].size() && incoming.offer (x);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
     void process (float* left, float* right, int n, const EffectParams& p, double) noexcept override
     {
+        if (incoming.take (next))
+            engine.swapCurve (next.t[0], next.t[1]);
         engine.setControls (rawFrom (p[0], 64, 192), rawFrom (p[1], 0, 128), rawFrom (p[2], 0, 128), rawFrom (p[3], 0, 4),
                             p[4] >= 0.5f || hqForAllPlugins(), p[5] >= 0.5f, p[6] >= 0.5f, p[7] >= 0.5f, offlineRendering());
         engine.process (left, right, n);
     }
 
 private:
+    struct Tables
+    {
+        std::vector<std::int16_t> t[2];
+    };
     WaveShaperEngine engine;
+    StateHandoff<Tables> incoming;
+    Tables next;
 };
 } // namespace
 

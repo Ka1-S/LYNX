@@ -16059,3 +16059,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Visual164Tests.inc"
 #include "Patcher164fTests.inc"
 #include "FlPlugins165Tests.inc"
+#include "LinuxMouse165Tests.inc"
