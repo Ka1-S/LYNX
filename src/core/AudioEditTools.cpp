@@ -507,7 +507,7 @@ void remapEnvelopes (Document& doc, std::int64_t oldFrames, Range edited, std::i
     const auto newFrames = doc.audio.frames();
     if (oldFrames <= 1 || newFrames <= 1 || (oldFrames == newFrames && edited.length() == newLength))
         return;
-    for (auto* env : { &doc.volumeEnvelope, &doc.panEnvelope, &doc.separationEnvelope, &doc.mixEnvelope })
+    for (auto* env : { &doc.volumeEnvelope, &doc.panEnvelope, &doc.separationEnvelope, &doc.mixEnvelope, &doc.scratchEnvelope })
     {
         if (env->empty())
             continue;
@@ -1004,6 +1004,48 @@ Range pasteMixEnvelope (Document& doc, std::int64_t at, const Audio& clip, const
         }
     }
     return { at, at + c.audio.frames() };
+}
+
+void scratch (Document& doc, const Envelope& position, Progress* progress)
+{
+    // [DEC 0xce23b0] every output frame i plays the original at position env(i / n) * n (a resampler over a copy),
+    // so a rising line is the sound as it is, a falling one plays it backwards, flat holds it. Here: interpolation
+    // while the speed is under 1, and the average over the span played (the integral) when it is faster, which keeps
+    // fast scratches from aliasing.
+    const auto n = doc.audio.frames();
+    if (n < 2 || position.empty())
+        return;
+    const auto last = (double) (n - 1);
+    std::vector<double> pos ((std::size_t) n);
+    for (std::int64_t i = 0; i < n; ++i)
+        pos[(std::size_t) i] = std::clamp (position.at ((double) i / last), 0.0, 1.0) * last;
+    for (std::size_t c = 0; c < doc.audio.channels.size(); ++c)
+    {
+        if (stop (progress))
+            return;
+        const auto src = doc.audio.channels[c];
+        std::vector<double> integral ((std::size_t) n + 1, 0.0); // integral[k] = sum of src[0..k)
+        for (std::int64_t i = 0; i < n; ++i)
+            integral[(std::size_t) i + 1] = integral[(std::size_t) i] + src[(std::size_t) i];
+        auto at = [&] (double x) { // linear interpolation
+            const auto k = std::min ((std::int64_t) x, n - 2);
+            const auto f = x - (double) k;
+            return (double) src[(std::size_t) k] * (1.0 - f) + (double) src[(std::size_t) k + 1] * f;
+        };
+        auto area = [&] (double x) { // the integral up to x (of the sample-and-hold signal, fine for averaging)
+            const auto k = std::min ((std::int64_t) x, n - 1);
+            return integral[(std::size_t) k] + (double) src[(std::size_t) k] * (x - (double) k);
+        };
+        auto& out = doc.audio.channels[c];
+        for (std::int64_t i = 0; i < n; ++i)
+        {
+            const auto x = pos[(std::size_t) i];
+            const auto prev = i > 0 ? pos[(std::size_t) i - 1] : x;
+            const auto span = std::abs (x - prev);
+            out[(std::size_t) i] = (float) (span > 1.0 ? (area (std::max (x, prev)) - area (std::min (x, prev))) / span : at (x));
+        }
+        report (progress, (double) (c + 1) / (double) doc.audio.channels.size());
+    }
 }
 
 Range pasteMixSpectral (Document& doc, std::int64_t at, const Audio& clip, const Envelope& mix, double freqScale, Progress* progress)

@@ -66,6 +66,8 @@ struct Document
     Envelope volumeEnvelope, panEnvelope, separationEnvelope;
     // the mix envelope of "Paste mix (envelope)" (not heard: it says how much of the clipboard is mixed in)
     Envelope mixEnvelope;
+    // the position envelope of "Scratch (envelope)" (not heard until applied)
+    Envelope scratchEnvelope;
 
     bool hasLoop() const noexcept { return loopStart >= 0 && loopEnd > loopStart; }
 };

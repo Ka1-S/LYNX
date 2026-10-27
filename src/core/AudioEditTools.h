@@ -140,6 +140,9 @@ void equalize (Document& doc, Range r, const EqSettings& s, Progress* progress =
 // frame the result is clip * e + original * (1 - e), e = the mix envelope (x over the document's original length).
 // Returns the range the clipboard covers.
 Range pasteMixEnvelope (Document& doc, std::int64_t at, const Audio& clip, const Envelope& mix);
+// Scratch (envelope): the envelope is the play position (y 0..1 over the audio's length) for each moment (x), like a
+// record moved by hand: a rising diagonal leaves the audio as it is, falling = backwards, flat = held.
+void scratch (Document& doc, const Envelope& position, Progress* progress = nullptr);
 // Paste mix (spectral): per frequency, the curve's y (0..1) says how much of the clipboard (y) and of the original
 // (1 - y) is heard where the clipboard goes; frequency axis as in Equalize.
 Range pasteMixSpectral (Document& doc, std::int64_t at, const Audio& clip, const Envelope& mix, double freqScale, Progress* progress = nullptr);

@@ -5364,3 +5364,8 @@ countries: br
 "Edit: Paste mix" = "Editar: Colar mixando"
 "Per frequency: top = the clipboard, bottom = the original audio, between = a mix of both. The clipboard goes at the selection's start." = "Por frequência: em cima = a área de transferência, embaixo = o áudio original, no meio = uma mistura dos dois. A área de transferência entra no início da seleção."
 "Shape the mix envelope (top: the clipboard, bottom: the original), then choose Edit > Paste mix (envelope): apply." = "Desenhe o envelope de mixagem (em cima: a área de transferência, embaixo: o original) e escolha Editar > Colar mixando (envelope): aplicar."
+"Edit: Scratch" = "Editar: Scratch"
+"Play position {0} s" = "Posição de reprodução {0} s"
+"Scratch (envelope)" = "Scratch (envelope)"
+"Scratch (envelope): apply" = "Scratch (envelope): aplicar"
+"Draw the play position over time (rising = forwards, falling = backwards, flat = held), then choose Tools > Scratch (envelope): apply." = "Desenhe a posição de reprodução ao longo do tempo (subindo = para frente, descendo = para trás, plano = parado) e escolha Ferramentas > Scratch (envelope): aplicar."

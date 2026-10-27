@@ -1471,6 +1471,29 @@ private:
         commit (tr ("Paste mix (envelope)"));
     }
 
+    // FL's Scratch (envelope): the first time it shows the position envelope (a rising diagonal = the audio as it is);
+    // the second time it renders the audio played along that envelope
+    void scratchWithEnvelope()
+    {
+        if (doc.audio.empty() || recState != RecState::idle)
+            return;
+        if (envMode != EnvMode::scratch)
+        {
+            if (doc.scratchEnvelope.empty())
+                doc.scratchEnvelope.points = { { 0.0, 0.0, 0.0f }, { 1.0, 1.0, 0.0f } };
+            setEnvMode (EnvMode::scratch);
+            setStatus (tr ("Draw the play position over time (rising = forwards, falling = backwards, flat = held), then choose Tools > Scratch (envelope): apply."), false);
+            repaint();
+            return;
+        }
+        stopPlayback();
+        const auto env = doc.scratchEnvelope;
+        doc.scratchEnvelope = {};
+        ae::scratch (doc, env);
+        setEnvMode (EnvMode::wave);
+        commit (tr ("Scratch (envelope)"));
+    }
+
     // the clipboard stretched to the selection's length (pitch kept), or drum-stretched (slices keep their attacks),
     // replacing the selection
     void pasteFitted (bool drum)
@@ -2335,7 +2358,8 @@ private:
         volume,
         panning,
         separation,
-        mix // the mix envelope of Paste mix (envelope)
+        mix,    // the mix envelope of Paste mix (envelope)
+        scratch // the position envelope of Scratch (envelope)
     };
     EnvMode envMode = EnvMode::wave;
     ae::NoiseProfile noiseProfile;
@@ -2346,7 +2370,7 @@ private:
 
     ae::Envelope& currentEnvelope()
     {
-        return envMode == EnvMode::panning ? doc.panEnvelope : envMode == EnvMode::separation ? doc.separationEnvelope : envMode == EnvMode::mix ? doc.mixEnvelope : doc.volumeEnvelope;
+        return envMode == EnvMode::panning ? doc.panEnvelope : envMode == EnvMode::separation ? doc.separationEnvelope : envMode == EnvMode::mix ? doc.mixEnvelope : envMode == EnvMode::scratch ? doc.scratchEnvelope : doc.volumeEnvelope;
     }
 
     static const char* envModeName (EnvMode m)
@@ -2358,6 +2382,7 @@ private:
             case EnvMode::panning: return TR_NOOP ("Edit: Panning");
             case EnvMode::separation: return TR_NOOP ("Edit: Stereo sep");
             case EnvMode::mix: return TR_NOOP ("Edit: Paste mix");
+            case EnvMode::scratch: return TR_NOOP ("Edit: Scratch");
         }
         return "";
     }
@@ -2377,8 +2402,8 @@ private:
         juce::PopupMenu m;
         for (auto mode : { EnvMode::wave, EnvMode::volume, EnvMode::panning, EnvMode::separation })
             m.addItem (tr (envModeName (mode)), mode == EnvMode::wave || doc.audio.numChannels() > 1 || mode == EnvMode::volume, envMode == mode, [this, mode] { setEnvMode (mode); });
-        if (envMode == EnvMode::mix)
-            m.addItem (tr (envModeName (EnvMode::mix)), true, true, [] {});
+        if (envMode == EnvMode::mix || envMode == EnvMode::scratch)
+            m.addItem (tr (envModeName (envMode)), true, true, [] {});
         return m;
     }
 
@@ -2473,6 +2498,7 @@ private:
             const auto y = p.y;
             setStatus (envMode == EnvMode::volume ? tr ("Volume {0} dB", { juce::String (20.0 * std::log10 (juce::jmax (1.0e-6f, ae::envelopeGain (y))), 1) })
                                                   : envMode == EnvMode::mix ? tr ("Clipboard {0}%", { juce::String (juce::roundToInt (y * 100.0)) })
+                                                  : envMode == EnvMode::scratch ? tr ("Play position {0} s", { juce::String (y * (double) doc.audio.frames() / doc.audio.sampleRate, 3) })
                                                   : envMode == EnvMode::panning ? tr ("Panning {0}", { juce::String (juce::roundToInt ((y * 2.0 - 1.0) * 100.0)) })
                                                                                 : tr ("Stereo separation {0}", { juce::String (juce::roundToInt ((y * 2.0 - 1.0) * 100.0)) }),
                        false);
@@ -2492,7 +2518,8 @@ private:
         const Lane lanes[] = { { &doc.volumeEnvelope, EnvMode::volume, theme::colour::meterLow },
                                { &doc.panEnvelope, EnvMode::panning, theme::colour::info },
                                { &doc.separationEnvelope, EnvMode::separation, theme::colour::warning },
-                               { &doc.mixEnvelope, EnvMode::mix, theme::colour::accent } };
+                               { &doc.mixEnvelope, EnvMode::mix, theme::colour::accent },
+                               { &doc.scratchEnvelope, EnvMode::scratch, theme::colour::accent } };
         for (const auto& l : lanes)
         {
             const auto active = envMode == l.mode;
@@ -2737,8 +2764,8 @@ juce::PopupMenu AudioEditor::mainMenu()
     tools.addSectionHeader (tr ("Envelope"));
     tools.addSubMenu (tr ("Edit"), envModeMenu(), has);
     tools.addItem (tr ("Cancel all envelopes"), envAny, false, [this] {
-        doc.volumeEnvelope = doc.panEnvelope = doc.separationEnvelope = doc.mixEnvelope = {};
-        if (envMode == EnvMode::mix)
+        doc.volumeEnvelope = doc.panEnvelope = doc.separationEnvelope = doc.mixEnvelope = doc.scratchEnvelope = {};
+        if (envMode == EnvMode::mix || envMode == EnvMode::scratch)
             setEnvMode (EnvMode::wave);
         commit (tr ("Cancel all envelopes"));
     });
@@ -2791,6 +2818,7 @@ juce::PopupMenu AudioEditor::mainMenu()
     tools.addItem (tr ("Time stretch / pitch shift..."), has, false, [this] { showStretch(); });
     tools.addItem (tr ("Drum(loop) stretch..."), has, false, [this] { openEdisonTool (T::drumStretch); });
     tools.addItem (tr ("Claw machine..."), has, false, [this] { openEdisonTool (T::claw); });
+    tools.addItem (envMode == EnvMode::scratch ? tr ("Scratch (envelope): apply") : tr ("Scratch (envelope)"), has, false, [this] { scratchWithEnvelope(); });
     tools.addItem (tr ("Resample..."), has, false, [this] { showResample(); });
     tools.addSectionHeader (tr ("Channels"));
     const auto stereo = doc.audio.numChannels() > 1;

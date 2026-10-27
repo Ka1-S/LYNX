@@ -437,3 +437,27 @@ TEST (audioedittools_paste_mix_envelope_and_spectral_round165l)
     CHECK (toneLevel (y, a, b, 3000.0, sr) < 0.05); // its high tone is replaced...
     CHECK (toneLevel (y, a, b, 5000.0, sr) > 0.4);  // ...by the clipboard's
 }
+
+TEST (audioedittools_scratch_envelope_round165l)
+{
+    auto d = rampDoc (1000);
+    const auto original = d.audio.channels[0];
+    ae::Envelope forwards;
+    forwards.points = { { 0.0, 0.0, 0.0f }, { 1.0, 1.0, 0.0f } };
+    ae::scratch (d, forwards);
+    double err = 0.0;
+    for (std::size_t i = 0; i < original.size(); ++i)
+        err = std::max (err, (double) std::abs (d.audio.channels[0][i] - original[i]));
+    CHECK (err < 1e-4);
+    ae::Envelope backwards;
+    backwards.points = { { 0.0, 1.0, 0.0f }, { 1.0, 0.0, 0.0f } };
+    ae::scratch (d, backwards);
+    CHECK (std::abs (d.audio.channels[0].front() - original.back()) < 1e-4);
+    CHECK (std::abs (d.audio.channels[0].back() - original.front()) < 1e-4);
+    // twice as fast: the average of each pair (no aliasing), then held at the end
+    auto f = rampDoc (1000);
+    ae::Envelope fast;
+    fast.points = { { 0.0, 0.0, 0.0f }, { 0.5, 1.0, 0.0f }, { 1.0, 1.0, 0.0f } };
+    ae::scratch (f, fast);
+    CHECK (std::abs (f.audio.channels[0][900] - original.back()) < 0.01);
+}
