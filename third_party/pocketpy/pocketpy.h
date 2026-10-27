@@ -94,6 +94,7 @@
 // LYNX: every allocation is counted (third_party/pocketpy/pocketpy.c, "LYNX heap"): past the host's limit the running
 // script is stopped (like a script that runs too long), so a runaway script cannot take the machine's memory
 #ifndef PK_MALLOC
+    #include <stddef.h>
     #ifdef __cplusplus
     extern "C" {
     #endif

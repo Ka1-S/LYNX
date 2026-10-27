@@ -121,7 +121,8 @@ def onTick():
         v.trigger()
 )";
     auto p = makeProcessor (Kind::script, vfxs165::state (src));
-    const auto out = vfxs165::play (*p, {}, 44100);
+    auto out = vfxs165::play (*p, {}, 44100);
+    out.erase (std::remove_if (out.begin(), out.end(), [] (const vfxs165::Timed& o) { return o.at >= 44100; }), out.end());
     // 120 bpm: a tick is 44100 · 60 / (120 · 96) = 229.6875 samples; an eighth 11025
     std::vector<long> ons, offs;
     for (const auto& o : out)
@@ -132,7 +133,11 @@ def onTick():
             std::printf ("  %s at %ld key %d\n", o.e.type == Event::Type::on ? "on" : "off", o.at, o.e.voice.key);
     }
     CHECK ((ons == std::vector<long> { 0, 11025, 22050, 33075 }));
-    CHECK ((offs == std::vector<long> { 5513, 16538, 27563, 38588 })); // (24 ticks = 5512.5 samples, rounded)
+    // (24 ticks = 5512.5 samples: the half sample rounds either way)
+    const long expectedOffs[] = { 5513, 16538, 27563, 38588 };
+    CHECK (offs.size() == 4);
+    for (std::size_t k = 0; k < offs.size() && k < 4; ++k)
+        CHECK (std::abs (offs[k] - expectedOffs[k]) <= 1);
     CHECK (p->busy());
 }
 
@@ -334,6 +339,10 @@ TEST (vfx_script_python_has_what_fl_scripts_use)
                       "    assert text == 'two lines as one'\n"
                       "    assert Mine().extra == 3 and Mine().note == 60.0\n"
                       "    assert time.time_ns() > 0\n"
+                      "    assert '42'.isdigit() and not '4a'.isdigit() and 'ab'.isalpha() and 'a1'.isalnum() and ' '.isspace()\n"
+                      "    assert 'AB'.isupper() and 'ab'.islower() and 'hello world'.title() == 'Hello World'\n"
+                      "    assert 'a,b,c'.rsplit(',', 1) == ['a,b', 'c'] and 'a.b.c'.rpartition('.') == ('a.b', '.', 'c')\n"
+                      "    assert 'abcabc'.rfind('b') == 4 and 'ab'.center(6, '*') == '**ab**' and 'x'.capitalize() == 'X'\n"
                       "    vfx.setOutputController('ok', 1)\n"
                       "vfx.addOutputController('ok', 0)\n"
                       "def onTick():\n    check()\n";

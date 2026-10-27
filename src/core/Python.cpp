@@ -98,6 +98,88 @@ def _randrange(start, stop=None, step=1):
         raise ValueError('empty range for randrange()')
     return start + step * random.randint(0, n - 1)
 random.randrange = _randrange
+
+# str methods CPython has and pocketpy lacks (ASCII rules; other characters count as letters)
+import _lynxstr
+def _letter(c):
+    return ('a' <= c <= 'z') or ('A' <= c <= 'Z') or ord(c) > 127
+def _digit(c):
+    return '0' <= c <= '9'
+def _isdigit(s):
+    return len(s) > 0 and all(_digit(c) for c in s)
+def _isalpha(s):
+    return len(s) > 0 and all(_letter(c) for c in s)
+def _isalnum(s):
+    return len(s) > 0 and all(_letter(c) or _digit(c) for c in s)
+def _isspace(s):
+    return len(s) > 0 and all(c in ' \t\n\r\x0b\x0c' for c in s)
+def _isupper(s):
+    return s != s.lower() and s == s.upper()
+def _islower(s):
+    return s != s.upper() and s == s.lower()
+def _isidentifier(s):
+    return len(s) > 0 and not _digit(s[0]) and all(_letter(c) or _digit(c) or c == '_' for c in s)
+def _capitalize(s):
+    return s[:1].upper() + s[1:].lower()
+def _title(s):
+    out = ''
+    prev = False
+    for c in s:
+        out += c.lower() if prev else c.upper()
+        prev = _letter(c)
+    return out
+def _istitle(s):
+    return s != s.lower() and s == _title(s)
+def _swapcase(s):
+    return ''.join(c.lower() if c != c.lower() else c.upper() for c in s)
+def _center(s, width, fill=' '):
+    n = width - len(s)
+    if n <= 0:
+        return s
+    left = n // 2 + (n & width & 1)
+    return fill * left + s + fill * (n - left)
+def _partition(s, sep):
+    i = s.find(sep)
+    return (s, '', '') if i < 0 else (s[:i], sep, s[i + len(sep):])
+def _rfind(s, sub, start=0, end=None):
+    if end is None:
+        end = len(s)
+    best = -1
+    i = s.find(sub, start)
+    while i >= 0 and i + len(sub) <= end:
+        best = i
+        i = s.find(sub, i + 1)
+    return best
+def _rindex(s, sub, start=0, end=None):
+    i = _rfind(s, sub, start, end)
+    if i < 0:
+        raise ValueError('substring not found')
+    return i
+def _rpartition(s, sep):
+    i = _rfind(s, sep)
+    return ('', '', s) if i < 0 else (s[:i], sep, s[i + len(sep):])
+def _rsplit(s, sep=None, maxsplit=-1):
+    parts = s.split() if sep is None else s.split(sep)
+    if maxsplit < 0 or len(parts) <= maxsplit + 1:
+        return parts
+    keep = len(parts) - maxsplit
+    return [(' ' if sep is None else sep).join(parts[:keep])] + parts[keep:]
+def _expandtabs(s, tabsize=8):
+    out = ''
+    for c in s:
+        if c == '\t':
+            out += ' ' * (tabsize - len(out.split('\n')[-1]) % tabsize) if tabsize > 0 else ''
+        else:
+            out += c
+    return out
+for _n, _f in (('isdigit', _isdigit), ('isdecimal', _isdigit), ('isnumeric', _isdigit), ('isalpha', _isalpha),
+               ('isalnum', _isalnum), ('isspace', _isspace), ('isupper', _isupper), ('islower', _islower),
+               ('isidentifier', _isidentifier), ('capitalize', _capitalize), ('title', _title), ('istitle', _istitle),
+               ('swapcase', _swapcase), ('casefold', str.lower), ('center', _center), ('partition', _partition),
+               ('rpartition', _rpartition), ('rfind', _rfind), ('rindex', _rindex), ('rsplit', _rsplit),
+               ('expandtabs', _expandtabs)):
+    if not hasattr('', _n):
+        _lynxstr.add(_n, _f)
 )PY";
 
 // `re` on top of one native search (std::regex, ECMAScript syntax after a few Python → ECMAScript rewrites)
@@ -420,6 +502,16 @@ std::size_t byteOffset (const char* s, std::size_t size, int chars)
     return size;
 }
 
+// _lynxstr.add(name, function): a method of str (LYNX's prelude adds CPython's missing ones)
+bool strAdd (int argc, py_StackRef argv)
+{
+    PY_CHECK_ARGC (2);
+    PY_CHECK_ARG_TYPE (0, tp_str);
+    py_setdict (py_tpobject (tp_str), py_name (py_tostr (py_arg (0))), py_arg (1));
+    py_newnone (py_retval());
+    return true;
+}
+
 bool reError (const std::exception& e)
 {
     return py_exception (tp_ValueError, "bad regular expression (%s)", e.what());
@@ -683,6 +775,7 @@ struct Host
         };
         cb->flush = [] {};
         cb->getchr = [] { return -1; };
+        py_bindfunc (py_newmodule ("_lynxstr"), "add", strAdd);
         py_GlobalRef re = py_newmodule ("_lynxre");
         py_bindfunc (re, "find", reFind);
         py_bindfunc (re, "groups", reGroups);
