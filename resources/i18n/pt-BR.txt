@@ -5211,7 +5211,6 @@ countries: br
 "Minute : Second : Centisecond" = "Minuto : Segundo : Centésimo"
 "Time: SMPTE time code (hours : minutes : seconds : frames)" = "Tempo: código de tempo SMPTE (horas : minutos : segundos : quadros)"
 "[LMB] next mode (bars, minutes, SMPTE)  [RMB] mode and frame rate" = "[LMB] próximo modo (compassos, minutos, SMPTE)  [RMB] modo e taxa de quadros"
-"Note names" = "Nomes das notas"
 "English (C, D, E)" = "Inglês (C, D, E)"
 "Germanic (H for B)" = "Germânico (H no lugar de B)"
 "Solfège (do, re, mi)" = "Solfejo (dó, ré, mi)"

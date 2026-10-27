@@ -165,6 +165,58 @@ Score = user value × (1 / effort). Evidence: [DFM] for all; [DECOMP] added wher
 | 12 | Patcherize, Performance mode, Piano Roll / controller Python scripts, Create DirectWave instrument, score-sheet export | M | L | next version (12: after r165c / r165d land) |
 | — | Stem separation / AI tools, FL Cloud, FL Studio Remote, Gopher | ⛔ | | decision / out of scope |
 
+### 2.1 Plan after the user's "everything in this version" (2026-10-27 16:40)
+Edison tools → r165l, Performance mode + Patcherize → r165m. Everything else of §2 is r165f's for 0.1.20, two
+sub-rounds at a time (LOAD LIMIT rules):
+| Sub-round | Gaps |
+|---|---|
+| rea165-markers (running) | #1 marker actions, Quantize song jumps, time-marker menu, MIDI marker jump |
+| rea165-midisync (running) | #2 MIDI clock / MTC out, external clock in, all-notes-off |
+| rea165-mixer (next) | #7 per-track manual latency, Bypass track latency compensation, Compensate for master latency; #8 Render armed / selected tracks to wave files, Create submix; record source point |
+| rea165-rack (next) | #9 Burn MIDI to pattern, Channel Rack per-channel loop points (Advanced looping), Receive notes from; Create DirectWave instrument (auto-sampler) |
+| rea165-browser (then) | #10 Browser tags (+ plugin tags); Playlist track leftovers (Lock to content, Send pattern instances here, Merge pattern clips); MIDI clipboard; score-sheet export |
+| rea165-scripts (after r165d's pocketpy lands) | Piano Roll Python scripts, MIDI controller scripts |
+| lead | #3 score logger, #4 metronome sounds, #5 SMPTE time display, #6 note names — done, building |
+
+## 3. Built by the lead
+
+### 3.1 Score logger [DFM] [DECOMP]
+FL: Tools › "Dump score log to selected pattern" › Last 2 / 5 / 10 / 20 / 30 minutes (actions
+`ToolsDumpScoreLog{2,5,10,20,30}MinutesAction`, tag = minutes) and "Clear log" (`ToolsClearScoreLogAction`, a confirm
+"This will clear all logged notes!"). The dump is `FUN_0124c060` (called with tag × 60 seconds):
+- the log is a note list (start and length in milliseconds of wall time, the rack channel of each note); empty →
+  "The score log is empty. That means you haven't input any notes yet.";
+- a copy is converted with `FUN_01311fb0` = ms × tempo × PPQ / 60000 (rounded), start and end separately; notes still
+  held (length 0x7FFFFFF0) are dropped; lengths below the minimum (`DAT_015d89cc` = ticks per step / 6) are raised;
+- the window reaches back from the end of the last note; older notes are dropped;
+- the first note moves to tick 0 and every silence longer than **two bars** (`DAT_015d8914` = ticks per bar, set
+  by `FUN_013111e0` from PPQ / steps per beat / beats per bar) is shortened to two bars;
+- undo step "score log dump"; the selected pattern: empty → the notes go in; otherwise "Merge" / "Replace" / "Cancel".
+LYNX (`core/ScoreLog.{h,cpp}`, `AudioEngine::logPlayedNote`, Tools menu): the same rules. Notes are logged where
+they are sent to the channels (MIDI inputs after the scale snap and target selection; the typing keyboard and the
+touch keyboard), in a fixed 65 536-note ring under a spin lock held for a few instructions, on the MIDI / UI thread
+only — never on the audio thread. One difference: FL's gap pass also walks the dropped (older / held) notes, so a
+dump can start up to two bars late; LYNX applies the rule to the kept notes only (the first kept note at tick 0).
+
+### 3.2 Metronome sounds [DFM]
+FL's metronome menu: Hi-hat, Tick, Beep, Cowbell, Pulse. LYNX (metronome button right-click › Metronome sound):
+Click (LYNX's previous sound, unchanged), Hi-hat (double high-passed noise), Tick (12 ms bright sine), Beep (80 ms
+sine), Cowbell (two square partials a ×1.44 apart), Pulse (raised-cosine bump) — LYNX's own synthesis, the downbeat
+higher (or louder for the hi-hat). Saved in the UI settings (`metronomeSound`). Cost: one switch per sample while a
+click sounds, nothing otherwise. Count-in 1–4 bars already existed (Record menu).
+
+### 3.3 SMPTE time display [DFM]
+FL's time display modes: Bar : Beat/Step : Tick, Minute : Second : Centisecond, SMPTE 23.976 / 24 / 25 / 29.97 (drop,
+non-drop) / 30 / 48 / 50 / 59.94 (drop, non-drop) / 60 / 72 fps. LYNX's toolbar time display: a click cycles bars →
+minutes → SMPTE; the right-click menu picks the mode and the rate (`core/Timecode.h`: drop frame skips frames 0–1
+(0–3 at 59.94) at every minute but each tenth, so one real hour reads 01:00:00;00; non-drop 29.97 reads 00:59:56:12).
+
+### 3.4 Note names [DFM]
+FL's Settings › General › Note names (English / Germanic / Solfege) and Black notes (sharps / flats). LYNX: Settings ›
+General, the same two choices (`core/NoteNames.h`): Germanic writes H for B and B for B♭; Solfège Do Re Mi Fa Sol La
+Si. Used by the Piano Roll keys and notes, its scale list and chord readout, the note tools, the touch keyboard and
+the channel's root-note keyboard. Octaves stay FL's (key 60 = C5 / Do5).
+
 ## Where I stopped
 - PAUSED by the coordinator (machine load 33). Audit done: §1 inventory ([DFM] of all 105 FLEngine forms, tmp/rea165/menus.txt),
   §2 ranking. Sub-rounds launched and paused: rea165-markers (gap 1), rea165-midisync (gap 2) in their own worktrees.
