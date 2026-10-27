@@ -1,5 +1,7 @@
 #include "engine/ProjectFile.h"
 
+#include "core/MixerOps.h"
+
 #include <algorithm>
 
 #include "core/Effects.h"
@@ -1932,6 +1934,12 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
     if (song.mixer.empty()) // projects from before the mixer existed
         song.mixer = Song::defaultMixer();
+
+    // a channel routed past the saved mixer's last insert (round 162): the inserts up to it exist, so it is not mixed
+    // into the last one
+    for (const auto& c : song.channels)
+        if (c.mixerTrack >= (int) song.mixer.size())
+            mixerops::ensureInsert (song, c.mixerTrack);
 
     // sends to tracks that don't exist are discarded
     for (auto& t : song.mixer)
