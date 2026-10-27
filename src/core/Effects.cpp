@@ -49,6 +49,7 @@
 #include "core/VoiceTools.h"
 #include "core/VoiceShift.h"
 #include "core/VisualFx.h"
+#include "core/FlExtraFx.h"
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
 
@@ -2911,6 +2912,28 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                 { "Input stereo", 1.0f }, { "Round trip", 0.0f }, { "Ping", 0.0f } } };
             return info;
         }
+        case EffectKind::fruityMute2:
+        {
+            // round 165g: a new Fruity Mute 2 lets the sound through (Mute = On means sound on, FL's labels), both sides selected
+            static const EffectInfo info { "Fruity Mute 2", { { "Mute", 1.0f }, { "Channel", 1.0f / 3.0f } } };
+            return info;
+        }
+        case EffectKind::bigClock:
+        {
+            static const EffectInfo info { "Fruity Big Clock", { { "Display", 0.0f } } };
+            return info;
+        }
+        case EffectKind::tuner:
+        {
+            // FL's Default preset: 440 Hz, fast, bass off, Dial
+            static const EffectInfo info { "Tuner", { { "Reference", 0.5f }, { "Reactivity", 1.0f }, { "Bass", 0.0f }, { "Visual", 1.0f } } };
+            return info;
+        }
+        case EffectKind::htmlNotebook:
+        {
+            static const EffectInfo info { "Fruity HTML NoteBook", {} };
+            return info;
+        }
         case EffectKind::waveCandy:
         {
             // round 164c (core/VisualFx.h wavecandy::Param): a new one shows the spectrum, like FL's Default preset's analyser
@@ -3428,6 +3451,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return lowlifter::paramText (param, v);
         case EffectKind::hardwareInsert:
             return hwinsert::paramText (param, v);
+        case EffectKind::fruityMute2:
+            return flextra::mute2::paramText (param, v);
+        case EffectKind::bigClock:
+            return flextra::bigclock::paramText (param, v);
+        case EffectKind::tuner:
+            return flextra::tuner::paramText (param, v);
+        case EffectKind::htmlNotebook:
+            return {};
         case EffectKind::waveCandy:
             return visualfx::wavecandy::paramText (param, v);
         case EffectKind::visualizer:
@@ -3690,6 +3721,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::flLowLifter: return lowlifter::make(); // round 154
         case EffectKind::hardwareInsert: return std::make_unique<hwinsert::HardwareInsertFx>(); // round 164d
+        case EffectKind::fruityMute2: return flextra::mute2::make(); // round 165g
+        case EffectKind::bigClock:
+        case EffectKind::tuner:
+        case EffectKind::htmlNotebook: return visualfx::make(); // round 165g: pass the sound, feed the editor's tap
         case EffectKind::waveCandy:
         case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
         case EffectKind::xyController:

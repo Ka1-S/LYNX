@@ -29,6 +29,7 @@
 #include "platform/FileTypes.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "ui/PluginPresetMenu.h"
 #include "ui/PluginWindow.h"
 #include "ui/ClipProperties.h"
@@ -739,6 +740,18 @@ public:
             // animates (demo signal) — round 122's check that an idle editor burns no CPU
             const auto i = args.indexOf ("--editorcpu");
             runEditorCpu (args[i + 1].unquoted());
+            return;
+        }
+
+        if (args.contains ("--flextrashot"))
+        {
+            // LYNX.exe --flextrashot <folder>: pictures of the editors of round 165g (Big Clock, Tuner, HTML NoteBook, Mute 2)
+            const auto i = args.indexOf ("--flextrashot");
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            lynx::AudioEngine shotEngine (false);
+            const auto ok = lynx::runFlExtraShots (shotEngine, juce::File (args[i + 1].unquoted()));
+            setApplicationReturnValue (ok ? 0 : 1);
+            quit();
             return;
         }
 

@@ -7,20 +7,20 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
 - 2026-10-27 resume after the BSOD: Ghidra projects of every missing plugin's DLL are on D:\lynx-work\flplugins165\ghidra
   (BigClock, Mute2, Scratcher(+engine), Tuner(+engine), Transmitter, VideoPlayer, HtmlNoteBook). Sub-rounds relaunched:
   flbeta165p (Granulizer, Newtime, Newtone), flbeta165s (Harmor); flbeta165k (Kepler) waits for a free slot.
-- Now: Fruity Mute 2 decoded; FL renders of crafted Mute 2 states running; next: Big Clock, Tuner, HTML NoteBook,
-  inert imports (Razer Chroma, ReWired, FL Studio Mobile), then Scratcher, Transmitter, Video Player.
+- Batch 1 written (Mute 2, Big Clock, Tuner, HTML NoteBook, inert imports): building + tests, FL GUI shots, then land.
+  Next: Scratcher, Transmitter (34 presets, state v3 = ~44 controls 0…10000), Video Player.
 
 ## Plugins (FL 2026, Plugins\Fruity)
 | FL plugin | kind | LYNX | evidence |
 |---|---|---|---|
-| Fruity Mute 2 | effect | (in progress) | [DECOMP], [MANUAL] |
-| Fruity Big Clock | effect (no sound) | (in progress) | [MANUAL] |
-| Tuner | effect (no sound) | (in progress) | [MANUAL] |
-| Fruity HTML NoteBook | effect (no sound) | (in progress) | [MANUAL] |
+| Fruity Mute 2 | effect | exact (§1) | [DECOMP], [MANUAL] |
+| Fruity Big Clock | effect (no sound) | §2 | [MANUAL] |
+| Tuner | effect (no sound) | §3 | [MANUAL] |
+| Fruity HTML NoteBook | effect (no sound) | §4 | [MANUAL] |
 | Fruity Scratcher | effect (turntable) | (todo) | [MANUAL] |
 | Transmitter | effect (transient / sustain split) | (todo) | [MANUAL], presets |
 | Fruity Video Player | generator | (todo) | [MANUAL] |
-| FL Studio Mobile / Mobile Rack FX | generator / effect | (todo: import note) | |
+| FL Studio Mobile / Mobile Rack FX | generator / effect | import note (§5) | |
 | Razer Chroma, ReWired | | inert on import, with a note | |
 
 ## 1. Fruity Mute 2
@@ -28,3 +28,34 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
 clamped to 2: 0 = L, 1 = L + R, 2 = R. [DECOMP 006baaf0] process: not muted → copy; L → left × 0, right × 1;
 L + R → both zeroed; R → left × 1, right × 0. No ramp. [DECOMP 006ba2a0] state: int32 version (1), then the two
 controls' raw values (int32 each).
+[SHOT D:\lynx-work\flplugins165\fl\e13.png] FL 2026's window: two knobs with caption boxes MUTE / CHANNEL and their
+values; a new instance shows "On" and "L + R" — so "On" is the sound passing (muted = false indexes label 0 "On"), and
+LYNX's default is Mute = 1, Channel = 1/3. [EXEC FL] headless renders (FL64 /R) of projects holding Mute 2 hang at
+"Opening: Fruity Mute 2" (screenshot fl\stuck1.png), so the engine is checked by the decompiled logic and unit tests
+only. LYNX: EffectKind::fruityMute2, core/FlExtraFx.cpp, layout "Fruity Mute 2" (PluginLayout.cpp), import of the state.
+
+## 2. Fruity Big Clock
+[MANUAL] shows the playing time: Bar:Beat:Tick, Minute:Second:1/100 and (optional) Bar:Step:Tick; right-click for
+options. LYNX: EffectKind::bigClock (no sound, passes the audio), one parameter "Display"; the editor
+(ui/FlExtraEditors.cpp) draws the song position in the biggest monospaced size that fits the resizable window, a click
+steps to the next display, right-click picks one. Ticks are shown at FL's default 96 per quarter note. [TEST]
+fl165g_big_clock_text.
+
+## 3. Tuner
+[MANUAL] Reference 400–480 Hz (440), Reactivity slow … fast (fast: F1–C10, slow: F1–E7, ignores brief fluctuations),
+Bass (one octave lower, ≥ 100 ms per estimate), Visual Basic / Dial. [DATA presets Circular|Horizontal\{Default,
+Average,Bass}.fst] state = i32 version 1, reference 3000, reactivity (Default 1, Average 0), bass 0/1, visual 1 =
+Horizontal (Basic), 2 = Circular (Dial). [HYP] reference raw 0…6000 = 400…480 Hz (3000 = 440, the midpoint),
+reactivity −1 … 1. LYNX's detection is its own YIN on the UI thread fed by the slot's tap (the audio thread only copies,
+as Wave Candy): [TEST] fl165g_tuner_state_and_detection — B0 (bass) to C8, both reactivities, A4 = 432 Hz, within 2 cents.
+
+## 4. Fruity HTML NoteBook
+[MANUAL] shows an .html page chosen with the file icon; the page is not stored in the project. [DATA presets] state =
+i32 version 1 + the address as a Pascal short string ("http://www.google.com/", FL news). LYNX keeps the same state,
+renders local pages as formatted text (headings, paragraphs, lists, bold / italic, links, preformatted; scripts and
+styles skipped) and opens web addresses and external links in the user's browser — LYNX never downloads pages itself
+(privacy). Links to other local pages open in place. [TEST] fl165g_html_notebook.
+
+## 5. Inert plugins
+Razer Chroma (vendor lighting) and FL Studio Mobile Rack FX are left out of the mixer with a note in the import report;
+ReWired, Fruity Video Player and FL Studio Mobile channels keep LYNX's synth substitute with a note saying why.

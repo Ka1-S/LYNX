@@ -16058,3 +16058,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Misc164Tests.inc"
 #include "Visual164Tests.inc"
 #include "Patcher164fTests.inc"
+#include "FlPlugins165Tests.inc"

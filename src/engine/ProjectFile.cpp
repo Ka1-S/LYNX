@@ -243,6 +243,10 @@ const char* effectId (EffectKind k)
         case EffectKind::flFrequencyShifter: return "flFrequencyShifter";
         case EffectKind::flLowLifter: return "flLowLifter";
         case EffectKind::hardwareInsert: return "hardwareInsert";
+        case EffectKind::fruityMute2: return "fruityMute2";
+        case EffectKind::bigClock: return "bigClock";
+        case EffectKind::tuner: return "tuner";
+        case EffectKind::htmlNotebook: return "htmlNotebook";
         case EffectKind::waveCandy: return "waveCandy";
         case EffectKind::visualizer: return "visualizer";
         case EffectKind::xyController: return "xyController";
@@ -705,7 +709,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
                     EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter, EffectKind::waveCandy, EffectKind::visualizer,
-                    EffectKind::xyController, EffectKind::xyzController, EffectKind::controlSurface, EffectKind::hardwareInsert })
+                    EffectKind::xyController, EffectKind::xyzController, EffectKind::controlSurface, EffectKind::hardwareInsert,
+                    EffectKind::fruityMute2, EffectKind::bigClock, EffectKind::tuner, EffectKind::htmlNotebook })
         if (id == effectId (k))
             return k;
 

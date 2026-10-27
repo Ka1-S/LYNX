@@ -145,6 +145,8 @@ APP_SOURCES+=(src/core/PluginLayout.cpp src/core/StateParams.cpp src/ui/PluginEd
 APP_SOURCES+=(src/core/CrashReport.cpp src/ui/CrashReporter.cpp)
 # visual plugins: Wave Candy, Visualizer, video export (round 164c)
 APP_SOURCES+=(src/core/VisualFx.cpp src/ui/VisualEditors.cpp)
+# FL plugins LYNX lacked: Mute 2, Big Clock, Tuner, HTML NoteBook (round 165g)
+APP_SOURCES+=(src/core/FlExtraFx.cpp src/ui/FlExtraEditors.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

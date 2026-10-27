@@ -990,6 +990,25 @@ Layout fruityBalance()
     return l;
 }
 
+Layout fruityMute2Layout()
+{
+    // round 165g, FL Studio 2026's window: two knobs side by side, each with its caption box (MUTE / CHANNEL) and its value
+    // under it ("On" = the sound passes, "Off" = muted; L, L + R, R = the side(s) silenced)
+    Layout l;
+    l.fl = "Fruity Mute 2";
+    l.width = 300;
+    l.height = 64;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 300, 64, nullptr, boxed));
+    v.push_back (knob (28, 32, 36, "Mute", nullptr, 0, noCaption, 1));
+    v.push_back (label (52, 8, 92, 16, TR_NOOP ("MUTE")));
+    v.push_back (value (52, 30, 92, 18, "Mute"));
+    v.push_back (knob (172, 32, 36, "Channel", nullptr, 0, noCaption, 3));
+    v.push_back (label (196, 8, 96, 16, TR_NOOP ("CHANNEL")));
+    v.push_back (value (196, 30, 96, 18, "Channel"));
+    return l;
+}
+
 Layout fruitySend()
 {
     // one row: DRY, the SEND TO box (the destination insert, a menu of the mixer's inserts), PAN and VOLUME
@@ -3255,7 +3274,9 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::flPitchShifter, EffectKind::effector, EffectKind::hardcore, EffectKind::vocodex,
                                                  EffectKind::fruitySend,
                                                  // round 154
-                                                 EffectKind::emphasizer };
+                                                 EffectKind::emphasizer,
+                                                 // round 165g
+                                                 EffectKind::fruityMute2 };
     return kinds;
 }
 
@@ -3342,6 +3363,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::orbit: l = captionsAbove (orbitLayout()); break;
         case EffectKind::latticeMod: l = captionsAbove (latticeLayout()); break;
         case EffectKind::fruitySend: l = fruitySend(); break;
+        case EffectKind::fruityMute2: l = fruityMute2Layout(); break;
         case EffectKind::crestCompressor: l = crestCompressor(); break;
         case EffectKind::prismMultiband: l = prismMultiband(); break;
         case EffectKind::sentryGate: l = sentryGate(); break;
