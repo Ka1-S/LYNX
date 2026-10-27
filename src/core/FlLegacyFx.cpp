@@ -1,6 +1,6 @@
 #include "core/FlLegacyFx.h"
 
-// FL's legacy Fruity Phase Inverter, Center, Bass Boost and 7 Band EQ, exact engines (docs/analise/REA_rodada165k.md).
+// FL's legacy Fruity Phase Inverter, Center, Bass Boost, 7 Band EQ and Delay (v1), exact engines (docs/analise/REA_rodada165k.md).
 // Clean-room: written from the behaviour, formulas and data layouts described there; nothing of Image-Line's code or
 // data is copied. Arithmetic follows the plug-ins operation by operation (float / double steps in their order, one
 // rounding each, no contraction); the x87 kernels run in 80-bit long double with 64-bit precision and round to
@@ -132,6 +132,22 @@ std::optional<Eq7State> parseEq7 (const std::vector<std::uint8_t>& d)
     return s;
 }
 
+std::optional<Delay1State> parseDelay1 (const std::vector<std::uint8_t>& d)
+{
+    if (d.size() < 4 + 4 * (std::size_t) delay1Params || i32At (d, 0) > 1)
+        return std::nullopt;
+    Delay1State s;
+    for (int k = 0; k < delay1Params; ++k)
+        s.raw[(std::size_t) k] = i32At (d, 4 + 4 * (std::size_t) k);
+    return s;
+}
+
+namespace
+{
+constexpr int delay1Lo[delay1Params] = { 0, 0, 0, 0, 1, 0 };
+constexpr int delay1Hi[delay1Params] = { 1024, 1024, 1024, 1024, 16, 1024 };
+} // namespace
+
 void toParams (const PhaseInverterState& s, float* p) noexcept { p[0] = norm (s.invert, 0, 1024); }
 void toParams (const CenterState& s, float* p) noexcept { p[0] = s.on != 0 ? 1.0f : 0.0f; }
 void toParams (const BassBoostState& s, float* p) noexcept
@@ -143,6 +159,18 @@ void toParams (const Eq7State& s, float* p) noexcept
 {
     for (int b = 0; b < eq7Bands; ++b)
         p[b] = norm (s.gain[(std::size_t) b], -1800, 1800);
+}
+void toParams (const Delay1State& s, float* p) noexcept
+{
+    for (int k = 0; k < delay1Params; ++k)
+        p[k] = norm (s.raw[(std::size_t) k], delay1Lo[k], delay1Hi[k]);
+}
+Delay1State delay1FromParams (const float* p) noexcept
+{
+    Delay1State s;
+    for (int k = 0; k < delay1Params; ++k)
+        s.raw[(std::size_t) k] = rawFrom (p[k], delay1Lo[k], delay1Hi[k]);
+    return s;
 }
 PhaseInverterState phaseInverterFromParams (const float* p) noexcept { return { rawFrom (p[0], 0, 1024) }; }
 CenterState centerFromParams (const float* p) noexcept { return { p[0] >= 0.5f ? 1 : 0 }; }
@@ -201,6 +229,37 @@ std::string eq7ParamText (int param, float v01)
         return {};
     char b[32];
     std::snprintf (b, sizeof b, "%+.1f dB", (double) eq7Db (rawFrom (v01, -1800, 1800)));
+    return b;
+}
+
+namespace
+{
+int delphiRound (double x) noexcept { return (int) std::nearbyint (x); } // Round: to nearest, ties to even
+int delayTempo (float v) noexcept { return delphiRound ((double) (v * 220.0f + 60.0f)); }
+int delayMode (float v) noexcept { return delphiRound ((double) (v * 3.0f - 0.5f)); }
+} // namespace
+std::string delay1ParamText (int param, float v01)
+{
+    if (param < 0 || param >= delay1Params)
+        return {};
+    const int raw = rawFrom (v01, delay1Lo[param], delay1Hi[param]);
+    const float v = unit (raw, delay1Lo[param], delay1Hi[param]);
+    char b[32];
+    if (param == 3)
+    {
+        if (raw == 0)
+            return "Host";
+        std::snprintf (b, sizeof b, "%d BPM", delayTempo (v));
+    }
+    else if (param == 4)
+        std::snprintf (b, sizeof b, "%d/16", raw);
+    else if (param == 5)
+    {
+        static const char* const names[3] = { "Normal", "Inverted stereo", "Ping-pong" };
+        return names[std::clamp (delayMode (v), 0, 2)];
+    }
+    else
+        std::snprintf (b, sizeof b, "%d%%", (int) std::lround (v * 100.0f));
     return b;
 }
 
@@ -394,6 +453,206 @@ void Eq7Engine::process (float* left, float* right, int n) noexcept
     }
 }
 
+// ================================================================================================ Fruity Delay (v1)
+namespace
+{
+std::uint32_t bitsOf (float f) noexcept
+{
+    std::uint32_t u;
+    std::memcpy (&u, &f, 4);
+    return u;
+}
+// the plug-ins' per-call parameter glide: from the current value towards the target over the call, at most `limit`
+// per sample; a glide ending within 2^-24 of zero ends at zero
+void glide (float& slope, float& cur, float& start, float target, float limit, int n) noexcept
+{
+    start = cur;
+    slope = target - start;
+    if ((bitsOf (slope) & 0xFFFFFFFFu) == 0)
+        return;
+    cur = target;
+    slope = slope / (float) n;
+    if (std::fabs (slope) > limit)
+    {
+        slope = std::copysign (limit, slope);
+        cur = start + slope * (float) n;
+        if ((bitsOf (cur) & 0x7FFFFFFFu) < 0x33800000u)
+        {
+            cur = 0.0f;
+            slope = -start / (float) n;
+        }
+    }
+}
+
+// dst += src · g over m frames, the gain gliding by d per frame as the plug-ins' SSE routine steps it (two frames per
+// register: even frames from g, odd ones from g + d, each advancing by 2d; the last m mod 8 frames by d)
+void depositGlide (const float* l, const float* r, float* dst, int m, float g, float d) noexcept
+{
+    float a = g, b = g + d;
+    const float d2 = d + d;
+    const int groups = m >> 3;
+    int i = 0;
+    for (int k = 0; k < groups * 4; ++k)
+    {
+        dst[2 * i] = l[i] * a + dst[2 * i], dst[2 * i + 1] = r[i] * a + dst[2 * i + 1];
+        ++i;
+        dst[2 * i] = l[i] * b + dst[2 * i], dst[2 * i + 1] = r[i] * b + dst[2 * i + 1];
+        ++i;
+        a = a + d2, b = b + d2;
+    }
+    for (; i < m; ++i)
+    {
+        dst[2 * i] = l[i] * a + dst[2 * i], dst[2 * i + 1] = r[i] * a + dst[2 * i + 1];
+        a = a + d;
+    }
+}
+} // namespace
+
+void Delay1Engine::prepare (int sampleRate, int maxBlock) noexcept
+{
+    *this = Delay1Engine();
+    rate = std::max (1, sampleRate);
+    extra = std::max (1, maxBlock);
+    limit = (float) (44.1 / (double) rate); // the host's glide limit per sample: 0.001 at 44.1 kHz
+    const Delay1State defaults;
+    for (int k = 0; k < delay1Params; ++k)
+        setParam (k, defaults.raw[(std::size_t) k]);
+    inCur = inTarget;
+    fbCur = fbTarget;
+}
+
+void Delay1Engine::setHostTempo (float bpm) noexcept
+{
+    hostTempo = bpm;
+    if (tempoBpm == 0)
+    {
+        sixteenth = delphiRound ((double) ((float) (rate * 15) / hostTempo));
+        setLength();
+    }
+}
+
+void Delay1Engine::setParam (int k, int raw) noexcept
+{
+    if (k < 0 || k >= delay1Params)
+        return;
+    const float x = unit (raw, delay1Lo[k], delay1Hi[k]);
+    v[k] = x;
+    switch (k)
+    {
+        case 0: inTarget = x; break;
+        case 1: fbTarget = (float) ((double) x * 0.99); break;
+        case 2:
+        {
+            const auto e = (float) (dmath::exp ((double) x * dmath::ln (21.0)) - 1.0);
+            cutoff = (float) ((double) e * 0.05);
+            break;
+        }
+        case 3:
+            if (x == 0.0f)
+            {
+                tempoBpm = 0;
+                sixteenth = delphiRound ((double) ((float) (rate * 15) / hostTempo));
+            }
+            else
+            {
+                tempoBpm = delayTempo (x);
+                sixteenth = delphiRound ((double) ((float) (rate * 15) / (float) tempoBpm));
+            }
+            setLength();
+            break;
+        case 4:
+            steps = delphiRound ((double) (x * 15.0f + 1.0f));
+            setLength();
+            break;
+        default: mode = delayMode (x); break;
+    }
+}
+
+void Delay1Engine::setLength() noexcept
+{
+    // the delay line holds the delay plus one host block; a new size reallocates it cleared, the read position at its
+    // start and the write position one delay ahead, and the feedback glide jumps to its target
+    const int len = std::max (1, sixteenth * steps);
+    const int total = extra + len;
+    if ((int) buf.size() == 2 * total)
+        return;
+    buf.assign (2 * (std::size_t) total, 0.0f);
+    fbCur = fbTarget;
+    length = len;
+    rd = 0;
+    wr = len;
+}
+
+void Delay1Engine::process (float* left, float* right, int n) noexcept
+{
+    if (n <= 0 || buf.empty())
+        return;
+    const int total = (int) buf.size() / 2;
+    // 1. the input, at the Input level (gliding), added into the line at the write position
+    {
+        float slope = 0, start = 0;
+        glide (slope, inCur, start, inTarget, limit, n);
+        const int first = std::min (n, total - wr);
+        if (bitsOf (slope) == 0)
+        {
+            if ((std::int32_t) bitsOf (start) > 0)
+            {
+                auto put = [&] (int from, int at, int m) {
+                    for (int i = 0; i < m; ++i)
+                    {
+                        float* d = buf.data() + 2 * (at + i);
+                        d[0] = left[from + i] * start + d[0];
+                        d[1] = right[from + i] * start + d[1];
+                    }
+                };
+                put (0, wr, first);
+                if (n > first)
+                    put (first, 0, n - first);
+            }
+        }
+        else
+        {
+            depositGlide (left, right, buf.data() + 2 * wr, first, start, slope);
+            if (n > first)
+                depositGlide (left + first, right + first, buf.data(), n - first, start + slope * (float) first, slope);
+        }
+    }
+    if (mode < 0 || mode > 2)
+        return;
+    // 2. the delayed signal out (added to the dry input) and fed back through the low-pass into the write position
+    float slope = 0, g = 0;
+    glide (slope, fbCur, g, fbTarget, limit, n);
+    const float k = cutoff;
+    // the plug-in's x87 kernels (80-bit): normal keeps the sides; inverted stereo swaps the delayed signals at the
+    // output; ping-pong also feeds each side's delayed signal into the other side's line
+    X87Mode fpu;
+    ld z0 = z28, z1 = z30, gg = g;
+    const ld ss = slope, kk = k, thr = (ld) tiny;
+    const bool swapOut = mode != 0, cross = mode == 2;
+    auto lp = [&] (ld& z, float d, float w) noexcept {
+        z = (((ld) d * gg + (ld) w) - z) * kk + z;
+        return ! (std::fabs (z) > thr) ? 0.0f : (float) z; // ≤ 2^-24 (or NaN) stores 0
+    };
+    for (int i = 0; i < n; ++i)
+    {
+        float* r = buf.data() + 2 * rd;
+        float* w = buf.data() + 2 * wr;
+        const float dl = r[0], dr = r[1];
+        const float xl = left[i], xr = right[i];
+        left[i] = (float) ((ld) (swapOut ? dr : dl) + (ld) xl);
+        right[i] = (float) ((ld) (swapOut ? dl : dr) + (ld) xr);
+        r[0] = r[1] = 0.0f;
+        w[0] = lp (z0, cross ? dr : dl, w[0]);
+        w[1] = lp (z1, cross ? dl : dr, w[1]);
+        gg += ss;
+        if (++rd >= total)
+            rd = 0;
+        if (++wr >= total)
+            wr = 0;
+    }
+    z28 = (double) z0, z30 = (double) z1;
+}
+
 // ================================================================================================ effects
 namespace
 {
@@ -513,10 +772,51 @@ private:
     Eq7State current {};
     bool ready = false;
 };
+class Delay1Effect final : public Effect
+{
+public:
+    void prepare (double sampleRate) noexcept override
+    {
+        rate = (int) std::lround (sampleRate);
+        ready = false;
+    }
+    void reset() noexcept override {}
+    void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override
+    {
+        const auto s = delay1FromParams (params.data());
+        const auto tempo = (float) (bpm > 0.0 ? bpm : 140.0);
+        if (! ready)
+        {
+            engine.prepare (rate, engineBlock); // a fresh plug-in, the host's tempo, then the state's controls
+            engine.setHostTempo (tempo);
+            for (int k = 0; k < delay1Params; ++k)
+                engine.setParam (k, s.raw[(std::size_t) k]);
+            current = s, hostTempo = tempo, ready = true;
+        }
+        if (tempo != hostTempo)
+        {
+            engine.setHostTempo (tempo);
+            hostTempo = tempo;
+        }
+        for (int k = 0; k < delay1Params; ++k)
+            if (s.raw[(std::size_t) k] != current.raw[(std::size_t) k])
+                engine.setParam (k, s.raw[(std::size_t) k]);
+        current = s;
+        inBlocks (left, right, n, [this] (float* l, float* r, int m) { engine.process (l, r, m); });
+    }
+
+private:
+    Delay1Engine engine;
+    Delay1State current {};
+    float hostTempo = 140.0f;
+    int rate = 44100;
+    bool ready = false;
+};
 } // namespace
 
 std::unique_ptr<Effect> makePhaseInverter() { return std::make_unique<PhaseInverterEffect>(); }
 std::unique_ptr<Effect> makeCenter() { return std::make_unique<CenterEffect>(); }
 std::unique_ptr<Effect> makeBassBoost() { return std::make_unique<BassBoostEffect>(); }
 std::unique_ptr<Effect> makeEq7() { return std::make_unique<Eq7Effect>(); }
+std::unique_ptr<Effect> makeDelay1() { return std::make_unique<Delay1Effect>(); }
 } // namespace lynx::fllegacy

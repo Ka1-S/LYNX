@@ -652,6 +652,11 @@ enum class EffectKind : std::uint8_t
     emphasizer,      // FL's Emphasizer, exact (REA_rodada154, core/EmphasizerFx.h): FL's 6 controls / max
     flFrequencyShifter, // FL's Frequency Shifter, exact (REA_rodada154, core/FreqShifterFl.h): FL's 10 controls (raw − min) / range
     flLowLifter,     // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
+    flPhaseInverter, // FL's Fruity Phase Inverter, exact (REA_rodada165k, core/FlLegacyFx.h): its control / 1024
+    flCenter,        // FL's Fruity Center, exact (REA_rodada165k, core/FlLegacyFx.h): on / off
+    flBassBoost,     // FL's Fruity Bass Boost, exact (REA_rodada165k, core/FlLegacyFx.h): frequency, amount / 1024
+    fl7BandEq,       // FL's Fruity 7 Band EQ, exact (REA_rodada165k, core/FlLegacyFx.h): 7 gains (raw + 1800) / 3600
+    flDelay1,        // FL's Fruity Delay (v1), exact (REA_rodada165k, core/FlLegacyFx.h): 6 controls (raw − min) / range
     waveCandy,       // LYNX's analyser in FL's Wave Candy role (REA_rodada164c, core/VisualFx.h): no sound; scope, spectrum, meters
     visualizer,      // LYNX's Visualizer in FL's ZGameEditor Visualizer role (REA_rodada164c): no sound; scene in EffectSlot::state
     xyController,    // FL's X-Y Controller (REA_rodada164a, core/XyController.h): no sound; outputs X, Y follow a pad

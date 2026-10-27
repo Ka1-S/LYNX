@@ -1875,6 +1875,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter,
                                       EffectKind::hardcore,
                                       EffectKind::multibandDelay, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter,
+                                      EffectKind::flPhaseInverter, EffectKind::flCenter, EffectKind::flBassBoost, EffectKind::fl7BandEq, EffectKind::flDelay1, // round 165k
                                       EffectKind::waveCandy, EffectKind::visualizer, // visual plugins (round 164c)
                                       // FL engines that need more than their parameters (round 142, issue #5): a new one starts from
                                       // the plugin's Default preset of the user's FL installation (core/NativeEngines.h)

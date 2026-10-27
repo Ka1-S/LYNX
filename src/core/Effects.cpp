@@ -15,6 +15,7 @@
 #include "core/ConvolverFx.h"
 #include "core/VintagePhaser.h"
 #include "core/EmphasizerFx.h"
+#include "core/FlLegacyFx.h"
 #include "core/FreqShifterFl.h"
 #include "core/LowLifterFl.h"
 #include "core/Vocodex.h"
@@ -2893,6 +2894,35 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                   { "Left phase offset", 0.5f } } };
             return info;
         }
+        case EffectKind::flPhaseInverter:
+        {
+            static const EffectInfo info { "Fruity Phase Inverter", { { "Invert", 1.0f } } };
+            return info;
+        }
+        case EffectKind::flCenter:
+        {
+            static const EffectInfo info { "Fruity Center", { { "On", 1.0f } } };
+            return info;
+        }
+        case EffectKind::flBassBoost:
+        {
+            static const EffectInfo info { "Fruity Bass Boost", { { "Frequency", 0.5f }, { "Amount", 0.75f } } };
+            return info;
+        }
+        case EffectKind::fl7BandEq:
+        {
+            static const EffectInfo info { "Fruity 7 Band EQ", { { "63 Hz", 0.5f }, { "250 Hz", 0.5f }, { "500 Hz", 0.5f },
+                                                                 { "1.5 kHz", 0.5f }, { "3 kHz", 0.5f }, { "5 kHz", 0.5f },
+                                                                 { "8 kHz", 0.5f } } };
+            return info;
+        }
+        case EffectKind::flDelay1:
+        {
+            // FL's defaults: input 338, feedback 512, cutoff 1024, host tempo, 3 sixteenths, normal
+            static const EffectInfo info { "Fruity Delay", { { "Input", 338.0f / 1024.0f }, { "Feedback", 0.5f }, { "Cutoff", 1.0f },
+                                                             { "Tempo", 0.0f }, { "Time", 2.0f / 15.0f }, { "Mode", 0.0f } } };
+            return info;
+        }
         case EffectKind::flLowLifter:
         {
             // FL's controls; defaults = the plug-in's Default preset (as a new instance in FL)
@@ -3426,6 +3456,16 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return fsfl::paramText (param, v);
         case EffectKind::flLowLifter:
             return lowlifter::paramText (param, v);
+        case EffectKind::flPhaseInverter:
+            return fllegacy::phaseInverterParamText (param, v);
+        case EffectKind::flCenter:
+            return fllegacy::centerParamText (param, v);
+        case EffectKind::flBassBoost:
+            return fllegacy::bassBoostParamText (param, v);
+        case EffectKind::fl7BandEq:
+            return fllegacy::eq7ParamText (param, v);
+        case EffectKind::flDelay1:
+            return fllegacy::delay1ParamText (param, v);
         case EffectKind::hardwareInsert:
             return hwinsert::paramText (param, v);
         case EffectKind::waveCandy:
@@ -3689,6 +3729,11 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::emphasizer: return emphasizer::make(); // round 154
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::flLowLifter: return lowlifter::make(); // round 154
+        case EffectKind::flPhaseInverter: return fllegacy::makePhaseInverter(); // round 165k
+        case EffectKind::flCenter: return fllegacy::makeCenter();
+        case EffectKind::flBassBoost: return fllegacy::makeBassBoost();
+        case EffectKind::fl7BandEq: return fllegacy::makeEq7();
+        case EffectKind::flDelay1: return fllegacy::makeDelay1();
         case EffectKind::hardwareInsert: return std::make_unique<hwinsert::HardwareInsertFx>(); // round 164d
         case EffectKind::waveCandy:
         case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
