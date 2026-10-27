@@ -3,6 +3,9 @@
 Tudo o que dá para preparar já está no repositório (pacote MSIX, textos, imagens). Falta o que só você pode fazer:
 a conta e os cliques de envio. Detalhes técnicos: `docs/STORE.md`.
 
+> **Feito (27/10):** conta criada, nome **LYNX SHARE** reservado e as variáveis do GitHub preenchidas (identidade
+> `KA1WARE.LYNXSHARE`, Store ID `9NQRFBFDCX6N`). Siga a partir do passo 4. Os passos 1–3 ficam aqui para referência.
+
 ## 1. Criar a conta (grátis, uma vez)
 
 1. Abra <https://storedeveloper.microsoft.com> → **Get started** / **Começar** → entre com sua conta Microsoft.
@@ -47,8 +50,8 @@ quê — me mande o texto.
 
 ## 5. Depois que estiver no ar
 
-- Me passe o link da página (`https://apps.microsoft.com/detail/<ID>`): eu ligo o botão **"Microsoft Store
-  (recomendado)"** no site (já está pronto num branch) e publico.
+- Me avise: eu ligo o botão **"Microsoft Store (recomendado)"** no site (já pronto no branch `wip/store165-site`,
+  apontando para `https://apps.microsoft.com/detail/9NQRFBFDCX6N`) e publico.
 - Novas versões: Partner Center → LYNX → **Atualizar** → Pacotes → envie o novo `.msix` → Novidades → Enviar.
 - Opcional: Windows → Configurações → Sistema → Para desenvolvedores → **Modo de desenvolvedor** permite eu testar
   o pacote instalado neste PC sem pedir administrador (hoje está desligado; o teste foi feito no GitHub Actions).

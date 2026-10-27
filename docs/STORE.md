@@ -37,15 +37,17 @@ is in the repository:
   `Package/Identity/Publisher` and `Package/Properties/PublisherDisplayName`. Copy them into the repository variables
   (GitHub › Settings › Secrets and variables › Actions › *Variables*):
 
-  | Variable | Value from Partner Center | Placeholder until then |
+  | Variable | Partner Center field | LYNX's value (set 2026-10-27) |
   |---|---|---|
-  | `MSIX_IDENTITY_NAME` | Package/Identity/Name, e.g. `12345Ka1-S.LYNX` | `LYNX.DAW` |
-  | `MSIX_PUBLISHER` | Package/Identity/Publisher, e.g. `CN=1A2B3C4D-…` | `CN=LYNX` |
-  | `MSIX_PUBLISHER_DISPLAY` | Package/Properties/PublisherDisplayName | `LYNX` |
-  | `MSIX_DISPLAY_NAME` | the reserved app name (only if it changes) | `LYNX SHARE` |
+  | `MSIX_IDENTITY_NAME` | Package/Identity/Name | `KA1WARE.LYNXSHARE` |
+  | `MSIX_PUBLISHER` | Package/Identity/Publisher | `CN=BACBB786-A595-4AC3-9807-A70EAA268E4C` |
+  | `MSIX_PUBLISHER_DISPLAY` | Package/Properties/PublisherDisplayName | `KA1WARE` |
+  | `MSIX_DISPLAY_NAME` | the reserved app name | `LYNX SHARE` |
 
-  A package built with the placeholders is valid but Partner Center rejects it ("identity does not match"): set the
-  variables first, then run the workflow (tag push, or *Actions › Release › Run workflow*).
+  Package family name **`KA1WARE.LYNXSHARE_sj8hjwabzpdr8`**, Store ID **`9NQRFBFDCX6N`** (once live:
+  <https://apps.microsoft.com/detail/9NQRFBFDCX6N>, `ms-windows-store://pdp/?ProductId=9NQRFBFDCX6N`).
+  `make-msix-layout.py` uses the same values as defaults, so a local package is the release workflow's package.
+  A package with another identity is rejected by Partner Center ("identity does not match").
 
 ## What the workflow does
 
@@ -54,10 +56,11 @@ In the `package` job (Windows), after the self-test, the editor windows test and
 1. `make-msix-layout.py` builds the layout; `makepri` indexes the scale / target-size assets into `resources.pri`
    (languages `en-US`, `pt-BR`); `makeappx pack` writes **`LYNX-<label>-store.msix`** (unsigned — the Store signs it).
    It goes into the release assets and `SHA256SUMS.txt` like every other file.
-2. **Install test:** the same layout with a *test identity* (the publisher gets Windows' "unsigned package" OID
-   `2.25.311729368913984317654407730594956997722`, so it installs without a certificate and can never clash with the
-   Store's) is installed with `Add-AppxPackage -AllowUnsigned`, then LYNX runs **inside the package** through its
-   execution alias: `--packageinfo` must report the package identity and a settings folder on the real disk (checked
+2. **Install test:** the same layout and identity name (`KA1WARE.LYNXSHARE`), except that the publisher gets Windows'
+   "unsigned package" OID `2.25.311729368913984317654407730594956997722` appended (`--test-identity`): that is what
+   lets an unsigned package install at all, and it gives the test package its own family name, so it can never clash
+   with the Store-signed one. Everything else (files, manifest, assets, resources.pri) is the Store package's. It is
+   installed with `Add-AppxPackage -AllowUnsigned`, then LYNX runs **inside the package** through its execution alias: `--packageinfo` must report the package identity and a settings folder on the real disk (checked
    from outside the package, like Explorer would), and `--selftest` must pass. The package is removed afterwards.
 
 ## LYNX inside a package
@@ -95,7 +98,7 @@ Installing an unsigned package needs an elevated PowerShell, and registering a l
 python scripts\make-msix-layout.py --version 0.1.20 --bin build-win --out msix-test --test-identity --loose --extra LICENSE
 Add-AppxPackage -Register msix-test\AppxManifest.xml   # (loose files: no makepri/makeappx needed)
 lynx --packageinfo $PWD\packageinfo.txt; Get-Content packageinfo.txt
-Get-AppxPackage LYNX.DAW | Remove-AppxPackage
+Get-AppxPackage KA1WARE.LYNXSHARE | Remove-AppxPackage
 ```
 
 ## Store policy check
