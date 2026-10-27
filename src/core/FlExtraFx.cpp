@@ -374,6 +374,23 @@ void Analyzer::push (const float* mono, int n) noexcept
         if (std::abs (den) > 1e-12)
             tau += std::clamp (0.5 * (s0 - s2) / den, -1.0, 1.0);
     }
+    // short periods (high notes): the interpolation's error is a fraction of a sample, cents at C8 — refine on the dip
+    // of a multiple of the period and divide (the error shrinks with the multiple)
+    if (tau < 64.0)
+    {
+        const auto multiple = std::min ((int) (128.0 / tau), (int) ((tauMax - 2) / tau));
+        if (multiple >= 2)
+        {
+            auto at = (int) std::lround (tau * multiple);
+            for (int k = at - 2; k <= at + 2; ++k)
+                if (k > 1 && k < tauMax && m.d[(std::size_t) k] < m.d[(std::size_t) at])
+                    at = k;
+            const auto s0 = (double) m.d[(std::size_t) at - 1], s1 = (double) m.d[(std::size_t) at], s2 = (double) m.d[(std::size_t) at + 1];
+            const auto den = s0 + s2 - 2.0 * s1;
+            if (s1 < 0.3 && std::abs (den) > 1e-12)
+                tau = ((double) at + std::clamp (0.5 * (s0 - s2) / den, -1.0, 1.0)) / multiple;
+        }
+    }
     const auto hz = m.sr / tau;
     const auto note = 69.0 + 12.0 * std::log2 (hz / m.a4);
 
