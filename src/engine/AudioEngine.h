@@ -97,6 +97,7 @@ public:
     // clips start on the next block, quantized by their track's Performance settings; nothing launches while stopped.
     void performanceCommand (const perf::Command& command) noexcept { performanceLive->commands.push (command); }
     const perf::Live& performanceState() const noexcept { return *performanceLive; }
+    perf::Live& performanceStateForSnapshot() noexcept { return *performanceLive; } // --perfshot: a sample of what plays
     void stop() noexcept; // also cancels a count-in or a wait for the first note
 
     // Recording options (docs/WORKFLOW_FL.md P2: recording set). UI thread.
