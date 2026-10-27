@@ -46,7 +46,7 @@ namespace lynx
 bool harmorStateUsable (const std::vector<std::uint8_t>& state);
 
 // An old state (version 11…15: the first releases' presets, FL's Default.fst included) in the current layout, as
-// FL's Harmor re-saves it after loading (REA_rodada165g §1); nullopt when the state is not an old one (or unreadable).
+// FL's Harmor re-saves it after loading (REA_rodada165g-flbeta165s §1); nullopt when the state is not an old one (or unreadable).
 // The engine plays old states directly; the importer stores the upgraded bytes so the settings panel can edit them.
 std::optional<std::vector<std::uint8_t>> harmorUpgradeState (const std::vector<std::uint8_t>& state);
 

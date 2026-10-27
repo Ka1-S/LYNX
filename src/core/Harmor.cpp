@@ -320,7 +320,7 @@ bool readArt (Reader& r, ArtData& a)
 
 // ---------------------------------------------------------------------------------------------------------------
 // Old states (version 11…15, the factory presets of Harmor's first releases, Default.fst included) as the DLL's loader
-// brings them into the current layout (REA_rodada165g §1, [DECOMP FUN_0086ed30] + [EXEC] DLL re-saves): a part
+// brings them into the current layout (REA_rodada165g-flbeta165s §1, [DECOMP FUN_0086ed30] + [EXEC] DLL re-saves): a part
 // stores 385 integers — the articulator-33 smoothing (index 376) is missing, so a 0 is inserted there; version 11 also
 // stores the 43 smoothing times (343…385) on an older scale, converted as round(log2(1 + (41^(v/1000) − 1)·37.5·0.0511)·
 // 1000/9); articulator 33 is not stored and gets its defaults. The global block's text becomes an empty string plus
@@ -4546,7 +4546,7 @@ private:
     void glideTo (Record& v, const Levels& L, bool porta) noexcept
     {
         const auto& p = P->parts[(std::size_t) v.part];
-        // the note's glide factor ([DECOMP FUN_00883ae0, note set-up], REA_rodada165g §2): 1, or (1 − 0.85·velocity)² in
+        // the note's glide factor ([DECOMP FUN_00883ae0, note set-up], REA_rodada165g-flbeta165s §2): 1, or (1 − 0.85·velocity)² in
         // float when global 6 is on (a harder note glides faster)
         if (P->portaVel && v.note >= 0 && v.note < maxNotes)
         {
