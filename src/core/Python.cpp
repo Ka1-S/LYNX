@@ -180,6 +180,14 @@ for _n, _f in (('isdigit', _isdigit), ('isdecimal', _isdigit), ('isnumeric', _is
                ('expandtabs', _expandtabs)):
     if not hasattr('', _n):
         _lynxstr.add(_n, _f)
+
+# globals() is a name dict whose get() needs its default: CPython's get(key, default=None)
+_names = type(globals())
+_names_get = _names.get
+def _names_get_default(self, key, default=None):
+    return _names_get(self, key, default)
+if _names is not dict:
+    _lynxstr.add('get', _names_get_default, _names)
 )PY";
 
 // `re` on top of one native search (std::regex, ECMAScript syntax after a few Python → ECMAScript rewrites)
@@ -505,9 +513,16 @@ std::size_t byteOffset (const char* s, std::size_t size, int chars)
 // _lynxstr.add(name, function): a method of str (LYNX's prelude adds CPython's missing ones)
 bool strAdd (int argc, py_StackRef argv)
 {
-    PY_CHECK_ARGC (2);
+    if (argc != 2 && argc != 3)
+        return TypeError ("add(name, function[, type])");
     PY_CHECK_ARG_TYPE (0, tp_str);
-    py_setdict (py_tpobject (tp_str), py_name (py_tostr (py_arg (0))), py_arg (1));
+    py_Type type = tp_str;
+    if (argc == 3)
+    {
+        PY_CHECK_ARG_TYPE (2, tp_type);
+        type = py_totype (py_arg (2));
+    }
+    py_setdict (py_tpobject (type), py_name (py_tostr (py_arg (0))), py_arg (1));
     py_newnone (py_retval());
     return true;
 }

@@ -448,15 +448,15 @@ TEST (vfx_script_runs_fl_factory_scripts)
             if (const auto i = info->index (name); i >= 0)
                 v.numbers[(std::size_t) i] = value;
         };
-        set ("Enable", 1);
-        set ("Key", 0);
-        set ("Scale", 0);
-        set ("Snap Direction", 1);
+        set ("Snap to Scale: Enable", 1);
+        set ("Snap to Scale: Key", 0);
+        set ("Snap to Scale: Scale", 0);
+        set ("Snap to Scale: Snap Direction", 1);
         script::writeValues (*s, *info, v);
         auto p = makeProcessor (Kind::script, writeScript (*s));
         auto keys = vfxs165::keysOn (vfxs165::play (*p, { vfxs165::on (0, 61), vfxs165::on (10, 63), vfxs165::on (20, 60) }, 512));
         CHECK ((keys == std::vector<int> { 60, 62, 60 }));
-        set ("Snap Direction", 0);
+        set ("Snap to Scale: Snap Direction", 0);
         script::writeValues (*s, *info, v);
         p->configure (writeScript (*s));
         keys = vfxs165::keysOn (vfxs165::play (*p, { vfxs165::on (0, 61) }, 512));
