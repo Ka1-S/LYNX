@@ -897,8 +897,9 @@ Layout fruityWaveShaper()
     v.push_back (knob (165, 279, 30, "Pre amp", TR_NOOP ("Pre"), 302));
     v.push_back (knob (210, 279, 30, "Mix", TR_NOOP ("Mix"), 302));
     v.push_back (knob (253, 279, 30, "Post gain", TR_NOOP ("Post"), 302));
-    v.push_back (toggle (150, 312, 34, 14, "Smooth", TR_NOOP ("Smooth")));
-    v.push_back (toggle (150, 332, 34, 14, "HQ", TR_NOOP ("HQ")));
+    // (round 165: the switches start further left, so "SMOOTH" fits beside its switch instead of "S...")
+    v.push_back (toggle (112, 312, 72, 14, "Smooth", TR_NOOP ("Smooth")));
+    v.push_back (toggle (112, 332, 72, 14, "HQ", TR_NOOP ("HQ")));
     v.push_back (toggle (190, 332, 60, 14, "Center", TR_NOOP ("Center")));
     v.push_back (label (188, 312, 60, 14, TR_NOOP ("Oversample"), alignLeft));
     v.push_back (stepper (250, 310, 24, 18, "Oversampling", nullptr, 4));

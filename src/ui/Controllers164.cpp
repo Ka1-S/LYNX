@@ -765,21 +765,7 @@ private:
     // A label that fits: the caption font, smaller down to 8.5 px, then narrowed (never "…" while it can be read)
     static void drawLabel (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area, float room, juce::Justification just)
     {
-        using namespace theme;
-        auto f = font (type::caption);
-        room = juce::jmax (area.getWidth(), room);
-        auto width = juce::GlyphArrangement::getStringWidth (f, text);
-        for (auto h = f.getHeight(); width > room && h > 8.5f;)
-        {
-            h = juce::jmax (8.5f, h - 0.5f);
-            f = f.withHeight (h);
-            width = juce::GlyphArrangement::getStringWidth (f, text);
-        }
-        g.setFont (f);
-        auto box = area;
-        if (room > area.getWidth())
-            box = just.testFlags (juce::Justification::left) ? area.withWidth (room) : area.withSizeKeepingCentre (room, area.getHeight());
-        g.drawFittedText (text, box.toNearestInt(), just, 1, 0.6f);
+        ui::drawFittingText (g, text, area, just, theme::font (theme::type::caption), 8.5f, room);
     }
 
     static juce::String midiBadge (const SurfaceControl& c)
