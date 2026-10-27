@@ -16053,6 +16053,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Ui163Tests.inc"
 #include "HwInsert164Tests.inc"
 #include "Layer164Tests.inc"
+#include "Patcher164vTests.inc"
 #include "Vfx164Tests.inc"
 #include "Misc164Tests.inc"
 #include "Visual164Tests.inc"

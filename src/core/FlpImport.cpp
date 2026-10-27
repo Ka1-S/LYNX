@@ -1294,6 +1294,16 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.pluginState = c.pluginState;
         }
 
+        // Dashboard (REA_rodada164f-flimport): its value controls as LYNX's Dashboard panel (FL's state kept, for its
+        // controller links below)
+        if (c.pluginName == "Dashboard")
+            if (auto dash = surface::parseFlDashboard (c.pluginState))
+            {
+                def.instrument = InstrumentKind::dashboard;
+                def.patcher.surface = std::move (dash->controls);
+                def.pluginState = c.pluginState;
+            }
+
         // FL's VFX plugins (round 164b): note processors, with FL's state as it is
         if (const auto kind = vfx::kindOfFlName (c.pluginName))
         {
@@ -1919,7 +1929,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (plugin == "fruity wrapper" && def.plugin.foreign.format == ForeignPlugin::Format::none)
                 ++r.unsupported["Fruity Wrapper (plugin state not readable)"]; // e.g. a wrapper version newer than 12
             else if ((plugin == "midi out" && def.instrument == InstrumentKind::midiOut)
-                     || (plugin == "fruity voltage controller" && def.instrument == InstrumentKind::voltage))
+                     || (plugin == "fruity voltage controller" && def.instrument == InstrumentKind::voltage)
+                     || (plugin == "dashboard" && def.instrument == InstrumentKind::dashboard))
                 ++r.converted[c.pluginName];
             else if (def.instrument == InstrumentKind::vfx)
                 ++r.converted[c.pluginName];
@@ -3086,8 +3097,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (link.source.isChannel())
         {
             const auto channel = channelMap.find (link.source.channel());
-            if (channel == channelMap.end() || song.channels[(std::size_t) channel->second].instrument != InstrumentKind::controller)
+            if (channel == channelMap.end()
+                || (song.channels[(std::size_t) channel->second].instrument != InstrumentKind::controller
+                    && song.channels[(std::size_t) channel->second].instrument != InstrumentKind::dashboard))
                 continue;
+            const auto& sourceChannel = song.channels[(std::size_t) channel->second];
+            auto output = link.source.param() - flp::ControlId::pluginParamBase;
+            if (sourceChannel.instrument == InstrumentKind::dashboard) // FL's output number → the panel's order
+            {
+                const auto k = surface::flDashboardOutputToLynx (sourceChannel.pluginState, output);
+                if (! k)
+                    continue;
+                output = *k;
+            }
             Automation a;
             std::function<float (float)> valueMap;
             a.target = resolveTarget (link.target, valueMap);
@@ -3095,7 +3117,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 continue;
             a.name = "Controller (" + song.channels[(std::size_t) channel->second].name + ")";
             a.source.channel = channel->second;
-            a.source.output = link.source.param() - flp::ControlId::pluginParamBase;
+            a.source.output = output;
             if (valueMap)
                 for (int i = 0; i <= 32; ++i)
                     a.curve.push_back (std::clamp (valueMap ((float) i / 32.0f), 0.0f, 1.0f));

@@ -53,4 +53,16 @@ std::vector<SurfaceControl> starterControls();
 std::optional<std::vector<SurfaceControl>> parseFlControlSurface (const std::vector<std::uint8_t>& state);
 // The LYNX output of FL's published output `flOutput` (FL numbers them freely; LYNX in panel order).
 std::optional<int> flOutputToLynx (const std::vector<std::uint8_t>& state, int flOutput);
+
+// FL's Dashboard state (0xD5, REA_rodada164f-flimport): a list of "records" (one per value control, in the panel's
+// order of value controls: record k = parameter k + 1 = the k-th control that holds a value) and the skinned panel.
+// A record of type 4 publishes its value on FL's controller output `number`; other types send MIDI (CC…).
+struct FlDashboard
+{
+    std::vector<SurfaceControl> controls; // the value controls (knob, slider, check box) with FL's names and values
+    std::vector<int> flOutputs;           // [LYNX output] FL's output number (−1: the record sends MIDI, no output)
+};
+std::optional<FlDashboard> parseFlDashboard (const std::vector<std::uint8_t>& state);
+// The LYNX output (Dashboard channel) of FL's Dashboard output `flOutput`
+std::optional<int> flDashboardOutputToLynx (const std::vector<std::uint8_t>& state, int flOutput);
 } // namespace lynx::surface

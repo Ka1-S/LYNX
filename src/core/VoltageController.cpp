@@ -110,10 +110,11 @@ float applyRange (int range, float v) noexcept
 
 float pitchValue (const Settings& s, double key) noexcept
 {
-    // full scale 1.0 = 10 V: 1 V / octave = 0.1 per octave; 1.2 V / octave = 0.1 V (0.01) per semitone
-    // (FL's own 1.2 V/oct formula decompiles to 10 × that, REA_rodada164a §6 [HYP]: LYNX keeps the standard's value)
+    // full scale 1.0 = 10 V, 0 at C5: 1 V / octave = 0.1 per octave. "1.2 V / octave" is what FL renders
+    // (REA_rodada164f-flimport [FL render]: C5 0, C#5 +0.1, D5 +0.2, B4 −0.1, D#5 +0.3; an octave away clips at ±1):
+    // 0.1 full scale (1 V) per semitone — 10 × the 0.01 the name says, as FL's code computes it (REA_rodada164a §6)
     const auto semitones = key - 60.0;
-    return (float) (s.pitchFactor * (s.pitchStandard == 1 ? semitones * 0.01 : semitones / 120.0));
+    return (float) (s.pitchFactor * (s.pitchStandard == 1 ? semitones * 0.1 : semitones / 120.0));
 }
 
 const char* sourceName (Source source) noexcept

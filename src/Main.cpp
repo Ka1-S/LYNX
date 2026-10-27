@@ -4838,6 +4838,24 @@ private:
             shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
         }
+        // FL's Dashboard presets of this PC's FL Studio, imported (round 164f): one PNG each
+        if (const auto fl = lynx::findFlStudio(); fl.installDir.isDirectory())
+            for (const auto& file : fl.installDir.getChildFile ("Data/Patches/Plugin presets/Generators/Dashboard").findChildFiles (juce::File::findFiles, false, "*.fst"))
+            {
+                juce::MemoryBlock bytes;
+                if (! file.loadFileAsData (bytes))
+                    continue;
+                const auto preset = flp::parseProject ({ (const std::uint8_t*) bytes.getData(), bytes.getSize() }, true);
+                const auto dash = preset.channels.empty() ? std::nullopt : lynx::surface::parseFlDashboard (preset.channels[0].pluginState);
+                if (! dash || dash->controls.empty())
+                    continue;
+                offline.editSong ([&] (lynx::Song& s) {
+                    s.channels[6].name = file.getFileNameWithoutExtension().toStdString();
+                    s.channels[6].patcher.surface = dash->controls;
+                });
+                offline.dispatchPendingMessages();
+                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + file.getFileNameWithoutExtension().replaceCharacter (' ', '-') + ".png");
+            }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
             for (int part = 0; part < 7; ++part)
