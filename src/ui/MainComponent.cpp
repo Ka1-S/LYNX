@@ -2045,6 +2045,60 @@ void MainComponent::showMetronomeMenu()
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&metronomeButton));
 }
 
+void MainComponent::dumpScoreLog (int minutes)
+{
+    const auto& song = engine.getSong();
+    scorelog::DumpOptions options;
+    options.minutes = minutes;
+    options.bpm = song.bpm;
+    options.beatsPerBar = song.beatsPerBar;
+    auto notes = scorelog::dump (engine.scoreLogSnapshot(), options);
+    // (channels deleted since the notes were played are left out)
+    notes.erase (std::remove_if (notes.begin(), notes.end(), [&song] (const Note& n) { return n.channel < 0 || n.channel >= (int) song.channels.size(); }),
+                 notes.end());
+    if (notes.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Score logger"),
+                                                tr ("The score log is empty: no notes were played on a MIDI keyboard or the typing keyboard in that time."));
+        return;
+    }
+
+    auto apply = [this] (std::vector<Note> logged, bool replace) {
+        const auto count = logged.size();
+        engine.editSong ([&logged, replace] (Song& s) {
+            if (s.patterns.empty())
+                s.patterns.emplace_back();
+            s.currentPattern = juce::jlimit (0, (int) s.patterns.size() - 1, s.currentPattern);
+            auto& pattern = s.patterns[(std::size_t) s.currentPattern];
+            if (replace)
+                pattern.notes.clear();
+            pattern.notes.insert (pattern.notes.end(), logged.begin(), logged.end());
+            pattern.sortNotes();
+        });
+        ui::postHint ({ tr ("Score log: {0} notes put in the pattern", { juce::String ((int) count) }), {}, false, false }, 4000);
+    };
+
+    const auto& patterns = song.patterns;
+    const auto current = song.currentPattern;
+    if (current < 0 || current >= (int) patterns.size() || patterns[(std::size_t) current].notes.empty())
+    {
+        apply (std::move (notes), false);
+        return;
+    }
+
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withTitle (tr ("Score logger"))
+                       .withMessage (tr ("The current pattern isn't empty. Do you want the score log to be merged, or to replace the current content?"))
+                       .withButton (tr ("Merge"))
+                       .withButton (tr ("Replace"))
+                       .withButton (tr ("Cancel"));
+    juce::AlertWindow::showAsync (options, [apply, notes] (int result) mutable {
+        if (result == 1 || result == 2)
+            apply (std::move (notes), result == 2);
+    });
+}
+
 void MainComponent::showMetronomeVolume()
 {
     // a callout with the volume knob; the click plays at the new level at once (Transport::metronomeVolume)
@@ -4343,6 +4397,25 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
                 const auto folder = AudioLogger::defaultFolder();
                 folder.createDirectory();
                 folder.startAsProcess();
+            });
+        }
+        {
+            // FL's score logger (REA round 165f): the notes played lately, recording or not, into the current pattern
+            juce::PopupMenu dumpMenu;
+            for (const auto minutes : { 2, 5, 10, 20, 30 })
+                dumpMenu.addItem (tr ("Last {0} minutes", { juce::String (minutes) }), [this, minutes] { dumpScoreLog (minutes); });
+            menu.addSubMenu (tr ("Dump score log to selected pattern"), dumpMenu);
+            menu.addItem (tr ("Clear score log"), ! engine.scoreLogEmpty(), false, [this] {
+                auto options = juce::MessageBoxOptions()
+                                   .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                   .withTitle (tr ("Score logger"))
+                                   .withMessage (tr ("This will clear all logged notes!"))
+                                   .withButton (tr ("Clear log"))
+                                   .withButton (tr ("Cancel"));
+                juce::AlertWindow::showAsync (options, [this] (int result) {
+                    if (result == 1)
+                        engine.clearScoreLog();
+                });
             });
         }
         menu.addSubMenu (tr ("Toolbar"), makeToolbarMenu());

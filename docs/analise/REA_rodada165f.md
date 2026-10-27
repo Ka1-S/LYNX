@@ -106,6 +106,45 @@ proprietary protocol) · →r165x = another round of 165 owns it.
 | External tools (launch an audio editor / app with the file) | ❌ — L |
 | FL Cloud (sounds, mastering, backups, plugins), Gopher, AI Deverb / Declipper / Denoiser, stem separation, Speech synthesizer form | ⛔ |
 
+### 1.9 Screens: every FL form group, LYNX's screen, and whether they were ever compared side by side
+FL's 105 forms (`tmp/rea165/forms.txt`) grouped by window; LYNX's screen per `UI_windows_inventory.md` (round 81)
+updated with later rounds; "Compared" = a round that put FL's and LYNX's screen next to each other ([SHOT]/[EXEC]
+captures), "never" = no side-by-side so far. Non-user forms (base classes, docking, tutorial, test, licensing / shop /
+cloud) are left out as in round 81.
+
+| FL form(s) | LYNX screen | Compared side by side |
+|---|---|---|
+| TFruityLoopsMainForm (main window, menus, toolbar) | MainComponent, toolbar | UI_STUDY_round90, UI_toolbar_study, 115, 143 (menus) |
+| TStepSeqForm (Channel Rack) | ChannelRackComponent | 104, 139, 143, 149 |
+| Piano roll (main form code) + TPRNotePropForm | PianoRollComponent, note inspector | UI_STUDY_round90, 115, 143 A.1 (Tools menu), 149 (lane); note properties: never |
+| Playlist (main form code) + TPLClipPropForm, TPLMergeArrangementForm | PlaylistComponent, Clip properties, Arrangements window | Playlist: 90, 104, UI_STUDY_playlist_clips, 143 A.2–A5; Clip properties / Merge arrangement: **never** |
+| TFXForm (Mixer) | MixerComponent | 90, 104, 139, 143 A.6, 146, 149 |
+| TBrowserForm, TSampleListForm (Browser) | BrowserComponent | 115, 139, 143 B3–B5 |
+| TPluginForm (channel / plugin window, wrapper, Misc tab) | PluginWindow + PluginHeader, ChannelSettings | 139, 143 B1–B2, 149 |
+| native plugin windows (plugin DLLs) | LYNX's own editors | UI_STUDY_plugins93, 114 (third-party), plugin rounds |
+| TFLHintBarForm (hint bar) | HintBar | 115, 143 |
+| TMIDIForm (Options: Audio, MIDI, General, File, Project, Info) | Settings pages | 143 B6–B8 (Audio, General, File); **MIDI, Project, Info: never** |
+| TRenderForm, TWAVRenderForm, TMEMP3OptionsForm, TMEOggOptionsForm (export) | Export window | 139 B1 (export entries/menus only); **the export window itself: never** |
+| TMIDIImportForm | Import MIDI data | 149 Part B |
+| TEventEditForm, TGraphEditorForm | Event editor, automation editor | **never** |
+| TPRQuantizeForm … TPRChordToolForm, TPRFillForm (15 Piano Roll tool dialogs) | NoteToolDialogs | **never** as dialogs (only the Tools menu, 143 A.1) |
+| TMEnvEditor + 20 TME* tool forms (Edison) | AudioEditor (basic tools) | **never** |
+| TTouchKeybForm | Touch keyboard | **never** |
+| TNewProjForm, TInfoForm, TProjectRenameForm | New project dialog, Settings › Info; rename: none | **never** |
+| TShortcutForm, TShortcutEditorForm | Shortcut manager | **never** |
+| TPluginListForm, TPlugListForm, TMissingPluginsForm | Plugin manager / quick-add palette / plugin picker, Missing files | picker: 149; **plugin manager, missing files: never** |
+| TPluginMonitorForm | Plugin performance monitor | **never** |
+| TTapTempoForm, TAddMarkerSettingsForm, TPRTimeSigForm | tap tempo, marker menus | **never** (markers: rea165-markers will) |
+| TParamCtrlForm, TMIDIInputForm, TMIDIInputForm_Generic, TEnvMapForm | link to controller, global link settings; mapping curve: none | **never** |
+| TNameEditForm, TPaletteEditorForm, TThemeEditorForm | Rename and color; palette / theme: none (one LYNX theme) | **never** |
+| TWelcomeWizard | Setup wizard | 149 / 161b (LYNX only); FL's: **never** |
+| TExportScoreForm, TDWPRenderForm, TSpeechForm, TDemucsForm, TDeverbForm, TPythonForm, TScriptDialog | none (gaps §1.5 / ⛔) | — |
+
+Never compared, by how often a user sees them: the **Export window**, **Piano Roll tool dialogs**, **Edison**,
+**Settings › MIDI / Project / Info**, Event editor, Clip properties, New project, Shortcut manager, Touch keyboard,
+Plugin manager, Missing files, Plugin monitor, Merge arrangement, tap tempo / marker dialogs. A design-fidelity round
+should take them in that order (off-screen `--snapshot` of LYNX + one short FL session under the locks).
+
 ## 2. Ranked gaps (not owned by r165a–e/g/h/i)
 
 Score = user value × (1 / effort). Evidence: [DFM] for all; [DECOMP] added where the behaviour was decompiled.

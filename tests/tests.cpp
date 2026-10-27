@@ -15850,6 +15850,7 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Bugs131Tests.inc"
 #include "Parity135wTests.inc"
 #include "Feat133Tests.inc"
+#include "ScoreLog165Tests.inc"
 #include "Parity135fTests.inc"
 #include "Feat132Tests.inc"
 #include "Parity135sTests.inc"
