@@ -2100,7 +2100,9 @@ ImageData parseImage (const std::vector<std::uint8_t>& t)
         im.why = "resynthesis-mode image (not modelled: the part plays its timbres)";
         return im;
     }
-    if (! r.ok || im.cols <= 0 || im.rows <= 0 || im.rows > 4096 || (long long) im.cols * im.rows > 64LL * 1024 * 1024)
+    if (r.ok && (im.cols == 0 || im.rows == 0))
+        return im; // (an empty image object: every part without an image stores one)
+    if (! r.ok || im.cols < 0 || im.rows < 0 || im.rows > 4096 || (long long) im.cols * im.rows > 64LL * 1024 * 1024)
     {
         im.why = "image data unreadable";
         return im;

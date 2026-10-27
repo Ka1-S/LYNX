@@ -5,15 +5,9 @@ demo projects). Data: `/mnt/d/lynx-work/flbeta165s` (survey tsv, `st/` old state
 EXEC harness around the unmodified `Harmor_x64.dll`, `py/` batteries, `tools/harmorrender`).
 
 ## Where I stopped
-- 2026-10-27 16:05 — resumed after the BSOD. Checkpoint commit 798e9ad2 (old-state upgrade in `Harmor.cpp`, the
-  importer storing upgraded bytes, velocity-following portamento) kept; not yet re-verified. `py/bisect.py` and the
-  `run/o` listing were zeroed by the crash (rewritten as needed).
-- 16:30 — harmorrender rebuilt from the checkpoint (identical binary to the pre-crash one: the checkpoint compiles).
-  Full battery of all 325 installation presets (`bat_all0.log`, `bat_all0_spec.tsv`): 248 null < −60 dB, 291 STFT
-  magnitude < −40 dB; 34 audibly different (§3). Ghidra project of Harmor_x64.dll being imported (own project
-  `/mnt/d/lynx-work/flbeta165s/ghidra`, under the ghidra lock + build slot) for the missing filter shapes.
-- Pre-crash battery `bat_old1.log` (88 old presets, LYNX(upgraded) vs DLL(old), rack off): 70 within −70 dB, outliers
-  listed in §3. Next: rebuild harmorrender, re-run, triage outliers, run the current-format presets + demos.
+- 2026-10-27 19:40 — fixes verified against the DLL (`bat_all1.log`, `bat_all1_spec.tsv`): all 325 installation
+  presets now play on the exact engine (88 old ones were refused before), 264 null < −60 dB (was 248), 304 same
+  spectrum (was 291). Harmor stays **"(beta)"**: 21 presets still differ audibly (§5). Next: build-local, land.
 
 ## 1. Old states (version 11…15) [DECOMP FUN_0086ed30][EXEC]
 The 88 presets saved by Harmor's first releases (Default.fst among them) were refused by LYNX ("state not usable").
@@ -69,3 +63,24 @@ Used by 24 presets (18 of the audible outliers); LYNX switched that filter off. 
 - 13 (N 1024): `exp(float((1 − (cos(π(1 − i·s)) + 1)/2)·18 − 18)·ln10/20)`;
 - 15 (N 4096, origin ½, ends 1/1): `a²·b² + b/8`, a = (cos(12π(1 − i·s)) + 1)/2, b = 1 − (cos(2π(1 − i·s)) + 1)/2;
 - 16 (N 2048, filled with 1.0, origin ½): the first and last N/3 entries `(1 − (cos(2π(1 − i·0.5/(N/3))) + 1)/2)²`.
+
+## 5. Result and what still differs [EXEC]
+After §1–4 (`bat_all1*`; repeated runs of the same preset vary by a few dB where a state uses randomness, the DLL's
+Mersenne-Twister seed differing per run):
+
+| | before | after |
+|---|---|---|
+| presets the exact engine plays | 237 / 325 | 325 / 325 |
+| null < −60 dB | 248 | 264 |
+| STFT magnitude < −40 dB | 291 | 304 |
+
+Shape presets now at −70…−84 dB (Machine wriggle, Blue screen 2, Wall, Equinox, Above the treeline, Bajo Deep/
+Future/Growl 2, Lead Borracho/Mono/Supersaw 2, Pluck Analogo/Clasico); Interpolation −84.4 dB, Labyrinth −19.9 dB
+(spectrum −38.8: the image now plays; the rest not found).
+
+Why Harmor keeps "(beta)": still audibly different (STFT ≥ −40 dB): Dub steppy 1, Labyrinth, Shield hit, Rotochip
+(note start delay, §3), Morning (part misc +4 → part +0x668: an audio filter object set up by FUN_008781f0 /
+FUN_00863450, not modelled; −81.8 dB with it zeroed in both), Sunroom, Metal thingy / Magic swamp / Ice bells (IPP
+`Exp_32f_A11` in the frequency phaser, §3), Pomona (several causes), Resynthesis/Harmony (delay + resynthesis),
+Oldschool / Tronic 3 / Blue screen / Lead Arcade (shapes now on; a second difference remains), Olbaid noise drums/FX
+(Plato Cerrado/Abierto, FX Subida, White Noise Caida: noise-driven, near the threshold), Lead Hoover.
