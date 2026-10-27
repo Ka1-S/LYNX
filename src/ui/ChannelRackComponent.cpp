@@ -490,9 +490,14 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             const auto hoverStepHere = hoverArea == Area::grid && hoverRow == row && hoverStep == step && paintMode == PaintMode::none;
             const auto ghost = step >= realSteps && ! any; // after the pattern's end: faint until clicked
             auto fill = any ? (onGrid ? stepOn : stepNote) : theme::stepOff (step);
-            if (ghost)
-                fill = fill.withMultipliedAlpha (hoverStepHere ? 0.55f : 0.22f);
-            theme::fillRoundRect (g, r.toFloat(), theme::radius::sm, hoverStepHere && ! ghost ? fill.brighter (any ? 0.15f : 0.35f) : fill);
+            if (ghost) // a faint outlined cell, filled while hovered
+            {
+                theme::fillRoundRect (g, r.toFloat(), theme::radius::sm, fill.withMultipliedAlpha (hoverStepHere ? 0.9f : 0.35f));
+                g.setColour (fill.brighter (0.25f).withMultipliedAlpha (0.55f));
+                g.drawRoundedRectangle (r.toFloat().reduced (0.5f), theme::radius::sm, 1.0f);
+            }
+            else
+                theme::fillRoundRect (g, r.toFloat(), theme::radius::sm, hoverStepHere ? fill.brighter (any ? 0.15f : 0.35f) : fill);
 
             if (hoverStepHere)
             {
@@ -1823,9 +1828,8 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
         setStep (p, row, step, on);
         // a ghost step of a pattern with a set length: the length grows to the bar holding it (automatic lengths
         // follow the notes by themselves)
-        const auto bar = (std::int64_t) ppq * std::max (1, s.beatsPerBar);
-        if (on && p.lengthTicks > 0 && (std::int64_t) (step + 1) * ticksPerStep > p.lengthTicks)
-            p.lengthTicks = ((std::int64_t) (step + 1) * ticksPerStep + bar - 1) / bar * bar;
+        if (on)
+            p.lengthTicks = lengthWithStep (p.lengthTicks, step, ticksPerStep, (std::int64_t) ppq * std::max (1, s.beatsPerBar));
     });
 }
 

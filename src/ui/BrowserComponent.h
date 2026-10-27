@@ -126,6 +126,7 @@ public:
     // --snapshot: the PROJECT tab with the patterns, generators and samples open, a sample selected
     void showProjectForSnapshot();
     void showPluginDatabaseForSnapshot();
+    void showPluginDatabase(); // FL's Shift+F8: the All tab with the Plugin database opened and scrolled into view
     // --snapshot (round 164): only `folder`, opened, listed under `filter` (folders with nothing to list left out)
     void showFilterForSnapshot (const juce::File& folder, browserview::ContentFilter filter);
     void resetViewForSnapshot(); // its Generators / Effects FL engines open (round 142)

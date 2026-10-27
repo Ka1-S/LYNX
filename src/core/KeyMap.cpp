@@ -51,7 +51,7 @@ std::vector<Action> makeActions()
         { "view.typingPiano", TR_NOOP ("Typing keyboard as a piano on/off"), Context::global, { chord ('T', ctrl) } },
         { "view.toolbar", TR_NOOP ("Show or hide the toolbar panels"), Context::global, { chord (f11, ctrl) } },
         { "view.audioEditor", TR_NOOP ("Open the audio editor"), Context::global, {} },
-        { "view.tempoTapper", TR_NOOP ("Tempo tapper (tap the tempo)"), Context::global, {} },
+        { "view.tempoTapper", TR_NOOP ("Tempo tapper (tap the tempo)"), Context::global, { chord (f5, ctrl) } },
         { "view.sampleBrowser", TR_NOOP ("Sample browser (separate window)"), Context::global, {} },
 
         // workspace panels
@@ -61,6 +61,12 @@ std::vector<Action> makeActions()
         { "panel.browser", TR_NOOP ("Show, focus or hide the Browser"), Context::global, { chord (f8, alt) } },
         { "panel.quickAdd", TR_NOOP ("Quick-add palette: instruments and effects"), Context::global, { chord (f8) } },
         { "panel.mixer", TR_NOOP ("Show, focus or hide the Mixer"), Context::global, { chord (f9) } },
+        // FL 2026's other window keys (its shortcut list, REA round 165a)
+        { "view.pluginDatabase", TR_NOOP ("Plugin database (in the Browser)"), Context::global, { chord (f8, shift) } },
+        { "view.midiSettings", TR_NOOP ("MIDI settings"), Context::global, { chord (f10) } },
+        { "view.projectInfo", TR_NOOP ("Project info"), Context::global, { chord (f11) } },
+        { "view.closeWindows", TR_NOOP ("Close all windows (plugins, channel settings, tools)"), Context::global, { chord (f12) } },
+        { "view.closePluginWindows", TR_NOOP ("Close all plugin windows"), Context::global, { chord (f12, alt) } },
         { "panel.maximisePlaylist", TR_NOOP ("Maximize or restore the Playlist"), Context::global, { chord (enter) } },
 
         // patterns

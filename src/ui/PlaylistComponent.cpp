@@ -4233,7 +4233,7 @@ void PlaylistComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::M
         return;
     }
 
-    if (alt && ! ctrl && ! shift) // FL: Alt+wheel zooms vertically (the track heights), around the mouse
+    if (alt && ! shift) // Alt+wheel (and Ctrl+Alt+wheel, as in the Piano Roll) zooms vertically: the track heights, around the mouse
     {
         gliding = false;
         setTrackZoom (trackZoom * gesture::wheelZoomFactor (wheel.deltaY, wheel.isSmooth), e.y);

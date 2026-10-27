@@ -226,4 +226,31 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRackComponent)
 };
+
+// The Channel Rack panel's viewport: a sample, SoundFont or generator dropped on the free space under the channels
+// becomes a new channel too, as anywhere in FL's Channel Rack (issue #11); the drop goes to the rack.
+class ChannelRackViewport final : public juce::Viewport,
+                                  public juce::FileDragAndDropTarget,
+                                  public juce::DragAndDropTarget
+{
+public:
+    explicit ChannelRackViewport (ChannelRackComponent& r) : rack (r) {}
+
+    bool isInterestedInFileDrag (const juce::StringArray& files) override { return rack.isInterestedInFileDrag (files); }
+    void filesDropped (const juce::StringArray& files, int x, int y) override
+    {
+        const auto p = rack.getLocalPoint (this, juce::Point<int> (x, y));
+        rack.filesDropped (files, p.x, p.y);
+    }
+    bool isInterestedInDragSource (const SourceDetails& details) override { return rack.isInterestedInDragSource (details); }
+    void itemDropped (const SourceDetails& details) override
+    {
+        auto moved = details;
+        moved.localPosition = rack.getLocalPoint (this, details.localPosition);
+        rack.itemDropped (moved);
+    }
+
+private:
+    ChannelRackComponent& rack;
+};
 } // namespace lynx

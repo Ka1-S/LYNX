@@ -1054,6 +1054,15 @@ public:
         return -1;
     }
 
+    // the first row labelled `label`, or -1
+    int rowLabelled (const juce::String& label) const
+    {
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(std::size_t) i]->label == label)
+                return i;
+        return -1;
+    }
+
     // for snapshots: opens these project sections; returns the first row of a sample item
     int openProjectSections (std::initializer_list<Category> open)
     {
@@ -3084,6 +3093,21 @@ void BrowserComponent::showPluginDatabaseForSnapshot()
                           tr ("Plugin database") + "/" + tr ("Effects"), tr ("Effects") + "/" + tr ("FL engines") };
     setTab (allTab);
     rebuildTree();
+}
+
+void BrowserComponent::showPluginDatabase()
+{
+    const auto db = tr ("Plugin database");
+    openPluginFolders.insert (db);
+    openPluginFolders.insert (db + "/" + tr ("Generators"));
+    openPluginFolders.insert (db + "/" + tr ("Effects"));
+    setTab (allTab);
+    rebuildTree();
+    if (const auto row = tree->rowLabelled (db); row >= 0)
+    {
+        tree->select (row, false);
+        tree->grabKeyboardFocus();
+    }
 }
 
 void BrowserComponent::showProjectForSnapshot()
