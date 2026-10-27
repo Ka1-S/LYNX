@@ -1071,7 +1071,7 @@ public:
         styleCombo (clockBox);
         styleLabel (clockOffsetLabel, tr ("External sync offset (milliseconds)"));
         clockOffset.setSliderStyle (juce::Slider::IncDecButtons);
-        clockOffset.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 80, 24);
+        clockOffset.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 56, 24);
         clockOffset.setRange (-1000.0, 1000.0, 1.0);
         clockOffset.setDoubleClickReturnValue (true, 0.0);
         clockOffset.setTooltip (tr ("Positive plays LYNX later than the clock, negative earlier"));
@@ -1165,6 +1165,7 @@ public:
         engine.addChangeListener (this);
         rebuildInputs();
         load();
+        timerCallback(); // (the status at once, not after the first tick)
     }
 
     ~MidiPage() override
@@ -1194,7 +1195,7 @@ private:
 
         r.section (syncTitle);
         clockBox.setBounds (r.row (clockLabel, 300));
-        clockOffset.setBounds (r.row (clockOffsetLabel, 200));
+        clockOffset.setBounds (r.row (clockOffsetLabel, 140));
         clockStatus.setBounds (r.row (clockStatusLabel, 0));
         clockNote.setBounds (r.indented (16).translated (0, -3));
 

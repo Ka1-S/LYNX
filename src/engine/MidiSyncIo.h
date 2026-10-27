@@ -13,6 +13,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "core/LiveEventQueue.h"
 #include "core/MidiSync.h"
@@ -111,6 +112,7 @@ private:
     std::atomic<std::uint64_t> sentCount { 0 }, droppedCount { 0 };
     std::atomic<double> lateSum { 0.0 }, lateMax { 0.0 }, blockSum { 0.0 }, blockMax { 0.0 };
     std::atomic<std::uint64_t> lateN { 0 }, blockN { 0 };
+    std::vector<double>* lateLog = nullptr;  // --midisync-test only (the sender thread appends)
     mutable Stats lastStats;
     mutable double lastStatsMs = 0.0;
 };

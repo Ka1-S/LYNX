@@ -281,6 +281,8 @@ void MidiSyncIo::run()
                         atomicAdd (lateSum, late);
                         atomicMax (lateMax, late);
                         lateN.fetch_add (1, std::memory_order_relaxed);
+                        if (lateLog != nullptr)
+                            lateLog->push_back (late);
                         sentCount.fetch_add (1, std::memory_order_relaxed);
                     }
                     queue.pop_front();
@@ -392,6 +394,9 @@ juce::String MidiSyncIo::selfTest (const juce::String& outputName, const juce::S
     o.masterSync = true;
     p.setOutput (o);
     const auto real = outputName.isNotEmpty();
+    std::vector<double> lates;
+    lates.reserve (4096);
+    io.lateLog = &lates;
     io.configure (p, real, ! real);
     report << "output=" << (real ? outputName : juce::String ("(dry run, timed without a device)")) << " opened=" << (io.sending() ? 1 : 0) << "\n";
     for (const auto& d : juce::MidiOutput::getAvailableDevices())
@@ -447,6 +452,14 @@ juce::String MidiSyncIo::selfTest (const juce::String& outputName, const juce::S
         const auto s = io.stats();
         report << "sender: sent=" << (juce::int64) s.sent << " dropped=" << (juce::int64) s.dropped << " late mean ms=" << juce::String (s.meanLateMs, 3)
                << " max ms=" << juce::String (s.maxLateMs, 3) << " (5 s)\n";
+        io.stopThread (1000);
+        if (! lates.empty())
+        {
+            std::sort (lates.begin(), lates.end());
+            auto pct = [&lates] (double q) { return lates[(std::size_t) std::min ((double) lates.size() - 1, q * (double) lates.size())]; };
+            report << "sender late ms: p50=" << juce::String (pct (0.5), 3) << " p95=" << juce::String (pct (0.95), 3)
+                   << " p99=" << juce::String (pct (0.99), 3) << "\n";
+        }
         report << "audio thread per block: mean us=" << juce::String (s.meanBlockUs, 2) << " max us=" << juce::String (s.maxBlockUs, 2) << "\n";
     }
     if (input != nullptr)
