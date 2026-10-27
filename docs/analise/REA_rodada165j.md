@@ -7,11 +7,13 @@ REA/Ghidra (clean-room); [SRC] open-source tuner source read (licence noted); [m
 
 ## Where I stopped
 
-- Done: harness (tmp/tune165/py: synth, measure, real, atsyn, lxsyn, lxreal), 10 synthetic takes, renders through
-  Auto-Tune Pro (retune 20 / 0 / Classic) and Waves Tune RT (Note Transition 20 ms) — scored
-  (D:\lynx-work\tune165\res_syn_refs.txt). Her 24 live-set takes: substitute params dumped to D:\lynx-work\tune165\params.
-- Building minitune (LynxTune.cpp + VocalPitch.cpp only; fast A/B loop) and the FL Pitcher harness (pit.exe).
-- Next: LYNX baseline scores, then experiments (wip copies in tmp/tune165/wip, E1 = voicing hysteresis).
+- Done: harness, references scored (Auto-Tune Pro ×3, Waves Tune RT, FL Pitcher DLL), LYNX baseline (minitune =
+  bit-identical to 0.1.19's LYNX Tune). Pitcher null vs FL's DLL done (§3).
+- Finding: on corrections ≥ ~35 c LYNX Tune loses 3–10 dB at 2.5–6 kHz (pitch-mark phase vs the glottal pulse);
+  Auto-Tune / Waves don't. Her takes: bursts 40.9 vs 31.2 / min, formant distance 0.80 vs 0.49 dB.
+- In progress: experiments in src/core/VocalPitch.cpp behind `vocal::experiment` bits (TEMPORARY, must be removed
+  or turned into the real code before landing): E1 voicing hysteresis, E2 PSOLA dropout bridge, E3 first mark on the
+  HF-energy peak, E5 slow phase lock of marks onto the HF peak.
 
 ## 1. Method: the three-way comparison harness
 
@@ -66,3 +68,12 @@ off-line analysis, drift scaled around the note centre) is the "graph mode" kind
 - Published detectors considered: pYIN (Mauch & Dixon 2014: YIN with a threshold distribution + HMM voicing), YAAPT,
   SWIPE (sawtooth-waveform-inspired, spectral). In the real-time path only causal ideas apply (a voicing hysteresis,
   the harmonic guard, spectral weighting); a CREPE-like network was not tried (CPU).
+
+## 3. FL Pitcher: LYNX's rebuild against FL's own DLL [EXEC]
+
+The round-30 harness (`tmp/r30/run/pit.c`, our own code: loads `Pitcher_x64.dll` unmodified, drives its own
+setParameter / render) and LYNX's `pitcher::Pitcher` (`tools: tmp/tune165/tools/pitcherrender.cpp`) on the ten
+synthetic takes, Formant on, Correction Speed 1 (instant) and 0.612 (~20 ms), Range 110 Hz (55 Hz for the low male,
+220 Hz for the soprano): **14 of 20 renders bit-identical**; the other six null at −43 … −51 dB (soprano ×2,
+breathy ×2, the formant trap at 0.612) — the CRT `log2f` rounding already noted in round 30 (one splice instant moves).
+Nothing to fix.
