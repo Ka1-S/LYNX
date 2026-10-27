@@ -125,8 +125,39 @@ VFX Pads is not installed.
   - Patcher and channel routing.
 - **CPU** [RUN]: the Sequencer runs 1 s of audio (4 keys, chords on every step, 140 bpm) in 0.74 ms, 0.07 % of one core.
   The other processors only work at note events. The Envelope works per block for the voices it matches.
-- Screenshots: `--vfxshot` (see "Where I stopped" for the state of the side-by-side check).
+- Screenshots: `--vfxshot` saves an editor per kind, plus the Sequencer with FL's factory bank and the Script with
+  FL's "Snap To Scale". They were compared with FL 2026 running (`/mnt/d/lynx-work/vfx164/shots/`, sequencer/ and
+  script/) [EXEC FL]. The layout follows FL's, drawn with our own controls:
+  - program selector, Latch, pages, Page lock, shift;
+  - the big grid of the selected lane over six overview lanes;
+  - MODE / INPUT / ARPEGGIATOR / OUTPUT panel.
+- Used in the Windows app like a user [RUN]:
+  - Channel Rack › + › VFX (note effects) › VFX Sequencer adds the channel and opens its editor;
+  - clicking a Note select cell sets the step (N2 → R);
+  - picking the Velocity lane shows its bars;
+  - a click on a bar sets the velocity (96 → 42), and the overview row follows.
 
 ## Where I stopped
 
-(updated at the end of the round)
+Landed: the seven kinds, each with:
+- state;
+- processor (the Script passes notes through);
+- editor;
+- FL presets;
+- .flp import;
+- picker / Patcher / Browser entries;
+- tests;
+- pt-BR strings.
+
+Left for later, in order of value:
+1. **VFX Script running Python.** This needs an embedded CPython 3.12 (about 30 MB, its own licence and packaging on the
+   three platforms) and a clean-room `flvfx` module: voices, `onTriggerVoice` / `onReleaseVoice` / `onTick`, and
+   `createDialog` surface controls. The state and the editor are ready for it. `ScriptSettings::parameters()` already reads
+   the control values. Running a script must stay off the audio thread (a worker with a lock-free event queue), and a
+   slow script must not glitch audio.
+2. **Sequencer chains and program changes**: the 16 × 8 chain tables are parsed (`SequencerSettings::chains`); an
+   incoming program change would select the program or chain step.
+3. **Envelope loop points** (FL's "Pumping" preset).
+4. **Level Scaler re-evaluated per tick** (automation on held notes) and the "Event persistence" lollipop display.
+5. **Keyboard Splitter Manual mapping**, and FL's zone-1 fallback for random zones.
+6. **Voice property changes** on Channel Rack VFX channels (now Patcher only) and VFX → "To LYNX" MIDI ports.
