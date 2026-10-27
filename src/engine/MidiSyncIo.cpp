@@ -289,12 +289,13 @@ void MidiSyncIo::run()
                     next = std::min (next, queue.front().dueMs);
             }
         }
-        // sleep until shortly before the next message, then in short steps
-        const auto wait = next - juce::Time::getMillisecondCounterHiRes();
-        if (wait > 2.0)
-            std::this_thread::sleep_for (std::chrono::microseconds ((int) ((wait - 1.0) * 1000.0)));
-        else if (wait > 0.05)
-            std::this_thread::sleep_for (std::chrono::microseconds (100));
+        // sleep until just before the next message, at most 1 ms (new messages arrive from the audio thread every
+        // block), then in short steps (FL's sync thread polls with Sleep (1); REA 165f)
+        const auto untilNext = next - juce::Time::getMillisecondCounterHiRes();
+        if (untilNext > 0.3)
+            std::this_thread::sleep_for (std::chrono::microseconds ((int) (std::min (untilNext - 0.25, 1.0) * 1000.0)));
+        else if (untilNext > 0.02)
+            std::this_thread::sleep_for (std::chrono::microseconds (50));
     }
 #if JUCE_WINDOWS
     timeEndPeriod (1);

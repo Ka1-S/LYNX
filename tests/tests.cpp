@@ -55,7 +55,7 @@
 #include "core/MissingFiles.h"
 #include "core/PianoRollTools.h"
 #include "core/EventEdit.h"
-include "core/Preferences.h"
+#include "core/Preferences.h"
 #include "core/MidiSync.h"
 #include "core/History.h"
 #include "core/Gms.h"
