@@ -48,6 +48,7 @@
 #include "core/RackOps.h"
 #include "core/Layer.h"
 #include "core/XyController.h"
+#include "core/FlCurve.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "ui/Controllers164.h"
@@ -4734,6 +4735,12 @@ private:
             auto xyzFx = lynx::makeEffectSlot (lynx::EffectKind::xyzController);
             xyzFx.params[(std::size_t) lynx::xy::level (2)] = 0.8f;
             song.mixer[1].effects.push_back (xyzFx);
+            // round 165: an X-Y-Z whose X curve is FL's "Stairs" (tension +40 %) and Y a bent single curve
+            xyzFx.params[(std::size_t) lynx::xy::curveMode (0)] = lynx::xy::curveModeValue (lynx::flcurve::stairs);
+            xyzFx.params[(std::size_t) lynx::xy::tension (0)] = 0.7f;
+            xyzFx.params[(std::size_t) lynx::xy::level (0)] = 0.62f;
+            xyzFx.params[(std::size_t) lynx::xy::tension (1)] = 0.825f;
+            song.mixer[1].effects.push_back (xyzFx);
             auto panel = lynx::makeEffectSlot (lynx::EffectKind::controlSurface);
             lynx::SurfaceControl c;
             for (const auto& [kind, name, v, x, y] : std::vector<std::tuple<lynx::SurfaceControl::Kind, const char*, float, float, float>> {
@@ -4834,7 +4841,8 @@ private:
             const lynx::AutomationTarget target { lynx::AutomationTargetKind::effectParam, 1, 1, 0 };
             shoot (lynx::makeXyControllerEditor (offline, slotOf (1), nullptr, target), "-xy-controller.png");
             shoot (lynx::makeXyControllerEditor (offline, slotOf (2), nullptr, target), "-xyz-controller.png");
-            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (3), target), "-control-surface.png");
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (3), nullptr, target), "-xyz-controller-stairs.png");
+            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (4), target), "-control-surface.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
         }
@@ -4852,9 +4860,25 @@ private:
                 offline.editSong ([&] (lynx::Song& s) {
                     s.channels[6].name = file.getFileNameWithoutExtension().toStdString();
                     s.channels[6].patcher.surface = dash->controls;
+                    s.channels[6].pluginState = preset.channels[0].pluginState; // (its MIDI port, channel, program)
                 });
                 offline.dispatchPendingMessages();
-                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + file.getFileNameWithoutExtension().replaceCharacter (' ', '-') + ".png");
+                const auto name = file.getFileNameWithoutExtension().replaceCharacter (' ', '-');
+                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + name + ".png");
+                // edit mode (round 165): each control's output number and the MIDI it sends ("1 CC74")
+                if (auto panel = lynx::makeChannelSettingsPanel (offline, 6))
+                {
+                    std::function<void (juce::Component&)> pressEdit = [&] (juce::Component& c) {
+                        for (auto* child : c.getChildren())
+                        {
+                            if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText() == lynx::tr ("Edit"))
+                                b->setToggleState (true, juce::sendNotificationSync);
+                            pressEdit (*child);
+                        }
+                    };
+                    pressEdit (*panel);
+                    shoot (std::move (panel), "-dashboard-fl-" + name + "-edit.png");
+                }
             }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))

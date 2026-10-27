@@ -825,7 +825,7 @@ private:
             return;
         auto* window = new juce::AlertWindow (tr ("Dashboard MIDI"),
                                               tr ("The Dashboard sends its notes, the program and the controls set to \"Send MIDI\" to the plugins "
-                                                  "whose MIDI input port is this port (Wrapper settings > MIDI)."),
+                                                  "whose MIDI input port is this port (plugin window > Settings > MIDI > Input port)."),
                                               juce::MessageBoxIconType::NoIcon);
         window->addTextEditor ("port", juce::String (current->port), tr ("Port (0-255)"));
         window->addTextEditor ("channel", juce::String (current->channel + 1), tr ("MIDI channel (1-16)"));

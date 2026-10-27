@@ -156,6 +156,7 @@ public:
     {
         for (auto& v : overrides)
             v.store (-1.0f, std::memory_order_relaxed);
+        configured.fill (-1);
     }
 
     void prepare (double sr) noexcept override
@@ -178,6 +179,13 @@ public:
         shared = s;
         std::atomic_thread_fence (std::memory_order_release);
         sequence.store (seq + 2, std::memory_order_release);
+        // a value the song changed (the knob moved by hand, not automation): it wins over the last automated one
+        for (int p = 0; p < paramCount; ++p)
+            if (s.params[(std::size_t) p] != configured[(std::size_t) p])
+            {
+                configured[(std::size_t) p] = s.params[(std::size_t) p];
+                overrides[(std::size_t) p].store (-1.0f, std::memory_order_relaxed);
+            }
         tempo.store (bpm > 0.0 ? bpm : 120.0, std::memory_order_relaxed);
         channelVolume.store (channel.volume, std::memory_order_relaxed);
     }
@@ -226,7 +234,8 @@ public:
         nextModY = modY;
     }
     void pitchBend (float semitones) noexcept override { bend = semitones; }
-    // automation / a link on an offset or scale (round 165): overrides the setting until the next one
+    // automation / a link on an offset or scale (round 165): overrides the setting until the next one, or until the
+    // song's own value changes
     void setParameter (int index, float value) noexcept override
     {
         if (index >= 0 && index < paramCount && std::isfinite (value))
@@ -362,6 +371,7 @@ private:
     Settings shared;   // written by configure (UI thread)
     Settings settings; // the audio thread's copy
     std::array<std::atomic<float>, paramCount> overrides; // (−1: none)
+    std::array<std::int32_t, paramCount> configured {}; // (the build thread's: the song's values configure last saw)
     std::atomic<double> tempo { 120.0 };
     std::atomic<float> channelVolume { 0.78f };
 

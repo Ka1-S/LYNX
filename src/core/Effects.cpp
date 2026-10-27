@@ -2957,7 +2957,7 @@ const EffectInfo& effectInfo (EffectKind kind)
             static const EffectInfo info = [] {
                 EffectInfo i { "Control Surface", {} };
                 static std::vector<std::string> names;
-                for (int k = 0; k < surface::maxOutputs; ++k)
+                for (int k = 0; k < surface::maxSurfaceOutputs; ++k)
                     names.push_back ("Control " + std::to_string (k + 1));
                 for (const auto& n : names)
                     i.params.push_back ({ n.c_str(), 0.0f });
