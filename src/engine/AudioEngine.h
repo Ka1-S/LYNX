@@ -158,7 +158,10 @@ public:
     void setPreviewVolume (double volume) noexcept;
     double getPreviewVolume() const noexcept { return previewVolume; }
     // Plays a sound made in memory through the same preview output (the start-up sound). UI thread.
-    void previewSample (std::shared_ptr<const SampleData> sample, bool loop = false, float gain = 0.8f);
+    void previewSample (std::shared_ptr<const SampleData> sample, bool loop = false, float gain = 0.8f, bool audioEditor = false);
+    // The Audio Editor's playback volume (its toolbar knob, round 162): 0..1.25 like the Browser's, 1 = unity.
+    void setEditorVolume (double volume) noexcept;
+    double getEditorVolume() const noexcept { return editorVolume; }
     // The frame of the previewed sample being played, -1 when the preview is silent.
     double getPreviewPosition() const noexcept;
 
@@ -535,6 +538,7 @@ private:
     double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
     double previewVolume = 1.0;
+    double editorVolume = 1.0;
     void publishSong();
     void adoptPrepared (PreparedFlp& prepared); // the plugins of a prepared import found / substituted (message thread)
 
@@ -558,6 +562,9 @@ private:
         int cc = 0, channel = 0, value = 0;
     };
     SpscQueue<ControllerEvent, 1024> controllerQueue; // MIDI thread -> UI (controllers)
+    // the CCs a MIDI link (project or global) uses: they move their parameter and are not also played into the
+    // selected channel's instrument (round 162); written by applyControllers, read by the MIDI thread
+    std::array<std::atomic<std::uint64_t>, 2> linkedCcs {};
     AutomationTarget learning;
     bool learningGlobal = false;
     bool saveGlobalLinks = false; // only the engine with an audio device (the app) writes the settings file

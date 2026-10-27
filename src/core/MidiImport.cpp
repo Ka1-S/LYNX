@@ -210,7 +210,7 @@ bool importInto (Song& song, const ParsedMidi& midi, const Options& o, const std
             c.instrument = InstrumentKind::synth;
             c.volume = 0.6f;
         }
-        c.mixerTrack = o.mixerTracks ? song.nextFreeInsert() : 0;
+        c.mixerTrack = o.mixerTracks ? song.claimFreeInsert() : 0;
         song.channels.push_back (c);
         const auto channel = (int) song.channels.size() - 1;
         for (auto n : g.notes)

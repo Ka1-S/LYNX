@@ -328,6 +328,7 @@ void AudioEngine::buildInitialGraph()
     auto previewOwned = std::make_unique<PreviewPlayer>();
     preview = previewOwned.get();
     preview->setVolume (controls::previewGain (previewVolume));
+    preview->setEditorVolume (controls::previewGain (editorVolume));
     auto previewNode = graph.addNode (std::move (previewOwned));
 
     for (int channel = 0; channel < 2; ++channel)
@@ -757,10 +758,17 @@ int AudioEngine::snapInputKey (int key) const noexcept
     return scale > 0 ? notetools::snapToScale (key, inputScaleRoot.load(), scale) : key;
 }
 
-void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample, bool loop, float gain)
+void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample, bool loop, float gain, bool audioEditor)
 {
     if (preview != nullptr)
-        preview->play (std::move (sample), loop, gain);
+        preview->play (std::move (sample), loop, gain, audioEditor);
+}
+
+void AudioEngine::setEditorVolume (double volume) noexcept
+{
+    editorVolume = controls::clampUtilityVolume (volume);
+    if (preview != nullptr)
+        preview->setEditorVolume (controls::previewGain (editorVolume));
 }
 
 void AudioEngine::setPreviewVolume (double volume) noexcept
@@ -1552,9 +1560,48 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
     if (device.midiChannel != 0 && m.getChannel() != device.midiChannel)
         return;
 
+    // the pitch wheel, the mod wheel and the other controllers play into the channels the notes go to (round 162,
+    // issue #9: they did nothing unless linked): hosted plugins get the MIDI message, LYNX's instruments bend by the
+    // channel's pitch range. A CC with a MIDI link only moves its parameter.
+    auto playControl = [this, &device] (int control, float value) {
+        NoteEvent e;
+        e.type = NoteEvent::Type::control;
+        e.key = control;
+        e.velocity = value;
+        const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
+        if (device.target >= 0)
+        {
+            e.channel = device.target;
+            midiEvents.push (e);
+            return;
+        }
+        for (int i = -1; i < extra; ++i)
+        {
+            e.channel = i < 0 ? liveChannel.load() : extraLiveChannels[(std::size_t) i].load();
+            if (e.channel >= 0)
+                midiEvents.push (e);
+        }
+    };
+
     if (m.isController())
     {
-        controllerQueue.push ({ m.getControllerNumber(), m.getChannel() - 1, m.getControllerValue() });
+        const auto cc = m.getControllerNumber();
+        controllerQueue.push ({ cc, m.getChannel() - 1, m.getControllerValue() });
+        // (120…127 are channel mode messages: All Sound / Notes Off, reset…)
+        if (cc >= 0 && cc < 120 && (linkedCcs[(std::size_t) (cc >> 6)].load (std::memory_order_relaxed) >> (cc & 63) & 1u) == 0)
+            playControl (cc, (float) m.getControllerValue() / 127.0f);
+        return;
+    }
+
+    if (m.isPitchWheel())
+    {
+        playControl (NoteEvent::controlPitchBend, juce::jlimit (-1.0f, 1.0f, (float) (m.getPitchWheelValue() - 8192) / 8192.0f));
+        return;
+    }
+
+    if (m.isChannelPressure())
+    {
+        playControl (NoteEvent::controlPressure, (float) m.getChannelPressureValue() / 127.0f);
         return;
     }
 
@@ -2747,6 +2794,14 @@ void AudioEngine::applyControllers()
     }
 
     const auto links = linksWithGlobal (song.midiLinks, getGlobalLinks());
+    {
+        std::uint64_t bits[2] {};
+        for (const auto& link : links)
+            if (link.cc >= 0 && link.cc < 128)
+                bits[link.cc >> 6] |= std::uint64_t { 1 } << (link.cc & 63);
+        for (int w = 0; w < 2; ++w)
+            linkedCcs[(std::size_t) w].store (bits[w], std::memory_order_relaxed);
+    }
     if (latest.empty() || links.empty())
         return;
 

@@ -157,6 +157,17 @@ int Song::nextFreeInsert() const
     return 0; // every insert is in use: Master (FL's default for a new channel)
 }
 
+int Song::claimFreeInsert()
+{
+    if (const auto t = nextFreeInsert(); t > 0)
+        return t;
+    if (mixer.empty() || (int) mixer.size() >= maxMixerTracks)
+        return 0;
+    const auto name = "Insert " + std::to_string (mixer.size());
+    mixer.emplace_back().name = name;
+    return (int) mixer.size() - 1;
+}
+
 void Song::removeChannel (int index)
 {
     if (index < 0 || index >= (int) channels.size())

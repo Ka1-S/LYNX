@@ -4015,7 +4015,7 @@ bool addAudioClip (AudioEngine& engine, const juce::File& file, std::int64_t sta
             c.name = name;
             c.instrument = InstrumentKind::audioClip;
             c.samplePath = path;
-            c.mixerTrack = s.nextFreeInsert();
+            c.mixerTrack = s.claimFreeInsert();
             s.channels.push_back (c);
             channel = (int) s.channels.size() - 1;
         }

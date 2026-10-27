@@ -178,7 +178,7 @@ void placeTakeClips (Song& song, const std::vector<TakeFile>& files, const std::
         c.name = f.name;
         c.instrument = InstrumentKind::audioClip;
         c.samplePath = f.path;
-        c.mixerTrack = f.insert > 0 && f.insert < (int) song.mixer.size() ? f.insert : song.nextFreeInsert();
+        c.mixerTrack = f.insert > 0 && f.insert < (int) song.mixer.size() ? f.insert : song.claimFreeInsert();
         song.channels.push_back (c);
         const auto channel = (int) song.channels.size() - 1;
         const auto insert = c.mixerTrack;
