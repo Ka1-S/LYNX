@@ -16,6 +16,8 @@ Evidence markers: **[MAN]** FL's manual (the HTML help that ships with FL 2026),
 - 18:12: drop on the rack's free space failed in the app: juce::Viewport calls `setInterceptsMouseClicks (false, true)`
   on itself, so the drag target search skipped it. `ChannelRackViewport` now intercepts clicks. Next: re-test that
   drop, finish build-local + Windows build, merge main, land.
+- 18:31: free-space drop verified (`u10-freedrop.png`), Theme page verified. Waiting for build-local + Windows build,
+  then land.
 
 ## FL's behaviour, item by item
 
@@ -35,3 +37,42 @@ parsed with a small DFM reader; strings) plus FL's documented gestures already c
 | 8 | Double right-click and hold = the Mute tool while held (P2 in WORKFLOW_FL) | [MAN] |
 | 9 | The transport Stop ends a Browser preview | issue |
 | 10 | Vertical zoom of the Playlist: wheel with Alt (Ctrl+Alt in the editors), and the zoom grips of FL's scroll bars | [MAN], [HYP] for the exact modifier |
+
+## What LYNX does now
+
+| # | LYNX | Where |
+|---|---|---|
+| 1 | Piano Roll keys: velocity from the click's x on the key (`gesture::keyClickVelocity`), hint shows "vel N" | `EditorGestures.h`, `PianoRollComponent` |
+| 2 | Step clicks never preview (Ctrl+click the channel button auditions) | `ChannelRackComponent::applyPaint` |
+| 3 | `ChannelRackViewport` forwards file and Browser drops on the panel's free space; it intercepts clicks because juce::Viewport makes itself click-transparent | `ChannelRackComponent.h` |
+| 4 | New KeyMap actions with FL's defaults: Shift+F8, F10, F11, F12, Alt+F12, Ctrl+F5, F2 (Browser rename), Del (Mixer slot); View/Options menu entries. P/M stay unassigned (FL has none) and can be set in Options › Manage shortcuts | `KeyMap`, `MainComponent::runAction` |
+| 5 | Ghost steps outlined past the pattern end; a click sets the step and lengthens the pattern by whole bars (`lengthWithStep`) | `RackOps`, `ChannelRackComponent` |
+| 6 | Slot menu "Delete\tDel"; Del while the menu is open | `QuickPick`, `EffectsPanel::deleteSlot` |
+| 7 | Plugin display names (`plugin-names.txt`), Browser Rename.../F2/Original name; renamed plugins first in slot/add menus; one-key type-ahead | `PluginHost`, `prefs`, `QuickPick` |
+| 8 | Double right-click and hold = mute while held | `PlaylistComponent` |
+| 9 | Transport Stop also stops the Browser preview | `MainComponent::stopAndRewind` |
+| 10 | Playlist `trackZoom`: Alt+wheel, Ctrl+Alt+wheel, grip above the vertical scroll bar (double-click = 100%) | `PlaylistComponent` |
+| fix | Options › Theme opened the MIDI page (page index clamped to 0..5) | `MainComponent::openSettings` |
+
+## Verification
+
+Linux build under Xvfb (shots in the session scratchpad `shots/`):
+- 1 `s29-vel.png`: clicks at a key's left/middle/right gave vel 10/62/121.
+- 3 `s24-dropped.png` (Browser drag → new channel / onto a channel), `s25-xdnd.png` (external XDND drop), `u10-freedrop.png`
+  (file dropped on the empty space under the channels of an enlarged rack panel → new Sampler channel; before the
+  viewport fix the same drop was ignored, `t04all.png`).
+- 4 `u11-options.png` (F10/F11 in the Options menu), `u12-theme.png` (Options › Theme opens the Theme page). The F-keys
+  themselves don't reach JUCE through xdotool on Xvfb; covered by unit tests (defaults and no conflicts).
+- 5 `t02c.png` (outlined ghost steps), `s04-ghostclick.png` (click on a ghost step → pattern of 2 bars).
+- 6 `s18-slotmenu.png`, `s20all.png` (Delete removes the plugin).
+- 7 `s11c.png`, `s13c.png` (EQ renamed 1_EQ, "Renamed plugins" header), `s19-picked.png` (typing 1 added it).
+- 8 `s08.png` (two clips muted by double right-click and hold).
+- 10 `s06-vzoom.png` (173 %, 81 %, grip double-click back to 100 %).
+- 2 and 9: code-verified (no audio device under Xvfb).
+- Unit tests `tests/Fl165Tests.inc`: velocity mapping, `lengthWithStep`, plugin-name file (CRLF too), type-ahead, FL
+  window keys and conflict check.
+
+## Left for later
+
+- The Quick-add palette (F8) and the slot's label still show the plugin's original name.
+- FL's exact modifier for vertical Playlist zoom is [HYP] (Alt+wheel follows FL's documented editors).
