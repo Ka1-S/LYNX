@@ -175,6 +175,7 @@ target_sources(lynx_core PRIVATE
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
     src/core/AudioEdit.cpp
+    src/core/FlAutoSlicer.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp
