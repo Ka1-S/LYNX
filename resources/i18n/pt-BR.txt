@@ -5524,3 +5524,11 @@ countries: br
 "Black notes" = "Teclas pretas"
 "Sharps (#)" = "Sustenidos (#)"
 "Flats (b)" = "Bemóis (b)"
+# round 165m (batch 2)
+"Prepare for performance mode..." = "Preparar para o modo performance..."
+"Prepare for performance mode" = "Preparar para o modo performance"
+"Inserts empty columns before the song for the clips to launch, a marker on each, and a Start marker where the song begins; Performance mode is turned on." = "Insere colunas vazias antes da música para os clipes a disparar, um marcador em cada uma e um marcador Start onde a música começa; o modo performance é ligado."
+"Marker count" = "Número de marcadores"
+"2 steps" = "2 passos"
+"8 bars" = "8 compassos"
+"Track: [LMB] select  [Ctrl][LMB] add / remove  [Shift][LMB] range  [RMB] menu  [2xLMB] open the clip source  [Shift][Wheel] move up / down" = "Faixa: [LMB] seleciona  [Ctrl][LMB] inclui / tira  [Shift][LMB] intervalo  [RMB] menu  [2xLMB] abre a fonte do clipe  [Shift][Wheel] move para cima / baixo"
