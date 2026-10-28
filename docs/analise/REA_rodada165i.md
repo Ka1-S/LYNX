@@ -9,6 +9,13 @@ Evidence markers: **[EXEC]** measured here, **[DECOMP]** Ghidra pseudocode of FL
 
 ## Where I stopped
 
+- 2026-10-27 23:10 (resumed after the BSOD): landed so far — the test profile / test mode / `--opentime` (main
+  `2f520ca6`). On feature/perf165, still to land: the task graph, the plugin rescan fix, KeepFloatMode, the stretch disk
+  cache, and (new, `bae869a6`) the keep-pitch shifters made in parallel (`prepareKeyShifts`, `rack_keyshift` in
+  load.log, `LYNX_PARALLEL_KEYSHIFT=0` for A/B; test `perf165_parallel_key_shifters_render_the_same`). Running:
+  `tmp/perf165/ot.sh main br` (C:\…\perf165\{main,br}; fresh profile from `seed/`, LYNX_TEST_MODE=1, `--opentime`,
+  cold and warm open, load gate < 8) → `res-ot.jsonl`; build-local of bae869a6. Next: FL runs (`run.sh open`, FL lock),
+  fill §2, land everything else via land.sh.
 - 2026-10-27 15:26: the PC blue-screened mid-round (driver bugcheck, not LYNX). The work on disk was saved as the
   checkpoint commit `0bb53ce5` (unverified). Rebuilt from the diff:
   - **Task-graph mixer scheduling** (`RackState::buildTaskGraph`, `RackRenderer::runTaskGraph`): channels and inserts
