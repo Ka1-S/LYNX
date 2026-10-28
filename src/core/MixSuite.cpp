@@ -438,6 +438,7 @@ vmatch::echannel::Settings consoleSettingsOf (const EffectParams& p) noexcept
     e.dynOn = on (p[dynOn]);
     e.dynamicsAfterEq = ! on (p[order]);
     e.filtersBeforeDynamics = on (p[filterSplit]);
+    e.eqToSidechain = on (p[eqToSidechain]); // round 165
     if (k4Voicing (p)) // round 148: the 4K console (its own Q scale, colour, mic pre, VCA, make-up, mix)
     {
         e.model = 1;
@@ -547,6 +548,7 @@ public:
         // round 147b: + the console's automatic make-up when switched on
         const auto outGain = (float) (dbToGain (trimDb (p[output]) + (on (p[autoMakeup]) ? autoMakeupDb (p) : 0.0)) * (on (p[phase]) ? -1.0 : 1.0));
         const bool eq = on (p[eqOn]), dyn = on (p[dynOn]), eqFirst = ! on (p[order]), fts = on (p[filtersToSidechain]);
+        const bool eqSc = on (p[eqToSidechain]); // round 165: the filters and the EQ in the side chain only
 
         // compressor
         const auto thr = compThresholdDb (p[compThreshold]), rat = ratio (p[compRatio]);
@@ -565,16 +567,18 @@ public:
         for (int i = 0; i < n; ++i)
         {
             float a = l[i] * inGain, b = r[i] * inGain;
-            if (! fts)
+            if (! fts && ! eqSc)
                 filters (audio, a, b);
-            if (eq && eqFirst)
+            if (eq && eqFirst && ! eqSc)
                 bands (audio, a, b);
 
             if (dyn && (compOn || gateOn))
             {
                 float sa = a, sb = b;
-                if (fts)
+                if (fts || eqSc)
                     filters (side, sa, sb);
+                if (eqSc && eq)
+                    bands (side, sa, sb);
                 const auto rect = (double) std::max (std::abs (sa), std::abs (sb));
                 // level detector: instant attack, 30 ms release (keeps the ripple of low notes out of the gain)
                 levelEnv = rect > levelEnv ? rect : levelRelease * levelEnv + (1.0 - levelRelease) * rect;
@@ -621,7 +625,7 @@ public:
                 maxGate = std::max (maxGate, (float) gateGr);
             }
 
-            if (eq && ! eqFirst)
+            if (eq && ! eqFirst && ! eqSc)
                 bands (audio, a, b);
             l[i] = a * outGain;
             r[i] = b * outGain;
@@ -940,6 +944,8 @@ public:
     {
         if (vocalOn)
             return vocalEngine.latencySamples();
+        if (classicOn) // round 165 [EXEC]: the reference reports 0 samples, so the classic voicing has no latency
+            return 0;
         return delay.len + (osFactor > 1 ? Oversampler::latency() : 0);
     }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
@@ -1005,9 +1011,10 @@ private:
             scL = scR = nullptr;
             return;
         }
-        if (classic (p))
+        classicOn = classic (p);
+        if (classicOn)
         {
-            // the measured classic de-esser has no look-ahead; the fixed latency Hush reports is kept as a plain delay
+            // the measured classic de-esser has no look-ahead and (round 165) no latency, as the reference
             vmatch::deesser::Settings c;
             c.hz = hz (p[frequency]);
             c.thresholdDb = classicThresholdDb (p[threshold]);
@@ -1016,8 +1023,6 @@ private:
             c.listen = on (p[listen]);
             c.outputDb = lin (p[output], -12.0, 12.0);
             classicEngine.process (l, r, n, c);
-            for (int i = 0; i < n; ++i)
-                delay.process (l[i], r[i]);
             meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
             meters.setDetector (classicEngine.detectorDb());
             return;
@@ -1232,6 +1237,7 @@ private:
     vmatch::deesser::DeEsser classicEngine;
     vmatch::vocalds::DeEsser vocalEngine;
     bool vocalOn = false;
+    bool classicOn = false; // round 165: the classic voicing has no latency
     Biquad detect, detectLp, listenF, listenLp, split, bandLp, bandLp2, topHp, topHp2;
     double env = 0.0, gr = 0.0, fullEnv = 0.0;
     double envCh[2] {}, grCh[2] {};
@@ -1713,6 +1719,14 @@ bool modulated (const EffectParams& p) noexcept
     return false;
 }
 bool measuredEffects (const EffectParams& p) noexcept { return on (p[effectLaw]); }
+
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value)
+{
+    std::vector<std::pair<int, float>> edits { { param, value } };
+    if (param == classicDrive && on (p[classicAuto]))
+        edits.push_back ({ classicOutput, emberclassic::autoOutput (p[classicOutput], p[classicDrive], value) });
+    return edits;
+}
 double collapseRatio (double referenceDrive) noexcept { return std::exp2 (-2.0 * std::clamp (referenceDrive, 0.0, 1.0)); }
 
 float shape (Style s, float x) noexcept
@@ -2726,6 +2740,7 @@ private:
         c.steep = on (p[classicSteep]);
         c.mix = std::clamp ((double) p[classicMix], 0.0, 1.0);
         c.outputDb = emberclassic::outputDb (p[classicOutput]);
+        c.measuredPunish = on (p[classicLaw]);
         if (! classicOn || ! (c == classicSet))
         {
             if (! classicOn)
@@ -2825,7 +2840,9 @@ const EffectInfo& ridgeInfo()
                                      { "Auto make-up", 0.0f }, { "Analog", 0.0f },
                                      // round 148: the 4K voicing
                                      { "4K voicing", 0.0f }, { "EQ colour", 0.0f }, { "Mic pre", 0.0f }, { "Mic gain", 0.0f },
-                                     { "Make-up offset", 0.5f } } };
+                                     { "Make-up offset", 0.5f },
+                                     // round 165
+                                     { "EQ to SC", 0.0f } } };
     return info;
 }
 
@@ -2916,7 +2933,9 @@ const EffectInfo& emberInfo()
                                      { "Mod 2 source", 0.0f }, { "Mod 2 target", 0.0f }, { "Mod 2 amount", 0.5f },
                                      { "Mod 3 source", 0.0f }, { "Mod 3 target", 0.0f }, { "Mod 3 amount", 0.5f },
                                      { "Mod 4 source", 0.0f }, { "Mod 4 target", 0.0f }, { "Mod 4 amount", 0.5f },
-                                     { "Effect law", 1.0f } } };
+                                     { "Effect law", 1.0f },
+                                     // round 165 (Decapitator: Auto, the Classic law)
+                                     { "Classic auto", 1.0f }, { "Classic law", 1.0f } } };
     return info;
 }
 
@@ -3194,6 +3213,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case mod1Target: case mod2Target: case mod3Target: case mod4Target: return modTargetName (modTargetOf (v));
             case mod1Amount: case mod2Amount: case mod3Amount: case mod4Amount: return fmt ("%+.3f", modAmount (v));
             case effectLaw: return on (v) ? "measured" : "static";
+            case classicAuto: return onOff (v);
+            case classicLaw: return on (v) ? "measured" : "round 136";
             case band2Style: case band3Style: case band4Style: case band5Style: case band6Style:
             {
                 static const char* names[] = { "tube", "tape", "transistor", "fuzz" };

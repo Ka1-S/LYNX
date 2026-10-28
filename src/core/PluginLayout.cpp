@@ -897,8 +897,9 @@ Layout fruityWaveShaper()
     v.push_back (knob (165, 279, 30, "Pre amp", TR_NOOP ("Pre"), 302));
     v.push_back (knob (210, 279, 30, "Mix", TR_NOOP ("Mix"), 302));
     v.push_back (knob (253, 279, 30, "Post gain", TR_NOOP ("Post"), 302));
-    v.push_back (toggle (150, 312, 34, 14, "Smooth", TR_NOOP ("Smooth")));
-    v.push_back (toggle (150, 332, 34, 14, "HQ", TR_NOOP ("HQ")));
+    // (round 165: the switches start further left, so "SMOOTH" fits beside its switch instead of "S...")
+    v.push_back (toggle (112, 312, 72, 14, "Smooth", TR_NOOP ("Smooth")));
+    v.push_back (toggle (112, 332, 72, 14, "HQ", TR_NOOP ("HQ")));
     v.push_back (toggle (190, 332, 60, 14, "Center", TR_NOOP ("Center")));
     v.push_back (label (188, 312, 60, 14, TR_NOOP ("Oversample"), alignLeft));
     v.push_back (stepper (250, 310, 24, 18, "Oversampling", nullptr, 4));
@@ -987,6 +988,25 @@ Layout fruityBalance()
     v.push_back (label (130, 18, 80, 20, TR_NOOP ("Volume")));
     v.push_back (knob (170, 77, 46, "Volume", nullptr, 0, noCaption));
     v.push_back (value (130, 112, 80, 20, "Volume", 0));
+    return l;
+}
+
+Layout fruityMute2Layout()
+{
+    // round 165g, FL Studio 2026's window: two knobs side by side, each with its caption box (MUTE / CHANNEL) and its value
+    // under it ("On" = the sound passes, "Off" = muted; L, L + R, R = the side(s) silenced)
+    Layout l;
+    l.fl = "Fruity Mute 2";
+    l.width = 300;
+    l.height = 64;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 300, 64, nullptr, boxed));
+    v.push_back (knob (28, 32, 36, "Mute", nullptr, 0, noCaption, 1));
+    v.push_back (label (52, 8, 92, 16, TR_NOOP ("MUTE")));
+    v.push_back (value (52, 30, 92, 18, "Mute"));
+    v.push_back (knob (172, 32, 36, "Channel", nullptr, 0, noCaption, 3));
+    v.push_back (label (196, 8, 96, 16, TR_NOOP ("CHANNEL")));
+    v.push_back (value (196, 30, 96, 18, "Channel"));
     return l;
 }
 
@@ -1614,8 +1634,11 @@ Layout ridgeStrip()
     v.push_back (section (4, 4, 276, 104, TR_NOOP ("Filters")));
     v.push_back (dial (54, 50, 36, "HPF", TR_NOOP ("High-pass")));
     v.push_back (dial (140, 50, 36, "LPF", TR_NOOP ("Low-pass")));
-    v.push_back (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")));
-    v.push_back (when (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split")), "4K voicing", 0.0f, 0.5f)); // round 123: E voicing, filters before dynamics
+    // round 165: the old "filters to the side chain" switch only shows while it is on (older projects); the side chain
+    // now takes the filters and the EQ together ("EQ to SC", the Dynamics section), as on the reference
+    v.push_back (when (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")), "Filters to SC", 0.5f, 1.0f));
+    // round 123: the E voicing's filter split (filters before the dynamics); round 165: only where it acts
+    v.push_back (when (when (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split")), "4K voicing", 0.0f, 0.5f), "Voicing", 0.5f, 1.0f));
     const char* names[] = { TR_NOOP ("HF"), TR_NOOP ("HMF"), TR_NOOP ("LMF"), TR_NOOP ("LF") };
     const char* gains[] = { "HF gain", "HMF gain", "LMF gain", "LF gain" };
     const char* freqs[] = { "HF freq.", "HMF freq.", "LMF freq.", "LF freq." };
@@ -1633,7 +1656,8 @@ Layout ridgeStrip()
     }
     v.push_back (section (4, 520, 276, 192, TR_NOOP ("Equalizer")));
     v.push_back (display (10, 540, 264, 118, "ridgeeq"));
-    v.push_back (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f));
+    // round 165: the Brown / Black curves are Ridge's own engine's (the E console voicing has the console's one curve)
+    v.push_back (when (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f), "Voicing", 0.0f, 0.5f));
     // round 148: the 4K voicing (the console measured on the SSL 4K E trial) — its three EQ colours, the mic pre and
     // its gain, the make-up offset; the rest of the panel drives it with the console's own scales
     v.push_back (when (tabs (10, 664, 150, 20, "EQ colour", TR_NOOP ("Brown|Black|Orange")), "4K voicing", 0.5f, 1.0f));
@@ -1660,12 +1684,23 @@ Layout ridgeStrip()
     v.push_back (dial (330, 370, 32, "Gate release", TR_NOOP ("Release")));
     v.push_back (toggle (396, 380, 70, 20, "Gate fast", TR_NOOP ("Fast")));
     v.push_back (tabs (396, 408, 154, 20, "Expander", TR_NOOP ("Gate|Expand")));
+    // round 165: the reference's two LED ladders (compressor, expander / gate: 3 … 20 dB of reduction) on the left, the
+    // routing on the right — the dynamics in, where they sit (before / after the EQ), the EQ into their side chain
     v.push_back (section (284, 444, 272, 132, TR_NOOP ("Dynamics")));
-    v.push_back (meter (292, 466, 256, 12, 0, TR_NOOP ("Comp")));
-    v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
-    v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
-    v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
-    v.push_back (toggle (292, 540, 84, 20, "Analog", TR_NOOP ("Analog"))); // round 147b: the console emulation's colour
+    {
+        auto comp = display (292, 462, 30, 108, "grleds");
+        comp.steps = 0;
+        comp.label = TR_NOOP ("Comp");
+        v.push_back (comp);
+        auto gate = display (326, 462, 30, 108, "grleds");
+        gate.steps = 1;
+        gate.label = TR_NOOP ("Exp");
+        v.push_back (gate);
+    }
+    v.push_back (toggle (366, 464, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
+    v.push_back (toggle (456, 464, 92, 20, "Analog", TR_NOOP ("Analog"))); // round 147b: the console emulation's colour
+    v.push_back (tabs (366, 494, 182, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    v.push_back (when (toggle (366, 524, 182, 20, "EQ to SC", TR_NOOP ("EQ to side chain")), "4K voicing", 0.0f, 0.5f));
     // the GAIN block (round 129, the reference's): input trim and phase, the output fader beside the input / output
     // level meter with its peak read-outs
     v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));
@@ -1813,27 +1848,36 @@ Layout aetherLayout()
 }
 
 // round 136: Ember's Classic voicing (core/EmberClassic.h) — with Voicing on, Ember's own controls hide and the
-// Classic ones (the reference's laws and texts) show; added around emberLayout() so that layout stays as it is
+// Classic ones (the reference's laws and texts) show; added around emberLayout() so that layout stays as it is.
+// Round 165 (REA_rodada165ha §3): the reference's one-screen arrangement in LYNX's widgets — Punish top left, the VU
+// (output level) top centre, Output with its Auto link top right, the big Drive left, Low cut (+ Thump), Tone,
+// High cut (+ Steep) and Mix in a row, the five styles one click each along the bottom
 Layout withEmberClassic (Layout l)
 {
+    // every item of Ember's own page hides in Classic (round 165: also the band rows, which carry their own condition)
     for (auto& it : l.items)
-        if (it.whenParam == nullptr)
+        if (it.whenParam == nullptr || it.when2Param == nullptr)
             it = when (it, "Voicing", 0.0f, 0.5f);
     auto add = [&l] (LayoutItem it) { l.items.push_back (when (it, "Voicing", 0.5f, 1.0f)); };
-    add (section (4, 4, 200, 222, TR_NOOP ("Style")));
-    auto styles = radio (12, 30, 184, 120, "Classic style", TR_NOOP ("A|E|N|T|P"));
-    add (styles);
-    add (toggle (12, 166, 184, 22, "Classic punish", TR_NOOP ("Punish")));
-    add (section (208, 4, 308, 222, TR_NOOP ("Classic")));
-    add (dial (266, 86, 70, "Classic drive", TR_NOOP ("Drive"), big));
-    add (dial (380, 60, 36, "Classic tone", TR_NOOP ("Tone"), bipolar));
-    add (dial (460, 60, 36, "Classic mix", TR_NOOP ("Mix")));
-    add (dial (340, 148, 30, "Classic low cut", TR_NOOP ("Low cut")));
-    add (dial (410, 148, 30, "Classic high cut", TR_NOOP ("High cut")));
-    add (dial (480, 148, 30, "Classic output", TR_NOOP ("Output")));
-    add (toggle (216, 200, 80, 20, "Classic thump", TR_NOOP ("Thump")));
-    add (toggle (300, 200, 80, 20, "Classic steep", TR_NOOP ("Steep")));
-    add (toggle (400, 200, 108, 20, "Voicing", TR_NOOP ("Classic")));
+    add (section (4, 4, 512, 432, TR_NOOP ("Classic")));
+    add (toggle (24, 44, 104, 28, "Classic punish", TR_NOOP ("Punish")));
+    auto vu = display (152, 28, 216, 136, "vumeter");
+    vu.steps = 0;
+    add (vu);
+    add (dial (434, 84, 56, "Classic output", TR_NOOP ("Output")));
+    add (toggle (400, 156, 68, 20, "Classic auto", TR_NOOP ("Auto")));
+    add (dial (86, 222, 104, "Classic drive", TR_NOOP ("Drive"), big));
+    add (dial (204, 268, 50, "Classic low cut", TR_NOOP ("Low cut")));
+    add (dial (300, 268, 50, "Classic tone", TR_NOOP ("Tone"), bipolar));
+    add (dial (396, 268, 50, "Classic high cut", TR_NOOP ("High cut")));
+    add (dial (474, 222, 50, "Classic mix", TR_NOOP ("Mix")));
+    add (toggle (168, 336, 72, 20, "Classic thump", TR_NOOP ("Thump")));
+    add (toggle (360, 336, 72, 20, "Classic steep", TR_NOOP ("Steep")));
+    add (label (24, 368, 280, 14, TR_NOOP ("Style")));
+    add (tabs (24, 384, 300, 32, "Classic style", TR_NOOP ("A|E|N|T|P")));
+    // projects saved before round 165 keep round 136's Punish until switched to the measured law
+    add (when (tabs (344, 360, 152, 20, "Classic law", TR_NOOP ("Old|Measured")), "Classic law", 0.0f, 0.5f));
+    add (toggle (344, 392, 152, 24, "Voicing", TR_NOOP ("Classic")));
     return l;
 }
 
@@ -3255,7 +3299,9 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::flPitchShifter, EffectKind::effector, EffectKind::hardcore, EffectKind::vocodex,
                                                  EffectKind::fruitySend,
                                                  // round 154
-                                                 EffectKind::emphasizer };
+                                                 EffectKind::emphasizer,
+                                                 // round 165g
+                                                 EffectKind::fruityMute2 };
     return kinds;
 }
 
@@ -3342,6 +3388,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::orbit: l = captionsAbove (orbitLayout()); break;
         case EffectKind::latticeMod: l = captionsAbove (latticeLayout()); break;
         case EffectKind::fruitySend: l = fruitySend(); break;
+        case EffectKind::fruityMute2: l = fruityMute2Layout(); break;
         case EffectKind::crestCompressor: l = crestCompressor(); break;
         case EffectKind::prismMultiband: l = prismMultiband(); break;
         case EffectKind::sentryGate: l = sentryGate(); break;

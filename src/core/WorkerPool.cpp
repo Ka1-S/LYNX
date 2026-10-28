@@ -83,6 +83,11 @@ struct WorkerPool::Semaphore
 };
 #endif
 
+void WorkerPool::relax() noexcept
+{
+    cpuRelax();
+}
+
 WorkerPool::WorkerPool (int n, std::function<void()> onThreadStart) : wake (std::make_unique<Semaphore>())
 {
     // ticket 0: count 0, nothing to take until the first parallelFor

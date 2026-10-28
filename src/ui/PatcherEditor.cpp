@@ -1,5 +1,6 @@
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "ui/VoltageEditor.h"
@@ -26,6 +27,9 @@
 #include "ui/ControllerEditors.h"
 #include "ui/PluginPicker.h"
 #include "ui/PluginWindow.h"
+#include "ui/LayerEditor.h"
+#include "ui/PluginEditors.h"
+#include "ui/SoundFontEditor.h"
 #include "ui/Theme.h"
 #include "ui/ToolWindow.h"
 #include "ui/VfxEditors.h"
@@ -858,6 +862,7 @@ private:
                 add (true, PatchWire::Kind::midi, o,
                      zones && o < 16 && ! zones->zones[(std::size_t) o].name.empty() ? juce::String::fromUTF8 (zones->zones[(std::size_t) o].name.c_str())
                      : kind ? juce::String (vfx::outputName (*kind, o))
+                     : node.generator && node.channel.instrument == InstrumentKind::layer ? tr ("Children") // (round 165c)
                             : tr ("MIDI out"));
         }
         for (int i = 0; i < ports.audioIns; ++i)
@@ -1192,6 +1197,17 @@ private:
         return -1;
     }
 
+    // A generator node's running control output k, for its editor (a tool window that may outlive this editor: it
+    // keeps no pointer to it)
+    std::function<float (int)> nodeOutput (int n) const
+    {
+        return [&e = engine, t = target, n] (int k) {
+            auto* g = t.channel ? patcher::graphOf (e.getChannelInstrument (t.index).get()) : patcher::graphOf (e.getEffect (t.index, t.slot).get());
+            const auto in = g != nullptr && n < g->nodeCount() ? g->instrumentAt (n) : nullptr;
+            return in != nullptr ? in->controlOutput (k) : 0.0f;
+        };
+    }
+
     patcher::Graph* runningGraph() const
     {
         if (target.channel)
@@ -1274,6 +1290,7 @@ public:
         for (const auto kind : { InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap })
             builtIn ("Drum", kind, juce::String (effectNameOf (kind)));
         builtIn ("MIDI", InstrumentKind::midiOut, "MIDI Out", [] (ChannelDef& c) { midictl::writeMidiOut (c.pluginState, midictl::MidiOutSettings {}); });
+        builtIn ("Misc", InstrumentKind::layer, tr ("Layer")); // round 165c: plays the generators on its Children pin
         builtIn ("Misc", InstrumentKind::soundfont, "LYNX Soundfont", [] (ChannelDef& c) { c = sf::makeChannel(); });
         builtIn ("Patcher", InstrumentKind::patcher, "Patcher");
         builtIn ("Synth classic", InstrumentKind::synth, tr ("Synth"));
@@ -1284,8 +1301,7 @@ public:
                                                                         addChannel (*c);
                                                                 } });
         // effects
-        for (const auto kind : addableEffects())
-            if (kind != EffectKind::hardwareInsert) // (its device I/O and round trip live in the mixer's own chain, not inside a Patcher)
+        for (const auto kind : addableEffects()) // (the Hardware Insert too since round 165c: the Patcher hands it the device's buses)
                 effects[tr (effectCategory (kind))].push_back ({ addableEffectName (kind), addableEffectAvailable (kind), [this, kind, at] {
                                                                    const auto fx = newAddableEffect (kind, engine.getSong().bpm);
                                                                    if (! fx)
@@ -1513,7 +1529,10 @@ private:
             case EffectKind::patcher:
                 return "Patcher";
             case EffectKind::waveCandy: case EffectKind::visualizer:
+            case EffectKind::bigClock: case EffectKind::htmlNotebook: // round 165g
                 return "Visual";
+            case EffectKind::tuner: // round 165g (FL's Tuner: an analyser)
+                return "Misc";
             default:
                 return "Misc";
         }
@@ -1572,6 +1591,9 @@ private:
     }
 
 public:
+    // --patchershot: a node's editor, as a double-click opens it (round 165c)
+    void openNodeEditorForShot (int n) { openNodeEditor (n); }
+
     juce::PopupMenu hostMenu (bool input, juce::PopupMenu* eventsOut = nullptr)
     {
         const auto* d = currentDoc();
@@ -1813,14 +1835,16 @@ private:
             openToolWindow (std::move (editor), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
-        if (! node.generator && VisualWindows::handles (node.effect.kind)) // Wave Candy / Visualizer in a Patcher (round 164c)
+        const auto extra = FlExtraWindows::handles (node.effect.kind); // Big Clock / Tuner / HTML NoteBook (round 165g)
+        if (! node.generator && (VisualWindows::handles (node.effect.kind) || extra)) // Wave Candy / Visualizer in a Patcher (round 164c)
         {
             VisualTarget vt;
             vt.engine = &engine;
             vt.locate = [t = target, n] (Song& song) -> EffectSlot* {
                 auto* doc = t.doc (song);
                 return doc != nullptr && n < (int) doc->nodes.size() && ! doc->nodes[(std::size_t) n].generator
-                               && VisualWindows::handles (doc->nodes[(std::size_t) n].effect.kind)
+                               && (VisualWindows::handles (doc->nodes[(std::size_t) n].effect.kind)
+                                   || FlExtraWindows::handles (doc->nodes[(std::size_t) n].effect.kind))
                            ? &doc->nodes[(std::size_t) n].effect
                            : nullptr;
             };
@@ -1832,7 +1856,29 @@ private:
                 return g != nullptr ? g->effectAt (n) : nullptr;
             };
             vt.running = [runningIn = vt.runningIn, &e = engine] { return runningIn (e); };
-            VisualWindows::openNode (vt, title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            if (extra)
+                FlExtraWindows::openNode (vt, title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            else
+                VisualWindows::openNode (vt, title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (! node.generator && node.effect.kind == EffectKind::hardwareInsert) // round 165c: the editor it has in a mixer slot
+        {
+            openToolWindow (makeNodeEffectEditor (
+                                engine,
+                                [t = target, n] (Song& song) -> EffectSlot* {
+                                    auto* doc = t.doc (song);
+                                    return doc != nullptr && n < (int) doc->nodes.size() && ! doc->nodes[(std::size_t) n].generator
+                                                   && doc->nodes[(std::size_t) n].effect.kind == EffectKind::hardwareInsert
+                                               ? &doc->nodes[(std::size_t) n].effect
+                                               : nullptr;
+                                },
+                                [&e = engine, t = target, n]() -> std::shared_ptr<Effect> {
+                                    auto* g = t.channel ? patcher::graphOf (e.getChannelInstrument (t.index).get()) : patcher::graphOf (e.getEffect (t.index, t.slot).get());
+                                    return g != nullptr && n < g->nodeCount() ? g->effectAt (n) : nullptr;
+                                },
+                                title + " (" + tr ("Patcher") + ")"),
+                            title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         if (! node.generator && node.effect.kind != EffectKind::plugin && node.effect.kind != EffectKind::patcher)
@@ -1865,9 +1911,36 @@ private:
             openToolWindow (makeVfxEditor (engine, locate, -1), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
+        if (node.generator && node.channel.instrument == InstrumentKind::controller && parseKeyboardController (node.channel.controllerState)) // round 165c
+        {
+            openToolWindow (makeKeyboardControllerEditor (engine, locate,
+                                                          [out = nodeOutput (n)] { return out (0); }),
+                            title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (node.generator && node.channel.instrument == InstrumentKind::layer) // round 165c: its children = the nodes on its Children pin
+        {
+            openToolWindow (makeLayerEditor (engine, locate,
+                                             [t = target, n] (Song& song) {
+                                                 std::vector<ChannelDef*> kids;
+                                                 if (auto* doc = t.doc (song))
+                                                     for (const auto k : patcher::layerChildren (*doc, n))
+                                                         kids.push_back (&doc->nodes[(std::size_t) k].channel);
+                                                 return kids;
+                                             }),
+                            title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (node.generator && node.channel.instrument == InstrumentKind::soundfont) // round 165c
+        {
+            openToolWindow (makeSoundFontEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
         if (node.generator && node.channel.instrument == InstrumentKind::controller && ! parseKeyboardController (node.channel.controllerState))
         {
-            openToolWindow (makeEnvelopeControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            openToolWindow (makeEnvelopeControllerEditor (engine, locate, -1,
+                                                          nodeOutput (n)), // its running outputs (round 165c)
+                            title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         // a built-in engine (LYNX's synth / sampler, FL's engines): the editor it has on a channel (round 164f)
@@ -2053,6 +2126,28 @@ void shootMenus (AudioEngine& engine, bool channel, int index, int slot, std::fu
             if (auto* c = desktop.getComponent (k); std::find (before.begin(), before.end(), c) == before.end() && c->getWidth() > 0)
                 save (c->createComponentSnapshot (c->getLocalBounds()), name);
         juce::PopupMenu::dismissAllActiveMenus();
+    }
+}
+void shootNodeEditors (AudioEngine& engine, bool channel, int index, int slot, std::function<void (const juce::Image&, int)> save)
+{
+    const Target target { channel, index, slot };
+    PatcherEditor editor (engine, target);
+    const auto* doc = target.doc (engine.getSong());
+    const auto count = doc != nullptr ? (int) doc->nodes.size() : 0;
+    for (int n = 0; n < count; ++n)
+    {
+        const auto& node = doc->nodes[(std::size_t) n];
+        if ((! node.generator && (node.effect.kind == EffectKind::plugin || node.effect.kind == EffectKind::patcher))
+            || (node.generator && (node.channel.instrument == InstrumentKind::plugin || node.channel.instrument == InstrumentKind::patcher)))
+            continue; // (a plugin's own window / a nested Patcher: not here)
+        editor.openNodeEditorForShot (n);
+        engine.dispatchPendingMessages();
+        if (auto* w = findToolWindow (target.key() + "-node-" + juce::String (n)))
+        {
+            if (auto* c = w->getContentComponent())
+                save (c->createComponentSnapshot (c->getLocalBounds()), n);
+            delete w;
+        }
     }
 }
 } // namespace PatcherWindows

@@ -1,4 +1,5 @@
 #include "ui/ColourPicker.h"
+#include "core/NoteNames.h"
 #include "ui/ProjectLoading.h"
 #include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
@@ -6,6 +7,7 @@
 
 #include "core/TransportEdit.h"
 #include "ui/CrashReporter.h"
+#include "ui/DanceView.h"
 #include "engine/AudioLogger.h"
 #include "ui/PluginSkin.h"
 #include "platform/Paths.h"
@@ -30,6 +32,7 @@
 #include "platform/FileTypes.h"
 #include "platform/CrashGuard.h"
 #include "platform/LinuxRealtime.h"
+#include "platform/Package.h"
 
 #include "engine/Text.h"
 
@@ -400,6 +403,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
     }
+    // the dancers of the project's dance channels (FL's Fruity Dance) over the workspace (round 165e)
+    danceStage = std::make_unique<DanceStage> (engine);
+    danceStage->setMouseClickGrabsKeyboardFocus (false);
+    addAndMakeVisible (*danceStage);
 
     for (auto& b : panelButtons)
     {
@@ -497,7 +504,9 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 
     // new or updated plugins since the last run: an incremental scan in the background (unchanged files are
     // skipped), a few seconds after start so it doesn't compete with loading; the first run asks in the wizard
-    if (persistent && setupWizardDone() && backgroundScanAtStart())
+    if (persistent && setupWizardDone() && backgroundScanAtStart() && platform::testMode())
+        platform::testModeLog ("background plugin scan at start");
+    else if (persistent && setupWizardDone() && backgroundScanAtStart())
         juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<MainComponent> (this)] {
             if (safe != nullptr)
                 safe->engine.getPluginHost().startBackgroundScan();
@@ -783,6 +792,11 @@ void MainComponent::resized()
         toolbarEditor->toFront (false);
     }
     workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight + tray));
+    if (danceStage != nullptr)
+    {
+        danceStage->setBounds (getLocalBounds());
+        danceStage->toFront (false);
+    }
     if (setupOverlay != nullptr)
     {
         setupOverlay->setBounds (getLocalBounds());
@@ -1136,6 +1150,24 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("view.audioEditor")) openAudioEditorForSelection();
     else if (is ("view.tempoTapper")) openTempoTapper (engine);
     else if (is ("view.sampleBrowser")) toggleSampleBrowser();
+    else if (is ("view.pluginDatabase"))
+    {
+        showPanel (Panel::browser);
+        browser.showPluginDatabase();
+    }
+    else if (is ("view.midiSettings")) openSettings ((int) SettingsPage::midi);
+    else if (is ("view.projectInfo")) openSettings ((int) SettingsPage::info);
+    else if (is ("view.closePluginWindows") || is ("view.closeWindows"))
+    {
+        PluginWindows::closeAll();
+        ParametricEqWindows::closeAll(); // every native effect / controller editor
+        if (is ("view.closeWindows")) // FL's F12: the editors and tool windows too (LYNX's docked panels stay)
+        {
+            closeAutomationEditors();
+            closeChannelSettings();
+            closeAllToolWindows();
+        }
+    }
     else if (is ("rack.groupSelected")) rack.groupSelected();
     else if (is ("rack.rotateLeft")) rack.rotateSelected (-1);
     else if (is ("rack.rotateRight")) rack.rotateSelected (1);
@@ -1146,6 +1178,11 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("browser.load")) browser.loadSelected();
     else if (is ("browser.closeFolder")) browser.openFolder (false);
     else if (is ("browser.openFolder")) browser.openFolder (true);
+    else if (is ("browser.rename"))
+    {
+        if (! browser.renameSelectedPlugin()) // not a plugin: F2's global action (rename the pattern)
+            showRenamePattern (engine.getSong().currentPattern);
+    }
     else if (id.rfind ("pianoRoll.", 0) == 0) return pianoRoll.runAction (id);
     else if (id.rfind ("playlist.", 0) == 0) return playlist.runAction (id);
     else if (id.rfind ("mixer.", 0) == 0) return mixer.runAction (id);
@@ -1341,6 +1378,10 @@ void MainComponent::loadUiSettings()
             skin::setReducedEffects (on);
         else if (key == "waveStereo")
             ui::WaveformCache::stereo = on;
+        else if (key == "noteNames")
+            notenames::currentStyle.store (juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "noteFlats")
+            notenames::currentFlats.store (on);
         else if (key == "rememberSeek")
             EditorGlobals::get().rememberSeek = on;
         else if (key == "followPlaylist" || key == "followPianoRoll")
@@ -1368,6 +1409,8 @@ void MainComponent::loadUiSettings()
             askUnusedRecordings = on;
         else if (key == "autosaveKeep")
             autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "metronomeSound")
+            engine.getTransport().metronomeSound.store (juce::jlimit (0, 5, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
         else if (key == "metronomeVolume")
             engine.getTransport().metronomeVolume.store ((float) controls::clampUtilityVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue()));
         else if (key == "previewVolume")
@@ -1436,6 +1479,8 @@ void MainComponent::saveUiSettings()
                                       + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0)
                                       + "\nwaveSpectral=" + juce::String (ui::WaveformCache::spectral ? 1 : 0)
                                       + "\nwaveStereo=" + juce::String (ui::WaveformCache::stereo ? 1 : 0)
+                                      + "\nnoteNames=" + juce::String (notenames::currentStyle.load())
+                                      + "\nnoteFlats=" + juce::String (notenames::currentFlats.load() ? 1 : 0)
                                       + "\nreducedEffects=" + juce::String (skin::reducedEffects() ? 1 : 0)
                                       + "\npluginStyle=" + juce::String (skin::forcedStyle() < 0 ? "Automatic" : skin::styleName ((skin::Style) skin::forcedStyle()))
                                       + "\npluginStyleOverrides=" + skin::overridesToString()
@@ -1453,6 +1498,7 @@ void MainComponent::saveUiSettings()
                                       + "\naskUnusedRecordings=" + juce::String (askUnusedRecordings ? 1 : 0)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\nmetronomeVolume=" + juce::String (engine.getTransport().metronomeVolume.load(), 2)
+                                      + "\nmetronomeSound=" + juce::String (engine.getTransport().metronomeSound.load())
                                       + "\npreviewVolume=" + juce::String (engine.getPreviewVolume(), 2)
                                       + "\neditorVolume=" + juce::String (engine.getEditorVolume(), 2)
                                       + "\nrackPianoRollView=" + juce::String (rack.isPianoRollView() ? 1 : 0)
@@ -1514,6 +1560,8 @@ void MainComponent::stopAndRewind (bool toStart)
     // "Remember seek time" sends the first Stop to the ruler mark (round 162, issue #9)
     const auto alreadyStopped = toStart || ! (engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn());
     engine.stop();
+    // FL: the transport's Stop also ends a Browser sample preview (issue #11)
+    browser.stopPreview(); // (the engine's one preview voice: the Sample browser window's preview stops too)
     const auto& globals = EditorGlobals::get();
     const auto back = transportedit::stopTarget (alreadyStopped, globals.rememberSeek && engine.getSong().mode == PlayMode::song, globals.seekMark);
 
@@ -1560,8 +1608,8 @@ void MainComponent::fitChannelRack (bool width)
     // compact like FL's rack: at most two bars of steps are shown, longer patterns scroll sideways, so the
     // rack does not cover the Playlist after a project with long patterns is opened
     const auto maxWidth = juce::jmin (juce::jmax (300, workspace.getWidth() - 2 * 16 - 260), rack.widthForSteps (32));
-    const auto contentWidth = juce::jmin (rack.getWidth(), maxWidth);
-    const auto needsHorizontal = rack.getWidth() > contentWidth;
+    const auto contentWidth = juce::jmin (rack.naturalWidth(), maxWidth); // the ghost steps only fill a wider rack
+    const auto needsHorizontal = rack.naturalWidth() > contentWidth;
     workspace.fitPanelContent (Panel::channelRack, width ? contentWidth + scrollbar : 0, rack.getHeight() + (needsHorizontal ? scrollbar : 0));
     fittedChannelCount = (int) engine.getSong().channels.size();
 }
@@ -1659,6 +1707,8 @@ void MainComponent::selectTabForSnapshot (int tab)
 void MainComponent::showDesktopForSnapshot (bool extraPanels)
 {
     workspace.resetLayout();
+    if (auto* stage = dynamic_cast<DanceStage*> (danceStage.get()))
+        stage->update(); // (the project's dancers now: no timer runs before the picture)
 
     if (extraPanels)
     {
@@ -2039,10 +2089,74 @@ void MainComponent::showMetronomeMenu()
             });
         menu.addSubMenu (tr ("Volume"), levels);
     }
+    // FL's Metronome sound section (REA round 165f), LYNX's own synthesized sounds
+    menu.addSectionHeader (tr ("Metronome sound"));
+    {
+        const char* names[] = { TR_NOOP ("Click"), TR_NOOP ("Hi-hat"), TR_NOOP ("Tick"), TR_NOOP ("Beep"), TR_NOOP ("Cowbell"), TR_NOOP ("Pulse") };
+        for (int i = 0; i < 6; ++i)
+            menu.addItem (tr (names[i]), true, transport.metronomeSound.load() == i, [this, i] {
+                engine.getTransport().metronomeSound.store (i);
+                saveUiSettings();
+            });
+    }
     menu.addSeparator();
     menu.addItem (tr ("Count-in before recording") + shortcutText ("record.countIn"), true, engine.getRecordOptions().countInBars > 0,
                   [this] { runAction ("record.countIn"); });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&metronomeButton));
+}
+
+void MainComponent::dumpScoreLog (int minutes)
+{
+    const auto& song = engine.getSong();
+    scorelog::DumpOptions options;
+    options.minutes = minutes;
+    options.bpm = song.bpm;
+    options.beatsPerBar = song.beatsPerBar;
+    auto notes = scorelog::dump (engine.scoreLogSnapshot(), options);
+    // (channels deleted since the notes were played are left out)
+    notes.erase (std::remove_if (notes.begin(), notes.end(), [&song] (const Note& n) { return n.channel < 0 || n.channel >= (int) song.channels.size(); }),
+                 notes.end());
+    if (notes.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Score logger"),
+                                                tr ("The score log is empty: no notes were played on a MIDI keyboard or the typing keyboard in that time."));
+        return;
+    }
+
+    auto apply = [this] (std::vector<Note> logged, bool replace) {
+        const auto count = logged.size();
+        engine.editSong ([&logged, replace] (Song& s) {
+            if (s.patterns.empty())
+                s.patterns.emplace_back();
+            s.currentPattern = juce::jlimit (0, (int) s.patterns.size() - 1, s.currentPattern);
+            auto& pattern = s.patterns[(std::size_t) s.currentPattern];
+            if (replace)
+                pattern.notes.clear();
+            pattern.notes.insert (pattern.notes.end(), logged.begin(), logged.end());
+            pattern.sortNotes();
+        });
+        ui::postHint ({ tr ("Score log: {0} notes put in the pattern", { juce::String ((int) count) }), {}, false, false }, 4000);
+    };
+
+    const auto& patterns = song.patterns;
+    const auto current = song.currentPattern;
+    if (current < 0 || current >= (int) patterns.size() || patterns[(std::size_t) current].notes.empty())
+    {
+        apply (std::move (notes), false);
+        return;
+    }
+
+    auto box = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withTitle (tr ("Score logger"))
+                       .withMessage (tr ("The current pattern isn't empty. Do you want the score log to be merged, or to replace the current content?"))
+                       .withButton (tr ("Merge"))
+                       .withButton (tr ("Replace"))
+                       .withButton (tr ("Cancel"));
+    juce::AlertWindow::showAsync (box, [apply, notes] (int result) mutable {
+        if (result == 1 || result == 2)
+            apply (std::move (notes), result == 2);
+    });
 }
 
 void MainComponent::showMetronomeVolume()
@@ -2382,6 +2496,27 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none && persistent)
         mixerinput::explain (notice);
+    // round 165c: hardware inserts measured for another device setup (the device or its buffer size changed, or the project
+    // was measured elsewhere): a prompt that pings them on request, nothing pinged by itself (pings make clicks)
+    if (auto stale = engine.takeHardwareInsertNotice(); ! stale.empty() && persistent)
+    {
+        const auto count = (int) stale.size();
+        auto options = juce::MessageBoxOptions()
+                           .withIconType (juce::MessageBoxIconType::InfoIcon)
+                           .withTitle (tr ("Hardware Insert"))
+                           .withMessage ((count == 1 ? tr ("The round trip of a hardware insert was measured for another audio setup (the device or its "
+                                                           "buffer size changed), so its return is no longer lined up with the rest of the mix.")
+                                                     : tr ("The round trip of {0} hardware inserts was measured for another audio setup (the device or its "
+                                                           "buffer size changed), so their returns are no longer lined up with the rest of the mix.",
+                                                           { juce::String (count) }))
+                                         + "\n\n" + tr ("Ping now? Each one sends a few clicks out to its gear and listens for them on its return."))
+                           .withButton (tr ("Ping now"))
+                           .withButton (tr ("Later"));
+        juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer<MainComponent> (this), stale = std::move (stale)] (int result) {
+            if (result == 1 && safe != nullptr)
+                safe->engine.pingHardwareInserts (stale);
+        });
+    }
 
     const auto& song = engine.getSong();
     bool namesChanged = patternBox.getNumItems() != (int) song.patterns.size();
@@ -3259,7 +3394,7 @@ void MainComponent::saveToNewProjectFolder()
     // recordings go to <name>/Audio/Recorded). This session's takes still in the global recordings folder move along
     // (copied there, the project uses the copies; the originals are then offered for deletion as unused).
     const auto start = currentFile != juce::File() ? currentFile.getParentDirectory()
-                                                   : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Projects");
+                                                   : lynx::platform::documentsFolder().getChildFile ("LYNX/Projects");
     start.createDirectory();
     fileChooser = std::make_unique<juce::FileChooser> (tr ("Save to new project folder"),
                                                        start.getChildFile (projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("untitled")),
@@ -3621,7 +3756,9 @@ void MainComponent::openLynxProject (const juce::File& file)
     if (persistent)
     {
         showMissingFiles (true);
-        if (engine.getSong().info.showOnOpen)
+        if (engine.getSong().info.showOnOpen && platform::testMode())
+            platform::testModeLog ("project info shown on open");
+        else if (engine.getSong().info.showOnOpen)
             openSettings (1);
     }
 }
@@ -3643,6 +3780,8 @@ void MainComponent::openSettings (int page)
         o.compactMenus = theme::menus::compact();
         o.waveSpectral = ui::WaveformCache::spectral;
         o.waveStereo = ui::WaveformCache::stereo;
+        o.noteNames = notenames::currentStyle.load();
+        o.noteFlats = notenames::currentFlats.load();
         o.reducedEffects = skin::reducedEffects();
         o.gpuRendering = gpuRenderingEnabled();
         o.pluginStyle = skin::forcedStyle();
@@ -3679,6 +3818,13 @@ void MainComponent::openSettings (int page)
             skin::setReducedEffects (o.reducedEffects);
             skin::setForcedStyle (o.pluginStyle);
             for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) // open editors redraw at once
+                if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
+        }
+        if (o.noteNames != notenames::currentStyle.load() || o.noteFlats != notenames::currentFlats.load())
+        {
+            notenames::currentStyle.store (juce::jlimit (0, 2, o.noteNames));
+            notenames::currentFlats.store (o.noteFlats);
+            for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) // the keyboards redraw with the new names
                 if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
         }
         if (o.gpuRendering != gpuRenderingEnabled())
@@ -3723,7 +3869,7 @@ void MainComponent::openSettings (int page)
         if (safe != nullptr)
             safe->showPluginManager();
     };
-    showSettings (engine, (SettingsPage) juce::jlimit (0, 5, page), std::move (hooks));
+    showSettings (engine, (SettingsPage) juce::jlimit (0, (int) SettingsPage::theme, page), std::move (hooks)); // (Theme was clamped to MIDI)
 }
 
 void MainComponent::showPluginManager()
@@ -3747,6 +3893,11 @@ void MainComponent::showShortcutManager()
 
 void MainComponent::showMissingFiles (bool afterOpening)
 {
+    if (afterOpening && platform::testMode()) // (LYNX_TEST_MODE: nothing waits for a click)
+    {
+        platform::testModeLog ("Missing files dialog after opening " + projectName);
+        return;
+    }
     MissingFilesInfo info;
     info.projectName = projectName;
     const auto fromFlp = importedFlpFile.existsAsFile() && currentFile == juce::File();
@@ -4262,7 +4413,10 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addItem (tr ("Save layout as..."), [this] { saveLayoutAs(); });
         menu.addSubMenu (tr ("Load layout"), layoutsMenu());
         menu.addItem (tr ("Bring back off-screen panels"), [this] { workspace.bringBackOffscreen(); });
+        menu.addItem (tr ("Close all windows (plugins, channel settings, tools)") + shortcutText ("view.closeWindows"), [this] { runAction ("view.closeWindows"); });
+        menu.addItem (tr ("Close all plugin windows") + shortcutText ("view.closePluginWindows"), [this] { runAction ("view.closePluginWindows"); });
         menu.addSeparator();
+        menu.addItem (tr ("Plugin database (in the Browser)") + shortcutText ("view.pluginDatabase"), [this] { runAction ("view.pluginDatabase"); });
         menu.addItem (tr ("Audio editor") + shortcutText ("view.audioEditor"), [this] { openAudioEditorForSelection(); });
         menu.addItem (tr ("Tempo tapper") + shortcutText ("view.tempoTapper"), [this] { openTempoTapper (engine); });
         menu.addItem (tr ("Sample browser (separate window)") + shortcutText ("view.sampleBrowser"), true, findToolWindow ("sampleBrowser") != nullptr,
@@ -4285,12 +4439,12 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
     {
         // the Settings window's pages (Settings › General gathers the app options that were menu items here)
         menu.addItem (tr ("Audio settings..."), [this] { openSettings ((int) SettingsPage::audio); });
-        menu.addItem (tr ("MIDI settings..."), [this] { openSettings ((int) SettingsPage::midi); });
+        menu.addItem (tr ("MIDI settings...") + shortcutText ("view.midiSettings"), [this] { openSettings ((int) SettingsPage::midi); });
         menu.addItem (tr ("General settings..."), [this] { openSettings ((int) SettingsPage::general); });
         menu.addItem (tr ("Theme (colors, background)..."), [this] { openSettings ((int) SettingsPage::theme); });
         menu.addItem (tr ("File settings (search folders)..."), [this] { openSettings ((int) SettingsPage::files); });
         menu.addItem (tr ("Project settings (tempo, time signature)..."), [this] { openSettings ((int) SettingsPage::project); });
-        menu.addItem (tr ("Project info..."), [this] { openSettings ((int) SettingsPage::info); });
+        menu.addItem (tr ("Project info...") + shortcutText ("view.projectInfo"), [this] { openSettings ((int) SettingsPage::info); });
         {
             juce::PopupMenu mixerMenu; // round 163: clean mixer, inserts and Master chain of new projects
             mixeroptions::addItems (mixerMenu, engine, true);
@@ -4343,6 +4497,25 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
                 const auto folder = AudioLogger::defaultFolder();
                 folder.createDirectory();
                 folder.startAsProcess();
+            });
+        }
+        {
+            // FL's score logger (REA round 165f): the notes played lately, recording or not, into the current pattern
+            juce::PopupMenu dumpMenu;
+            for (const auto minutes : { 2, 5, 10, 20, 30 })
+                dumpMenu.addItem (tr ("Last {0} minutes", { juce::String (minutes) }), [this, minutes] { dumpScoreLog (minutes); });
+            menu.addSubMenu (tr ("Dump score log to selected pattern"), dumpMenu);
+            menu.addItem (tr ("Clear score log"), ! engine.scoreLogEmpty(), false, [this] {
+                auto options = juce::MessageBoxOptions()
+                                   .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                   .withTitle (tr ("Score logger"))
+                                   .withMessage (tr ("This will clear all logged notes!"))
+                                   .withButton (tr ("Clear log"))
+                                   .withButton (tr ("Cancel"));
+                juce::AlertWindow::showAsync (options, [this] (int result) {
+                    if (result == 1)
+                        engine.clearScoreLog();
+                });
             });
         }
         menu.addSubMenu (tr ("Toolbar"), makeToolbarMenu());
@@ -4412,7 +4585,7 @@ void MainComponent::showLanguageChoice (const juce::String& id)
     i18n::save (id);
     const auto restart = [this] {
         confirmDiscard ([] {
-            juce::File::getSpecialLocation (juce::File::currentExecutableFile).startAsProcess();
+            lynx::platform::relaunchApp(); // through the package in the Store build (platform/Package.h)
             juce::JUCEApplication::quit();
         });
     };

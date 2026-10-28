@@ -1387,7 +1387,9 @@ int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& s
     if (const auto m = wavesValue (rw, 14))
         slot.params[h::mode] = *m >= 0.5 ? 1.0f : 0.0f, ++n;
     if (const auto d = wavesValue (rw, 13))
-        slot.params[h::detector] = *d >= 1.5 ? 1.0f : 0.0f, ++n;
+        // round 165 [EXEC]: the 17.1 trial stores HighPass 1 / BandPass 0 (band-pass states were read as high-pass); 2 =
+        // band-pass as before
+        slot.params[h::detector] = (*d < 0.5 || *d >= 1.5) ? 1.0f : 0.0f, ++n;
     if (const auto l = wavesValue (rw, 10))
         slot.params[h::listen] = *l >= 0.5 ? 1.0f : 0.0f, ++n;
     return n;
@@ -1599,7 +1601,7 @@ int translateSslVocalstrip2 (const std::vector<std::uint8_t>& state, EffectSlot&
 // console measured black-box on the official trial — every EQ band and filter from its impulse responses, the
 // feedback compressor and expander from sine stairs, tone bursts, noise and her takes — so the controls map one to
 // one in the console's own units (docs/analise/REA_rodada123.md). Round 147b: analog translated (off in every state of
-// her corpus). Not translated: EQ to the dynamics side chain.
+// her corpus). Round 165: EQ to the dynamics side chain (Dyn S.C., RealWorld 26) translated.
 int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace r = mixsuite::ridge;
@@ -1633,7 +1635,8 @@ int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot
     p[r::hfBell] = at (22, 0.0) > 0.5 ? 1.0f : 0.0f;
     p[r::eqOn] = at (25, 0.0) > 0.5 ? 0.0f : 1.0f;
     const auto ratio = std::max (1.0, at (1, 1.0));
-    p[r::compRatio] = ratio > 1000.0 ? 1.0f : (float) std::sqrt (std::clamp ((ratio - 1.0) / 19.0, 0.0, 0.998));
+    // round 165 [EXEC]: the console's ∞ : 1 is stored as 100 (it played as 20 : 1 here, 3 … 5 dB too loud)
+    p[r::compRatio] = ratio >= 99.0 ? 1.0f : (float) std::sqrt (std::clamp ((ratio - 1.0) / 19.0, 0.0, 0.998));
     p[r::compThreshold] = linNorm (at (0, 0.0), -20.0, 10.0);
     p[r::compRelease] = logNorm (std::clamp (at (3, 0.4), 0.1, 4.0), 0.1, 4.0);
     p[r::compFastAttack] = at (2, 2.0) == 1.0 ? 1.0f : 0.0f;
@@ -1648,7 +1651,8 @@ int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot
     p[r::filtersToSidechain] = 0.0f;
     p[r::compMix] = 1.0f;
     p[r::analog] = at (31, 0.0) > 0.5 ? 1.0f : 0.0f; // round 147b: ANALOG (its noise floor, measured on the trial)
-    return 31;
+    p[r::eqToSidechain] = at (26, 0.0) > 0.5 ? 1.0f : 0.0f; // round 165: Dyn S.C. ([EXEC] RealWorld 26 follows the switch)
+    return 32;
 }
 
 // H-Delay (RealWorld list, round 119): 1 sync (0 BPM, 1 host, 2 ms), 2 BPM, 3 delay ms, 4 note (3 per length: triplet,

@@ -18,8 +18,10 @@
 #include "core/Recorder.h"
 #include "core/TakeRecording.h"
 #include "core/WorkerPool.h"
+#include "engine/MidiSyncIo.h"
 #include "core/RackRenderer.h"
 #include "core/RtStats.h"
+#include "core/ScoreLog.h"
 #include "core/FlpImport.h"
 #include "core/History.h"
 #include "core/NativeEngines.h"
@@ -45,6 +47,9 @@ class AudioLogger;
 FlPathRoots findFlStudioRoots();
 // The user's FL installation as the native FL engines read it (round 142): its folders and this PC's file system
 const natives::FlAccess& flStudioAccess(); // (found once per session)
+
+// Start-up trace hook (round 165i): Main's LYNX_TRACE_STARTUP log receives the engine's own steps (null: off)
+inline void (*startupMark) (const char* step) = nullptr;
 
 class AudioEngine final : private juce::AudioIODeviceCallback,
                           private juce::MidiInputCallback,
@@ -172,6 +177,12 @@ public:
     // the Piano Roll's chord readout (any thread).
     std::vector<int> heldInputKeys() const;
 
+    // FL's score logger (REA round 165f): every note played on a MIDI input or the typing keyboard, recording or
+    // not, for Tools › Dump score log to selected pattern. Any thread (a short spin lock; never the audio thread).
+    std::vector<scorelog::Entry> scoreLogSnapshot() const;
+    bool scoreLogEmpty() const;
+    void clearScoreLog();
+
     // Scale snap for played notes (MIDI input and the PC keyboard): scale index into notetools::scales()
     // (0 = off) and its root (0..11). Any thread.
     void setInputScale (int scale, int root) noexcept;
@@ -284,6 +295,24 @@ public:
     // The hardware inserts' channels (round 164d): opens their outputs and, when one returns from an input, the device
     // input. UI thread.
     void openHardwareInsertIo();
+    // Every hardware insert of the song (round 165c): a mixer slot's, or a node inside a Patcher (mixer-slot or generator
+    // Patcher; `nodes` = the node index at each Patcher level). UI thread.
+    struct HardwareInsertRef
+    {
+        bool channel = false; // a Channel Rack generator Patcher (index = channel), else a mixer slot (index = track)
+        int index = 0, slot = 0;
+        std::vector<int> nodes;
+        bool operator== (const HardwareInsertRef&) const = default;
+    };
+    std::vector<HardwareInsertRef> getHardwareInserts() const;
+    static EffectSlot* locateHardwareInsert (Song& song, const HardwareInsertRef& ref);
+    std::shared_ptr<Effect> runningHardwareInsert (const HardwareInsertRef& ref) const;
+    // The routed, active inserts whose round trip was measured for another device setup (device, rate or buffer size)
+    std::vector<HardwareInsertRef> staleHardwareInserts() const;
+    // Presses their Ping buttons (the clicks go out on their sends; the results are applied as they come back)
+    void pingHardwareInserts (const std::vector<HardwareInsertRef>& refs);
+    // After the device setup changed with stale inserts in the song: those inserts, once (the UI offers "Ping now")
+    std::vector<HardwareInsertRef> takeHardwareInsertNotice() { return std::exchange (hwNotice, {}); }
     // Input level of an insert's source since the last call (0..1, per side). UI thread.
     // (the Mixer's strips take it 30 times a second; other views peek at the last value taken)
     float takeInputPeak (int track, int side) noexcept
@@ -338,6 +367,8 @@ public:
     const prefs::MidiPrefs& getMidiPrefs() const noexcept { return midiPrefs; }
     // Applies them (and saves them in %APPDATA%\LYNX\midi-settings.txt when `save`).
     void setMidiPrefs (const prefs::MidiPrefs& prefs, bool save = true);
+    // master sync out / external clock in / all notes off (round 165f)
+    MidiSyncIo& getMidiSync() noexcept { return midiSync; }
 
     // How many undo steps are kept (Settings › General).
     void setUndoLevels (int levels);
@@ -415,6 +446,21 @@ public:
     void keepRunningPlugins (PreparedFlp& prepared);
     bool finishFlpImport (PreparedFlp&& prepared, bool asEdit);
 
+    // --- real-time bounce (round 165c: Export › "Render through the hardware in real time") ---
+    // The song plays through the audio device from `startTick` (song mode; past its end and through the loop region,
+    // without starting over) while the Master's output is recorded: hardware inserts send to and return from their gear
+    // as they do while playing. Message thread; returns an error (empty: started).
+    juce::String startRealtimeBounce (double startTick);
+    // What the Master played since the last call, from the first sample the song played (one consumer thread).
+    int pullRealtimeBounce (std::vector<float>& left, std::vector<float>& right) { return meters.bounceTap.pull (left, right); }
+    bool isBouncing() const noexcept { return bouncing; }
+    // While bouncing: the transport still plays (false: the user stopped it), the delay compensation's total at the
+    // start, the device's dropouts and the frames the tap lost since the start.
+    bool bounceStillPlaying() const noexcept { return transport.playing.load(); }
+    int bounceLatency() const noexcept { return bounceStartLatency; }
+    int bounceDropouts() const;
+    // Stops playback and puts the transport back as it was (message thread).
+    void finishRealtimeBounce();
     // Renders without an audio device. Writes to `output` if not nullptr.
     // After `seconds`, continues for up to `tailSeconds` while there is still sound.
     // `progress(0..1)` returns false to cancel. Returns the peak (used by the self-test),
@@ -537,6 +583,18 @@ private:
     UiPulse uiPulse;
     int latencyRepublishes = 0;   // PDC re-plans because a unit's latency changed (diagnostics)
     juce::String lastLatencyChange;
+    // hardware inserts (round 165c): ping results applied to the slots (whether an editor is open or not), and the device
+    // setup they were measured for
+    void applyHardwareInsertPings();
+    std::map<const void*, int> hwPingSerials; // running insert -> the last ping result seen
+    std::string lastSetupKey;
+    std::vector<HardwareInsertRef> hwNotice;
+    int hwTicks = 0;
+    bool bouncing = false;
+    int bounceStartLatency = 0, bounceStartXruns = 0;
+    double bounceReturnTick = 0.0;
+    bool bounceRestoreMode = false;
+    bool checkHardwareInserts = false;
     std::uint64_t loggedOver = 0, loggedLate = 0;
     double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
@@ -550,6 +608,7 @@ private:
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorPlayer player;
     Transport transport;
+    MidiSyncIo midiSync; // (before the MIDI callbacks and the audio callback use it)
     SampleLibrary samples;
     LiveEventQueue liveEvents;   // UI -> audio
     LiveEventQueue midiEvents;   // MIDI thread -> audio
@@ -615,6 +674,9 @@ private:
     prefs::MidiPrefs midiPrefs;                      // UI thread
     juce::SpinLock midiPrefsLock;                    // guards midiPrefsShared (UI writes, MIDI thread reads)
     prefs::MidiPrefs midiPrefsShared;
+    void logPlayedNote (int channel, int key, float velocity, bool on);
+    mutable juce::SpinLock scoreLogLock;             // MIDI thread and UI thread write, the UI reads
+    scorelog::Log scoreLog;
     std::map<std::tuple<int, int, int, int, int, int>, prefs::PickupState> pickups; // (cc, channel, target) -> takeover
     struct DeviceStateSaver;
     std::unique_ptr<DeviceStateSaver> deviceStateSaver;
@@ -681,8 +743,8 @@ private:
     void updateLinearSong() noexcept
     {
         const auto on = takeCount > 0 && linearRecording();
-        liveInput.linearSong.store (on);
-        liveInput.noLoopRegion.store (on && song.hasLoop());
+        liveInput.linearSong.store (on || bouncing);
+        liveInput.noLoopRegion.store ((on && song.hasLoop()) || bouncing);
     }
     takes::LatencyPing ping;                       // audio thread while running (UI starts it, reads the result)
     juce::int64 lostFrames = 0;

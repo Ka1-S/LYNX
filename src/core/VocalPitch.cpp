@@ -397,7 +397,7 @@ std::vector<PitchFrame> analysePitch (const float* x, int n, double sampleRate, 
 // ---------------------------------------------------------------------------------------------------------------------
 // TD-PSOLA
 
-Psola::Psola() : env ((std::size_t) ringSize, 0.0f)
+Psola::Psola() : env ((std::size_t) ringSize, 0.0f), wsum ((std::size_t) ringSize, 0.0f)
 {
     for (int c = 0; c < 2; ++c)
     {
@@ -424,6 +424,7 @@ void Psola::reset() noexcept
         std::fill (acc[c].begin(), acc[c].end(), 0.0f);
     }
     std::fill (env.begin(), env.end(), 0.0f);
+    std::fill (wsum.begin(), wsum.end(), 0.0f);
     envZ = 0.0f;
     now = 0;
     nextMark = 0.0;
@@ -645,6 +646,7 @@ void Psola::process (const float* x, float* y, int channels) noexcept
             const auto src = ta + ((double) o - ts) * f;
             for (int c = 0; c < channels; ++c)
                 acc[c][(std::size_t) (o & m)] += w * readIn (c, src);
+            wsum[(std::size_t) (o & m)] += w;
         }
         // unshifted voiced grains drift toward their marks, so a voice already on its note comes out as the input
         // itself (delayed), not displaced by up to half a period. Round 148: faded in over the last 3.4 cents of
@@ -671,6 +673,21 @@ void Psola::process (const float* x, float* y, int channels) noexcept
         auto& slot = acc[c][(std::size_t) (e & m)];
         y[c] = slot;
         slot = 0.0f;
+    }
+    // Round 165j (setNormalise): the overlap-add divided by the sum of the grain windows that reached this sample. In a
+    // steady note the windows already sum to ~1 (the f / r grain gain); where grains of different lengths or spacings
+    // meet — voiced onsets and ends, voicing dropouts, note changes, the switch between voiced and unvoiced grains —
+    // the sum dips or bulges and the level with it ([RUN] REA_rodada165j §4: her takes, bursts 40.9 -> 39.4 / min).
+    if (e >= 0)
+    {
+        auto& ws = wsum[(std::size_t) (e & m)];
+        if (normalise > 0.0f && ws > 1e-3f)
+        {
+            const auto g = 1.0f + normalise * (1.0f / std::clamp (ws, 0.5f, 2.0f) - 1.0f);
+            for (int c = 0; c < channels; ++c)
+                y[c] *= g;
+        }
+        ws = 0.0f;
     }
 }
 } // namespace lynx::vocal

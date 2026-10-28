@@ -128,9 +128,24 @@ struct GlobalLink
     bool operator== (const GlobalLink&) const = default;
 };
 
+// An output device (FL's Options › MIDI "Output" panel, REA round 165f): master sync and all-notes-off.
+struct MidiOutputPrefs
+{
+    std::string name;          // the device name
+    bool masterSync = false;   // "Send master sync"
+    std::string syncType = "clock"; // midisync::syncTypeKey: MIDI clock + SPP, or an MTC rate
+    int offsetMs = 0;          // "Master sync offset (milliseconds)", -1000…1000 (later = positive)
+    bool allNotesOff = false;  // "Send all notes off" on init and after an export
+
+    bool operator== (const MidiOutputPrefs&) const = default;
+};
+
 struct MidiPrefs
 {
     std::vector<MidiInputPrefs> inputs; // the devices the user changed (others use the defaults)
+    std::vector<MidiOutputPrefs> outputs; // the output devices the user changed
+    std::string clockInput;             // "External clock sync": the input LYNX follows ("" = off)
+    int clockOffsetMs = 0;              // "External sync offset (milliseconds)", -1000…1000
     std::vector<GlobalLink> globalLinks;
     VelocityCurve velocity = VelocityCurve::linear;
     bool pickup = false;                // a controller takes over a parameter only once it reaches its value
@@ -138,6 +153,8 @@ struct MidiPrefs
     // The settings of a device (the defaults when it was never changed).
     MidiInputPrefs input (const std::string& name) const;
     void setInput (const MidiInputPrefs& input);
+    MidiOutputPrefs output (const std::string& name) const;
+    void setOutput (const MidiOutputPrefs& output);
 
     // Should a message on MIDI channel `channel` (1..16) from `device` be played?
     bool accepts (const std::string& device, int channel) const;
@@ -211,4 +228,14 @@ std::vector<int> visiblePlugins (const std::vector<PluginRow>& rows, const std::
 // Favourite plugins: one identifier per line.
 std::set<std::string> parseFavourites (const std::string& text);
 std::string formatFavourites (const std::set<std::string>& ids);
+
+// Plugin names the user gave (FL's renamed Plugin database entries, issue #11): "key<TAB>name" per line. The key is
+// the plugin's identifier string, or "lynx:fx:<name>" / "lynx:gen:<name>" for LYNX's built-in ones. A name that
+// starts with a character no other entry starts with ("1_Limiter") is picked by typing it in the slot menus.
+std::map<std::string, std::string> parsePluginNames (const std::string& text);
+std::string formatPluginNames (const std::map<std::string, std::string>& names);
+
+// Type-ahead in a menu of `labels` (FL's menus): the one label starting with `typed` (case-insensitive, a renamed
+// plugin's "1_" digit or letter); -1 when none or several do.
+int uniqueTypeAhead (const std::vector<std::string>& labels, char typed);
 } // namespace lynx::prefs

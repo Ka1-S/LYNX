@@ -123,6 +123,7 @@ TEST (gemini_doubler_voices_follow_the_measured_laws)
     using namespace lynx;
     namespace g = voicetools::gemini;
     auto base = makeEffectSlot (EffectKind::geminiDoubler).params;
+    base[g::lowOn] = base[g::highOn] = 0.0f; // round 165: new instances start with the reference's shelves on
     // one voice alone, source L+R, no detune, 10 ms, panned centre, not aligned: an impulse comes back 10 ms later
     // at −3 dB on each side (equal-power pan)
     auto p = base;
