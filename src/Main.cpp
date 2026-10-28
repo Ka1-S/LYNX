@@ -1,4 +1,5 @@
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "engine/FileSort.h"
 #include "platform/Paths.h"
 
 #include "core/LoadTrace.h"
@@ -61,6 +62,7 @@
 #include "core/VoltageController.h"
 #include "ui/Controllers164.h"
 #include "ui/ExportDialog.h"
+#include "ui/QuickAddPalette.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
 #include "engine/ProjectPackage.h"
@@ -744,7 +746,7 @@ public:
 
         if (args.contains ("--windowtest"))
         {
-            // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor and a plugin-like window
+            // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor, a plugin-like window and a name dialog
             // over the main window and checks that each one stays in front, owned by the main window, with the
             // keyboard focus (issue #4). The windows appear on screen for a few seconds.
             runWindowTest (args[args.indexOf ("--windowtest") + 1].unquoted());
@@ -833,7 +835,7 @@ public:
             for (const auto* pattern : { "crash *.txt", "hang *.txt" })
             {
                 auto files = lynx::platform::settingsFile ("autosave").findChildFiles (juce::File::findFiles, false, pattern);
-                std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+                lynx::filesort::byTime (files, lynx::filesort::By::modificationTime, true);
                 if (! files.isEmpty())
                     (juce::String (pattern).startsWith ("crash") ? session.crashFile : session.hangFile) = files[0];
             }
@@ -1377,7 +1379,7 @@ private:
         folder.createDirectory();
         // keep the newest hang files only
         auto old = folder.findChildFiles (juce::File::findFiles, false, "hang *.txt");
-        std::sort (old.begin(), old.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+        lynx::filesort::byTime (old, lynx::filesort::By::modificationTime, true);
         for (int i = 20; i < old.size(); ++i)
             old.getReference (i).deleteFile();
         lynx::crashguard::startHangWatch (folder.getFullPathName().replaceCharacter ('\\', '/').toStdString());
@@ -2649,6 +2651,7 @@ private:
             lynx::MainComponent* ui = nullptr;
             std::unique_ptr<juce::DocumentWindow> main, pluginLike;
             juce::TextEditor* pluginField = nullptr;
+            std::unique_ptr<juce::AlertWindow> nameDialog;
             std::function<void()> done;
 
             void line (const juce::String& text)
@@ -2731,10 +2734,26 @@ private:
                         break;
                     case 5:
                         check ("main window takes the keyboard focus back when it is active", ui->hasKeyboardFocus (true));
+                        // round 165q: a name dialog (F4's next empty pattern, Rename and color...) opens ready to type
+                        nameDialog = lynx::makeNameAndColourDialog ("Rename pattern", "Pattern 2", 0xff808080u);
+                        nameDialog->enterModalState (true, nullptr, false);
+                        lynx::keepAboveMainWindow (*nameDialog);
+                        break;
+                    case 6:
+                    {
+                        auto* f = juce::Component::getCurrentlyFocusedComponent();
+                        auto* field = dynamic_cast<juce::TextEditor*> (f);
+                        check ("name dialog: its text field has the keyboard focus", field != nullptr && focusIn (nameDialog.get()));
+                        if (field != nullptr)
+                            field->keyPressed (juce::KeyPress ('x', {}, 'x'));
+                        check ("name dialog: typing replaces the name", nameDialog->getTextEditorContents ("name") == "x");
+                        nameDialog->exitModalState (0);
+                        nameDialog = nullptr;
                         line (ok ? "result=OK" : "result=FAILED");
                         stopTimer();
                         done();
                         break;
+                    }
                     default:
                         break;
                 }
@@ -5560,6 +5579,34 @@ private:
         lynx::PatcherWindows::shootMenus (offline, true, lynx::vfx::kindCount, 0, [&] (const juce::Image& image, const juce::String& name) {
             savePng (image, prefix + "-patcher-menu-" + name + ".png");
         });
+
+        // a plugin renamed in the Plugin database ("1_EQ", FL): the Quick-add palette and the mixer slot show the new name
+        if (juce::SystemStats::getEnvironmentVariable ("LYNX_TEST_MODE", {}).isNotEmpty())
+        {
+            const auto key = std::string ("lynx:fx:") + lynx::effectInfo (lynx::EffectKind::parametricEq).name;
+            offline.getPluginHost().setPluginName (key, "1_EQ");
+            offline.editSong ([] (lynx::Song& s) {
+                if (s.mixer.size() > 1)
+                {
+                    lynx::EffectSlot slot;
+                    slot.kind = lynx::EffectKind::parametricEq;
+                    s.mixer[1].effects.push_back (slot);
+                }
+            });
+            offline.dispatchPendingMessages();
+            {
+                lynx::QuickAddTargets targets;
+                targets.addInstrument = [] (lynx::ChannelDef) {};
+                targets.addEffect = [] (lynx::EffectSlot) {};
+                auto palette = lynx::makeQuickAddPalette (offline, std::move (targets));
+                savePng (palette->createComponentSnapshot (palette->getLocalBounds()), prefix + "-quickadd-renamed.png");
+            }
+            ui.selectTabForSnapshot (3);
+            ui.getMixerForSnapshot().selectTrack (1);
+            offline.dispatchPendingMessages();
+            savePng (ui.createComponentSnapshot (ui.getLocalBounds()), prefix + "-mixer-renamed.png");
+            offline.getPluginHost().setPluginName (key, "");
+        }
     }
 
     void runPerfShot (const juce::String& prefix, const juce::String& projectPath)

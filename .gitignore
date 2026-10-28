@@ -10,3 +10,7 @@ build-linux/
 build-mac/
 dist/
 __pycache__/
+
+# object files (never commit build output)
+*.o
+*.obj

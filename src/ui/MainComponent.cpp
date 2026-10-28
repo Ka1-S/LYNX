@@ -325,6 +325,17 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::setHint (rackPianoRollButton, tr ("Piano-roll view: every channel shows its notes as a miniature piano roll (click one to edit it) "
                                           "instead of the step buttons; click again for the steps"));
     rackTitleTools.addAndMakeVisible (rackPianoRollButton);
+    // Follow (issue #12): a long pattern pages along with the playing step
+    rackFollowButton.setClickingTogglesState (false);
+    rackFollowButton.setOnColour (theme::colour::bg6);
+    rackFollowButton.setIconColourWhenOn (theme::colour::accent);
+    rackFollowButton.setWantsKeyboardFocus (false);
+    rackFollowButton.setMouseClickGrabsKeyboardFocus (false);
+    rackFollowButton.setToggleState (EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::channelRack), juce::dontSendNotification);
+    rackFollowButton.setTooltip (tr ("Follow: a pattern longer than the Channel Rack pages along with the playing step; off, it stays where you scrolled"));
+    ui::setQuickTip (rackFollowButton, tr ("Follow the playhead"));
+    rackFollowButton.onClick = [this] { runAction ("rack.follow"); };
+    rackTitleTools.addAndMakeVisible (rackFollowButton);
     // the pattern selector (issue #9): change the pattern the rack edits right from its title bar
     rackPatternSelector.onStep = [this] (int delta) { selectPattern (stepPattern (engine.getSong(), delta)); };
     rackPatternSelector.onMenu = [this] { showRackPatternList(); };
@@ -332,6 +343,17 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     rackTitleTools.addAndMakeVisible (rackPatternSelector);
     rackTitleTools.addAndMakeVisible (rackFilterBox);
     rackTitleTools.addAndMakeVisible (swingSlider);
+    // the pattern length in bars (issue #12)
+    rackLengthBox.onSet = [this] (int bars) {
+        const auto index = engine.getSong().currentPattern;
+        const auto ticks = (std::int64_t) juce::jlimit (0, 999, bars) * ppq * juce::jmax (1, engine.getSong().beatsPerBar);
+        if (index >= 0 && index < (int) engine.getSong().patterns.size() && engine.getSong().patterns[(std::size_t) index].lengthTicks != ticks)
+            engine.editSong ([index, ticks] (Song& s) { s.patterns[(std::size_t) index].lengthTicks = ticks; });
+        refreshRackLengthBox();
+    };
+    rackLengthBox.onMenu = [this] { showPatternLengthMenu(); };
+    ui::setHint (rackLengthBox, tr ("Pattern length in bars: [LMB] drag or [Wheel] change it  [2xLMB] automatic (from the notes)  [RMB] menu"));
+    rackTitleTools.addAndMakeVisible (rackLengthBox);
     rackTitleTools.addAndMakeVisible (rackGraphButton);
     rackTitleTools.layout = [this] {
         auto r = rackTitleTools.getLocalBounds();
@@ -341,9 +363,13 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         r.removeFromLeft (4);
         swingSlider.setBounds (r.removeFromLeft (26));
         r.removeFromLeft (4);
+        rackLengthBox.setBounds (r.removeFromLeft (rackLengthBoxWidth).reduced (0, 3));
+        r.removeFromLeft (4);
         rackGraphButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
         r.removeFromLeft (4);
         rackPianoRollButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
+        r.removeFromLeft (4);
+        rackFollowButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
     };
     workspace.setTitleAccessory (Panel::channelRack, &rackTitleTools, rackTitleToolsWidth);
     workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) { addPanelMenuItems (panel, menu); };
@@ -493,6 +519,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     fittedChannelCount = (int) engine.getSong().channels.size();
     hintBar.setHint ({ idleHint(), {}, false, false });
     setWantsKeyboardFocus (true);
+    installDialogTextFocus(); // dialogs open with their text field focused (round 165q)
     setSize (1180, 642);
     startTimerHz (30);
     uiTraceMonitor.start ([this, last = std::make_shared<RtStats::Snapshot>()] {
@@ -516,10 +543,16 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
             if (safe != nullptr)
                 safe->engine.getPluginHost().startBackgroundScan();
         });
+
+    // the keys a secondary window (tool, plugin, channel window) leaves unused run the global shortcuts, as in FL
+    setSecondaryWindowKeyHandler ([safe = juce::Component::SafePointer<MainComponent> (this)] (const juce::KeyPress& key) {
+        return safe != nullptr && safe->keyFromSecondaryWindow (key);
+    });
 }
 
 MainComponent::~MainComponent()
 {
+    setSecondaryWindowKeyHandler (nullptr);
     cancelProjectLoad(); // an open in progress uses the engine from its thread
     if (sessionLock != nullptr) // a clean exit: no "LYNX did not close properly" next time
         sessionMarker.deleteFile();
@@ -533,6 +566,7 @@ MainComponent::~MainComponent()
     ui::onTweak = nullptr;
     onEditEventsInPianoRoll = nullptr;
     PluginWindows::onGesture = nullptr;
+    removeDialogTextFocus();
     engine.nameAutomation = nullptr;
     PluginWindows::closeAll(); // plugin UIs before the engine
     ParametricEqWindows::closeAll();
@@ -1065,7 +1099,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    // 2. the focused panel's own keys
+    // 2. a key the user gave an action himself (Options › Shortcuts) wins over the panels' built-in keys
+    // (issue #12: Metronome on 'C' did nothing while the Playlist, whose Knife is 'C', had the focus)
+    if (const auto own = keyMap.findUserBound (chord, focusContext(), typingPiano); ! own.empty() && runAction (own))
+        return true;
+
+    // 3. the focused panel's own keys
     const auto focused = workspace.getFocused();
     const auto panelShown = workspace.isPanelVisible (focused);
 
@@ -1075,14 +1114,32 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (panelShown && focused == Panel::playlist && playlist.handleKey (key))
         return true;
 
-    // 3. the key map
+    // 4. the key map
     const auto action = keyMap.find (chord, focusContext(), typingPiano);
+    return ! action.empty() && runAction (action);
+}
+
+bool MainComponent::keyFromSecondaryWindow (const juce::KeyPress& key)
+{
+    // (round 165q / issue #12) a text field keeps its typing keys; the rest runs the global actions
+    const auto typingIntoText = dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) != nullptr;
+    const auto action = keyMap.findFromSecondaryWindow (chordFromKeyPress (key), typingIntoText, typingPiano);
     return ! action.empty() && runAction (action);
 }
 
 bool MainComponent::runAction (const std::string& id)
 {
     auto is = [&id] (const char* name) { return id == name; };
+
+    if (id == "rack.follow")
+    {
+        auto& g = EditorGlobals::get();
+        g.setFollowingView (EditorGlobals::FollowView::channelRack, ! g.isFollowingView (EditorGlobals::FollowView::channelRack));
+        rackFollowButton.setToggleState (g.isFollowingView (EditorGlobals::FollowView::channelRack), juce::dontSendNotification);
+        return true;
+    }
+    if (id.rfind ("pianoRoll.", 0) == 0 && pianoRoll.runKeyAction (id)) return true; // tools, slide, channel keys
+    if (id.rfind ("playlist.tool.", 0) == 0 && playlist.runKeyAction (id)) return true;
 
     if (is ("transport.playStop")) playStop();
     else if (is ("transport.pause")) playPause();
@@ -1268,6 +1325,13 @@ void MainComponent::loadKeyMap()
         for (const auto& e : errors)
             juce::Logger::writeToLog ("keys.json: " + juce::String (e));
     }
+
+    auto keyOf = [this] (const std::string& id) {
+        const auto& chords = keyMap.chordsFor (id);
+        return chords.empty() ? juce::String() : juce::String (keys::toString (chords.front()));
+    };
+    pianoRoll.refreshToolKeys (keyOf);
+    playlist.refreshToolKeys (keyOf);
 }
 
 // --- Browsers ------------------------------------------------------------------------------------
@@ -1391,6 +1455,9 @@ void MainComponent::loadUiSettings()
             EditorGlobals::get().rememberSeek = on;
         else if (key == "followPlaylist" || key == "followPianoRoll")
             EditorGlobals::get().setFollowing (key == "followPianoRoll", on, false);
+        else if (key == "followChannelRack" || key == "followAudioEditor")
+            EditorGlobals::get().setFollowingView (key == "followChannelRack" ? EditorGlobals::FollowView::channelRack
+                                                                               : EditorGlobals::FollowView::audioEditor, on, false);
         else if (key == "scopeMode")
             toolbar::OutputMonitor::mode = juce::jlimit (0, toolbar::OutputMonitor::modeCount - 1,
                                                          line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
@@ -1492,6 +1559,8 @@ void MainComponent::saveUiSettings()
                                       + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
                                       + "\nfollowPlaylist=" + juce::String (EditorGlobals::get().isFollowing (false) ? 1 : 0)
                                       + "\nfollowPianoRoll=" + juce::String (EditorGlobals::get().isFollowing (true) ? 1 : 0)
+                                      + "\nfollowChannelRack=" + juce::String (EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::channelRack) ? 1 : 0)
+                                      + "\nfollowAudioEditor=" + juce::String (EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::audioEditor) ? 1 : 0)
                                       + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode)
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
@@ -2341,6 +2410,7 @@ void MainComponent::refreshToolbar()
     refreshModeButton();
 
     refreshRackPatternSelector();
+    refreshRackLengthBox();
 }
 
 void MainComponent::refreshRackPatternSelector()
@@ -2370,6 +2440,105 @@ void MainComponent::showRackPatternList()
     menu.addItem (tr ("New pattern"), [this] { newPatternButton.onClick(); });
     menu.addItem (tr ("Rename and color the pattern") + shortcutText ("pattern.rename"), [this] { runAction ("pattern.rename"); });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&rackPatternSelector));
+}
+
+// --- the Channel Rack's pattern length box (issue #12) ---------------------------------------------------------
+
+int MainComponent::PatternLengthBox::stepBars (int value, int delta)
+{
+    static const int steps[] = { 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64 };
+    constexpr int count = (int) (sizeof (steps) / sizeof (steps[0]));
+    int i = 0;
+    while (i + 1 < count && steps[i + 1] <= value)
+        ++i;
+    if (delta < 0 && steps[i] < value) // between two steps: going down lands on the lower one
+        ++delta;
+    return steps[juce::jlimit (0, count - 1, i + delta)];
+}
+
+void MainComponent::PatternLengthBox::paint (juce::Graphics& g)
+{
+    using namespace theme;
+    const auto area = getLocalBounds().toFloat();
+    g.setColour (hovered ? colour::bg3 : colour::bg1);
+    g.fillRoundedRectangle (area, radius::sm);
+    g.setColour (hovered ? colour::borderStrong : colour::border);
+    g.drawRoundedRectangle (area.reduced (0.5f), radius::sm, 1.0f);
+    auto r = getLocalBounds().reduced (3, 0);
+    g.setFont (font (type::caption - 1.0f, true));
+    g.setColour (colour::textSecondary);
+    g.drawText (automatic ? "A" : "L", r.removeFromLeft (9), juce::Justification::centred, false);
+    g.setFont (font (type::small, true));
+    g.setColour (automatic ? colour::textSecondary : colour::textPrimary);
+    g.drawText (juce::String (bars), r, juce::Justification::centred, false);
+}
+
+void MainComponent::PatternLengthBox::mouseDown (const juce::MouseEvent& e)
+{
+    dragStartBars = bars;
+    if (e.mods.isPopupMenu() && onMenu)
+        onMenu();
+}
+
+void MainComponent::PatternLengthBox::mouseDrag (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || onSet == nullptr)
+        return;
+    // one step of the list per 14 px up (as the rack's insert number box: drag up = more)
+    const auto delta = -e.getDistanceFromDragStartY() / 14;
+    const auto value = delta == 0 ? dragStartBars : stepBars (dragStartBars, delta);
+    if (value != bars || automatic)
+        if (delta != 0)
+            onSet (value);
+}
+
+void MainComponent::PatternLengthBox::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    if (onSet != nullptr && wheel.deltaY != 0.0f)
+        onSet (stepBars (bars, wheel.deltaY > 0.0f ? 1 : -1));
+}
+
+void MainComponent::refreshRackLengthBox()
+{
+    const auto& song = engine.getSong();
+    if (song.currentPattern < 0 || song.currentPattern >= (int) song.patterns.size())
+        return;
+    const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
+    const auto bar = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar);
+    const auto bars = (int) juce::jmax<std::int64_t> (1, (pattern.effectiveLength (song.beatsPerBar) + bar - 1) / bar);
+    const auto automatic = pattern.lengthTicks == 0;
+    if (bars != rackLengthBox.bars || automatic != rackLengthBox.automatic)
+    {
+        rackLengthBox.bars = bars;
+        rackLengthBox.automatic = automatic;
+        rackLengthBox.setTooltip (automatic ? tr ("Pattern length: {0} (automatic, from the notes)", { bars == 1 ? tr ("1 bar") : tr ("{0} bars", { juce::String (bars) }) })
+                                            : tr ("Pattern length: {0}", { bars == 1 ? tr ("1 bar") : tr ("{0} bars", { juce::String (bars) }) }));
+        rackLengthBox.repaint();
+    }
+}
+
+void MainComponent::showPatternLengthMenu()
+{
+    const auto& song = engine.getSong();
+    const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
+    const auto bar = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar);
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Pattern length"));
+    menu.addItem (tr ("Automatic (from notes)"), true, pattern.lengthTicks == 0, [this] { rackLengthBox.onSet (0); });
+    for (int bars : { 1, 2, 4, 8, 16, 32 })
+        menu.addItem (bars == 1 ? tr ("1 bar") : tr ("{0} bars", { juce::String (bars) }), true, pattern.lengthTicks == bars * bar,
+                      [this, bars] { rackLengthBox.onSet (bars); });
+    menu.addSeparator();
+    menu.addItem (tr ("Type value..."), [this] {
+        ui::ValueSpec spec;
+        spec.name = tr ("Pattern length (bars, 0 = automatic)");
+        spec.minimum = 0.0;
+        spec.maximum = 999.0;
+        spec.interval = 1.0;
+        ui::typeValue (rackLengthBox, spec, rackLengthBox.automatic ? 0.0 : (double) rackLengthBox.bars,
+                       [this] (double v) { rackLengthBox.onSet (juce::roundToInt (v)); });
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&rackLengthBox));
 }
 
 void MainComponent::PatternSelector::paint (juce::Graphics& g)
@@ -2456,7 +2625,9 @@ juce::PopupMenu MainComponent::makePatternMenu()
     }
 
     juce::PopupMenu menu;
-    ui::addItemHeader (menu, tr ("Pattern"), juce::String::fromUTF8 (pattern.name.c_str()), PlaylistComponent::patternColour (song, index));
+    // a double-click on the title renames the pattern (issue #12)
+    ui::addItemHeader (menu, tr ("Pattern"), juce::String::fromUTF8 (pattern.name.c_str()), PlaylistComponent::patternColour (song, index),
+                       [this, index] { showRenamePattern (index); });
     menu.addItem (tr ("Next pattern") + shortcutText ("pattern.next"), index + 1 < (int) song.patterns.size(), false,
                   [this] { selectPattern (stepPattern (engine.getSong(), 1)); });
     menu.addItem (tr ("Previous pattern") + shortcutText ("pattern.previous"), index > 0, false,
@@ -2556,7 +2727,10 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     if (namesChanged || patternBox.getSelectedItemIndex() != song.currentPattern || std::abs (swingSlider.getValue() - song.swing) > 1e-6)
         refreshToolbar();
     else
+    {
         refreshRackPatternSelector(); // a new pattern colour
+        refreshRackLengthBox();       // (notes added: the automatic length grows)
+    }
 }
 
 // --- tempo display -------------------------------------------------------------------------------

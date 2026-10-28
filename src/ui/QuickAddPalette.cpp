@@ -5,6 +5,7 @@
 #include "core/Effects.h"
 #include "core/PluginSubstitutes.h"
 #include "core/SearchQuery.h"
+#include "engine/PluginHost.h"
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
 #include "ui/ChannelRackComponent.h"
@@ -22,6 +23,7 @@ struct Entry
 {
     juce::String name, detail;
     std::function<void()> add;
+    std::string key = {}; // its Plugin database key (core/Preferences.h plugin names): a renamed one shows its new name
 };
 
 class EntryList final : public juce::ListBox,
@@ -74,16 +76,23 @@ private:
         }
 
         const auto& e = shown[(std::size_t) row];
-        g.setFont (theme::font (theme::type::body));
-        g.setColour (theme::colour::textPrimary);
-        g.drawText (e.name, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
+        auto area = juce::Rectangle<int> (8, 0, width - 16, height);
 
+        // the source on the right first, then the name in what is left (cut with "..."): a long name no longer runs
+        // under the source (round 165q)
         if (e.detail.isNotEmpty())
         {
-            g.setFont (theme::font (theme::type::caption));
+            const auto caption = theme::font (theme::type::caption);
+            const auto detailWidth = juce::jmin (juce::GlyphArrangement::getStringWidthInt (juce::Font (caption), e.detail) + 2, area.getWidth() * 2 / 5);
+            g.setFont (caption);
             g.setColour (theme::colour::textSecondary);
-            g.drawText (e.detail, 8, 0, width - 16, height, juce::Justification::centredRight, true);
+            g.drawText (e.detail, area.removeFromRight (detailWidth), juce::Justification::centredRight, true);
+            area.removeFromRight (10);
         }
+
+        g.setFont (theme::font (theme::type::body));
+        g.setColour (theme::colour::textPrimary);
+        g.drawText (e.name, area, juce::Justification::centredLeft, true);
     }
 
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override
@@ -104,6 +113,8 @@ public:
         search.addListener (this);
         search.addKeyListener (this);
         search.setWantsKeyboardFocus (true);
+        // "Esc closes" (the hint below): the search box used to swallow Esc, so the window stayed open (round 165q)
+        search.onEscapeKey = [this] { closeToolWindowOf (*this); };
         addAndMakeVisible (search);
 
         for (auto* l : { &instrumentsTitle, &effectsTitle })
@@ -124,12 +135,14 @@ public:
                                                                    { InstrumentKind::snare, TR_NOOP ("Snare") }, { InstrumentKind::hat, TR_NOOP ("Hat") },
                                                                    { InstrumentKind::clap, TR_NOOP ("Clap") } };
         for (const auto& [kind, name] : builtIn)
-            instruments.all.push_back ({ tr (name), tr ("built-in"), [this, kind = kind, english = juce::String (name)] {
-                                            ChannelDef c;
-                                            c.name = english.toStdString();
-                                            c.instrument = kind;
-                                            targets.addInstrument (c);
-                                        } });
+            instruments.all.push_back ({ tr (name), tr ("built-in"),
+                                         [this, kind = kind, english = juce::String (name)] {
+                                             ChannelDef c;
+                                             c.name = english.toStdString();
+                                             c.instrument = kind;
+                                             targets.addInstrument (c);
+                                         },
+                                         std::string ("lynx:gen:") + name });
 
         // FL's Layer and Dashboard (round 164): no sound of their own
         instruments.all.push_back ({ tr ("Layer"), tr ("built-in"), [this] {
@@ -137,21 +150,24 @@ public:
                                         c.name = "Layer";
                                         c.instrument = InstrumentKind::layer;
                                         targets.addInstrument (c);
-                                    } });
+                                    },
+                                     "lynx:gen:Layer" });
         instruments.all.push_back ({ "Dashboard", tr ("built-in"), [this] {
                                         ChannelDef c;
                                         c.name = "Dashboard";
                                         c.instrument = InstrumentKind::dashboard;
                                         c.patcher.surface = surface::starterControls();
                                         targets.addInstrument (c);
-                                    } });
+                                    },
+                                     "lynx:gen:Dashboard" });
         instruments.all.push_back ({ "Voltage Controller", tr ("built-in"), [this] {
                                         ChannelDef c;
                                         c.name = "Voltage Controller";
                                         c.instrument = InstrumentKind::voltage;
                                         c.pluginState = voltage::write (voltage::Settings {});
                                         targets.addInstrument (c);
-                                    } });
+                                    },
+                                     "lynx:gen:Voltage Controller" });
 
         // FL's own instrument engines (round 142): those this PC can make (the user's FL installation)
         for (const auto& e : natives::instrumentEngines())
@@ -159,7 +175,8 @@ public:
                 instruments.all.push_back ({ flEngineName (e), tr ("built-in FL engine"), [this, kind = e.kind] {
                                                 if (auto c = natives::makeChannel (kind, flStudioAccess()))
                                                     targets.addInstrument (*c);
-                                            } });
+                                            },
+                                             std::string ("lynx:gen:") + e.name });
 
         // LYNX Soundfont (round 158): the empty player, and every indexed SoundFont preset ("piano", "808"...)
         instruments.all.push_back ({ "LYNX Soundfont", tr ("built-in"), [this] { targets.addInstrument (sf::makeChannel()); } });
@@ -179,7 +196,8 @@ public:
                                          [this, kind, bpm = engine.getSong().bpm] {
                                              if (const auto fx = newAddableEffect (kind, bpm))
                                                  targets.addEffect (*fx);
-                                         } });
+                                         },
+                                         std::string ("lynx:fx:") + effectInfo (kind).name });
         // LYNX equivalents of well-known third-party effects (the substitutes table): findable by the product's name
         for (const auto& entry : pluginSubstitutes())
             if (! entry.instrument)
@@ -211,14 +229,39 @@ public:
                                                 c.instrument = InstrumentKind::plugin;
                                                 c.plugin = ref;
                                                 targets.addInstrument (c);
-                                            } });
+                                            },
+                                             ref.id });
             else
                 effects.all.push_back ({ type.name, detail, [this, ref] {
                                             EffectSlot slot;
                                             slot.kind = EffectKind::plugin;
                                             slot.plugin = ref;
                                             targets.addEffect (slot);
-                                        } });
+                                        },
+                                         ref.id });
+        }
+
+        // plugins renamed in the Plugin database (FL, issue #11: "1_EQ"): their new name, first in the list; the
+        // original name stays in the detail, so typing it still finds them
+        const auto& names = engine.getPluginHost().pluginNames();
+        for (auto* list : { &instruments, &effects })
+        {
+            std::vector<Entry> renamed, rest;
+            for (auto& e : list->all)
+            {
+                const auto it = e.key.empty() ? names.end() : names.find (e.key);
+                if (it == names.end())
+                {
+                    rest.push_back (std::move (e));
+                    continue;
+                }
+                e.detail = e.name + juce::String::fromUTF8 (" \xc2\xb7 ") + e.detail;
+                e.name = juce::String::fromUTF8 (it->second.c_str());
+                renamed.push_back (std::move (e));
+            }
+            std::stable_sort (renamed.begin(), renamed.end(), [] (const Entry& a, const Entry& b) { return a.name.compareNatural (b.name) < 0; });
+            renamed.insert (renamed.end(), std::make_move_iterator (rest.begin()), std::make_move_iterator (rest.end()));
+            list->all = std::move (renamed);
         }
 
         for (auto* list : { &instruments, &effects })

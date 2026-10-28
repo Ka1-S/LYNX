@@ -857,13 +857,12 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (part == Part::meter && ! e.mods.isPopupMenu()) // clears the clip latch and the peak hold
+    if (part == Part::meter && ! e.mods.isPopupMenu()) // clears the clip latch and the peak hold, and selects (as FL)
     {
         for (int ch = 0; ch < 2; ++ch)
             if (const auto i = (std::size_t) t * 2 + (std::size_t) ch; i < levels.size())
                 levels[i].resetClip();
         repaint (meterArea (t).expanded (2));
-        return;
     }
 
     if (part == Part::route && e.mods.isPopupMenu())
@@ -928,7 +927,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if ((part == Part::body || part == Part::header) && ! e.mods.isPopupMenu() && (e.mods.isCtrlDown() || e.mods.isShiftDown()) && t > 0)
+    if ((part == Part::body || part == Part::header || part == Part::meter) && ! e.mods.isPopupMenu() && (e.mods.isCtrlDown() || e.mods.isShiftDown()) && t > 0)
     {
         auto s = selection;
         if (e.mods.isShiftDown())
@@ -1318,7 +1317,7 @@ ui::Hint MixerStrips::hintAt (juce::Point<int> p)
         case Part::arm: h.text = name + " - " + tr ("Record arm: Rec + Play records this insert's audio input into a Playlist clip  [RMB] input and monitoring"); h.hasMenu = true; break;
         case Part::input: h.text = name + " - " + tr ("Input level of this insert's audio input  [LMB] choose the input"); h.hasMenu = true; break;
         case Part::solo: h.text = name + " - " + tr ("Solo"); break;
-        case Part::meter: h.text = name + " - " + tr ("Peak meter (left/right) with peak hold  [LMB] clears the clip light"); break;
+        case Part::meter: h.text = name + " - " + tr ("Peak meter (left/right) with peak hold  [LMB] selects the track and clears the clip light"); break;
         case Part::route: h.text = name + " - " + tr ("Send from the selected insert to this one (drag after enabling: level; right-click: sidechain, only here)"); h.hasMenu = true; break;
         case Part::add: h.text = tr ("Add a mixer insert"); break;
         case Part::header:
@@ -1651,12 +1650,9 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
     const auto targets = std::find (selection.begin(), selection.end(), t) != selection.end() ? selection : std::vector<int> { t };
     const auto trackName = juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str());
 
-    // the title band in the insert's colour (FL tints the whole menu)
-    ui::addItemHeader (menu, t == 0 ? tr ("Master") : tr ("Mixer track {0}", { juce::String (t) }), trackName,
-                       song.mixer[(std::size_t) t].colour != 0 ? juce::Colour (song.mixer[(std::size_t) t].colour) : juce::Colour());
-
-    // FL's first section: name and colour (REA_rodada115)
-    menu.addItem (tr ("Rename and color...") + "\tF2", [this, t] {
+    auto rename = [this, t] {
+        if (t >= (int) engine.getSong().mixer.size())
+            return;
         const auto& track = engine.getSong().mixer[(std::size_t) t];
         showNameAndColourDialog (tr ("Rename track"), juce::String::fromUTF8 (track.name.c_str()), track.colour,
                                  [this, t] (const juce::String& name, std::uint32_t colour) {
@@ -1667,7 +1663,14 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
                                              s.mixer[(std::size_t) t].colour = colour;
                                          });
                                  });
-    });
+    };
+
+    // the title band in the insert's colour (FL tints the whole menu); a double-click on it renames (issue #12)
+    ui::addItemHeader (menu, t == 0 ? tr ("Master") : tr ("Mixer track {0}", { juce::String (t) }), trackName,
+                       song.mixer[(std::size_t) t].colour != 0 ? juce::Colour (song.mixer[(std::size_t) t].colour) : juce::Colour(), rename);
+
+    // FL's first section: name and colour (REA_rodada115)
+    menu.addItem (tr ("Rename and color...") + "\tF2", rename);
     menu.addSubMenu (tr ("Change color"), ui::colourMenu (song.mixer[(std::size_t) t].colour, [this, t] (std::uint32_t colour) {
                          if (t < (int) engine.getSong().mixer.size())
                              engine.editSong ([t, colour] (Song& s) { s.mixer[(std::size_t) t].colour = colour; });
@@ -3144,9 +3147,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
             // a LYNX substitute shows the plugin it stands in for, with a "LYNX" badge
             const auto substitute = slot.isSubstitute();
-            auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
-                        : substitute                    ? juce::String::fromUTF8 (substituteOriginalName (slot).c_str())
-                                                        : juce::String::fromUTF8 (projectcontents::effectSlotName (slot).c_str());
+            auto name = quickpick::slotName (engine, slot); // (a plugin renamed in the Plugin database: its new name, round 165c)
             if (slot.sidechain > 0 && slot.sidechain < (int) engine.getSong().mixer.size())
                 name << juce::String::fromUTF8 (" \xe2\x86\x90 ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
             auto text = textArea;
@@ -3216,7 +3217,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         drawButton (button, tr ("Open plugin interface"), Icon::plugin);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        textcache::drawText (g, juce::String::fromUTF8 (slot.plugin.name.c_str()), button.translated (0, 34), juce::Justification::centred);
+        textcache::drawText (g, quickpick::slotName (engine, slot), button.translated (0, 34), juce::Justification::centred);
         return;
     }
 
@@ -4208,7 +4209,8 @@ void EffectsPanel::openPluginWindow (int slot)
             return;
         }
         const auto& s = engine.getSong().mixer[(std::size_t) track].effects[(std::size_t) slot];
-        PluginWindows::open (effect, plugin->getInstance(), juce::String::fromUTF8 (s.plugin.name.c_str()),
+        PluginWindows::open (effect, plugin->getInstance(), quickpick::slotName (engine, s), // (its Plugin database name, round 165c)
+                            
                              { &engine, [t = track, slot] (Song& song) -> PluginRef* {
                                   if (t >= (int) song.mixer.size() || slot >= (int) song.mixer[(std::size_t) t].effects.size())
                                       return nullptr;
