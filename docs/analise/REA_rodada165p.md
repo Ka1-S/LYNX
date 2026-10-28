@@ -39,3 +39,12 @@ main ea719caf = C:\Users\kauan\lynx-test\issue12\main\LYNX.exe:
 - 0.1.18 / 0.1.19 (the user's version): `showSettings (engine, (SettingsPage) juce::jlimit (0, 5, page), …)` with
   SettingsPage::theme == 6 → MIDI, exactly the report. Fixed on main by 8a723472 (round 165a fl165). The 0.1.18
   exe was not run: it has no LYNX_PROFILE_DIR / test mode and would use the user's real profile.
+
+### Features of batch 1, checked on Windows (build c0333184, real input, fresh profile)
+| feature | Windows check |
+|---|---|
+| Click a mixer track's VU meter selects it | click on Insert 6's meter: selected, Effects panel "Insert 6", hint "[LMB] selects the track and clears the clip light" (f2.png) |
+| Double-click the header of the mixer insert's right-click menu renames | opens "Rename track"; typed "drums" → strip renamed (f6c.png). (The name field doesn't take the focus by itself: audit165's F2-dialog focus fix covers that dialog.) |
+| Same for a pattern's right-click menu | double-click on the "PATTERN / Pattern 1" header opens "Rename pattern" (f8.png) |
+| Channel Rack pattern length (bars) box | hint "Pattern length in bars: drag or wheel, double-click automatic"; wheel 1 → 4 bars, the grid grows (f11.png) |
+| Channel Rack follow playhead | on, 4-bar pattern playing: the step view pages to bar 2 (fpc.png) |
