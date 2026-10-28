@@ -147,6 +147,7 @@ private:
     void showMoreMenu();
     void updateScrollBars();
     void previewOn (int key, float velocity);
+    float keyVelocityAt (int x, int key) const; // velocity of a click on the keyboard at x
     void previewOff();
     void visibilityChanged() override;
 

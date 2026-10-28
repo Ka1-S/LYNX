@@ -243,6 +243,7 @@ public:
 
     void setTrack (int track);
     int getSelectedSlot() const noexcept { return selectedSlot; }
+    void deleteSlot (int slot); // removes the slot's effect (its menu's Delete, the Delete key)
     void selectSlot (int slot)
     {
         selectedSlot = slot;
