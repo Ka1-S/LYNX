@@ -1705,8 +1705,8 @@ void ChannelRackComponent::mouseDoubleClick (const juce::MouseEvent& e)
     }
     else if (area == Area::select && ! e.mods.isPopupMenu())
         selectAll();
-    else if (area == Area::name && ! e.mods.isAnyModifierKeyDown() && onOpenPianoRoll)
-        onOpenPianoRoll();
+    // a double-click on a channel's name is two clicks, as in FL: its window opens and closes again (FL 2026, checked
+    // round 165q F7). It no longer opens the Piano Roll — the hint promised that, but FL's channel button does not.
 }
 
 void ChannelRackComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
@@ -1761,7 +1761,7 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             h.text = name + " - " + tr ("Click: mute.  Ctrl+click or right-click: solo");
             break;
         case Area::name:
-            h.text = name + " - " + tr ("[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu");
+            h.text = name + " - " + tr ("[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [LMB] drag up/down reorders  [RMB] channel menu");
             // sample channels: where the pitch is (round 163, "getting to the sample pitching")
             if (row >= 0 && row < (int) song.channels.size()
                 && (song.channels[(std::size_t) row].instrument == InstrumentKind::sampler || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip))
