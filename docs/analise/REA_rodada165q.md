@@ -79,6 +79,8 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
 | 4 | Tempo display right-click › Tempo tapper; Sync | PASS | s5_40/s5_41 |
 | 8 | Last tweaked read-out on the hint bar, click → menu | PASS | s5_49/s5_50: "Insert 2 - Pan R8", menu with automation / remote control / value (note: Stereo separation is not an automation target, so it never shows there) |
 | 8 | Plugin window Presets menu with ◀ ▶, save / load / export | PASS | s6_05-s6_08: Pro-Q 4 (VST3 trial): menu, "Save preset..." name dialog opens focused, "mine" listed under Your presets |
+| 9 | Browser › Refresh search index (abuse: 5 rebuilds with searches in between) | PASS | s9_01/s9_02: results each time, alive 40 s later |
+| 4 | MIDI activity light; click reconnects | PASS (function) | s9_03/s9_04: hint lists the open inputs (StudioRack, SG Device I/O); the blink itself needs MIDI traffic — not testable here |
 | 4 | Undo history Ctrl+H; Quick-add Ctrl+A / Ctrl+Z (real scan codes) | PASS | s5_10/s5_11/s5_51 — F3 stays withdrawn |
 
 ## Findings (not in the posted claims, found on the way)
@@ -123,6 +125,8 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
   Piano Roll.
 - Abuse (session 4, all survived): Pattern/Song toggled 40x while playing; Ctrl+Z/Ctrl+Y spam while playing; 6 Pro-Q 4
   instances on the Master with windows opened while playing, 3 deleted (windows closed), undo/redo spam, Alt+F12.
+- Not verified (no MIDI device sends here): pitch bend / mod wheel out of the box (#9), MIDI light blink (#4);
+  Linux-only #8 item (wrapper settings not covered by the plugin window) — r165b's Linux sweep covers Linux windows.
 - Not testable here: MIDI input light / pitch bend (no MIDI device or loopMIDI on this machine); fine tune / stretch
   are also covered by tests/Sampler162Tests.inc.
 - F4 (cosmetic, fixed here): Quick-add palette — long names ran under the right-hand source label; the source is now
