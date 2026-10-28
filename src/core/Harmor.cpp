@@ -2137,6 +2137,38 @@ ImageData parseImage (const std::vector<std::uint8_t>& t)
 }
 
 inline float expF (float x) noexcept { return (float) std::exp ((double) x); }     // IPP Exp_32f (taken as correctly rounded)
+
+// IPP's 11-bit vector functions, which Harmor calls at precision "Average" (plugin +0x1150 Exp_32f_A11, +0x1158
+// Ln_32f_A11; A24 above) — measured black-box on FL's dsp_ippv2_x64.dll (REA_rodada165g-flbeta165h §3): the AVX2
+// code path (every CPU with AVX2 and FMA) evaluates them as below, bit for bit; IPP's SSE/AVX paths (CPUs without
+// AVX2) round some steps differently. fma32 is a float fused multiply-add (a·b exact in double, one rounding to float
+// except at a ~2⁻²⁹ chance of a double-rounding tie).
+inline float fma32 (float a, float b, float c) noexcept { return (float) ((double) a * (double) b + (double) c); }
+
+inline float ippExpA11 (float x) noexcept
+{
+    if (! (x > -87.3f && x < 88.7f)) // denormal / overflow range (and NaN): IPP's own handling is not modelled
+        return (float) std::exp ((double) x);
+    const auto n = std::nearbyint (x * 0x1.715476p+0f);  // round(x·log2 e)
+    const auto r = fma32 (-n, 0x1.62e430p-1f, x);        // x − n·ln 2
+    const auto q = fma32 (fma32 (fma32 (0x1.52c758p-3f, r, 0x1.01e5acp-1f), r, 0x1.0007bcp+0f), r, 1.0f);
+    return (float) std::ldexp ((double) q, (int) n);
+}
+
+inline float ippLnA11 (float x) noexcept
+{
+    if (! (x >= 1.17549435e-38f && x <= 3.40282347e+38f)) // zero, negative, denormal, inf, NaN
+        return (float) std::log ((double) x);
+    std::int32_t bits;
+    std::memcpy (&bits, &x, 4);
+    const auto e = (bits - 0x3f2aaaab) >> 23; // x = 2^e·m, m in [2/3, 4/3)
+    const std::int32_t mb = bits - (e << 23);
+    float m;
+    std::memcpy (&m, &mb, 4);
+    const auto f = m - 1.0f;
+    const auto q = fma32 (fma32 (fma32 (0x1.c25266p-3f, f, -0x1.11d1fcp-2f), f, 0x1.54e2c0p-2f), f, -0.5f);
+    return fma32 ((float) e, 0x1.62e430p-1f, fma32 (q * f, f, f));
+}
 inline float expm1F (float x) noexcept { return (float) std::expm1 ((double) x); } // IPP Expm1_32f
 inline float divF (float a, float b) noexcept { return (float) ((double) a / (double) b); } // IPP Div_32f
 
@@ -2711,6 +2743,8 @@ struct Part
     double part30 = 0.0;                 // part +0x30: the part's pitch knob in cents (formant reference)
     int misc47 = 0;                      // part +0x238 (combo +0x47): auto gain measured after the image
     float xyzC = 0.0f;                   // X/Y/Z smoothing coefficient (plugin +0x1118)
+    float delaySmp = 0.0f;               // part +0x1a0: note start delay in samples (part parameter 2)
+    std::vector<float> fadeIn;           // part +0x660 segment 0: the record's attack fade (part misc +4), empty = off
     std::shared_ptr<const Image> img;    // image synthesis (null: no usable image)
     std::vector<std::string> fallbacks;
 
@@ -2822,6 +2856,31 @@ struct Part
         modx = f32 (g[0] * 0.001953125), mody = f32 (g[1] * 0.001953125), modz = f32 (g[2] * 0.001953125);
         // X/Y/Z smoothed per control block (FUN_008826b0), 100 ms; off when global misc +0x39 is 0
         xyzC = S.gmisc[0x39] != 0 ? (float) std::exp (-4.6051701859880918 / ((fs * 0.1) / B)) : 0.0f;
+        {
+            // note start delay [DECOMP FUN_00879540 parameter 2]: p < 0: (2^(−p/48) − 1)/255 s, p ≥ 0: p·0.3125/tempo
+            // (float tempo), in float, times the integer sample rate
+            const auto pd = p[2];
+            const auto sec = pd >= 0 ? (float) ((double) pd * 0.3125 / (double) (float) bpm)
+                                     : (float) ((std::exp ((double) pd * -0.020833333333333332 * ln2) - 1.0) * 0.00392156862745098);
+            delaySmp = sec * (float) (int) fs;
+        }
+        {
+            // attack fade [DECOMP FUN_008781f0 → FUN_00863450 / FUN_00862d70 type 3, segment 0]: part misc +4 = v
+            // gives (v·0.001)²·25 ms; table (cos((N − i)·π/(N + 1)) + 1)/2 in float, i = 0…N−1, multiplied into the
+            // record's mono output from its first sample (FUN_008635c0)
+            fadeIn.clear();
+            const auto v = pd.I (0x04);
+            if (v != 0)
+            {
+                const auto x = (double) ((float) v * 0.001f);
+                const auto ms = x * x * 25.0;
+                const auto N = std::max (1, (int) std::nearbyint (ms * 0.001 * (double) (int) fs));
+                const auto w = (float) (1.0 / (double) (N + 1) * 3.141592653589793);
+                fadeIn.resize ((std::size_t) N);
+                for (int i = 0; i < N; ++i)
+                    fadeIn[(std::size_t) i] = (float) (((double) (float) std::cos ((double) ((float) (N - i) * w)) + 1.0) * 0.5);
+            }
+        }
         misc47 = pd.I (0x47);
         {
             const auto x = f32 (std::abs (glideV) * milli);
@@ -3811,6 +3870,10 @@ struct Record
     bool knValid[2] { false, false }, lsValid[2] { false, false };
     int part = 0, ku = 0, n = 0, note = -1, cnt = 0, firstlen = -1, hbM = 0, pkC = 0, pkIc = 0, dpos = -1, pendOldn = -1;
     int oscTop = 0, oscAge = 0, gcnt = 0, e8 = 0;
+    int fadePos = 0;          // voice +0xec: samples of the attack fade done
+    bool firstRender = true;  // bank +0x78: the bank has not rendered yet
+    int delay = 0;            // voice +0x48: samples the record still waits before it sounds (note start delay)
+    bool delayChecked = false; // voice +0x4c went 1 → 2: the start delay was read at the first control block
     long long stamp = 0, t0 = 0, scount = 0;
     double uPan = 0, uPh = -1, uDet = 0, uGain = 1, uDk = 0;
     double fvol = 1, fpan = 0, fpitch = 0, vel = 1;
@@ -4085,8 +4148,11 @@ public:
                 auto& v = records[(std::size_t) ri];
                 startRecord (v, pk, ku, nt, gsearch, hasUdk ? udk[(std::size_t) ku] : 0.0f, hzu, s14c, s108);
                 v.hr.fill (1.0f);
-                for (int i = 0; i < p.hrCnt; ++i)
-                    v.hr[(std::size_t) (p.hrSt + i)] = (float) std::exp ((double) (hrr[(std::size_t) i] * p.hrTab[(std::size_t) (p.hrSt + i)]));
+                for (int i = 0; i < p.hrCnt; ++i) // (exp through the plugin's IPP pointer +0x1150: A11 at precision 0)
+                {
+                    const auto e = hrr[(std::size_t) i] * p.hrTab[(std::size_t) (p.hrSt + i)];
+                    v.hr[(std::size_t) (p.hrSt + i)] = P->prec == 0 ? ippExpA11 (e) : (float) std::exp ((double) e);
+                }
                 v.note = slot;
                 if (nt.nv < (int) nt.voices.size())
                     nt.voices[(std::size_t) nt.nv++] = ri;
@@ -4514,6 +4580,14 @@ private:
             const EnvState* share = (gv != nullptr && art.envGlobal) ? &gv->arts[(std::size_t) k].es : nullptr;
             v.arts[(std::size_t) k].start (art, rand, uin, share, run[(std::size_t) pk].gl[(std::size_t) k]);
         }
+        if (p.p[15] != 0 && p.arts[1].hasEnv)
+        {
+            // part parameter 15 [DECOMP TriggerVoice FUN_00883cd0]: the velocity speeds the volume envelope up —
+            // its time scale (state +0x50) × (2 − 2·min(velocity, 1)), then the scales are applied again
+            const auto f = (double) (2.0f - (float) std::min (v.vel, 1.0) * 2.0f);
+            const double g[4] { f, 1.0, 0.0, 1.0 };
+            p.arts[1].env.globalScales (v.arts[1].es, g);
+        }
         v.shared = gv != nullptr && p.anyEnvGlobal;
         v.released = false;
         v.knValid[0] = v.knValid[1] = false, v.lsValid[0] = v.lsValid[1] = false;
@@ -4533,6 +4607,7 @@ private:
             v.ipos.off = p.img->toff;
         v.imgEnd = false, v.v1b0 = 0.0;
         v.cnt = 0;
+        v.delay = 0, v.delayChecked = false, v.fadePos = 0, v.firstRender = true;
         v.firstlen = v.shared ? gv->cnt : -1;
         v.curValid = false;
         v.e8 = P->e8;
@@ -4605,6 +4680,9 @@ private:
 
     // ---- one control block of a record (FUN_0088ab10 / hmodel.Voice.control) ----
 
+    // the vector exp of the control block: IPP Exp_32f_A11 at precision 0, (nearly) exact above
+    float vexp (float x) const noexcept { return P->prec == 0 ? ippExpA11 (x) : (float) fastExp ((double) x); }
+
     void hzarr (Record& v) noexcept
     {
         if (! v.hzdirty)
@@ -4615,12 +4693,13 @@ private:
             auto h = (float) v.f[(std::size_t) i] * fsF;
             h = std::max (h, 16.3515987f);
             v.hz[(std::size_t) i] = h;
-            v.l2[(std::size_t) i] = (float) fastLog ((double) h) * 1.44269502f;
+            v.l2[(std::size_t) i] = (P->prec == 0 ? ippLnA11 (h) : (float) fastLog ((double) h)) * 1.44269502f;
         }
         v.hzdirty = false;
     }
 
-    void control (Record& v) noexcept
+    // false: the first control block found a note start delay (the record waits, then this block runs again)
+    bool control (Record& v) noexcept
     {
         const auto& p = P->parts[(std::size_t) v.part];
         const auto fs = P->fs;
@@ -4662,6 +4741,18 @@ private:
             v.arts[(std::size_t) k].step (v.dtPrev, in);
             if (v.firstblk)
                 v.arts[(std::size_t) k].first();
+        }
+        if (v.firstblk && ! v.delayChecked)
+        {
+            // FUN_0088ab10 0x88b150: delay = articulator 42 × part +0x1a0 (float), rounded; any non-zero product
+            // restarts the block after the wait (voice +0x4c = 2), even when it rounds to no samples
+            v.delayChecked = true;
+            const auto d = (float) v.arts[42].out * p.delaySmp;
+            if (d != 0.0f)
+            {
+                v.delay = (int) std::nearbyint ((double) d);
+                return false;
+            }
         }
         if (v.firstblk)
         {
@@ -4798,7 +4889,7 @@ private:
             {
                 const auto val = (float) (a4 * 0.0008333333333333334 * ln2);
                 for (int i = 0; i < n; ++i)
-                    v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) std::exp (p.uniTab[(std::size_t) i] * val);
+                    v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) vexp (p.uniTab[(std::size_t) i] * val);
             }
             if (v.firstblk)
             {
@@ -5012,7 +5103,7 @@ private:
             {
                 const auto gh = (float) p.glideHz;
                 for (int i = 0; i < n; ++i)
-                    v.kg[(std::size_t) i] = (float) fastExp ((double) (v.hz[(std::size_t) i] * gh));
+                    v.kg[(std::size_t) i] = vexp (v.hz[(std::size_t) i] * gh);
             }
             else
                 std::fill (v.kg.begin(), v.kg.begin() + n, (float) p.glide);
@@ -5020,6 +5111,7 @@ private:
         v.fxv = f32 (f32 (p.fx) * A[2]);
         v.artpan = A[0];
         v.firstblk = false;
+        return true;
     }
 
     // ---- image synthesis (REA_rodada75) ----
@@ -5090,7 +5182,7 @@ private:
             case 0:
                 mask();
                 for (int i = 0; i < m; ++i)
-                    v.f[(std::size_t) (4 + i)] = v.f[(std::size_t) (4 + i)] * (double) expF (buf[(std::size_t) i] * a0);
+                    v.f[(std::size_t) (4 + i)] = v.f[(std::size_t) (4 + i)] * (double) vexp (buf[(std::size_t) i] * a0);
                 break;
             case 1:
             case 2:
@@ -5137,7 +5229,7 @@ private:
                     for (int i = 0; i < n; ++i)
                     {
                         const auto w = p.hasUniTab ? (p.uniTab[(std::size_t) i] * t[(std::size_t) i]) * s : t[(std::size_t) i] * s;
-                        v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) expF (w);
+                        v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) vexp (w);
                     }
                 }
             }
@@ -5443,7 +5535,7 @@ private:
                     e = (tableRead (fl.rmask, v.l2[(std::size_t) i] * mS + mO, prec) * e) * kk;
                 else
                     e = e * kk;
-                T[i] = T[i] * (float) fastExp ((double) e);
+                T[i] = T[i] * vexp (e);
             }
         }
         else if (r > 0.0 && fl.noise && v.fcarry != 0.0)
@@ -5625,12 +5717,12 @@ private:
 
     // FUN_00888da0: per-partial pluck decay exp(table·f5); with the pluck blend exp(f5 / mix of the DLL's pluck table and
     // timbre 2), the mix being the timbre-mix value (at most 1)
-    static void pluckRates (const Part& p, const double* A, int n, float f5, float* out) noexcept
+    void pluckRates (const Part& p, const double* A, int n, float f5, float* out) const noexcept
     {
         if (p.blend != 5)
         {
             for (int i = 0; i < n; ++i)
-                out[i] = (float) fastExp ((double) (p.pkTab[(std::size_t) i] * f5));
+                out[i] = vexp (p.pkTab[(std::size_t) i] * f5);
             return;
         }
         auto m = (float) f32 (p.tmix * A[3]);
@@ -5640,7 +5732,7 @@ private:
         for (int i = 0; i < n; ++i)
         {
             const auto t = (p.pkTabDll[(std::size_t) i] - p.T2[(std::size_t) i]) * w + p.T2[(std::size_t) i];
-            out[i] = (float) std::exp ((double) (f5 / t));
+            out[i] = vexp (f5 / t);
         }
     }
 
@@ -5755,7 +5847,7 @@ private:
             if (freq)
             {
                 const auto e = masked ? (Mv * Pv) * e3 : Pv * e3;
-                const auto g = P->prec >= 1 ? std::exp ((double) e * ln2) : (double) std::exp (e * (float) ln2);
+                const auto g = P->prec >= 1 ? std::exp ((double) e * ln2) : (double) ippExpA11 (e * (float) ln2);
                 v.f[(std::size_t) i] = v.f[(std::size_t) i] * g;
             }
             else if (masked)
@@ -5863,6 +5955,15 @@ private:
     void renderBank (Record& v, int m, double* out) noexcept
     {
         const int n = v.n;
+        if (v.firstRender)
+        {
+            // FUN_00784840: with an attack fade (bank +0x4d = 0, set by TriggerVoice when the part's fade segment
+            // is on) the partials start at their targets instead of gliding up from silence
+            v.firstRender = false;
+            if (! P->parts[(std::size_t) v.part].fadeIn.empty())
+                for (int i = 0; i < n; ++i)
+                    v.a[(std::size_t) i] = v.T[(std::size_t) i];
+        }
         int top = n;
         while (top > 0 && v.a[(std::size_t) top - 1] == 0.0f && v.T[(std::size_t) top - 1] == 0.0f)
             --top;
@@ -5975,8 +6076,20 @@ private:
         {
             if (v.cnt <= 0)
             {
+                if (v.delay > 0)
+                {
+                    // note start delay (FUN_0088ab10 entry): the record is silent, only the vibrato and phaser
+                    // phases move on; its control-block grid starts after the delay
+                    const auto m = std::min (v.delay, n - t);
+                    v.delay -= m;
+                    v.vph = (double) ((float) v.vph + (float) p.vibRate * (float) m);
+                    v.phph = f32 (v.phph + p.phRate * m);
+                    t += m;
+                    continue;
+                }
                 v.vibph = v.vph;
-                control (v);
+                if (! control (v))
+                    continue; // the start delay was just read: wait, then the first control block runs again
                 v.cnt = P->B;
                 if (v.firstlen >= 0)
                 {
@@ -5988,6 +6101,13 @@ private:
             v.cnt -= m;
             auto* y = mono.data();
             renderBank (v, m, y);
+            if (v.fadePos < (int) p.fadeIn.size())
+            {
+                const auto k = std::min (m, (int) p.fadeIn.size() - v.fadePos);
+                for (int j = 0; j < k; ++j)
+                    y[j] = y[j] * (double) p.fadeIn[(std::size_t) (v.fadePos + j)];
+                v.fadePos += k;
+            }
             v.vph = (double) ((float) v.vph + (float) p.vibRate * (float) m);
             v.phph = f32 (v.phph + p.phRate * m);
             if (v.dpos >= 0)
@@ -6402,6 +6522,9 @@ std::unique_ptr<Instrument> makeHarmorInstrument() { return std::make_unique<Har
 
 namespace harmor
 {
+float ippExpA11Model (float x) noexcept { return ippExpA11 (x); }
+float ippLnA11Model (float x) noexcept { return ippLnA11 (x); }
+
 std::vector<float> renderReference (const std::vector<std::uint8_t>& state, const std::vector<RefNote>& notes, double sampleRate,
                                     int length, int block, const std::vector<std::uint32_t>& mt, double bpm,
                                     const std::vector<std::uint8_t>& compressorState)
