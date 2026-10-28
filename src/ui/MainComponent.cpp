@@ -1,3 +1,4 @@
+#include "ui/ThemeSettings.h"
 #include "ui/ColourPicker.h"
 #include "core/NoteNames.h"
 #include "ui/ProjectLoading.h"
@@ -477,6 +478,13 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::installSliderContract();
     // FL's Last tweaked and automation recording (REA round 143): every automatable control reports its moves
     ui::onTweak = [this] (const AutomationTarget& t) { engine.noteTweaked (t); };
+    // Options › Theme › Startup sound: its Play button (issue #12)
+    themeui::previewStartupSound = [this] (const juce::String& path) {
+        std::shared_ptr<const SampleData> sound;
+        if (path.isNotEmpty() && juce::File (path).existsAsFile())
+            sound = engine.getSampleLibrary().load (path);
+        engine.previewSample (sound != nullptr ? sound : makeStartupSample());
+    };
     // the toolbar's last-tweaked read-out opens the parameter's own menu (FL's Tools › Last tweaked; round 162d)
     tweakReadout.onClick = [this] {
         makeLastTweakedMenu (0).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tweakReadout));
@@ -552,6 +560,7 @@ MainComponent::~MainComponent()
     workspace.saveState();
     ui::uninstallSliderContract();
     ui::onTweak = nullptr;
+    themeui::previewStartupSound = nullptr;
     onEditEventsInPianoRoll = nullptr;
     PluginWindows::onGesture = nullptr;
     engine.nameAutomation = nullptr;

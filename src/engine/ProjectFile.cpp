@@ -747,6 +747,7 @@ const char* targetKindName (AutomationTargetKind k)
         case AutomationTargetKind::effectParam: return "effectParam";
         case AutomationTargetKind::tempo: return "tempo";
         case AutomationTargetKind::effectMix: return "effectMix";
+        case AutomationTargetKind::mixerSend: return "mixerSend";
         case AutomationTargetKind::none: break;
     }
     return "none";
@@ -756,7 +757,7 @@ AutomationTargetKind targetKindFromName (const juce::String& name)
 {
     for (auto k : { AutomationTargetKind::channelVolume, AutomationTargetKind::channelPan, AutomationTargetKind::channelParam,
                     AutomationTargetKind::mixerVolume, AutomationTargetKind::mixerPan, AutomationTargetKind::effectParam,
-                    AutomationTargetKind::tempo, AutomationTargetKind::effectMix })
+                    AutomationTargetKind::tempo, AutomationTargetKind::effectMix, AutomationTargetKind::mixerSend })
         if (name == targetKindName (k))
             return k;
 

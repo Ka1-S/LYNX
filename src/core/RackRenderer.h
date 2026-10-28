@@ -48,6 +48,11 @@ struct RackState
     std::vector<int> mixerVolumeAuto, mixerPanAuto;
     std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [track][slot][param] (built-in)
     std::vector<std::vector<int>> effectMixAuto;                                 // [track][slot]: dry/wet
+    struct RouteAuto
+    {
+        int from = 0, to = 0, slot = -1;
+    };
+    std::vector<RouteAuto> routeAutos; // route level knobs (mixerSend), bound to mixerInputs by buildMixerGraph
     std::vector<int> liveAutomations;                                            // automations with a live source (controllers)
 
     // pattern events (event editor): each lane uses an automation slot after the song's automations
@@ -114,6 +119,7 @@ struct RackState
         int delay = 0; // index into sendDelays[source]
         float level = 1.0f;
         int tap = -1;  // ≥ 0: a Fruity Send slot's signal (sendTaps[tap]) instead of the source's output
+        int automation = -1; // the route's level automation (mixerSend, issue #12): its slot; -1 = none
     };
     std::vector<std::vector<MixerInput>> mixerInputs; // [track]; [0] = Master
 

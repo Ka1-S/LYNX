@@ -1529,10 +1529,21 @@ public:
     {
         const auto& s = channel.sampler;
         pitch.store (std::clamp (s.pitch, -24.0f, 24.0f));
-        attack.store (std::clamp (s.attack, 0.0f, 2.0f));
-        decay.store (std::clamp (s.decay, 0.0f, 10.0f));
-        sustain.store (std::clamp (s.sustain, 0.0f, 1.0f));
-        release.store (std::clamp (s.release, 0.0f, 4.0f));
+        // the knobs an automation clip drives (issue #12, setParameter) keep the automated value until the song's own
+        // value changes (the knob turned by hand)
+        auto knob = [this] (int k, float natural) {
+            if (! (configuredKnobs[(std::size_t) k] == natural))
+            {
+                configuredKnobs[(std::size_t) k] = natural;
+                automatedKnob[(std::size_t) k].store (false, std::memory_order_relaxed);
+            }
+            if (! automatedKnob[(std::size_t) k].load (std::memory_order_relaxed))
+                storeKnob (k, natural);
+        };
+        knob (samplerparam::attack, s.attack);
+        knob (samplerparam::decay, s.decay);
+        knob (samplerparam::sustain, s.sustain);
+        knob (samplerparam::release, s.release);
         reverse.store (s.reverse);
         cut.store (s.cut);
         // with "keep pitch" the sample arrives already stretched (RackState): play at normal speed; the keys then
@@ -1543,12 +1554,12 @@ public:
         // the tempo or not
         keyShift.store (s.keepPitch);
         keyShiftMethod.store ((int) s.stretchMethod);
-        regionStart.store (std::clamp (s.regionStart, 0.0f, 1.0f));
-        regionEnd.store (std::clamp (s.regionEnd, 0.0f, 1.0f));
+        knob (samplerparam::start, s.regionStart);
+        knob (samplerparam::end, s.regionEnd);
         porta.store (s.porta);
         portaBeats.store (std::max (0.0f, s.portaBeats));
-        cutoff.store (std::clamp (s.cutoff, 20.0f, 20000.0f));
-        resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
+        knob (samplerparam::cutoff, s.cutoff);
+        knob (samplerparam::resonance, s.resonance);
         filterType.store (std::clamp (s.filterType, 0, 3));
         outGain.store (samplerGain (s.gainDb));
         bpm.store (std::max (1.0, songBpm)); // before the mailbox: the synced LFO reads it when updating
@@ -2586,6 +2597,41 @@ private:
     std::atomic<double> bpm { 120.0 };
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
     std::atomic<float> cutoff { 20000.0f }, resonance { 0.0f };
+    // automated knobs (issue #12): which hold an automation's value, and the song values configure last saw (UI thread)
+    std::array<std::atomic<bool>, samplerparam::count> automatedKnob {};
+    std::array<float, samplerparam::count> configuredKnobs { [] {
+        std::array<float, samplerparam::count> a {};
+        a.fill (std::numeric_limits<float>::quiet_NaN());
+        return a;
+    }() };
+
+    void storeKnob (int k, float natural) noexcept
+    {
+        switch (k)
+        {
+            case samplerparam::attack: attack.store (std::clamp (natural, 0.0f, 2.0f)); break;
+            case samplerparam::decay: decay.store (std::clamp (natural, 0.0f, 10.0f)); break;
+            case samplerparam::sustain: sustain.store (std::clamp (natural, 0.0f, 1.0f)); break;
+            case samplerparam::release: release.store (std::clamp (natural, 0.0f, 4.0f)); break;
+            case samplerparam::cutoff: cutoff.store (std::clamp (natural, 20.0f, 20000.0f)); break;
+            case samplerparam::resonance: resonance.store (std::clamp (natural, 0.0f, 1.0f)); break;
+            case samplerparam::start: regionStart.store (std::clamp (natural, 0.0f, 1.0f)); break;
+            case samplerparam::end: regionEnd.store (std::clamp (natural, 0.0f, 1.0f)); break;
+            default: break;
+        }
+    }
+
+public:
+    // an automation clip on one of the Sampler's knobs (samplerparam, issue #12). Audio thread.
+    void setParameter (int index, float value) noexcept override
+    {
+        if (index < 0 || index >= samplerparam::count)
+            return;
+        automatedKnob[(std::size_t) index].store (true, std::memory_order_relaxed);
+        storeKnob (index, samplerparam::toNatural (index, value));
+    }
+
+private:
     std::atomic<bool> porta { false };
     std::atomic<float> outGain { 1.0f }; // SamplerSettings::gainDb as a factor
     std::atomic<float> portaBeats { 0.125f };

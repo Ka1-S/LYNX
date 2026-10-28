@@ -117,15 +117,24 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     };
     addAndMakeVisible (tools);
 
-    channelBox.setTooltip (tr ("Channel being edited (marked: has notes in this pattern). Wheel: channels with notes; Ctrl+wheel: all"));
+    channelBox.setTooltip (tr ("Channel being edited (marked: has notes in this pattern); \"All\" at the top edits every channel's notes at once. Wheel: channels with notes; Ctrl+wheel: all"));
     channelBox.setWantsKeyboardFocus (false);
     channelBox.setMouseClickGrabsKeyboardFocus (false);
     channelBox.onChange = [this] {
+        if (channelBox.getSelectedId() == allChannelsId)
+        {
+            setAllChannels (true);
+            return;
+        }
         const auto channel = channelBox.getSelectedId() - 1;
+        setAllChannels (false);
         if (channel >= 0 && channel < (int) engine.getSong().channels.size() && channel != engine.getSelectedChannel())
             engine.setSelectedChannel (channel);
     };
-    channelBox.onStep = [this] (int direction, bool all) { stepChannel (direction, ! all); };
+    channelBox.onStep = [this] (int direction, bool all) {
+        setAllChannels (false);
+        stepChannel (direction, ! all);
+    };
     addAndMakeVisible (channelBox);
 
     ghostButton.setClickingTogglesState (true);
@@ -306,13 +315,12 @@ std::vector<std::int64_t> PianoRollComponent::snapCandidates() const
     // edges of this channel's notes (except the ones being dragged) and of the visible ghosts
     std::vector<std::int64_t> out;
     const auto& notes = currentPattern (engine.getSong()).notes;
-    const auto channel = engine.getSelectedChannel();
 
     for (int i = 0; i < (int) notes.size(); ++i)
     {
         const auto& n = notes[(std::size_t) i];
 
-        if ((n.channel != channel && ! showGhosts) || std::find (dragIndices.begin(), dragIndices.end(), i) != dragIndices.end())
+        if ((! edits (n) && ! showGhosts) || std::find (dragIndices.begin(), dragIndices.end(), i) != dragIndices.end())
             continue;
 
         out.push_back (n.start);
@@ -408,11 +416,10 @@ void PianoRollComponent::resized()
 void PianoRollComponent::scrollToNotes (bool fitPattern)
 {
     const auto& song = engine.getSong();
-    const auto channel = engine.getSelectedChannel();
     int low = 128, high = -1;
 
     for (const auto& n : currentPattern (song).notes)
-        if (n.channel == channel)
+        if (edits (n))
         {
             low = juce::jmin (low, n.key);
             high = juce::jmax (high, n.key);
@@ -494,11 +501,10 @@ bool PianoRollComponent::isSelected (int index) const
 std::vector<int> PianoRollComponent::channelNotes() const
 {
     const auto& notes = currentPattern (engine.getSong()).notes;
-    const auto channel = engine.getSelectedChannel();
     std::vector<int> out;
 
     for (int i = 0; i < (int) notes.size(); ++i)
-        if (notes[(std::size_t) i].channel == channel)
+        if (edits (notes[(std::size_t) i]))
             out.push_back (i);
 
     return out;
@@ -543,14 +549,13 @@ juce::Rectangle<float> PianoRollComponent::stretchHandle() const
 {
     // a tab on the right end of the selection, vertically centred on it (clamped into the grid)
     const auto& notes = currentPattern (engine.getSong()).notes;
-    const auto channel = engine.getSelectedChannel();
     std::int64_t start = 0, end = 0;
     int top = -1, bottom = 128;
     bool any = false;
 
     for (auto i : selection)
     {
-        if (i < 0 || i >= (int) notes.size() || notes[(std::size_t) i].channel != channel)
+        if (i < 0 || i >= (int) notes.size() || ! edits (notes[(std::size_t) i]))
             continue;
         const auto& n = notes[(std::size_t) i];
         start = any ? juce::jmin (start, n.start) : n.start;
@@ -624,7 +629,7 @@ void PianoRollComponent::paintOverview (juce::Graphics& g, juce::Rectangle<float
 
     int low = 128, high = -1;
     for (const auto& n : pattern.notes)
-        if (n.channel == channel)
+        if (edits (n))
         {
             low = juce::jmin (low, n.key);
             high = juce::jmax (high, n.key);
@@ -643,7 +648,7 @@ void PianoRollComponent::paintOverview (juce::Graphics& g, juce::Rectangle<float
 
     for (const auto& n : pattern.notes)
     {
-        if (n.channel != channel)
+        if (! edits (n))
             continue;
 
         const auto y = inner.getCentreY() - ((float) n.key - mid) / span * inner.getHeight();
@@ -752,7 +757,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
 
         for (const auto& n : pattern.notes)
         {
-            if (n.channel == channel || ! showGhosts)
+            if (edits (n) || ! showGhosts)
                 continue;
 
             const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
@@ -774,7 +779,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             const auto& n = pattern.notes[(std::size_t) i];
 
-            if (n.channel != channel)
+            if (! edits (n))
                 continue;
 
             const auto selected = isSelected (i);
@@ -788,6 +793,14 @@ void PianoRollComponent::paint (juce::Graphics& g)
             g.fillRoundedRectangle (r, 2.5f);
             g.setColour (selected ? textPrimary : hovered ? textPrimary.withAlpha (0.75f) : bg0.withAlpha (0.6f));
             g.drawRoundedRectangle (r, 2.5f, 1.0f);
+
+            // "All" channels: whose note it is, by the channel's colour on its left edge (issue #12)
+            if (allChannels && n.channel >= 0 && n.channel < (int) song.channels.size() && r.getWidth() > 5.0f)
+            {
+                const auto c = song.channels[(std::size_t) n.channel].colour;
+                g.setColour ((c != 0 ? theme::tame (juce::Colour (c)) : textPrimary.withAlpha (0.5f)).withAlpha (0.9f));
+                g.fillRect (r.withWidth (2.5f).reduced (0.0f, 1.5f).translated (1.0f, 0.0f));
+            }
 
             // the edge under the mouse shows its grip
             if (hovered && (hover.zone == gesture::Zone::rightEdge || hover.zone == gesture::Zone::leftEdge))
@@ -932,7 +945,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             const auto& n = pattern.notes[(std::size_t) i];
 
-            if (n.channel != channel)
+            if (! edits (n))
                 continue;
 
             const auto x = (float) tickToX ((double) n.start);
@@ -1106,14 +1119,13 @@ int PianoRollComponent::ghostAt (int x, int y) const
         return -1;
 
     const auto& notes = currentPattern (engine.getSong()).notes;
-    const auto channel = engine.getSelectedChannel();
     const auto key = yToKey (y);
 
     for (int i = (int) notes.size() - 1; i >= 0; --i)
     {
         const auto& n = notes[(std::size_t) i];
 
-        if (n.channel != channel && n.key == key && x >= tickToX ((double) n.start) && x < tickToX ((double) (n.start + n.length)))
+        if (! edits (n) && n.key == key && x >= tickToX ((double) n.start) && x < tickToX ((double) (n.start + n.length)))
             return i;
     }
 
@@ -1405,7 +1417,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         dragOriginals.clear();
 
         for (auto i : selection)
-            if (i >= 0 && i < (int) notes.size() && notes[(std::size_t) i].channel == engine.getSelectedChannel())
+            if (i >= 0 && i < (int) notes.size() && edits (notes[(std::size_t) i]))
             {
                 dragIndices.push_back (i);
                 dragOriginals.push_back (notes[(std::size_t) i]);
@@ -2157,7 +2169,6 @@ PianoRollComponent::Hover PianoRollComponent::hoverAt (juce::Point<int> p) const
     }
 
     const auto& notes = currentPattern (engine.getSong()).notes;
-    const auto channel = engine.getSelectedChannel();
     gesture::EdgeRules rules;
     rules.allowLeft = resizeFromLeft;
 
@@ -2166,7 +2177,7 @@ PianoRollComponent::Hover PianoRollComponent::hoverAt (juce::Point<int> p) const
     {
         const auto& n = notes[(std::size_t) i];
 
-        if (n.channel != channel || n.key != h.key)
+        if (! edits (n) || n.key != h.key)
             continue;
 
         if (const auto zone = gesture::zoneAt (p.x, tickToX ((double) n.start), tickToX ((double) (n.start + n.length)), rules);
@@ -2357,7 +2368,6 @@ ui::Hint PianoRollComponent::hoverForSnapshot()
 void PianoRollComponent::cutWithKnife (juce::Point<int> from, juce::Point<int> to, bool snapOn)
 {
     const auto& notes = currentPattern (engine.getSong()).notes;
-    const auto channel = engine.getSelectedChannel();
     std::vector<std::pair<int, std::int64_t>> cuts;
 
     if (from.getDistanceFrom (to) < 3)
@@ -2376,7 +2386,7 @@ void PianoRollComponent::cutWithKnife (juce::Point<int> from, juce::Point<int> t
         {
             const auto& n = notes[(std::size_t) i];
 
-            if (n.channel != channel)
+            if (! edits (n))
                 continue;
 
             const auto rowY = keyToY (n.key) + rowHeight / 2;
@@ -2496,6 +2506,7 @@ void PianoRollComponent::refreshChannelBox()
             hasNotes[(std::size_t) n.channel] = true;
 
     juce::StringArray names;
+    names.add (tr ("All")); // (issue #12: every channel's notes; drawn bold)
     for (std::size_t c = 0; c < song.channels.size(); ++c)
         names.add ((hasNotes[c] ? juce::String::fromUTF8 ("\xe2\x97\x8f ") : juce::String ("    ")) + juce::String::fromUTF8 (song.channels[c].name.c_str()));
 
@@ -2506,12 +2517,50 @@ void PianoRollComponent::refreshChannelBox()
 
     if (! same)
     {
+        // the bold "All" at the top, as a custom item (a ComboBox item has no font of its own)
+        struct BoldItem final : juce::PopupMenu::CustomComponent
+        {
+            explicit BoldItem (juce::String t) : text (std::move (t)) {}
+            void getIdealSize (int& w, int& h) override
+            {
+                w = 160;
+                h = 24;
+            }
+            void paint (juce::Graphics& g) override
+            {
+                if (isItemHighlighted())
+                {
+                    g.setColour (theme::colour::accent.withAlpha (0.35f));
+                    g.fillRect (getLocalBounds());
+                }
+                g.setColour (theme::colour::textPrimary);
+                g.setFont (theme::font (theme::type::body, true));
+                g.drawText (text, getLocalBounds().withTrimmedLeft (12), juce::Justification::centredLeft, true);
+            }
+            juce::String text;
+        };
         channelBox.clear (juce::dontSendNotification);
-        for (int i = 0; i < names.size(); ++i)
-            channelBox.addItem (names[i], i + 1);
+        juce::PopupMenu::Item all (names[0]);
+        all.itemID = allChannelsId;
+        all.customComponent = new BoldItem (names[0]);
+        channelBox.getRootMenu()->addItem (std::move (all));
+        channelBox.getRootMenu()->addSeparator();
+        for (int i = 1; i < names.size(); ++i)
+            channelBox.addItem (names[i], i);
     }
 
-    channelBox.setSelectedId (engine.getSelectedChannel() + 1, juce::dontSendNotification);
+    channelBox.setSelectedId (allChannels ? allChannelsId : engine.getSelectedChannel() + 1, juce::dontSendNotification);
+}
+
+void PianoRollComponent::setAllChannels (bool on)
+{
+    if (allChannels == on)
+        return;
+    allChannels = on;
+    selection.clear();
+    stopListening();
+    refreshChannelBox();
+    repaint();
 }
 
 void PianoRollComponent::stepChannel (int direction, bool withNotesOnly)
@@ -3445,7 +3494,11 @@ void PianoRollComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     if (song.currentPattern != knownPattern || engine.getSelectedChannel() != knownChannel || count != knownNoteCount)
     {
         if (engine.getSelectedChannel() != knownChannel)
+        {
             stopListening();
+            if (knownChannel >= 0)
+                allChannels = false; // another channel picked (Channel Rack, keys): back to it alone
+        }
 
         knownPattern = song.currentPattern;
         knownChannel = engine.getSelectedChannel();
@@ -3535,7 +3588,7 @@ void PianoRollComponent::drawEvents (int fromX, int toX, int y, bool erase)
 
 void PianoRollComponent::timerCallback()
 {
-    if (channelBox.getSelectedId() != engine.getSelectedChannel() + 1)
+    if (channelBox.getSelectedId() != (allChannels ? allChannelsId : engine.getSelectedChannel() + 1))
         refreshChannelBox();
     updateChordReadout();
 

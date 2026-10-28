@@ -241,6 +241,19 @@ struct SamplerSettings
     bool operator== (const SamplerSettings&) const = default;
 };
 
+// The Sampler's knobs as automation targets (issue #12): a sampler channel's AutomationTarget { channelParam, channel, 0, k }
+// with k one of these. Values 0..1 follow the knobs' own curves (the Sampler settings page), so a clip drawn at 50% is
+// the knob at mid travel.
+namespace samplerparam
+{
+enum : int { attack, decay, sustain, release, cutoff, resonance, start, end, count };
+const char* name (int param) noexcept;              // "Attack", "Cutoff"... (TR_NOOP-marked in Song.cpp)
+float toValue (int param, float natural) noexcept;  // seconds / Hz / fraction -> 0..1
+float toNatural (int param, float value) noexcept;  // 0..1 -> seconds / Hz / fraction
+float get (const SamplerSettings& s, int param) noexcept;          // 0..1
+void set (SamplerSettings& s, int param, float value) noexcept;     // 0..1
+} // namespace samplerparam
+
 // Channel arpeggiator (FL's Channel settings).
 struct ArpSettings
 {
@@ -885,7 +898,8 @@ enum class AutomationTargetKind : std::uint8_t
     mixerPan,      // index = track
     effectParam,   // index = track, slot, param (built-in effect or plugin)
     tempo,         // song tempo: 0..1 = minTempo..maxTempo BPM
-    effectMix      // index = track, slot: slot dry/wet (0..1)
+    effectMix,     // index = track, slot: slot dry/wet (0..1)
+    mixerSend      // index = source insert, slot = destination (0 = Master): the route's level knob (fader curve; issue #12)
 };
 
 constexpr double minTempo = 10.0, maxTempo = 522.0; // FL's range
