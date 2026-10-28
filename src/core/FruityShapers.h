@@ -63,6 +63,26 @@ std::string waveShaperParamText (int param, float value01);
 // The shaping table: entries −1 … N+1 (stored from index 0), N = 16383 (bipolar) or 32767 (unipolar).
 std::vector<std::int16_t> shaperTable (const std::vector<WsPoint>& points, bool unipolar);
 
+// --- the curve editor (round 165: FL's point editor, edited in the plugin window) ---
+// The slot's state read for editing: an empty or unreadable state gives FL's default instance (the default curve,
+// controls from `params` when given).
+WaveShaperState waveShaperForEditing (const std::vector<std::uint8_t>& state, const float* params = nullptr);
+// FL's state layout 4 with these points (Δt normalised to a total of 1); the map's kind, its 20-byte header and the
+// editor flag are kept from `base` when it is a WaveShaper state, FL's defaults otherwise.
+std::vector<std::uint8_t> writeWaveShaper (const WaveShaperState& s, const std::vector<std::uint8_t>& base = {});
+// The points as positions on the map: x = time 0…1 (cumulative Δt), y = level 0…1
+std::vector<float> waveShaperTimes (const std::vector<WsPoint>& points);
+// Edits on the point list; times are absolute (0…1). The first point stays at 0 and the last at 1 (their level
+// moves); a point can't pass its neighbours. Each returns the index of the point it touched (−1 = nothing done).
+int addWaveShaperPoint (std::vector<WsPoint>& points, float x, float y);
+int moveWaveShaperPoint (std::vector<WsPoint>& points, int index, float x, float y);
+bool removeWaveShaperPoint (std::vector<WsPoint>& points, int index);
+// The level of the curve at map time x (0…1), as the engine shapes it (from the table)
+float waveShaperLevelAt (const std::vector<std::int16_t>& table, bool unipolar, float x) noexcept;
+// FL's segment shapes (WsPoint::mode) in the order of FL's point menu, with their names
+struct WsModeName { std::uint8_t mode; const char* name; };
+const std::vector<WsModeName>& waveShaperModes();
+
 class WaveShaperEngine
 {
 public:
@@ -70,6 +90,8 @@ public:
     ~WaveShaperEngine();
     // points: the state's curve (tables for both polarities are built here, off the audio thread)
     void setCurve (const std::vector<WsPoint>& points);
+    // audio thread: takes these tables (built by shaperTable, bipolar and unipolar); the old ones come back in them
+    void swapCurve (std::vector<std::int16_t>& bipolar, std::vector<std::int16_t>& unipolar) noexcept;
     void prepare (double sampleRate) noexcept;
     void reset() noexcept;
     // FL's controls (raw values) and options; renderMode = FL's "rendering" process mode
