@@ -25,7 +25,7 @@ std::vector<float> renderTransposed (int channels)
         c.samplePath = "sine.wav";
         c.sampler.stretchBeats = 2.0f + (float) (i % 3);
         c.sampler.keepPitch = true;
-        c.sampler.stretchMethod = i % 2 == 0 ? lynx::StretchMethod::transients : lynx::StretchMethod::stretch;
+        c.sampler.stretchMethod = i % 2 == 0 ? lynx::StretchMethod::transients : lynx::StretchMethod::general;
         c.mixerTrack = 1 + i % 3;
         c.volume = 0.3f;
         s.channels.push_back (c);
