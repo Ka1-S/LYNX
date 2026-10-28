@@ -542,17 +542,20 @@ Shape make (Icon icon)
         }
         case Icon::loop: // two arcs chasing each other around (a loop), arrow heads at their ends
         {
-            juce::Path a;
-            a.addCentredArc (12.0f, 12.0f, 7.5f, 7.5f, 0.0f, 0.35f, 2.85f, true);
-            st.addPath (a);
-            juce::Path b;
-            b.addCentredArc (12.0f, 12.0f, 7.5f, 7.5f, 0.0f, 3.5f, 6.0f, true);
-            st.addPath (b);
-            juce::Path h1, h2;
-            h1.addTriangle (11.2f, 20.1f, 14.9f, 21.6f, 13.4f, 16.8f); // ahead of the first arc's end (bottom), clockwise
-            h2.addTriangle (12.8f, 3.9f, 9.2f, 2.4f, 10.6f, 7.2f);     // ahead of the second arc's end (top)
-            fi.addPath (h1);
-            fi.addPath (h2);
+            constexpr float r = 7.0f;
+            auto arcWithHead = [&] (float from, float to) {
+                juce::Path a;
+                a.addCentredArc (12.0f, 12.0f, r, r, 0.0f, from, to, true);
+                st.addPath (a);
+                // the head at the arc's end, pointing along it (clockwise); angles from 12 o'clock as JUCE's arcs
+                const juce::Point<float> end (12.0f + r * std::sin (to), 12.0f - r * std::cos (to));
+                const juce::Point<float> along (std::cos (to), std::sin (to)), out (std::sin (to), -std::cos (to));
+                juce::Path h;
+                h.addTriangle (end + along * 3.6f, end + out * 3.2f - along * 0.6f, end - out * 3.2f - along * 0.6f);
+                fi.addPath (h);
+            };
+            arcWithHead (0.45f, 2.55f);
+            arcWithHead (3.6f, 5.7f);
             break;
         }
         case Icon::tuningFork: // two prongs on a stem, with a weighted foot

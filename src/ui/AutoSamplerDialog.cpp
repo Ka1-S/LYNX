@@ -193,6 +193,8 @@ public:
             toggles[i].setSize (320, 22);
             addCustomComponent (&toggles[i]);
         }
+        spacer.setSize (320, 14); // AlertWindow puts the buttons right under the last custom component
+        addCustomComponent (&spacer);
         addButton (tr ("Start"), 1, juce::KeyPress (juce::KeyPress::returnKey));
         addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
     }
@@ -222,6 +224,7 @@ public:
 
 private:
     std::array<juce::ToggleButton, 5> toggles;
+    juce::Component spacer;
 };
 } // namespace
 
