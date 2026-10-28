@@ -216,8 +216,11 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 {
     inputSlot.fill (-1);
     outputSlot.fill (-1);
+    const auto mark = [] (const char* step) { if (startupMark != nullptr) startupMark (step); };
+    mark ("  engine: workers + default song");
     publishSong();
     buildInitialGraph();
+    mark ("  engine: graph");
 
     if (openAudioDevice)
     {
@@ -235,6 +238,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             deviceManager.getAvailableDeviceTypes();
             deviceManager.addAudioDeviceType (std::move (pipeWire));
         }
+        mark ("  engine: device types");
 
         // 0 inputs, 2 outputs; the device of the last session (Settings › Audio) if it is still there, else the default.
         const auto saved = juce::XmlDocument::parse (audioDeviceFile());
@@ -249,6 +253,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             choosePreferredDriver(); // Linux: PipeWire, then JACK, then ALSA
             chooseSafeBufferSize(); // no saved setup: a buffer with room for heavy projects (Settings › Audio changes it)
         }
+        mark ("  engine: device opened");
         deviceManager.addAudioCallback (this);
         if (rackProcessor != nullptr)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
@@ -257,11 +262,13 @@ AudioEngine::AudioEngine (bool openAudioDevice)
         recordingSettings = loadRecordingSettings();
         saveGlobalLinks = true;
 
+        mark ("  engine: callback + settings");
         prefetcher = std::make_unique<StreamPrefetcher> (transport);
         prefetcher->update (song, samples);
         enableAllMidiInputs();
         deviceManager.addMidiInputDeviceCallback ({}, this); // {} = all inputs enabled
         midiDevicesChanged = juce::MidiDeviceListConnection::make ([this] { enableAllMidiInputs(); });
+        mark ("  engine: MIDI inputs");
     }
 
     startTimerHz (30); // recording and collection of retired snapshots
@@ -2312,7 +2319,11 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             std::atomic<std::size_t> nextStretch { 0 };
             auto stretchWorker = [&] {
                 for (auto i = nextStretch++; i < stretches.size(); i = nextStretch++)
-                    library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio, stretches[i].method);
+                    if (auto stretched = library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio, stretches[i].method))
+                    {
+                        const std::scoped_lock l (keep); // held until the rack is built (the cache drops unused lengths)
+                        out.decoded.push_back (std::move (stretched));
+                    }
             };
             std::vector<std::thread> helpers;
             for (std::size_t i = 1; i < juce::jmin (threads, stretches.size()); ++i)

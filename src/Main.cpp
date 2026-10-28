@@ -123,6 +123,7 @@ struct StartupTrace
     }
 };
 StartupTrace startupTrace;
+void startupMarkHook (const char* step) { startupTrace.mark (step); }
 
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
 void onCrash (void* exceptionPointers)
@@ -955,6 +956,8 @@ public:
         startHangWatch();
 
         startupTrace.mark ("initialise (normal start)");
+        if (startupTrace.on)
+            lynx::startupMark = startupMarkHook;
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         lynx::themeui::loadSaved(); // the user's theme (Options › Theme, round 162d)
         startupOptions = lynx::StartupOptions::load();
@@ -993,7 +996,9 @@ public:
         // the splash first, so it is on screen while the audio device opens; the main window is built
         // once the pepper has landed (the scene is still for a moment then) and shown when the splash ends
         splash = std::make_unique<lynx::SplashScreen>();
+        startupTrace.mark ("splash made");
         splash->showOnDesktop();
+        startupTrace.mark ("splash on the desktop");
 
         juce::Timer::callAfterDelay (40, [this] {
             startEngine();
@@ -3418,7 +3423,7 @@ private:
             int frame = -1;
             std::vector<double> times, rendered; // whole frames (event + paint + blit, when this timer paints) / the window's paints
             double setupMs = 0.0, wallStart = 0.0;
-            std::clock_t cpuStart = 0;
+            double cpuStart = 0.0; // process CPU seconds (std::clock is wall time on Windows)
 
             UiPerf (LynxApplication& a, juce::File r) : app (a), report (std::move (r)) {}
 
@@ -3451,7 +3456,7 @@ private:
                     times.clear();
                     rendered.clear();
                     wallStart = juce::Time::getMillisecondCounterHiRes();
-                    cpuStart = std::clock();
+                    cpuStart = lynx::processCpuSeconds();
                     frame = 0;
                     return;
                 }
@@ -3464,7 +3469,7 @@ private:
                     return;
 
                 const auto wall = juce::Time::getMillisecondCounterHiRes() - wallStart;
-                const auto cpu = 1000.0 * (double) (std::clock() - cpuStart) / CLOCKS_PER_SEC;
+                const auto cpu = 1000.0 * (lynx::processCpuSeconds() - cpuStart);
                 text << s.name << ": show " << juce::String (setupMs, 1) << " ms\n"
                      << "    painted frames: " << stats (rendered) << "\n"
                      << "    timed here (event + paint + blit): " << stats (times)
