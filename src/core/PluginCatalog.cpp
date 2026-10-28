@@ -158,7 +158,7 @@ std::vector<int> select (const std::vector<Entry>& entries, const std::set<std::
             continue;
         if (! words.empty())
         {
-            const auto text = lower (e.name + " " + e.vendor + " " + e.format + " " + category);
+            const auto text = lower (e.name + " " + e.renamed + " " + e.vendor + " " + e.format + " " + category);
             if (! std::all_of (words.begin(), words.end(), [&text] (const std::string& w) { return text.find (w) != std::string::npos; }))
                 continue;
         }
@@ -174,7 +174,7 @@ std::vector<int> select (const std::vector<Entry>& entries, const std::set<std::
             if (fx != fy)
                 return fx;
         }
-        const auto nx = lower (x.name), ny = lower (y.name);
+        const auto nx = lower (x.shownName()), ny = lower (y.shownName());
         if (nx != ny)
             return nx < ny;
         return x.format < y.format;

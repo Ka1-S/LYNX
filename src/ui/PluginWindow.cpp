@@ -487,6 +487,11 @@ public:
     ~PluginWindow() override
     {
         crashguard::note (("closing the editor of " + plugin.getName()).toStdString());
+        // round 165q: closing the active plugin window (its X, F12, Alt+F12, removing the plugin) let Windows hand the
+        // activation to another program (seen: a terminal on the second screen) instead of LYNX, so Space and the
+        // shortcuts went there. The main window takes it first, while LYNX is still the foreground program.
+        if (isActiveWindow())
+            activateMainWindow();
         stopTimer();
         plugin.removeListener (this);
         // the UI must be destroyed before the plugin (which may die together with `owner`)

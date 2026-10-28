@@ -293,7 +293,7 @@ public:
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override
     {
-        return validSlot() && files.size() == 1 && juce::File (files[0]).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+        return validSlot() && files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
     }
 
     void filesDropped (const juce::StringArray& files, int, int) override

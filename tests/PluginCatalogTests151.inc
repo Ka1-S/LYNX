@@ -74,3 +74,22 @@ TEST (rea151_plugin_catalog_search_and_favourites)
     CHECK (vendors (all, false) == std::vector<std::string> ({ "Acme", "Other Co" }));
     CHECK (countIn (all, false, "") == 4 && countIn (all, false, "Dynamics") == 2 && countIn (all, true, "Synth") == 1);
 }
+
+TEST (r165c_plugin_catalog_renamed_plugins)
+{
+    // a plugin renamed in the Plugin database ("1_EQ", FL's quick-pick prefix): the picker sorts and finds it by its new
+    // name and still by its original one; its category still comes from the original name
+    using namespace lynx::plugincatalog;
+    std::vector<Entry> all { { "a", "Zeta EQ", "Acme", "VST3", "Fx|EQ", false, "1_EQ" }, { "b", "Alpha Comp", "Acme", "VST3", "Fx|Dynamics", false } };
+    CHECK (all[0].shownName() == "1_EQ");
+    CHECK (all[1].shownName() == "Alpha Comp");
+    CHECK (categoryOf (all[0]) == "EQ & filter");
+    Filter f;
+    f.instruments = false;
+    auto shown = select (all, {}, f);
+    CHECK (shown.size() == 2 && shown[0] == 0); // "1_EQ" before "Alpha Comp"
+    f.query = "1_eq";
+    CHECK (select (all, {}, f).size() == 1);
+    f.query = "zeta";
+    CHECK (select (all, {}, f).size() == 1);
+}

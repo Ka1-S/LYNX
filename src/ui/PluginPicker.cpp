@@ -37,9 +37,14 @@ public:
     PluginPicker (AudioEngine& e, bool instruments, std::function<void (PluginRef)> chosen, std::function<void (ChannelDef)> builtIn)
         : engine (e), onChosen (std::move (chosen)), onBuiltIn (std::move (builtIn))
     {
+        const auto& renamed = engine.getPluginHost().pluginNames(); // (the Plugin database's names: "1_EQ", round 165c)
         for (const auto& type : engine.getPluginHost().getKnownPlugins().getTypes())
-            entries.push_back ({ type.createIdentifierString().toStdString(), type.name.toStdString(), type.manufacturerName.toStdString(),
-                                 type.pluginFormatName.toStdString(), type.category.toStdString(), type.isInstrument });
+        {
+            const auto id = type.createIdentifierString().toStdString();
+            const auto it = renamed.find (id);
+            entries.push_back ({ id, type.name.toStdString(), type.manufacturerName.toStdString(), type.pluginFormatName.toStdString(),
+                                 type.category.toStdString(), type.isInstrument, it != renamed.end() ? it->second : std::string() });
+        }
         if (onBuiltIn) // FL's VFX note effects, built in (round 164b)
             for (const auto kind : vfx::allKinds)
                 entries.push_back ({ builtInPrefix + std::to_string ((int) kind), vfx::flName (kind), "LYNX", "Built-in", "Note effect", true });
@@ -182,7 +187,7 @@ public:
             g.setColour (favourite ? theme::colour::accent : theme::colour::textDisabled.withAlpha (0.5f));
             g.setFont (theme::font (theme::type::body));
             textcache::drawText (g, star, juce::Rectangle<int> (0, 0, starWidth, height), juce::Justification::centred);
-            const juce::String cells[] = { juce::String::fromUTF8 (e.name.c_str()), juce::String::fromUTF8 (e.vendor.c_str()),
+            const juce::String cells[] = { juce::String::fromUTF8 (e.shownName().c_str()), juce::String::fromUTF8 (e.vendor.c_str()),
                                            juce::String::fromUTF8 (e.format.c_str()), tr (juce::String (plugincatalog::categoryOf (e))) };
             for (int i = 0; i < 4; ++i)
             {

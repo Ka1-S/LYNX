@@ -1,5 +1,7 @@
 #include "ui/AudioEditor.h"
 #include "ui/AudioEditorTools.h"
+#include "ui/BrowserComponent.h"
+#include "ui/EditorTools.h"
 
 #include <algorithm>
 #include <cmath>
@@ -198,6 +200,7 @@ struct Source
 class AudioEditor final : public juce::Component,
                           public juce::FileDragAndDropTarget,
                           public audiotools::Host,
+                          public juce::DragAndDropTarget,
                           private juce::Timer
 {
 public:
@@ -219,6 +222,17 @@ public:
         setupIcon (snapButton, tr ("Snap the selection to zero crossings"));
         setupIcon (fitButton, tr ("Zoom out full"));
         setupIcon (saveButton, tr ("Save as WAV..."));
+        // Follow (issue #12): the view pages along with the playback position; off, it stays where you look
+        setupIcon (followButton, tr ("Follow: the view pages along with the playback position; off, it stays where you scrolled"));
+        followButton.setClickingTogglesState (false);
+        followButton.setOnColour (theme::colour::bg6);
+        followButton.setIconColourWhenOn (theme::colour::accent);
+        followButton.setToggleState (EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::audioEditor), juce::dontSendNotification);
+        followButton.onClick = [this] {
+            auto& g = EditorGlobals::get();
+            g.setFollowingView (EditorGlobals::FollowView::audioEditor, ! g.isFollowingView (EditorGlobals::FollowView::audioEditor));
+            followButton.setToggleState (g.isFollowingView (EditorGlobals::FollowView::audioEditor), juce::dontSendNotification);
+        };
         recordButton.setOnColour (theme::colour::record);
         recordButton.setClickingTogglesState (false);
         snapButton.setClickingTogglesState (true);
@@ -329,6 +343,7 @@ public:
             engine.previewSample (nullptr);
         if (recState != RecState::idle)
             engine.getMeters().capture.setSource (AudioCapture::off);
+        releaseInput();
     }
 
     // --- opening ---------------------------------------------------------------------------------------------
@@ -417,6 +432,7 @@ public:
         place (envButton, 120, 6);
         place (snapButton, 28);
         place (fitButton, 28);
+        place (followButton, 28);
         sendButton.setBounds (bar.removeFromRight (70));
         bar.removeFromRight (6);
         saveButton.setBounds (bar.removeFromRight (28));
@@ -715,14 +731,32 @@ public:
         return files.size() == 1 && juce::File (files[0]).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
     }
 
+    // a sample dragged from LYNX's Browser too (issue #12)
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        return BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+    }
+
+    void itemDropped (const SourceDetails& details) override
+    {
+        const auto file = BrowserComponent::draggedFile (details);
+        if (file.existsAsFile())
+            filesDropped ({ file.getFullPathName() }, 0, 0);
+    }
+
+    // FL's Edison: a dropped file replaces what the editor shows (issue #12); with Ctrl held it is pasted at the
+    // cursor instead (LYNX's earlier behaviour)
     void filesDropped (const juce::StringArray& files, int, int) override
     {
-        if (files.isEmpty())
+        if (files.isEmpty() || recState != RecState::idle)
             return;
-        if (doc.audio.empty())
+        if (doc.audio.empty() || ! juce::ModifierKeys::getCurrentModifiersRealtime().isCommandDown())
         {
+            stopPlayback();
+            const auto previous = source;
             source = { Source::Kind::file, -1, files[0] };
-            loadFile (juce::File (files[0]));
+            if (! loadFile (juce::File (files[0])))
+                source = previous;
             return;
         }
         // into a document: pasted at the cursor
@@ -1740,11 +1774,14 @@ private:
         if (recordSource == AudioCapture::input)
         {
             if (! engine.hasAudioInput())
+            {
                 if (const auto result = engine.openAudioInput(); result.issue != AudioEngine::InputIssue::none)
                 {
                     setStatus (result.detail.isNotEmpty() ? result.detail : tr ("No active audio input (Settings > Audio)"), true);
                     return;
                 }
+                openedInput = true; // closed again when the recording stops (round 165q)
+            }
             device = engine.getDeviceManager().getCurrentAudioDevice();
             if (device == nullptr || device->getActiveInputChannels().countNumberOfSetBits() == 0)
             {
@@ -1841,12 +1878,23 @@ private:
         repaint();
     }
 
+    // the input this editor opened for its recording: closed again (FL does not keep the microphone open; Windows
+    // showed its microphone-in-use icon until LYNX quit — round 165q)
+    void releaseInput()
+    {
+        if (! openedInput)
+            return;
+        openedInput = false;
+        engine.releaseAudioInputIfUnused();
+    }
+
     void stopRecording()
     {
         if (recState == RecState::idle)
             return;
         drainRecording();
         engine.getMeters().capture.setSource (AudioCapture::off);
+        releaseInput();
         const auto got = ! recL.empty();
         const auto dropped = engine.getMeters().capture.droppedFrames();
         recState = RecState::idle;
@@ -2056,6 +2104,44 @@ private:
         updateTitle();
     }
 
+    // FL's Edison "Send to channel" of a part (issue #12): the selection (or a region) as a new Sampler channel's
+    // sample; the editor keeps the whole audio (nothing cut or cropped)
+    void sendRangeToNewSampler (ae::Range range)
+    {
+        range = ae::clamp (doc, range);
+        if (doc.audio.empty() || range.empty())
+            return;
+        ae::Document part;
+        part.audio = ae::copy (doc.audio, range);
+        part.title = doc.title;
+        if (doc.hasLoop() && doc.loopStart >= range.start && doc.loopEnd <= range.end)
+            ae::setLoop (part, { doc.loopStart - range.start, doc.loopEnd - range.start });
+        const auto folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Edits");
+        folder.createDirectory();
+        const auto file = folder.getNonexistentChildFile (safeTitle() + " (part)", ".wav");
+        const auto bytes = ae::encodeWav (part, bits);
+        if (! file.replaceWithData (bytes.data(), bytes.size()))
+        {
+            setStatus (tr ("Could not write {0}", { file.getFullPathName() }), true);
+            return;
+        }
+        engine.getSampleLibrary().forget (file.getFullPathName());
+        const auto path = file.getFullPathName().toStdString();
+        const auto name = (safeTitle() + " (part)").toStdString();
+        int index = 0;
+        engine.editSong ([&] (Song& s) {
+            ChannelDef c;
+            c.name = name;
+            c.instrument = InstrumentKind::sampler;
+            c.samplePath = path;
+            c.mixerTrack = s.claimFreeInsert();
+            s.channels.push_back (c);
+            index = (int) s.channels.size() - 1;
+        });
+        engine.setSelectedChannel (index);
+        setStatus (tr ("The selection went to a new Sampler channel ({0})", { juce::String::fromUTF8 (name.c_str()) }), false);
+    }
+
     void sendToNewSampler()
     {
         if (doc.audio.empty())
@@ -2158,6 +2244,8 @@ private:
         const auto has = ! doc.audio.empty();
         menu.addItem (tr ("Send to the Playlist as an audio clip"), has, false, [this] { sendToPlaylist(); });
         menu.addItem (tr ("Send to a new Sampler channel"), has, false, [this] { sendToNewSampler(); });
+        menu.addItem (tr ("Send the selection to a new Sampler channel"), has && ! selection.empty(), false,
+                      [this] { sendRangeToNewSampler (selection); });
         if (source.kind == Source::Kind::channel)
         {
             const auto& channels = engine.getSong().channels;
@@ -2182,6 +2270,7 @@ private:
                 repaint();
             });
             menu.addItem (tr ("Zoom on"), [this, m] { zoomTo ({ m.start, m.end }); });
+            menu.addItem (tr ("Send to a new Sampler channel"), [this, m] { sendRangeToNewSampler ({ m.start, m.end }); });
             menu.addItem (tr ("Set loop"), [this, m] {
                 ae::setLoop (doc, { m.start, m.end });
                 commit (tr ("Set loop"));
@@ -2263,8 +2352,9 @@ private:
             }
             const auto before = playhead;
             playhead = playFrom < 0 ? -1 : playFrom + (std::int64_t) pos; // (a tool preview is not on the timeline)
-            // page along with the playhead
-            if ((double) playhead > viewStart + (double) waveArea.getWidth() * fpp && fpp < maxFpp())
+            // page along with the playhead (Follow on, issue #12)
+            if (playhead >= 0 && EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::audioEditor)
+                && ((double) playhead > viewStart + (double) waveArea.getWidth() * fpp || (double) playhead < viewStart) && fpp < maxFpp())
             {
                 viewStart = (double) playhead;
                 clampView();
@@ -2616,6 +2706,7 @@ private:
     double playStartedMs = 0.0;
 
     RecState recState = RecState::idle;
+    bool openedInput = false; // startRecording opened the device input itself (released when it stops)
     RecordMode recordMode = RecordMode::now;
     int recordSource = AudioCapture::input;
     std::vector<float> recL, recR;
@@ -2633,7 +2724,7 @@ private:
     IconButton menuButton { "menu", Icon::panelMenu }, undoButton { "undo", Icon::undo }, redoButton { "redo", Icon::redo },
         historyButton { "history", Icon::chevronDown }, recordButton { "record", Icon::record }, recordMenuButton { "recordMenu", Icon::chevronDown },
         playButton { "play", Icon::play }, stopButton { "stop", Icon::stop }, snapButton { "snap", Icon::magnet }, fitButton { "fit", Icon::zoom },
-        saveButton { "save", Icon::save };
+        saveButton { "save", Icon::save }, followButton { "follow", Icon::follow };
     juce::TextButton loopButton, viewButton, sendButton, envButton;
     juce::Slider volumeKnob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     juce::OwnedArray<juce::TextButton> quickButtons;
@@ -2679,6 +2770,8 @@ juce::PopupMenu AudioEditor::editMenu (bool contextual)
     menu.addItem (tr ("Delete") + "\tDel", sel, false, [this] { deleteSelection(); });
     menu.addItem (tr ("Clear (silence)"), sel, false, [this] { edit (tr ("Silence"), [] (ae::Document& d, ae::Range r) { ae::clear (d, r); }, true); });
     menu.addItem (tr ("Trim (keep the selection)"), sel, false, [this] { trimSelection(); });
+    // (right-click on the selection: issue #12)
+    menu.addItem (tr ("Send the selection to a new Sampler channel"), sel, false, [this] { sendRangeToNewSampler (selection); });
     menu.addItem (tr ("Insert silence..."), has, false, [this] { showInsertSilence(); });
     menu.addItem (tr ("Delete the part after the loop"), has && doc.hasLoop(), false,
                   [this] { edit (tr ("Delete after loop"), [] (ae::Document& d, ae::Range) { ae::deleteAfterLoop (d); }); });

@@ -87,6 +87,10 @@ struct RackState
         std::shared_ptr<DelayLine> delay;
     };
     std::vector<HwRoute> hwRoutes;
+    // FL's "Bypass track latency compensation › When recording or not playing" (REA round 165f-mixer): these tracks'
+    // output delays (sendDelays[t], their hardware route) are skipped while the transport is stopped or recording.
+    std::vector<char> bypassWhenIdle; // [track]
+    bool anyBypassWhenIdle = false;
 
     // Current latencies of instruments and effects, in the same layout as `latencies`.
     std::vector<int> currentLatencies() const;
@@ -164,12 +168,14 @@ struct RackState
     {
         int other = 0;        // [source] → the target channel; [target] → the source channel
         int port = 0, midiChannel = 0;
+        bool portOnly = false; // only what the source sends on that port (a Patcher's VFX output, round 165c)
     };
     std::vector<std::vector<MidiRoute>> midiRoutesOut; // [source channel] → targets
     std::vector<std::vector<MidiRoute>> midiRoutesIn;  // [target channel] → sources
     struct EffectMidiRoute
     {
         int track = 0, slot = 0, port = 0, midiChannel = 0;
+        bool portOnly = false;
     };
     std::vector<std::vector<EffectMidiRoute>> effectMidiRoutes; // [source channel] → mixer-slot Patchers on its port
     bool hasEffectMidiRoutes = false;
@@ -179,6 +185,8 @@ struct RackState
     // VFX channels (round 164b): their notes go through their processor; output k goes out on MIDI port vfxPort + k
     std::vector<int> vfxChannels;
     std::vector<int> vfxPort; // [channel] (−1 = not a VFX channel)
+    // generator Patchers whose VFX nodes send to "To LYNX" MIDI ports (round 165c): taken at each chunk's start
+    std::vector<int> portEventChannels;
     // Dashboard channels (round 165): what their controls send in MIDI goes to the plugins on their port (midiTargets)
     std::vector<int> dashboardChannels;
     void buildMidiRoutes();
@@ -332,6 +340,7 @@ private:
     void renderChannel (const RackState& state, int channel, int n) noexcept;
     void processTrack (const RackState& state, int track, int n, MeterBank* meters) noexcept;
     void pullInputs (const RackState& state, int track, int n) noexcept;
+    void updatePdcBypass (const RackState& state, bool playing) noexcept;
     static void applyStereo (const MixerTrack& track, float* l, float* r, int n) noexcept;
     void deliverToEffects (const RackState& state, const NoteEvent& e) noexcept; // (round 162)
     float* channelBuffer (int channel, int side) noexcept;
@@ -356,6 +365,9 @@ private:
     EventBuffer events;
     std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = not evaluated yet
+    // the pitch bend an automation / event lane last gave each LYNX instrument (0..1; NaN = none yet; issue #12)
+    std::array<float, maxChannels> automatedBend {};
+    bool automatedBendReset = false;
     std::array<std::atomic<std::uint32_t>, RackState::maxAutomations / 32> overridden {}; // touched while recording
     std::atomic<bool> anyOverridden { false };
     void clearOverriddenValues() noexcept;
@@ -428,6 +440,8 @@ private:
     std::vector<TrackEqState> trackEqs; // built-in EQ of each track
     double chunkTick = 0.0;             // start of the block (for the global LFOs)
     bool chunkPlaying = false;          // the song plays during the block (effects that follow the transport)
+    bool pdcBypassNow = false;          // the "When recording or not playing" tracks skip their PDC delays this chunk
+    bool pdcBypassBefore = false;       // ... and did in the previous chunk (back to compensated: their lines are emptied)
     void applyTrackEq (const MixerTrack& track, int t, bool bypassed, float* l, float* r, int n) noexcept;
     static constexpr float silenceLevel = 1.5849e-5f;  // -96 dBFS
     int blockCapacity = 0;

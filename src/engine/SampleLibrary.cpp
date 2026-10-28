@@ -1,3 +1,4 @@
+#include "engine/FileSort.h"
 #include "engine/SampleLibrary.h"
 #include "platform/Paths.h"
 
@@ -10,6 +11,7 @@
 #include <set>
 
 #include "core/AudioEdit.h"
+#include "core/SampleFiles.h"
 #include "core/OggVorbis.h"
 #include "core/Mp3Decoder.h"
 #include "core/TimeStretch.h"
@@ -161,6 +163,11 @@ SampleLibrary::SampleLibrary()
     formats.registerFormat (new WavPackAudioFormat(), false); // .wv files from FL packs
 }
 
+bool SampleLibrary::isSampleFile (const juce::File& file)
+{
+    return isSampleExtension (file.getFileExtension().toStdString());
+}
+
 juce::String SampleLibrary::wildcard() const
 {
     return formats.getWildcardForAllFormats();
@@ -282,7 +289,7 @@ void pruneStretchCache()
         total += f.getSize();
     if (total <= stretchCacheLimit)
         return;
-    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
+    filesort::byTime (files, filesort::By::modificationTime);
     for (const auto& f : files)
     {
         if (total <= stretchCacheLimit * 3 / 4)
