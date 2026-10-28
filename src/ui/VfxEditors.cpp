@@ -669,8 +669,8 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------------------------------
-// An FL mapping / envelope curve, edited with the mouse: drag a point, double-click to add one, right-click a point to
-// remove it, drag a segment up or down to bend it; Alt+click a segment straightens it
+// An FL mapping / envelope curve, edited with the mouse: drag a point, right-click (FL) or double-click to add one,
+// right-click or Alt+click a point to remove it, drag a segment up or down to bend it; Alt+click a segment straightens it
 
 class CurveEditor final : public juce::Component
 {
@@ -752,14 +752,17 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         const auto at = pointAt (e.position);
-        if (e.mods.isPopupMenu())
+        const auto removable = at > 0 && at < (int) curve.points.size() - 1 && curve.points.size() > 2;
+        if (e.mods.isPopupMenu() || (e.mods.isAltDown() && at >= 0)) // a point: removed (FL: Alt+click too)
         {
-            if (at > 0 && at < (int) curve.points.size() - 1 && curve.points.size() > 2)
+            if (removable)
             {
                 curve.points.erase (curve.points.begin() + at);
                 hover = -1;
                 commit();
             }
+            else if (at < 0 && e.mods.isPopupMenu()) // round 165, FL: right-click adds a point, dragged while held
+                dragging = addPointAt (e.position);
             return;
         }
         if (at >= 0)
@@ -814,18 +817,25 @@ public:
     }
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        if (pointAt (e.position) >= 0)
-            return;
+        if (pointAt (e.position) < 0)
+            addPointAt (e.position);
+    }
+
+    // a new point at the mouse; its index (−1: before the first point)
+    int addPointAt (juce::Point<float> position)
+    {
         const auto area = plot();
-        const auto x = (double) ((e.position.x - area.getX()) / area.getWidth()) * range();
-        const auto y = std::clamp ((double) ((area.getBottom() - e.position.y) / area.getHeight()), 0.0, 1.0);
+        const auto x = (double) ((position.x - area.getX()) / area.getWidth()) * range();
+        const auto y = std::clamp ((double) ((area.getBottom() - position.y) / area.getHeight()), 0.0, 1.0);
         auto at = curve.points.begin();
         while (at != curve.points.end() && at->x <= x)
             ++at;
         if (at == curve.points.begin())
-            return;
+            return -1;
+        const auto index = (int) (at - curve.points.begin());
         curve.points.insert (at, vfx::MapCurve::Point { x, y });
         commit();
+        return index;
     }
 
 private:
@@ -1259,7 +1269,7 @@ public:
         const auto& p = part();
         const auto lfo = settings.shownPart == 1;
         const auto unit = ((lfo ? p.lfoAmp : p.envelope).footer[0] & 1) != 0 ? tr ("beats") : tr ("seconds");
-        g.drawText (tr ("Time in {0}. Drag a point, double-click to add one, right-click to remove it, drag a segment to bend it.", { unit }),
+        g.drawText (tr ("Time in {0}. Drag a point, right-click or double-click to add one, right-click it to remove it, drag a segment to bend it.", { unit }),
                     editor.getBounds().translated (0, editor.getHeight() + 2).withHeight (14), juce::Justification::centredLeft);
     }
 
