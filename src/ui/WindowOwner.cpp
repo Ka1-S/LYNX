@@ -685,11 +685,17 @@ void matchWindowOrderToScreen()
    #endif
 
     // JUCE's list already in that order after the main window: nothing to do (no window is touched)
+    const auto indexOf = [&desktop] (juce::Component* c) {
+        for (int i = 0; i < desktop.getNumComponents(); ++i)
+            if (desktop.getComponent (i) == c)
+                return i;
+        return -1;
+    };
     auto inOrder = true;
-    auto last = desktop.getComponents().indexOf (owner);
+    auto last = indexOf (owner);
     for (auto* c : above)
     {
-        const auto at = desktop.getComponents().indexOf (c);
+        const auto at = indexOf (c);
         inOrder = inOrder && at > last;
         last = at;
     }
