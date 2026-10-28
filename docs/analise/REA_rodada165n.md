@@ -37,6 +37,12 @@ Evidence markers: **[DOC]** Microsoft Learn (MSIX docs), **[CODE]** LYNX source,
   build dropped (winbuild queue > 2 h); land.sh builds it. MSIX workflow steps set continue-on-error until a CI run has
   proven them (Actions backlog: Release run 40592904988 still queued at 21:10).
 - 21:12 merged origin/main, landing via land.sh.
+- 00:32 land #1 conflicted (Paths.cpp, tests.cpp), land #2 failed: I had merged LOCAL main while it held tune165's merge
+  (rolled back later) → its LYNX Tune/Vox tests failed, plus I18nData.h not regenerated. Fixed: branch reset to my last
+  commit, merged only pushed main, regenerated I18nData.h (tools/make_i18n.py), Store165 test include moved off the end
+  of tests.cpp's list; wip/store165 force-pushed once (my own wip branch, to drop tune165's leaked commits).
+- 02:40 land #3 queued behind ~12 landings on the merge lock; Release run 40592904988: Version, Build LYNX.exe,
+  Linux, macOS green; Windows "Self-test and package" (the MSIX job) still queued on GitHub's runners.
 
 ## 1. Facts that shaped the design
 
