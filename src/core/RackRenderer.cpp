@@ -283,7 +283,9 @@ void prepareKeyShifts (const std::vector<Instrument*>& list, double sampleRate)
         return;
     }
     std::atomic<std::size_t> next { 0 };
+    const auto mode = FloatMode::current(); // the helpers round and flush like this thread
     auto work = [&] {
+        mode.applyHere();
         for (auto k = next.fetch_add (1); k < list.size(); k = next.fetch_add (1))
             list[k]->prepareKeyShift (sampleRate);
     };

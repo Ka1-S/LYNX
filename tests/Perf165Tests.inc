@@ -57,9 +57,16 @@ TEST (perf165_parallel_key_shifters_render_the_same)
 {
     perf165::setEnv ("LYNX_PARALLEL_KEYSHIFT", "0");
     const auto serial = perf165::renderTransposed (6);
+    const auto again = perf165::renderTransposed (6);
+    CHECK (serial == again); // (the render itself repeats)
     perf165::setEnv ("LYNX_PARALLEL_KEYSHIFT", "1");
     const auto parallel = perf165::renderTransposed (6);
     CHECK (serial.size() == parallel.size());
     CHECK (serial == parallel);
     CHECK (*std::max_element (parallel.begin(), parallel.end()) > 0.02f);
+    const lynx::ScopedFlushDenormals ftz; // also when the building thread flushes denormals (the helpers copy its mode)
+    perf165::setEnv ("LYNX_PARALLEL_KEYSHIFT", "0");
+    const auto serialFtz = perf165::renderTransposed (6);
+    perf165::setEnv ("LYNX_PARALLEL_KEYSHIFT", "1");
+    CHECK (serialFtz == perf165::renderTransposed (6));
 }

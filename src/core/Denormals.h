@@ -73,4 +73,36 @@ private:
     unsigned int csr = 0;
     unsigned short cw = 0;
 };
+
+// A thread's floating-point mode, to give it to helper threads (round 165i): work split over threads then rounds and
+// flushes exactly like it would on the thread that asked for it
+class FloatMode
+{
+public:
+    static FloatMode current() noexcept
+    {
+        FloatMode m;
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64)
+        m.csr = _mm_getcsr();
+#endif
+#if defined(__x86_64__) && defined(__GNUC__)
+        __asm__ volatile ("fnstcw %0" : "=m" (m.cw));
+#endif
+        return m;
+    }
+
+    void applyHere() const noexcept
+    {
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64)
+        _mm_setcsr (csr);
+#endif
+#if defined(__x86_64__) && defined(__GNUC__)
+        __asm__ volatile ("fnclex\n\tfldcw %0" : : "m" (cw));
+#endif
+    }
+
+private:
+    unsigned int csr = 0;
+    unsigned short cw = 0;
+};
 } // namespace lynx
