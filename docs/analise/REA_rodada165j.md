@@ -10,8 +10,9 @@ REA/Ghidra (clean-room); [SRC] open-source tuner source read (licence noted); [m
 - Done: harness, references scored (Auto-Tune Pro ×3, Waves Tune RT, FL Pitcher DLL), LYNX baseline, Pitcher null vs
   FL's DLL (§3), experiments E1–E7 (§4.2); adopted the normalised overlap-add + 3 kHz shelf (§4.3, committed; the
   experiment switches are gone). Unit tests in `tests/Tune165Tests.inc`.
-- In progress: final renders with the landed code (synthetic, her takes, low latency), CPU before / after, the A/B
-  listening folder, PARITY rows, landing.
+- Done too: final renders with the landed code (bit-identical to E6+E7), CPU (+1 %), the A/B listening folder
+  (Desktop `LYNX-AB-afinacao`, 8 of her takes + 2 synthetic, outside git), PARITY rows.
+- Next: land (merge origin/main, land.sh), then §4.5.
 
 ## 1. Method: the three-way comparison harness
 
@@ -126,3 +127,36 @@ Auto-Tune's.
 - LYNX Tune's high shelf on the corrected path: 5 kHz +1 dB → 3 kHz +1.5 dB (it compensates the residual softening
   of the grain at the pulse, measured HF balance −0.52 → −0.13 dB vs the dry take; Auto-Tune −0.07 dB).
 - Tests: `tests/Tune165Tests.inc`.
+
+### 4.4 Before → after (the landed code; minitune with it is bit-identical to the E6+E7 renders)
+
+| measure | Auto-Tune Pro | Waves Tune RT | LYNX 0.1.19 | LYNX 0.1.20 |
+|---|---|---|---|---|
+| her takes: pitch med / p90 c | 5.79 / 26.2 | — | 4.39 / 20.9 | 4.42 / 20.9 |
+| her takes: same note as Auto-Tune | 100 % | — | 95.8 % | 95.8 % |
+| her takes: HF balance vs dry (dB) | −0.07 | — | −0.52 | **−0.13** |
+| her takes: formant distance (dB) | 0.49 | — | 0.80 | 0.77 |
+| her takes: bursts / min | 31.2 | — | 40.9 | 40.1 |
+| her takes, Classic / Low latency: bursts, HF | 27.9, −0.02 | — | 48.8, −0.51 | 45.2, −0.13 |
+| her takes, Classic / Low latency: pitch med / p90 c | 7.64 / 28.2 | — | 4.12 / 20.5 | 4.20 / 20.5 |
+| synthetic: latency ms | 61.6 (Classic 2.1) | 5.4 | 25.4 (Low 6.4) | 25.4 (Low 6.4) |
+| synthetic: accuracy med / p90 c | 2.8 / 10.1 | 2.3 / 12.2 | 1.7 / 4.4 | 1.7 / 4.4 |
+| synthetic: retune ms | 42 | 29 | 38 | 38 |
+| synthetic: vibrato kept | 1.01 | 1.02 | 0.97 | 0.97 |
+| synthetic: bursts / min | 30.0 | 18.5 | 15.7 | 17.6 (±2 events) |
+| synthetic: formant distance (dB) | 0.18 | 0.26 | 0.28 | 0.36 |
+| synthetic: HF balance vs dry (dB) | — | — | −0.40 | −0.04 |
+| CPU per instance, 44.1 kHz block 128 (median, interleaved runs) | — | — | 64.7 µs | 65.1 µs (+1 %) |
+
+The synthetic formant distance went up 0.08 dB (the 3 kHz shelf on held notes whose highs were not lost: the takes
+with the large corrections improved, s01 2.02 → 1.89 dB, the near-unshifted ones moved 0.05–0.12 dB). On her takes
+both timbre measures improved, so the shelf stays; it is a candidate for a per-shift amount next round.
+
+### 4.5 What is left
+
+- Bursts: 40 vs Auto-Tune's 31 / min on her takes, mostly at note changes and onsets (§4.1). None of E1 / E2 / E5
+  helped; the next idea is a grain-length change at note boundaries (one-period grains for the first marks of a
+  note), measured the same way.
+- Large corrections on the synthetic held notes still lose highs (the grain centre vs the glottal pulse: E3 fixed it
+  on synthetic takes only).
+- Newtone's engine stays black-box (zplane's licensed code).
