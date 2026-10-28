@@ -122,10 +122,133 @@ ExportJob::ExportJob (const Song& song, const Options& o, const juce::File& file
     engine->setSong (std::move (copy));
 }
 
+ExportJob::ExportJob (AudioEngine& liveEngine, const Options& o, const juce::File& file)
+    : options (clamped (realtimeOptions (o, liveEngine.getTransport().sampleRate.load()))),
+      output (file),
+      title (liveEngine.getSong().info.title),
+      artist (liveEngine.getSong().info.author)
+{
+    live = &liveEngine;
+    const auto& song = liveEngine.getSong();
+    std::int64_t musicTicks = 0, loopTicks = 0;
+    const auto copy = makeRenderSong (song, options, 0, musicTicks, loopTicks);
+    musicSeconds = copy.secondsForTicks (musicTicks);
+    loopSeconds = copy.secondsForTicks (loopTicks);
+    // where the range starts in the song (the selection: the loop region, as makeRenderSong cuts it)
+    startTick = options.range == Range::selection && song.hasLoop() ? (double) song.loopStart : 0.0;
+}
+
+Options ExportJob::realtimeOptions (Options o, double deviceRate)
+{
+    if (deviceRate > 0.0)
+        o.sampleRate = deviceRate; // (the device plays at its own rate)
+    if (o.range == Range::pattern)
+        o.range = Range::song;
+    o.loops = 1;
+    o.stems = Stems::none;
+    o.masterEffects = true;
+    o.hqAllPlugins = false;  // (the playback quality: what you hear)
+    o.pluginWarmUp = false;  // (the plugins are already running)
+    o.disableMaxPolyphony = false;
+    return o;
+}
+
+bool ExportJob::runRealtime (const std::function<bool (double)>& progress, juce::String& error)
+{
+    for (const auto f : formatsOf (options))
+        if (const auto file = f == options.format ? output : output.withFileExtension (extension (f)); ! canReplace (file))
+        {
+            error = inUseMessage (file);
+            return false;
+        }
+
+    auto onMessageThread = [] (std::function<void()> f) {
+        auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+        if (mm == nullptr || mm->isThisTheMessageThread())
+            f();
+        else
+            mm->callFunctionOnMessageThread ([] (void* p) -> void* { (*static_cast<std::function<void()>*> (p))(); return nullptr; }, &f);
+    };
+
+    juce::String started;
+    onMessageThread ([this, &started] { started = live->startRealtimeBounce (startTick); });
+    if (started.isNotEmpty())
+    {
+        error = started;
+        return false;
+    }
+
+    const auto rate = options.sampleRate;
+    const auto latency = (std::int64_t) live->bounceLatency();
+    const auto trim = options.trimPdc ? latency : 0;
+    const auto music = (std::int64_t) std::llround (musicSeconds * rate);
+    const auto maxTail = options.tail == TailMode::cut ? 0 : (std::int64_t) (options.maxTailSeconds * rate);
+    const auto expected = latency + music + maxTail;
+    std::vector<float> left, right;
+    left.reserve ((std::size_t) expected + 65536);
+    right.reserve ((std::size_t) expected + 65536);
+
+    constexpr float silence = 3.0e-5f; // ~ -90 dB, as the offline render's tail
+    std::int64_t quiet = 0, checked = 0;
+    auto cancelled = false, stopped = false;
+    for (;;)
+    {
+        juce::Thread::sleep (40);
+        live->pullRealtimeBounce (left, right);
+        const auto frames = (std::int64_t) left.size();
+        // the tail: half a second of silence after the music ends it (as the offline render)
+        for (; checked < frames; ++checked)
+            if (checked >= latency + music)
+                quiet = std::abs (left[(std::size_t) checked]) < silence && std::abs (right[(std::size_t) checked]) < silence ? quiet + 1 : 0;
+        const auto tailDone = frames >= latency + music && (maxTail == 0 || quiet > (std::int64_t) (rate * 0.5) || frames >= expected);
+        if (tailDone)
+            break;
+        if (progress && ! progress (juce::jlimit (0.0, 1.0, (double) frames / (double) juce::jmax<std::int64_t> (1, expected))))
+        {
+            cancelled = true;
+            break;
+        }
+        if (! live->bounceStillPlaying())
+        {
+            stopped = true;
+            break;
+        }
+    }
+    const auto dropouts = live->bounceDropouts();
+    onMessageThread ([this] { live->finishRealtimeBounce(); });
+
+    if (cancelled)
+    {
+        error = "cancelled";
+        return false;
+    }
+    if (stopped)
+    {
+        error = tr ("Playback was stopped during the real-time export");
+        return false;
+    }
+
+    // keep: the latency's silence trimmed, the music, and the tail as far as it went
+    auto end = std::min<std::int64_t> ((std::int64_t) left.size(), maxTail == 0 ? latency + music : expected);
+    left.resize ((std::size_t) end);
+    right.resize ((std::size_t) end);
+    left.erase (left.begin(), left.begin() + (std::ptrdiff_t) std::min<std::int64_t> (trim, end));
+    right.erase (right.begin(), right.begin() + (std::ptrdiff_t) std::min<std::int64_t> (trim, end));
+    if (dropouts > 0)
+        notice = tr ("{0} audio dropout(s) happened during the real-time export: listen to the file (a larger buffer size helps)",
+                     { juce::String (dropouts) });
+    if (progress)
+        progress (1.0);
+    return writeBuffered (left, right, error);
+}
+
 ExportJob::~ExportJob() = default;
 
 bool ExportJob::run (const std::function<bool (double)>& progress, juce::String& error)
 {
+    if (live != nullptr)
+        return runRealtime (progress, error);
+
     AudioEngine::RenderOptions render;
     render.seconds = musicSeconds;
     render.sampleRate = options.sampleRate;

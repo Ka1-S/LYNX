@@ -163,6 +163,8 @@ juce::String packageReport()
     const bool wrote = probe.replaceWithText (stamp) && probe.loadFileAsString() == stamp;
     lines.add ("probe=" + probe.getFullPathName() + (wrote ? " written" : " FAILED"));
     ok = ok && wrote;
+    if (! runningPackaged())
+        probe.deleteFile(); // (packaged, it stays: the release workflow looks for it from outside the package)
     lines.add (juce::String ("result=") + (ok ? "OK" : "FAILED"));
     return lines.joinIntoString ("\n") + "\n";
 }

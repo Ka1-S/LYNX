@@ -2505,6 +2505,27 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none && persistent)
         mixerinput::explain (notice);
+    // round 165c: hardware inserts measured for another device setup (the device or its buffer size changed, or the project
+    // was measured elsewhere): a prompt that pings them on request, nothing pinged by itself (pings make clicks)
+    if (auto stale = engine.takeHardwareInsertNotice(); ! stale.empty() && persistent)
+    {
+        const auto count = (int) stale.size();
+        auto options = juce::MessageBoxOptions()
+                           .withIconType (juce::MessageBoxIconType::InfoIcon)
+                           .withTitle (tr ("Hardware Insert"))
+                           .withMessage ((count == 1 ? tr ("The round trip of a hardware insert was measured for another audio setup (the device or its "
+                                                           "buffer size changed), so its return is no longer lined up with the rest of the mix.")
+                                                     : tr ("The round trip of {0} hardware inserts was measured for another audio setup (the device or its "
+                                                           "buffer size changed), so their returns are no longer lined up with the rest of the mix.",
+                                                           { juce::String (count) }))
+                                         + "\n\n" + tr ("Ping now? Each one sends a few clicks out to its gear and listens for them on its return."))
+                           .withButton (tr ("Ping now"))
+                           .withButton (tr ("Later"));
+        juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer<MainComponent> (this), stale = std::move (stale)] (int result) {
+            if (result == 1 && safe != nullptr)
+                safe->engine.pingHardwareInserts (stale);
+        });
+    }
 
     const auto& song = engine.getSong();
     bool namesChanged = patternBox.getNumItems() != (int) song.patterns.size();

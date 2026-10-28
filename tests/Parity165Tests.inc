@@ -68,3 +68,55 @@ TEST (ridge_e_channel_eq_to_sidechain_round165)
     own.params[r::eqToSidechain] = 1.0f;
     CHECK (std::abs (vm123::sineGainDb (own, 8000.0, -30.0)) < 0.3);
 }
+
+// round 165h §2: Hush De-esser's classic voicing ← Waves DeEsser (17.1 trial, black-box): BandPass states translated
+// (17.1 stores HighPass 1 / BandPass 0), BandPass = the high-pass side chain + a 4th-order low-pass, the wide-band
+// reduction stops at 25.6 dB, no latency
+TEST (hush_classic_deesser_bandpass_and_floor_round165)
+{
+    using namespace lynx;
+    namespace h = mixsuite::hush;
+    int n = 0;
+    auto bp = vm123::wavesSlot ("DeEsser", "5506 2 -30 7 0.5 10 * * * * 0 3.98 32 0 1", n);
+    auto hp = vm123::wavesSlot ("DeEsser", "5506 2 -30 7 0.5 10 * * * * 0 3.98 32 1 1", n);
+    CHECK (bp.params[h::detector] == 1.0f && hp.params[h::detector] == 0.0f && bp.params[h::mode] == 1.0f);
+    // [EXEC] the trial at 9 kHz (wide band, threshold −30): −20 / −10 / 0 dBFS in → BandPass −3.93 / −12.52 / −21.09 dB,
+    // HighPass −7.70 / −16.29 / −24.87 dB
+    static constexpr double want[][3] = { { -20, -3.93, -7.70 }, { -10, -12.52, -16.29 }, { 0, -21.09, -24.87 } };
+    for (const auto& w : want)
+    {
+        const auto gb = vm123::sineGainDb (bp, 9000.0, w[0]), gh = vm123::sineGainDb (hp, 9000.0, w[0]);
+        std::printf ("  DeEsser 9 kHz at %.0f dBFS: band-pass %.2f (trial %.2f), high-pass %.2f (trial %.2f)\n", w[0], gb, w[1], gh, w[2]);
+        CHECK (std::abs (gb - w[1]) < 0.7 && std::abs (gh - w[2]) < 0.7);
+    }
+    // the wide-band floor: threshold −60, 7 kHz at −10 dBFS → −25.57 dB on the trial (round 123's model: −40 dB)
+    auto deep = vm123::wavesSlot ("DeEsser", "5506 2 -60 7 0.5 10 * * * * 0 3.98 32 0 1", n);
+    const auto g = vm123::sineGainDb (deep, 7000.0, -10.0);
+    std::printf ("  DeEsser floor: %.2f dB (trial -25.57)\n", g);
+    CHECK (std::abs (g + 25.57) < 0.3);
+    // no latency, as the reference
+    auto fx = makeEffect (deep);
+    fx->prepare (48000.0);
+    std::vector<float> l (512, 0.0f), r (512, 0.0f);
+    fx->process (l.data(), r.data(), 512, deep.params, 120.0);
+    CHECK (fx->latencySamples() == 0);
+}
+
+// round 165h §3: Gemini Doubler's fresh instance = the Doubler2 / Doubler4 17.1 trials' (Align off, shelves on: low 0 dB
+// at 101 Hz, high +4.1 dB at 1306 Hz)
+TEST (gemini_doubler_reference_defaults_round165)
+{
+    using namespace lynx;
+    const auto s = makeEffectSlot (EffectKind::geminiDoubler);
+    const auto& info = effectInfo (EffectKind::geminiDoubler);
+    auto at = [&] (const char* name) {
+        for (std::size_t i = 0; i < info.params.size(); ++i)
+            if (std::string (info.params[i].name) == name)
+                return s.params[i];
+        CHECK (false);
+        return -1.0f;
+    };
+    CHECK (at ("Align") == 0.0f && at ("Low shelf") == 1.0f && at ("High shelf") == 1.0f);
+    CHECK (std::abs (voicetools::gemini::shelfDb (at ("High gain")) - 4.1) < 0.01 && std::abs (voicetools::gemini::shelfDb (at ("Low gain"))) < 0.01);
+    CHECK (std::abs (voicetools::gemini::freqHz (at ("Low freq")) - 101.0) < 0.5 && std::abs (voicetools::gemini::freqHz (at ("High freq")) - 1306.0) < 2.0);
+}
