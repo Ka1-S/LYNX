@@ -7,6 +7,7 @@
 #include "platform/Paths.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -48,6 +49,78 @@ double processCpuSeconds()
    #else
     return (double) std::clock() / CLOCKS_PER_SEC;
    #endif
+}
+
+juce::TextEditor* firstTextField (juce::Component& dialog)
+{
+    juce::TextEditor* best = nullptr;
+    juce::Point<int> bestAt;
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (! child->isVisible() || ! child->isEnabled())
+                continue;
+            if (auto* editor = dynamic_cast<juce::TextEditor*> (child); editor != nullptr && ! editor->isReadOnly() && editor->getWantsKeyboardFocus())
+            {
+                const auto at = dialog.getLocalPoint (editor, juce::Point<int>());
+                if (best == nullptr || at.y < bestAt.y || (at.y == bestAt.y && at.x < bestAt.x))
+                {
+                    best = editor;
+                    bestAt = at;
+                }
+                continue;
+            }
+            walk (*child);
+        }
+    };
+    walk (dialog);
+    return best;
+}
+
+namespace
+{
+struct DialogTextFocus final : juce::FocusChangeListener
+{
+    void globalFocusChanged (juce::Component* focused) override
+    {
+        if (focused == nullptr)
+            return;
+        auto* dialog = dynamic_cast<juce::AlertWindow*> (focused->getTopLevelComponent());
+        if (dialog == nullptr || ! dialog->isShowing())
+            return;
+        auto& props = dialog->getProperties();
+        static const juce::Identifier done ("lynxTextFocused");
+        if (props.contains (done)) // only the dialog's first focus: Tab and clicks move it freely afterwards
+            return;
+        props.set (done, true);
+        if (dynamic_cast<juce::TextEditor*> (focused) != nullptr)
+            return;
+        if (auto* field = firstTextField (*dialog))
+            field->grabKeyboardFocus(); // (AlertWindow's fields select all their text when focused)
+    }
+};
+
+std::unique_ptr<DialogTextFocus>& dialogTextFocus()
+{
+    static std::unique_ptr<DialogTextFocus> listener;
+    return listener;
+}
+} // namespace
+
+void installDialogTextFocus()
+{
+    if (dialogTextFocus() != nullptr)
+        return;
+    dialogTextFocus() = std::make_unique<DialogTextFocus>();
+    juce::Desktop::getInstance().addFocusChangeListener (dialogTextFocus().get());
+}
+
+void removeDialogTextFocus()
+{
+    if (dialogTextFocus() == nullptr)
+        return;
+    juce::Desktop::getInstance().removeFocusChangeListener (dialogTextFocus().get());
+    dialogTextFocus() = nullptr;
 }
 
 juce::Image logoImage()

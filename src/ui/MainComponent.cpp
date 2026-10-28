@@ -488,6 +488,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     fittedChannelCount = (int) engine.getSong().channels.size();
     hintBar.setHint ({ idleHint(), {}, false, false });
     setWantsKeyboardFocus (true);
+    installDialogTextFocus(); // dialogs open with their text field focused (round 165q)
     setSize (1180, 642);
     startTimerHz (30);
     uiTraceMonitor.start ([this, last = std::make_shared<RtStats::Snapshot>()] {
@@ -528,6 +529,7 @@ MainComponent::~MainComponent()
     ui::onTweak = nullptr;
     onEditEventsInPianoRoll = nullptr;
     PluginWindows::onGesture = nullptr;
+    removeDialogTextFocus();
     engine.nameAutomation = nullptr;
     PluginWindows::closeAll(); // plugin UIs before the engine
     ParametricEqWindows::closeAll();

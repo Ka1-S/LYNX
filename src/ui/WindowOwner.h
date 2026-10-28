@@ -46,6 +46,16 @@ void startRenderingWatch();
 // the window's native peer uses the chosen renderer now (keepAboveMainWindow calls it)
 void applyRenderingChoice (juce::Component& window);
 
+// Dialogs with a text field (rename and color, the next empty pattern's name, preset and insert names...) open with
+// the field focused and its text selected, so typing replaces the name at once, as in FL (round 165q). JUCE's
+// AlertWindow gives its buttons an explicit focus order, so the dialog's focus went to its first button: the letters
+// typed did nothing and Enter pressed OK. Installed once for the whole app (a Desktop focus listener): the first time
+// the focus enters a dialog, it moves to the dialog's first editable text field when it landed anywhere else.
+void installDialogTextFocus();
+void removeDialogTextFocus();
+// The dialog's first editable, visible text field (top to bottom, then left to right), or nullptr.
+juce::TextEditor* firstTextField (juce::Component& dialog);
+
 // The LYNX logo (256 px, with transparency).
 juce::Image logoImage();
 
