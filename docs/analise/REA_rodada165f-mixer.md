@@ -102,10 +102,15 @@ you select an input!".
   Export window for Render selected tracks) — the item order and texts follow FL's `DelayMenu` / Routing / Disk recording
   menus of TFXForm.dfm.
 
+- Cost (`LAT165_BENCH=1 lynx_tests`, 16 inserts with a 100-sample plugin, 256-sample blocks at 48 kHz, one thread):
+  playing — Never 4.72 µs/block, When recording… 4.41, Always 3.60; stopped — Never 4.26, When recording… 3.18 (lines
+  skipped), Always 3.22. The per-chunk bypass check is one flag when no track uses the mode; no allocation, no lock.
+- build-local with FL Data: 1 779 820 checks, 0 failures (after the i18n fix); Windows build OK.
+
 ## Where I stopped
 - §1–§3 built and tested; merged origin/main (conflicts: RackRenderer.cpp next to round 165i's task graph — the bypass
   state is set once per chunk before the graph runs, read-only inside it; tests.cpp; I18nData.h regenerated).
-  Running build-local with FL Data + Windows build, then land.
+  build-local + Windows OK → landing.
 - §4 (record source point) deferred: needs renderer taps (post effects / EQ / level / track) feeding the takes after the
   render, with the latency compensation; takes come from the raw live input today (AudioEngine). .flp 0xA5 is parsed
   (`MixerInsert::recordSource`).

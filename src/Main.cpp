@@ -5660,7 +5660,7 @@ private:
                 juce::StringArray names { "Mixer track" };
                 std::vector<juce::PopupMenu> menus { menu };
                 const auto latencyPrefix = lynx::tr ("Track latency: {0}", { juce::String() });
-                const juce::String wanted[] = { lynx::tr ("Selected tracks \xe2\x87\x84 this track"), lynx::tr ("Disk recording"),
+                const juce::String wanted[] = { lynx::tr ("Selected tracks ⇄ this track"), lynx::tr ("Disk recording"),
                                                 lynx::tr ("Plugin delay compensation") };
                 for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
                 {
