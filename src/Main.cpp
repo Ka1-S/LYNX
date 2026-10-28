@@ -2173,7 +2173,7 @@ private:
                                      return std::optional<lynx::Song> (songWith (fx));
                                  } });
             std::vector<std::size_t> cuts { n / 2 };
-            for (const auto c : { (std::size_t) 90, (std::size_t) 114, (std::size_t) 128 }) // (Facet's 90 → 114 params; the 128 → 160 slot)
+            for (const auto c : { (std::size_t) 90, (std::size_t) 114, (std::size_t) 128, (std::size_t) 160 }) // (Facet's 90 → 114 params; the 128 → 160 → 192 slot)
                 if (c < n) cuts.push_back (c);
             for (const auto c : cuts)
                 variants.push_back ({ "old project (" + juce::String ((int) c) + " of " + juce::String ((int) n) + " params)", [=] { return oldState (base, c); } });

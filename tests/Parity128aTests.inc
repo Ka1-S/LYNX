@@ -155,6 +155,7 @@ TEST (parity128a_hush_new_controls)
     p[threshold] = (float) (20.0 / 60.0); // −40 dBFS
     p[range] = 0.5f;                      // 12 dB
     p[frequency] = 0.5f * (float) (std::log (2.0) / std::log (8.0)); // 2.83 kHz
+    p[rangeLaw] = 0.0f; // (round 165x: Hush's own link and ranges, as projects saved before keep them)
 
     auto tone = [&] (double hz, double amp) {
         std::vector<float> s ((std::size_t) n);

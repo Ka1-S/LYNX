@@ -1769,7 +1769,8 @@ Layout glowLeveler()
     auto vu = display (170, 40, 200, 136, "vumeter");
     vu.steps = 0; // live output 0: gain reduction
     v.push_back (vu);
-    v.push_back (display (392, 22, 136, 18, "vusel"));
+    // round 165x: the VU DISPLAY selector is a parameter (saved with the project, translated from the reference's state)
+    v.push_back (tabs (392, 22, 136, 18, "VU display", TR_NOOP ("Input|GR|Output"), { 0.5f, 0.0f, 1.0f }));
     v.push_back (tabs (200, 184, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
     v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
     // round 123: the voicing — Glow's own engine, or the measured classic opto leveler (substitutes start there)
@@ -1781,11 +1782,13 @@ Layout glowLeveler()
     v.push_back (when (tabs (12, 26, 130, 18, "Opto law", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     // round 165w: the classic voicing's release (Measured = the trial's gain recovery; Old = round 123's slower tail, kept
     // by a project saved before), right, under the VU selector
-    v.push_back (when (label (392, 46, 136, 10, TR_NOOP ("Release")), "Voicing", 0.5f, 1.0f));
+    v.push_back (when (label (392, 46, 136, 10, TR_NOOP ("Attack / release")), "Voicing", 0.5f, 1.0f)); // round 165x: both measured
     v.push_back (when (tabs (392, 57, 136, 16, "Opto release", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
     v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));
+    // round 165x: where Auto makeup was switched on (the reference's make-up follows the dial from there)
+    v.push_back (when (dial (470, 254, 28, "Makeup ref", TR_NOOP ("Makeup ref")), "Voicing", 0.5f, 1.0f));
     return l;
 }
 
@@ -1793,9 +1796,9 @@ Layout hushDeEsser()
 {
     Layout l;
     l.width = 460;
-    l.height = 316;
+    l.height = 376; // round 165x: + the extended law's row
     auto& v = l.items;
-    v.push_back (section (4, 4, 452, 308, TR_NOOP ("De-esser")));
+    v.push_back (section (4, 4, 452, 368, TR_NOOP ("De-esser")));
     v.push_back (display (12, 26, 200, 78, "hushband"));
     v.push_back (meter (12, 110, 200, 12, 0, TR_NOOP ("Reduction")));
     v.push_back (tabs (12, 130, 98, 20, "Wideband", TR_NOOP ("Split|Wide")));
@@ -1826,6 +1829,11 @@ Layout hushDeEsser()
     v.push_back (tabs (104, 286, 176, 20, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
     // round 148: the measured single-vocal detector (the role: a vocal de-esser's Single Vocal mode)
     v.push_back (toggle (290, 286, 158, 20, "Vocal voicing", TR_NOOP ("Vocal detector")));
+    // round 165x: the reference's ranges and link (Old = a project saved before: ±12 dB, 2 … 16 kHz, Hush's link) and
+    // the link's 100 … 200 % half (the share processed on the mid or side signal only)
+    v.push_back (tabs (12, 318, 200, 20, "Range law", TR_NOOP ("Old ranges|Extended")));
+    v.push_back (tabs (222, 318, 110, 20, "Link only side", TR_NOOP ("Mid only|Side only")));
+    v.push_back (dial (380, 330, 24, "Link only", TR_NOOP ("Link only")));
     return l;
 }
 
