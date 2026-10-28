@@ -93,5 +93,10 @@ struct RefNote
 std::vector<float> renderReference (const std::vector<std::uint8_t>& state, const std::vector<RefNote>& notes, double sampleRate,
                                     int length, int block = 512, const std::vector<std::uint32_t>& mt = {}, double bpm = 120.0,
                                     const std::vector<std::uint8_t>& compressorState = {});
+
+// IPP's 11-bit Exp_32f_A11 / Ln_32f_A11 as FL's DLL computes them on the AVX2 code path (Harmor's precision
+// "Average"; REA_rodada165g-flbeta165h §3), exposed for the tests
+float ippExpA11Model (float x) noexcept;
+float ippLnA11Model (float x) noexcept;
 } // namespace harmor
 } // namespace lynx

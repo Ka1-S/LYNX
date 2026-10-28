@@ -4,6 +4,7 @@
 #include "core/VoltageController.h"
 #include "core/XyController.h"
 #include "core/Vfx.h"
+#include "core/VideoPlayer.h"
 #include "core/Patcher.h"
 #include <filesystem>
 #include "core/EditorPolish.h"
@@ -1633,6 +1634,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                 }
             }
+            else if (name == "fruity video player")
+            {
+                // FL's state as it is (round 165g, core/VideoPlayer.h); the video's path through FL's folder names
+                if (auto vs = video::read (c.pluginState))
+                {
+                    if (vs->path.find ('%') != std::string::npos)
+                        if (const auto resolved = resolveFlPath (vs->path, options.roots); ! resolved.empty())
+                            vs->path = resolved;
+                    def.instrument = InstrumentKind::videoplayer;
+                    def.pluginState = video::write (*vs);
+                    adoptedFromPlugin = true;
+                }
+            }
             else if (name == "fruity dance")
             {
                 // a visual plugin: notes change the dance, its Gen_Render writes nothing (REA_rodada68 §8)
@@ -1893,6 +1907,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
             def.sampler.keepPitch = c.stretchMode != 0; // only FL's "Resample" changes the pitch
             def.sampler.stretchMethod = stretchMethodForFlMode (c.stretchMode);
+            // Fruity Granulizer: FL hands the plugin TIME as its beat count, without MUL (REA_rodada165g-flgran165 §3)
+            if (def.instrument == InstrumentKind::granulizer)
+                def.sampler.stretchBeats = (float) (c.stretchTime / 192.0);
         }
 
         // FL's time-stretching panel on a sample channel or an audio clip [FL: measured, REA_rodada164e-clippitch §2]:
@@ -1933,6 +1950,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::flkeys
                      || def.instrument == InstrumentKind::granulizer || def.instrument == InstrumentKind::drumaxx
                      || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance
+                     || def.instrument == InstrumentKind::videoplayer
                      || def.instrument == InstrumentKind::directwave || def.instrument == InstrumentKind::soundfont)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
@@ -1958,7 +1976,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      && def.instrument == InstrumentKind::synth)
             {
                 const auto note = flextra::inertPluginNote (c.pluginName); // round 165g: ReWired, Video Player, FL Studio Mobile
-                if (c.pluginName == "ReWired" || c.pluginName == "Fruity Video Player")
+                if (c.pluginName == "ReWired")
                     def.muted = true; // no sound of their own in LYNX: the stand-in synth must not play their notes
                 ++r.unsupported[note.empty() ? c.pluginName : note]; // (Keyboard Controller only sends notes to other channels)
             }
@@ -2018,6 +2036,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         const auto dockBits = insert.flags >> 6 & 3;
         const auto isCurrentTrack = insert.index > 0 && insert.index + 1 == (int) project.mixer.size();
         track.dock = dockBits == 2 ? MixerDock::right : (dockBits == 0 && ! isCurrentTrack) ? MixerDock::left : MixerDock::middle;
+        // FL's track latency (REA round 165f-mixer, FUN_00f3d620): the manual latency (0xEC f32), "Bypass track latency
+        // compensation" (0x31) and "Compensate for master latency" (0xEC flag 0x4000 = off)
+        track.latencyMs = std::clamp (insert.latencyMs, -maxTrackLatencyMs, maxTrackLatencyMs);
+        if (insert.index > 0)
+            track.latencyBypass = (LatencyBypass) std::clamp (insert.latencyBypass, 0, 2);
+        track.compensateMasterLatency = (insert.flags & 0x4000) == 0;
         // 0x93 "Audio output target" (REA round 156): −1 none, 0 the first pair (the only values seen in 1162 .flp files:
         // every Master 0, one insert 0); other values depend on FL's device list and are not imported, nor a Master
         // set to none (the project would play silent)

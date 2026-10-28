@@ -54,6 +54,10 @@ public:
 
     // Editing shortcuts; the main window forwards keys when the Piano Roll is visible.
     bool handleKey (const juce::KeyPress& key);
+    // The key map's actions of this editor (its tools and single letters: "pianoRoll.tool.knife"...); false if not one.
+    bool runKeyAction (const std::string& id);
+    // The tool buttons' tooltips show the keys the key map gives them (`keyOf`: action id -> key text, "" = none).
+    void refreshToolKeys (const std::function<juce::String (const std::string&)>& keyOf);
 
     // The key map's pianoRoll.* actions (tool dialogs, zoom presets). Returns false for unknown ids.
     bool runAction (const std::string& id);

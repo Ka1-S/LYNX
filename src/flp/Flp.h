@@ -335,6 +335,9 @@ struct MixerInsert
     int output = -2;              // 0x93 "Audio output target": -1 = none, 0 = the device's first pair; -2 = not in the file
     int input = -1;               // 0x9A "Audio input source": -1 = none; k = entry k of FL's list for its device (stereo
                                   // pairs first, then every channel alone: REA round 157c)
+    float latencyMs = 0.0f;       // 0xEC f32 at +0: the manual track latency in ms (REA round 165f-mixer)
+    int latencyBypass = 0;        // 0x31: Bypass track latency compensation 0 Never / 1 Always / 2 When recording or not playing
+    int recordSource = 0;         // 0xA5: 0 External input only, 1 + mixer input, 2 Post effects, 3 Post EQ, 4 Post level/pan, 5 Post track
 
     struct Slot
     {

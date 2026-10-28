@@ -2,9 +2,12 @@
 #include "platform/Paths.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <mutex>
 
 #include "core/Sha256.h"
+#include "engine/FileSort.h"
 #include "core/Mp3Decoder.h"
 #include "engine/Mp3Format.h"
 #include "engine/WavPackFormat.h"
@@ -31,12 +34,16 @@ juce::String diskKey (const juce::File& file)
 
 void pruneDiskCache (const juce::File& folder)
 {
+    // one prune at a time (the pool's threads finish waveforms together), and not after every single new file
+    static std::mutex pruning;
+    static std::atomic<int> writes { 0 };
+    if (writes.fetch_add (1) % 16 != 0)
+        return;
+    const std::lock_guard<std::mutex> guard (pruning);
     auto files = folder.findChildFiles (juce::File::findFiles, false, "*.lwv");
     if (files.size() <= diskCacheMaxFiles)
         return;
-    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) {
-        return a.getLastAccessTime() < b.getLastAccessTime();
-    });
+    filesort::byTime (files, filesort::By::accessTime); // (times read once: issue #12's crash)
     for (int i = 0; i < files.size() - diskCacheMaxFiles * 3 / 4; ++i)
         files.getReference (i).deleteFile();
 }
