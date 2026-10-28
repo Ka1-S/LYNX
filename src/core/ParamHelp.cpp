@@ -308,6 +308,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::glowLeveler, "auto makeup" }, TR_NOOP ("Turns the gain up as the peak reduction rises") },
         { { K::glowLeveler, "analog" }, TR_NOOP ("The reference's analog hum and noise (50 or 60 Hz mains), added after the gain") },
         { { K::glowLeveler, "opto law" }, TR_NOOP ("Measured: the reference's Limit and Auto makeup; old: the law of projects saved before round 152") },
+        { { K::glowLeveler, "opto release" }, TR_NOOP ("Measured: the reference's gain recovery after loud passages; old: the slower tail of projects saved before round 165") },
         // Hush De-esser
         { { K::hushDeEsser, "frequency" }, TR_NOOP ("Where the sibilance is detected and reduced") },
         { { K::hushDeEsser, "threshold" }, TR_NOOP ("Level of sibilance above which the de-esser works") },
@@ -394,6 +395,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::geminiDoubler, "high freq" }, TR_NOOP ("Frequency of the high shelf") },
         { { K::geminiDoubler, "feedback cut" }, TR_NOOP ("Darkens the doubles' feedback") },
         { { K::geminiDoubler, "range" }, TR_NOOP ("Maximum delay of the doubles") },
+        { { K::geminiDoubler, "eq law" }, TR_NOOP ("Shelf law: measured (cuts down to -88 dB) or the older round-124 shelves") },
         { { K::geminiDoubler, "on" }, TR_NOOP ("Switches this double on") },
         { { K::geminiDoubler, "gain" }, TR_NOOP ("Level of this double") },
         { { K::geminiDoubler, "delay" }, TR_NOOP ("How late this double comes") },

@@ -746,6 +746,7 @@ public:
             c.limit = on (p[mode]);
             c.measured = on (p[optoLaw]);
             c.autoMakeup = on (p[autoMakeup]);
+            c.measuredRelease = on (p[releaseLaw]);
             const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
             const int hz = analogHz (p[analog]);
             const auto trimGain = (float) dbToGain (trimDb (p[trim]));
@@ -2844,7 +2845,9 @@ const EffectInfo& glowInfo()
                                    // voicing, Gain 40, Peak reduction 46, Hi Freq 50)
                                    { { "Peak reduction", 0.46f }, { "Gain", 0.40f }, { "Limit", 0.0f }, { "Emphasis", 0.5f }, { "Mix", 1.0f },
                                      { "Trim", 0.5f }, { "Auto makeup", 0.0f }, { "Voicing", 1.0f },
-                                     { "Opto law", 1.0f }, { "Analog", 0.0f } } };
+                                     { "Opto law", 1.0f }, { "Analog", 0.0f },
+                                     // round 165w: the measured release (a project saved before keeps round 123's)
+                                     { "Opto release", 1.0f } } };
     return info;
 }
 
@@ -3110,6 +3113,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case trim: return fmt ("%+.1f dB", trimDb (v));
             case autoMakeup: return on (v) ? "on" : "off";
             case optoLaw: return on (v) ? "measured" : "round 123";
+            case releaseLaw: return on (v) ? "measured" : "round 123";
             case analog: return analogHz (v) == 0 ? "off" : analogHz (v) == 50 ? "50 Hz" : "60 Hz";
             default: return fmt ("%.2f", v);
         }

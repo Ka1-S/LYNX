@@ -1966,14 +1966,15 @@ public:
             using namespace voicetools::gemini;
             grid (4, 4);
             const bool lo = param01 ("Low shelf") >= 0.5f, hi = param01 ("High shelf") >= 0.5f;
-            const auto lg = lo ? shelfDb (param01 ("Low gain")) : 0.0, hg = hi ? shelfDb (param01 ("High gain")) : 0.0;
+            // round 165w: the law's range over the height (measured: −88 … +12 dB; round 124's: −30 … +12) and its shapes
+            const bool measured = param01 ("EQ law") >= 0.5f;
+            const auto floorDb = measured ? -88.0 : -30.0, spanDb = measured ? 100.0 : 42.0;
+            const auto lg = lo ? shelfDb (param01 ("Low gain"), measured) : 0.0, hg = hi ? shelfDb (param01 ("High gain"), measured) : 0.0;
             const auto lf = freqHz (param01 ("Low freq")), hf = freqHz (param01 ("High freq"));
-            // first-order shelf shapes (display only): −30 … +12 dB over the height
             strokeCurve ([=] (float x) {
                 const auto f = 20.0 * std::pow (1000.0, (double) x);
-                const auto l = lg / (1.0 + std::pow (f / lf, 2.0));
-                const auto h = hg / (1.0 + std::pow (hf / f, 2.0));
-                return (float) ((l + h + 30.0) / 42.0);
+                const auto db = shelfResponseDb (f, lf, lg, false, measured) + shelfResponseDb (f, hf, hg, true, measured);
+                return (float) std::clamp ((db - floorDb) / spanDb, 0.0, 1.0);
             }, inner, true);
             // round 137: the L / H markers (drag: frequency / gain; double-click: on / off) and the frequency labels
             g.setFont (font (8.5f * s));
@@ -1984,7 +1985,7 @@ public:
                 const auto x = inner.getX() + inner.getWidth() * (float) (std::log (hz / 20.0) / std::log (1000.0));
                 g.drawText (text, juce::Rectangle<float> (x - 12.0f * s, inner.getBottom() - 11.0f * s, 24.0f * s, 10.0f * s), juce::Justification::centred, false);
             }
-            const auto zero = inner.getBottom() - inner.getHeight() * 30.0f / 42.0f;
+            const auto zero = inner.getBottom() - inner.getHeight() * (float) (-floorDb / spanDb);
             g.drawText ("0", juce::Rectangle<float> (inner.getX() + 1.0f * s, zero - 5.0f * s, 14.0f * s, 10.0f * s), juce::Justification::centredLeft, false);
             for (const auto& h : geminiHandles (item))
             {
@@ -3085,8 +3086,9 @@ public:
             auto add = [&] (int freqP, int gainP, int onP) {
                 const auto hz = freqHz (valueOf (freqP));
                 const auto x = (float) (std::log (juce::jlimit (20.0, 20000.0, hz) / 20.0) / std::log (1000.0));
-                const auto db = valueOf (onP) >= 0.5f ? shelfDb (valueOf (gainP)) : 0.0;
-                out.push_back ({ freqP, gainP, onP, { inner.getX() + inner.getWidth() * x, inner.getBottom() - inner.getHeight() * (float) ((db + 30.0) / 42.0) } });
+                const bool measured = valueOf (eqLaw) >= 0.5f; // round 165w: the height is the gain's own scale
+                const auto y = valueOf (onP) >= 0.5f ? valueOf (gainP) : shelfValue (0.0, measured);
+                out.push_back ({ freqP, gainP, onP, { inner.getX() + inner.getWidth() * x, inner.getBottom() - inner.getHeight() * y } });
             };
             add (lowFreq, lowGain, lowOn);
             add (highFreq, highGain, highOn);

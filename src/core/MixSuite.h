@@ -180,7 +180,9 @@ namespace glow
 // peak reduction / gain / emphasis read 0 .. 100 like the original's dials (emphasis = its Hi Freq)
 // round 152 (REA_rodada152a §2): appended — the opto law (the Opto classic voicing's measured Limit and AUTO MAKEUP; a
 // project saved before keeps the round-123 law) and ANALOG (Off / 50 Hz / 60 Hz: the reference's measured hum and noise)
-enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, count };
+// round 165w (REA_rodada165w §2): appended — the opto release (the Opto classic voicing's measured gain recovery; a
+// project saved before keeps round 123's slower tail)
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, releaseLaw, count };
 int analogHz (float v) noexcept; // 0 (off), 50 or 60
 bool classic (const EffectParams& p) noexcept;
 std::string classicParamText (int param, float v);

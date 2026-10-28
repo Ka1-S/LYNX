@@ -80,6 +80,9 @@ enum Param
     voice1, // first parameter of voice 1; each voice has `voiceParams` parameters (VoiceParam order)
     voice3 = voice1 + 2 * 10, // round 135w (appended)
     modReset = voice1 + 4 * 10, // round 135w (appended)
+    // round 165w (appended): the shelves' law — 1 = measured on the 17.1 trials (gain −88 … +12 dB, two first-order
+    // sections), 0 = round 124's (−30 … +12 dB, one first-order section): a project saved before keeps it
+    eqLaw,
     paramCount
 };
 enum VoiceParam { vOn, vGain, vPan, vDelay, vFeedback, vDetune, vDepth, vRate, vOctave, vSource, voiceParams };
@@ -93,7 +96,11 @@ double feedback (float v) noexcept;      // 0 .. 1
 double detuneCents (float v) noexcept;   // −100 .. +100
 double depthCents (float v) noexcept;    // −200 .. +200 (triangle LFO on the pitch)
 double rateValue (float v) noexcept;     // 0.1 .. 400 (log); the LFO runs at rate / 2 Hz
-double shelfDb (float v) noexcept;       // −30 .. +12 dB
+double shelfDb (float v, bool measured = true) noexcept; // measured law: −88 .. +12 dB; round 124's: −30 .. +12 dB
+float shelfValue (double db, bool measured = true) noexcept;
+bool measuredEq (const EffectParams& p) noexcept;
+// the shelf's magnitude (dB) at f for a corner f0 and a gain (the analog prototype; editor display)
+double shelfResponseDb (double f, double f0, double db, bool high, bool measured) noexcept;
 double freqHz (float v) noexcept;        // 16 .. 21357 Hz (log)
 float freqValue (double hz) noexcept;
 int sourceOf (float v) noexcept;         // 0 own side, 1 sum, 2 difference
