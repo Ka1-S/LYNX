@@ -282,8 +282,17 @@ public:
         const auto clearWidth = theme::buttonWidth (clearButton, 70, 120);
         const auto gridWidth = theme::labelColumnWidth ({ &gridLabel }, 40, 110);
         const auto fixedTop = 240 + 12 + modeWidth[0] + modeWidth[1] + modeWidth[2] + 12 + gridWidth + 110 + clearWidth;
-        title.setBounds (top.removeFromLeft (juce::jlimit (120, 230, top.getWidth() - fixedTop)));
-        targetBox.setBounds (top.removeFromLeft (240).reduced (0, 2));
+        auto titleWidth = juce::jlimit (120, 230, top.getWidth() - fixedTop), boxWidth = 240;
+        // a title longer than its room ("Événements - Pattern 1") takes up to 80 px from the target box
+        const auto titleNeeds = juce::jmin (230, theme::labelColumnWidth ({ &title }, 0, 400));
+        if (titleNeeds > titleWidth)
+        {
+            const auto taken = juce::jmin (80, titleNeeds - titleWidth);
+            titleWidth += taken;
+            boxWidth -= taken;
+        }
+        title.setBounds (top.removeFromLeft (titleWidth));
+        targetBox.setBounds (top.removeFromLeft (boxWidth).reduced (0, 2));
         top.removeFromLeft (12);
         i = 0;
         for (auto* b : { &drawButton, &lineButton, &selectButton })
@@ -526,7 +535,12 @@ private:
                 targetBox.setSelectedItemIndex ((int) i, juce::dontSendNotification);
         }
 
-        title.setText (tr ("Events - {0}", { juce::String::fromUTF8 (currentPattern().name.c_str()) }), juce::dontSendNotification);
+        const auto newTitle = tr ("Events - {0}", { juce::String::fromUTF8 (currentPattern().name.c_str()) });
+        if (newTitle != title.getText())
+        {
+            title.setText (newTitle, juce::dontSendNotification);
+            resized(); // the title's width follows its text
+        }
     }
 
     // --- editing --------------------------------------------------------------------------------
