@@ -959,6 +959,8 @@ void RackState::buildAutomationTables()
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::soundfont // (LYNX Soundfont's knobs)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))
+                                  // a recorded / drawn pitch bend plays on any instrument (issue #12)
+                                  || midictl::isPitchBend (t.param)
                                   // an Envelope Controller's global Mod X / Y (round 164f)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::controller
                                       && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
@@ -1460,6 +1462,30 @@ void RackRenderer::applyPluginParams (const RackState& state, int firstSlot, boo
 
         if (b.channel >= 0)
         {
+            const auto kind = (std::size_t) b.channel < state.song.channels.size() ? state.song.channels[(std::size_t) b.channel].instrument
+                                                                                    : InstrumentKind::plugin;
+            if (midictl::isPitchBend (b.param) && kind != InstrumentKind::plugin && kind != InstrumentKind::midiOut
+                && b.channel < (int) state.instruments.size() && b.channel < maxChannels)
+            {
+                // LYNX's own instruments: the bend as the controller's wheel plays it (applyLiveControl), when it changes
+                if (! automatedBendReset)
+                {
+                    automatedBend.fill (std::numeric_limits<float>::quiet_NaN());
+                    automatedBendReset = true;
+                }
+                auto& last = automatedBend[(std::size_t) b.channel];
+                if (! (last == v) && state.instruments[(std::size_t) b.channel] != nullptr)
+                {
+                    last = v;
+                    NoteEvent e;
+                    e.type = NoteEvent::Type::control;
+                    e.channel = b.channel;
+                    e.key = NoteEvent::controlPitchBend;
+                    e.velocity = std::clamp (v, 0.0f, 1.0f) * 2.0f - 1.0f;
+                    applyLiveControl (state, e);
+                }
+                continue;
+            }
             if (b.channel < (int) state.instruments.size())
                 state.instruments[(std::size_t) b.channel]->setParameter (b.param, v);
             // a MIDI Out's controls reach the plugins on its port

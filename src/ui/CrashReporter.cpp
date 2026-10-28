@@ -1,3 +1,4 @@
+#include "engine/FileSort.h"
 #include "ui/CrashReporter.h"
 
 #include <atomic>
@@ -414,7 +415,7 @@ private:
         {
             working = true;
             auto files = pendingFolder().findChildFiles (juce::File::findFiles, false, "*.json.gz");
-            std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
+            filesort::byTime (files, filesort::By::modificationTime);
             for (const auto& file : files)
             {
                 if (threadShouldExit())
@@ -695,7 +696,7 @@ private:
             for (const auto* pattern : { "crash *.txt", "hang *.txt" })
             {
                 auto files = platform::settingsFile ("autosave").findChildFiles (juce::File::findFiles, false, pattern);
-                std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+                filesort::byTime (files, filesort::By::modificationTime, true);
                 if (! files.isEmpty() && files[0].getLastModificationTime() > week)
                     (juce::String (pattern).startsWith ("crash") ? s.crashFile : s.hangFile) = files[0];
             }
