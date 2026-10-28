@@ -26,6 +26,6 @@ TEST (store165_migration_keeps_preferences_not_caches)
     // caches, autosaves, crash reports, session markers and logs stay
     for (const auto* name : { "wavecache", "autosave", "flp-embedded", "crash-reports", "sessions" })
         CHECK (! st::migratesFromUnpackaged (name, true));
-    for (const auto* name : { "session-running.txt", "ui.log", "audio-glitches.log", "startup.log", "x.tmp", "migrated-from-appdata.txt", "", ".", ".." })
+    for (const auto* name : { "session-running.txt", "ui.log", "audio-glitches.log", "startup.log", "x.tmp", "migrated-from-appdata.txt", "package-probe.txt", "", ".", ".." })
         CHECK (! st::migratesFromUnpackaged (name, false));
 }

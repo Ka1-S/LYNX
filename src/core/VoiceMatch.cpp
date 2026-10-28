@@ -761,12 +761,19 @@ namespace deesser
 namespace
 {
 constexpr double thrOffset = -0.6009, thrSlope = -0.0097, ratio = 7.1171, knee = 1.2597, attackMs = 0.3027, releaseMs = 12.1503;
-constexpr double splitK = 0.3306, splitExp = 0.0491, scK = 1.0120, scExp = -0.0353, bpQ = 1.2988, bpOffset = 3.9011;
+constexpr double splitK = 0.3306, splitExp = 0.0491, scK = 1.0120, scExp = -0.0353;
+// round 165 [EXEC] (DeEsser 17.1 trial, tone stairs, thresholds −10 … −60): the reduction stops at 25.6 dB (wide band);
+// BandPass is the HighPass side chain followed by a 4th-order low-pass (two 2nd-order sections, Q 0.68) at 1.8435 x the
+// frequency (x (f / 5506)^-0.139: 1.75 x at 8 kHz: 9 … 14 kHz within 0.2 dB, 2 dB at 16 kHz): the trial's BandPass needs 0.3 / 0.7 / 1.8 / 4.4 / 11.9 dB more than its HighPass at 4.5 / 5.5 / 7 / 9 /
+// 12 kHz (dial 5506 Hz), this low-pass 0.06 dB rms from that (round 123's band-pass, Q 1.3 + 3.9 dB, was up to 8 dB off,
+// and the translator read every BandPass state as HighPass)
+constexpr double maxReductionDb = 25.6, bpLpK = 1.8435, bpLpExp = -0.139, bpLpQ = 0.68;
 
 void rbj (Biquad& b, int type, double f, double q, double sr) noexcept
 {
     const double w = 2.0 * pi * std::min (f, sr * 0.49) / sr, cw = std::cos (w), al = std::sin (w) / (2.0 * q);
     if (type == 0) b.set ((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + al, -2 * cw, 1 - al); // high-pass
+    else if (type == 2) b.set ((1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + al, -2 * cw, 1 - al); // low-pass
     else b.set (al, 0.0, -al, 1 + al, -2 * cw, 1 - al);                                     // band-pass (0 dB peak)
 }
 } // namespace
@@ -782,6 +789,8 @@ void DeEsser::reset() noexcept
 {
     sc1.reset();
     sc2.reset();
+    bp1.reset();
+    bp2.reset();
     lpX[0] = lpX[1] = lpY[0] = lpY[1] = 0.0;
     env = gr = 0.0;
 }
@@ -795,8 +804,10 @@ void DeEsser::design (const Settings& s) noexcept
     designedBp = s.bandPass;
     const double rel = f / 5506.0;
     const double fsc = f * scK * std::pow (rel, scExp);
-    rbj (sc1, s.bandPass ? 1 : 0, fsc, s.bandPass ? bpQ : 0.70710678, sr);
+    rbj (sc1, 0, fsc, 0.70710678, sr);
     sc2.b0 = sc1.b0; sc2.b1 = sc1.b1; sc2.b2 = sc1.b2; sc2.a1 = sc1.a1; sc2.a2 = sc1.a2;
+    rbj (bp1, 2, f * bpLpK * std::pow (rel, bpLpExp), bpLpQ, sr);
+    bp2.b0 = bp1.b0; bp2.b1 = bp1.b1; bp2.b2 = bp1.b2; bp2.a1 = bp1.a1; bp2.a2 = bp1.a2;
     const double k = std::tan (pi * std::min (f * splitK * std::pow (rel, splitExp), 0.45 * sr) / sr);
     lpB = k / (1.0 + k);
     lpA = (k - 1.0) / (k + 1.0);
@@ -806,17 +817,22 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
 {
     design (s);
     const double T = std::clamp (s.thresholdDb, -80.0, 0.0);
-    const double thr = T + thrOffset + thrSlope * (T + 24.2) + (s.bandPass ? bpOffset : 0.0);
+    const double thr = T + thrOffset + thrSlope * (T + 24.2);
     const double aA = coefMs (attackMs, sr), aR = coefMs (releaseMs, sr), out = dbToGain (s.outputDb);
     double maxGr = 0.0, maxO = -200.0;
     for (int i = 0; i < n; ++i)
     {
-        const double a = sc2.process (sc1.process (l[i], 0), 0), b = sc2.process (sc1.process (r[i], 1), 1);
+        double a = sc2.process (sc1.process (l[i], 0), 0), b = sc2.process (sc1.process (r[i], 1), 1);
+        if (s.bandPass)
+        {
+            a = bp2.process (bp1.process ((float) a, 0), 0);
+            b = bp2.process (bp1.process ((float) b, 1), 1);
+        }
         const double p = 0.5 * (a * a + b * b);
         env += (p > env ? aA : aR) * (p - env);
         const double o = 10.0 * std::log10 (std::max (env, 1e-24)) - thr;
         maxO = std::max (maxO, o);
-        gr = (1.0 - 1.0 / ratio) * (o > 30.0 * knee ? o : knee * std::log1p (std::exp (o / knee)));
+        gr = std::min (maxReductionDb, (1.0 - 1.0 / ratio) * (o > 30.0 * knee ? o : knee * std::log1p (std::exp (o / knee))));
         const double g = dbToGain (-gr);
         maxGr = std::max (maxGr, gr);
         if (s.listen)

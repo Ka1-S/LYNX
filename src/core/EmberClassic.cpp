@@ -34,18 +34,19 @@ double dbToGain (double db) noexcept { return std::pow (10.0, db / 20.0); }
 // The five styles' constants, fitted on the official trial (REA_rodada136 §1; tmp/vox136/lab). Style A is the one
 // every state of her corpus uses; E, N, T, P are fitted the same way on the same signal set (round 138: started from
 // A's constants with each style's measured colour FIR; mean null over the stairs, bursts and takes at drive 0 … 6:
-// E −16.3, N −16.6, T −12.1, P −12.5 dB, from −8.9 … −9.5 with A's curve; A: −25.2 dB).
+// E −16.3, N −16.6, T −12.1, P −12.5 dB, from −8.9 … −9.5 with A's curve; A: −25.2 dB). Round 165: each style's
+// measured Punish law (the small-signal gain Punish adds at drive 0 … 10, within 0.03 – 0.14 dB of the trial).
 const StyleModel styleTable[styleCount] {
     StyleModel { -0.255358, 3.28943, 9.75, -1.14311, 424.977, -0.326658, 1090.62, -0.367324, 0.539481, 1.51943, 1.53834, 2.58446, -0.356477, -1.10167, 69.6495, 124.432, 16.5416,
-                 { -0.050348522, 0.45404479, 0.79960583, -0.25489203, 0.00071080674, 0.13172658, -0.18265066, 0.1758486, -0.13859833, 0.089003814, -0.046502489, 0.012880354, 0.0057738622, -0.013574345, 0.012208355, -0.0082160702 } },
+                 { -0.050348522, 0.45404479, 0.79960583, -0.25489203, 0.00071080674, 0.13172658, -0.18265066, 0.1758486, -0.13859833, 0.089003814, -0.046502489, 0.012880354, 0.0057738622, -0.013574345, 0.012208355, -0.0082160702 }, 13.830, 0.4057 },
     StyleModel { -1.75235, 3.28943, 9.75, 1.11786, 1115.83, 0.0747911, 9922.27, 2.51661, 0.451642, 7.54995, 0.882348, 7.96975, -0.172261, -1.54865, 64.4605, 53.2492, 8.13625,
-                 { -0.10601218, 0.88559837, 0.52104064, -0.59799496, 0.51338433, -0.44356996, 0.3946877, -0.32920235, 0.27590921, -0.21574306, 0.16618424, -0.11710939, 0.082003896, -0.04956957, 0.029232918, -0.011986428 } }, // E
+                 { -0.10601218, 0.88559837, 0.52104064, -0.59799496, 0.51338433, -0.44356996, 0.3946877, -0.32920235, 0.27590921, -0.21574306, 0.16618424, -0.11710939, 0.082003896, -0.04956957, 0.029232918, -0.011986428 }, 14.012, 0.4787 }, // E
     StyleModel { -0.350645, 3.28943, 9.75, -1.63499, 632.752, 1.62653, 1283.86, 0.729425, 0.742618, 5.08067, 1.10494, 5.74673, -0.154669, -1.96319, 28.2141, 36.5461, 13.2041,
-                 { -0.057462716, 0.51475856, 0.59565603, -0.1951887, 0.20100539, -0.16211082, 0.1583298, -0.12293189, 0.11337933, -0.08247574, 0.070085289, -0.045254, 0.03620832, -0.01890969, 0.013629928, -0.0037943876 } }, // N
+                 { -0.057462716, 0.51475856, 0.59565603, -0.1951887, 0.20100539, -0.16211082, 0.1583298, -0.12293189, 0.11337933, -0.08247574, 0.070085289, -0.045254, 0.03620832, -0.01890969, 0.013629928, -0.0037943876 }, 14.139, 0.1029 }, // N
     StyleModel { -0.0156997, 3.28943, 9.75, -0.875387, 42.6041, -2.6432, 5406.14, 2.39267, 0.237349, 2.3023, 1.07218, 4.50339, -0.380718, -2.98134, 127.063, 102.321, 25.3318,
-                 { -0.095832879, 0.81800219, 0.58278911, -0.55857331, 0.43114637, -0.35812354, 0.31761663, -0.26122303, 0.22193496, -0.17084589, 0.13440571, -0.092138368, 0.067173398, -0.038256847, 0.024569006, -0.0080880511 } }, // T
+                 { -0.095832879, 0.81800219, 0.58278911, -0.55857331, 0.43114637, -0.35812354, 0.31761663, -0.26122303, 0.22193496, -0.17084589, 0.13440571, -0.092138368, 0.067173398, -0.038256847, 0.024569006, -0.0080880511 }, 14.017, 0.5118 }, // T
     StyleModel { 0.703021, 3.28943, 9.75, -0.757538, 174.47, 4.1792, 1155.66, 1.21455, 0.203818, 3.41136, 1.40577, 2.1345, -0.476152, -2.62538, 94.3472, 69.8909, 39.9236,
-                 { -0.07587156, 0.67775215, 0.59516886, -0.39260415, 0.32049256, -0.26406084, 0.24365413, -0.19383356, 0.17184911, -0.12649202, 0.10493743, -0.067138583, 0.053183781, -0.026498863, 0.020158807, -0.0039552972 } }, // P
+                 { -0.07587156, 0.67775215, 0.59516886, -0.39260415, 0.32049256, -0.26406084, 0.24365413, -0.19383356, 0.17184911, -0.12649202, 0.10493743, -0.067138583, 0.053183781, -0.026498863, 0.020158807, -0.0039552972 }, 13.924, 0.7414 }, // P
 };
 
 // analog biquad (b2 s² + b1 s + b0) / (a2 s² + a1 s + a0), s = j·f in Hz → digital by the bilinear transform
@@ -70,9 +71,34 @@ void shelf1 (P& f, double sr, double hz, double db, bool high) noexcept
     const double a0 = 1.0 + k, a1 = k - 1.0;
     f.b0 = b0 / a0; f.b1 = b1 / a0; f.a1 = a1 / a0;
 }
+// round 165 [EXEC trial, REA_rodada165ha §2]: style A with Punish on drives its curve differently (harder negative
+// knee, less dynamic bias) — fitted on the trial's renders at drives 1 / 3 / 6 / 10 (stairs, bursts, two takes): mean
+// null −10.0 dB with A's own curve → −17.4 dB. The other styles keep their own curve under Punish (not measured yet).
+StyleModel punishModelA()
+{
+    auto m = styleTable[0];
+    m.punishLawDb = 13.7233;
+    m.punishLawPerUnitDb = 0.346217;
+    m.outDb = -0.888831;
+    m.cPos = 0.471376;
+    m.pPos = 2.69529;
+    m.cNeg = 1.11787;
+    m.pNeg = 6.67158;
+    m.bias = -0.166177;
+    m.biasDyn = -0.249233;
+    m.envAttackMs = 130.526;
+    m.envReleaseMs = 40.9654;
+    return m;
+}
 } // namespace
 
 const StyleModel& styleModel (int style) noexcept { return styleTable[std::clamp (style, 0, styleCount - 1)]; }
+
+const StyleModel& punishModel (int style) noexcept
+{
+    static const StyleModel a = punishModelA();
+    return std::clamp (style, 0, styleCount - 1) == 0 ? a : styleModel (style);
+}
 
 // [EXEC] the trial's own value → text laws (VST3 parameter read-back, REA_rodada136 §1)
 double driveUnits (float v) noexcept { return 10.0 * std::clamp ((double) v, 0.0, 1.0); }
@@ -81,6 +107,12 @@ double lowCutHz (float v) noexcept { return 20.0 * std::pow (50.0, std::clamp ((
 double highCutHz (float v) noexcept { return 1000.0 * std::pow (20.0, std::clamp ((double) v, 0.0, 1.0)); }
 double outputDb (float v) noexcept { return -24.0 + 24.0 * std::clamp ((double) v, 0.0, 1.0); }
 int styleOf (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 4.0f), 0, styleCount - 1); }
+
+float autoOutput (float output, float driveFrom, float driveTo) noexcept
+{
+    const auto db = outputDb (output) + autoDbPerUnit * (driveUnits (driveTo) - driveUnits (driveFrom));
+    return (float) std::clamp ((db + 24.0) / 24.0, 0.0, 1.0);
+}
 
 // ---- the ×4 oversampler (same half-band polyphase scheme as mixsuite::Oversampler, shorter filters)
 Engine::Os4::Os4()
@@ -187,7 +219,7 @@ void Engine::reset() noexcept
 void Engine::set (const Settings& settings, const StyleModel* model)
 {
     s = settings;
-    m = model != nullptr ? *model : styleModel (s.style);
+    m = model != nullptr ? *model : s.punish && s.measuredPunish ? punishModel (s.style) : styleModel (s.style);
     design();
 }
 
@@ -237,7 +269,9 @@ void Engine::design()
         dryGain = dbToGain (db);
     }
     const double osr = sr * osFactor; // the curve (and the bias envelope) runs at 4×
-    gain = dbToGain (m.gain0Db + m.gainPerUnitDb * std::clamp (s.drive, 0.0, 10.0) + (s.punish ? m.punishDb : 0.0));
+    const double drive = std::clamp (s.drive, 0.0, 10.0);
+    const double punish = ! s.punish ? 0.0 : s.measuredPunish ? m.punishLawDb + m.punishLawPerUnitDb * drive : m.punishDb;
+    gain = dbToGain (m.gain0Db + m.gainPerUnitDb * drive + punish);
     out = dbToGain (m.outDb);
     dcA = std::exp (-2.0 * pi * m.dcHz / sr);
     envA = std::exp (-1.0 / (std::max (m.envAttackMs, 0.01) * 0.001 * osr));

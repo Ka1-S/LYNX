@@ -51,6 +51,7 @@ add_library(lynx_core STATIC
     src/core/ProjectSafety.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
+    src/core/MidiSync.cpp
     src/core/ThemePalette.cpp
     src/core/PluginLayout.cpp
     src/core/StateParams.cpp
@@ -88,6 +89,7 @@ add_library(lynx_core STATIC
     src/core/FreqShifterFl.cpp
     src/core/LowLifterFl.cpp
     src/core/VisualFx.cpp
+    src/core/FlExtraFx.cpp
     src/core/FruityDance.cpp
     src/core/Reeverb2.cpp
     src/core/LuxeVerb.cpp
@@ -300,6 +302,7 @@ if(LYNX_BUILD_APP)
         src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
         src/engine/AudioLogger.cpp
+        src/engine/MidiSyncIo.cpp
         src/engine/PreviewPlayer.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp
@@ -324,6 +327,7 @@ if(LYNX_BUILD_APP)
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
         src/ui/VisualEditors.cpp
+        src/ui/FlExtraEditors.cpp
         src/ui/VisualGl.cpp
         src/ui/DanceView.cpp
         src/ui/NewtoneEditor.cpp

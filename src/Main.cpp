@@ -3,6 +3,7 @@
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 #include "core/HardwareInsert.h"
 #include "core/EchoSuite.h"
 #include "core/LynxTune.h"
@@ -30,6 +31,7 @@
 #include "platform/Package.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "ui/VisualGl.h"
 #include "ui/DanceView.h"
 #include "ui/PluginPresetMenu.h"
@@ -453,6 +455,17 @@ public:
             return;
         }
 
+        if (args.contains ("--midisync-test"))
+        {
+            // LYNX --midisync-test report.txt ["output device"] ["input device"] (round 165f): MIDI clock timing
+            const auto i = args.indexOf ("--midisync-test");
+            const auto out = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].unquoted() : juce::String();
+            const auto in = args.size() > i + 3 && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
+            juce::File (args[i + 1].unquoted()).replaceWithText (lynx::MidiSyncIo::selfTest (out, in));
+            quit();
+            return;
+        }
+
         if (args.contains ("--devices") || args.contains ("--dispositivos")) // --dispositivos: legacy alias
         {
             // diagnostics: driver types and output devices JUCE offers (without opening any)
@@ -474,6 +487,10 @@ public:
                 for (const auto& name : type->getDeviceNames (true))
                     report << "  input=" << name << "\n";
             }
+            for (const auto& d : juce::MidiInput::getAvailableDevices())
+                report << "midi-in=" << d.name << "\n";
+            for (const auto& d : juce::MidiOutput::getAvailableDevices())
+                report << "midi-out=" << d.name << "\n";
 
             const auto flag = args.contains ("--devices") ? args.indexOf ("--devices") : args.indexOf ("--dispositivos");
             juce::File (args[flag + 1].unquoted()).replaceWithText (report);
@@ -754,6 +771,18 @@ public:
             // animates (demo signal) — round 122's check that an idle editor burns no CPU
             const auto i = args.indexOf ("--editorcpu");
             runEditorCpu (args[i + 1].unquoted());
+            return;
+        }
+
+        if (args.contains ("--flextrashot"))
+        {
+            // LYNX.exe --flextrashot <folder>: pictures of the editors of round 165g (Big Clock, Tuner, HTML NoteBook, Mute 2)
+            const auto i = args.indexOf ("--flextrashot");
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            lynx::AudioEngine shotEngine (false);
+            const auto ok = lynx::runFlExtraShots (shotEngine, juce::File (args[i + 1].unquoted()));
+            setApplicationReturnValue (ok ? 0 : 1);
+            quit();
             return;
         }
 
@@ -4701,6 +4730,33 @@ private:
                     editor->paintEntireComponent (g, false);
                 }
                 const auto file = out.getChildFile ("Auto-pan-tweak.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
+            }
+
+            // round 165: Ember's Classic voicing (the Decapitator role) in its one-screen panel
+            {
+                namespace em = lynx::mixsuite::ember;
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::ember);
+                fx.params[em::voicing] = 1.0f;
+                fx.params[em::classicDrive] = 0.35f;
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Ember Saturator-classic.png");
                 file.deleteFile();
                 juce::PNGImageFormat png;
                 if (auto stream = file.createOutputStream())
