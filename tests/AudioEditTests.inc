@@ -429,3 +429,57 @@ TEST (audioedit_wav_roundtrip_with_markers)
     const std::uint8_t junk[16] = { 'R', 'I', 'F', 'X' };
     CHECK (! ae::decodeWav (junk, sizeof (junk), mb));
 }
+
+// What FL hands a plugin about a WAV besides its audio (round 165g): cue / region starts, ACID beats
+TEST (audioedit_wav_extras_markers_and_acid)
+{
+    auto d = sineDoc (440.0, 0.05, 44100.0, 0.5f);
+    ae::addRegion (d, { 1500, 1900 }, "b");
+    ae::addMarker (d, 300, "a");
+    ae::addMarker (d, 2000);
+    auto bytes = ae::encodeWav (d, ae::WavFormat::int16);
+    // an ACID chunk: flags, root note, ?, ?, beats = 8, meter 4/4, tempo 120
+    const std::uint8_t acid[8 + 24] = { 'a', 'c', 'i', 'd', 24, 0, 0, 0, 2, 0, 0, 0, 60, 0, 0, 0x80, 0, 0, 0, 0,
+                                        8, 0, 0, 0, 4, 0, 4, 0, 0, 0, 0xf0, 0x42 };
+    bytes.insert (bytes.end(), acid, acid + sizeof (acid));
+    const auto riff = (std::uint32_t) bytes.size() - 8;
+    for (int k = 0; k < 4; ++k)
+        bytes[4 + (std::size_t) k] = (std::uint8_t) (riff >> (8 * k));
+    const auto x = ae::decodeWavExtras (bytes.data(), bytes.size(), d.audio.frames());
+    CHECK (x.markerStarts == (std::vector<std::int64_t> { 300, 1500, 2000 }));
+    CHECK (x.acidBeats == 8.0f);
+    // positions past the end are clamped; no chunks / not a WAV: nothing
+    const auto clamped = ae::decodeWavExtras (bytes.data(), bytes.size(), 1000);
+    CHECK (clamped.markerStarts == (std::vector<std::int64_t> { 300, 999, 999 }));
+    ae::Document plain = sineDoc (440.0, 0.01);
+    const auto p = ae::encodeWav (plain);
+    const auto none = ae::decodeWavExtras (p.data(), p.size(), plain.audio.frames());
+    CHECK (none.markerStarts.empty() && none.acidBeats == 0.0f);
+    const std::uint8_t junk[16] = { 'R', 'I', 'F', 'X' };
+    CHECK (ae::decodeWavExtras (junk, sizeof (junk), 10).markerStarts.empty());
+}
+
+// FL's auto slicing (core/FlAutoSlicer, round 165g): slice starts of the installation's Fruity Granulizer DLL on this
+// sample (5 square-wave hits; stereo 44.1 kHz and mono 48 kHz) [EXEC FL, tmp/r165g/py/gold.py]
+#include "core/FlAutoSlicer.h"
+TEST (fl_auto_slicer_matches_fl)
+{
+    const int n = 60000;
+    std::vector<float> x ((std::size_t) n, 0.0f);
+    std::vector<int> acc ((std::size_t) n, 0);
+    for (const int h : { 0, 9000, 21000, 30500, 47000 })
+        for (int i = h; i < n; ++i)
+        {
+            const int k = i - h, a = 20000 >> (k / 1500);
+            if (a == 0)
+                break;
+            acc[(std::size_t) i] = std::clamp (acc[(std::size_t) i] + ((k / 20) % 2 == 0 ? a : -a), -32768, 32767);
+        }
+    for (int i = 0; i < n; ++i)
+        x[(std::size_t) i] = (float) acc[(std::size_t) i] / 32768.0f;
+    const std::vector<std::int64_t> fl { 0, 9000, 21000, 30480, 46980 };
+    std::vector<float> r = x;
+    CHECK (lynx::flslice::autoSlice (x.data(), r.data(), n, 44100.0) == fl);
+    CHECK (lynx::flslice::autoSlice (x.data(), nullptr, n, 48000.0) == fl);
+    CHECK (lynx::flslice::autoSlice (nullptr, nullptr, 0, 44100.0).empty());
+}

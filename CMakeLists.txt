@@ -147,6 +147,7 @@ add_library(lynx_core STATIC
     src/core/NativeEngines.cpp
     src/core/Layer.cpp
     src/core/XyController.cpp
+    src/core/FlCurve.cpp
     src/core/ControlSurface.cpp
     src/core/VoltageController.cpp
     src/core/FabFilterStates.cpp
@@ -175,6 +176,7 @@ target_sources(lynx_core PRIVATE
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
     src/core/AudioEdit.cpp
+    src/core/FlAutoSlicer.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp

@@ -105,7 +105,7 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "grleds") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
                     || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0 || std::strcmp (item.display, "hwping") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
@@ -534,8 +534,8 @@ public:
             g.drawRoundedRectangle (box.reduced (0.5f), radius::md, 1.0f);
         }
         g.setColour (presetName.isNotEmpty() ? colour::textPrimary : colour::textSecondary);
-        g.setFont (font (type::small, presetName.isNotEmpty()));
-        g.drawText (presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight, true);
+        ui::drawFittingText (g, presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight,
+                             font (type::small, presetName.isNotEmpty()), 8.0f, 0.0f, 0.75f);
         drawArrow (g, prevButton(), juce::MathConstants<float>::pi, hoverHeader == 3 ? accent : colour::textSecondary);
         drawArrow (g, nextButton(), 0.0f, hoverHeader == 4 ? accent : colour::textSecondary);
     }
@@ -571,8 +571,7 @@ public:
             g.drawRoundedRectangle (r.withSizeKeepingCentre (w, r.getHeight()), 3.0f, 1.0f);
         }
         g.setColour (locked ? theme::colour::textPrimary : hasStyle (item, plugui::dim) ? colour::textDisabled : skin::captionColour());
-        g.setFont (font (juce::jmax (8.0f, 9.5f * scale()), true));
-        g.drawFittedText (caps (tr (item.label)), r.toNearestInt(), j, 1, 0.7f);
+        ui::drawFittingText (g, caps (tr (item.label)), r, j, font (juce::jmax (8.0f, 9.5f * scale()), true), 7.0f); // (round 165: fit, no "...")
     }
 
     void paintItem (juce::Graphics& g, const LayoutItem& item, int index, const EffectSlot& fx)
@@ -600,9 +599,8 @@ public:
                 {
                     // the plugin's name, big and quiet (FL's logos are not reproduced)
                     g.setColour (colour::bg4);
-                    g.setFont (font (r.getHeight() * 0.62f, true));
-                    g.drawFittedText (item.label, r.toNearestInt(),
-                                      hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight, 1, 0.8f);
+                    ui::drawFittingText (g, item.label, r, hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight,
+                                         font (r.getHeight() * 0.62f, true), r.getHeight() * 0.25f, 0.0f, 0.8f); // (smaller, never "Wav...")
                     break;
                 }
                 if (hasStyle (item, plugui::boxed))
@@ -779,18 +777,16 @@ public:
                     else
                         skin::button (g, r, false, hot, accent, radius::sm);
                     g.setColour (on ? colour::onAccent : colour::textSecondary);
-                    g.setFont (font (juce::jmax (8.0f, r.getHeight() * 0.8f), true));
                     if (item.label != nullptr)
-                        g.drawText (caps (tr (item.label)), r, juce::Justification::centred, false);
+                        ui::drawFittingText (g, caps (tr (item.label)), r, juce::Justification::centred, font (juce::jmax (8.0f, r.getHeight() * 0.8f), true), 6.5f);
                     break;
                 }
                 const auto box = juce::Rectangle<float> (16.0f * s, 9.0f * s).withCentre ({ r.getX() + 9.0f * s, r.getCentreY() });
                 skin::switchPill (g, box, on, accent, fx.enabled);
                 auto text = r.withTrimmedLeft (21.0f * s);
                 g.setColour (on ? colour::textPrimary : (hot ? colour::textSecondary : colour::textDisabled));
-                g.setFont (font (juce::jmax (8.0f, 9.5f * s), true));
                 if (item.label != nullptr)
-                    g.drawFittedText (caps (tr (item.label)), text.toNearestInt(), juce::Justification::centredLeft, 1, 0.7f);
+                    ui::drawFittingText (g, caps (tr (item.label)), text, juce::Justification::centredLeft, font (juce::jmax (8.0f, 9.5f * s), true), 7.0f);
                 break;
             }
 
@@ -2208,6 +2204,37 @@ public:
         else if (id == "hwping") // the hardware insert (round 164d): the round trip, the ping's state, what is missing
         {
             paintHwPing (g, r, fx);
+            return;
+        }
+        else if (id == "grleds") // round 165: a ladder of reduction LEDs (Ridge Strip: the console's 3 / 6 / 10 / 14 / 20 dB)
+        {
+            const auto db = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
+            auto area = r.reduced (1.0f * s);
+            const auto caption = area.removeFromBottom (14.0f * s);
+            static const int steps[] { 20, 14, 10, 6, 3 };
+            const auto h = area.getHeight() / 5.0f;
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            for (int k = 0; k < 5; ++k)
+            {
+                const auto cell = juce::Rectangle<float> (area.getX(), area.getY() + h * (float) k, area.getWidth(), h);
+                const auto led = cell.withWidth (cell.getHeight() * 0.62f).withSizeKeepingCentre (cell.getHeight() * 0.5f, cell.getHeight() * 0.5f)
+                                     .withX (cell.getX() + 2.0f * s);
+                const bool lit = fx.enabled && db >= (float) steps[k] - 0.05f;
+                g.setColour (lit ? accent : colour::gridBeat);
+                g.fillEllipse (led);
+                if (lit)
+                {
+                    g.setColour (accent.withAlpha (0.35f));
+                    g.drawEllipse (led.expanded (1.5f * s), 1.0f * s);
+                }
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (steps[k]), cell.withTrimmedLeft (led.getRight() - cell.getX() + 2.0f * s), juce::Justification::centredLeft, false);
+            }
+            if (item.label != nullptr && *item.label != 0)
+            {
+                g.setColour (colour::textSecondary);
+                g.drawText (caps (tr (item.label)), caption, juce::Justification::centred, false);
+            }
             return;
         }
         else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
@@ -4295,7 +4322,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "grleds") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());

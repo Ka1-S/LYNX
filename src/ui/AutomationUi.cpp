@@ -6,6 +6,7 @@
 
 #include "core/Effects.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "core/XyController.h"
 #include "core/MidiControls.h"
 #include "core/FlSynths.h"
@@ -37,6 +38,15 @@ juce::AudioPluginInstance* pluginFor (AudioEngine& engine, const AutomationTarge
             return &p->getInstance();
 
     return nullptr;
+}
+
+// "Main L offset", "Out 3 R scale" (the Voltage Controller's own parameters, round 165)
+juce::String voltageParamLabel (int param)
+{
+    static const char* outputs[] = { TR_NOOP ("Main L"), TR_NOOP ("Main R"), TR_NOOP ("Out 2 L"), TR_NOOP ("Out 2 R"),
+                                     TR_NOOP ("Out 3 L"), TR_NOOP ("Out 3 R"), TR_NOOP ("Out 4 L"), TR_NOOP ("Out 4 R") };
+    const auto output = tr (outputs[param % voltage::outputs]);
+    return param < voltage::outputs ? tr ("{0} offset", { output }) : tr ("{0} scale", { output });
 }
 
 // The CC / aftertouch / pitch bend value the plugin was last sent (or the controller's rest value).
@@ -714,6 +724,12 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
                      && song.channels[(std::size_t) t.index].instrument == InstrumentKind::controller
                      && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
                 param = t.param == envelopeControllerModXParam ? tr ("Mod X") : tr ("Mod Y"); // (round 164f)
+            else if (t.kind == AutomationTargetKind::channelParam && t.index >= 0 && t.index < (int) song.channels.size()
+                     && song.channels[(std::size_t) t.index].instrument == InstrumentKind::dashboard) // (round 165)
+                param = nameOf (surface::outputName (song.channels[(std::size_t) t.index].patcher.surface, t.param));
+            else if (t.kind == AutomationTargetKind::channelParam && t.index >= 0 && t.index < (int) song.channels.size()
+                     && song.channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0 && t.param < voltage::paramCount)
+                param = voltageParamLabel (t.param);
             else if (t.kind == AutomationTargetKind::effectParam && t.index < (int) song.mixer.size()
                      && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size())
             {

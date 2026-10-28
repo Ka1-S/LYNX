@@ -215,11 +215,11 @@ TEST (xy164_shape_and_output)
     auto p = lynx::xy::defaults (lynx::EffectKind::xyController);
     p[(std::size_t) lynx::xy::minimum (1)] = 0.2f;
     p[(std::size_t) lynx::xy::maximum (1)] = 0.6f;
-    CHECK (std::abs (lynx::xy::output (p, 1, 0.5) - 0.4f) < 1e-6f);
+    CHECK (std::abs (lynx::xy::output (lynx::EffectKind::xyController, p, 1, 0.5) - 0.4f) < 1e-6f);
     // min above max inverts the axis
     p[(std::size_t) lynx::xy::minimum (1)] = 1.0f;
     p[(std::size_t) lynx::xy::maximum (1)] = 0.0f;
-    CHECK (std::abs (lynx::xy::output (p, 1, 0.25) - 0.75f) < 1e-6f);
+    CHECK (std::abs (lynx::xy::output (lynx::EffectKind::xyController, p, 1, 0.25) - 0.75f) < 1e-6f);
 }
 
 TEST (xy164_effect_follows_goal)
@@ -286,7 +286,7 @@ TEST (xy164_fl_state)
     for (int o = 0; o < 2; ++o)
     {
         const auto constant = lynx::controllerConstantOutput ("Fruity X-Y Controller", d, o);
-        CHECK (constant && std::abs (*constant - lynx::xy::output (slot->params, o, slot->params[(std::size_t) lynx::xy::level (o)])) < 1e-3f);
+        CHECK (constant && std::abs (*constant - lynx::xy::output (slot->kind, slot->params, o, slot->params[(std::size_t) lynx::xy::level (o)])) < 1e-3f);
     }
 }
 

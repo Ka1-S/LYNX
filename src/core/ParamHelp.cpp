@@ -273,6 +273,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::ridgeStrip, "order" }, TR_NOOP ("Dynamics before or after the EQ") },
         { { K::ridgeStrip, "filters to sc" }, TR_NOOP ("The filters shape only the dynamics' side chain") },
         { { K::ridgeStrip, "comp mix" }, TR_NOOP ("Parallel compression: blends the uncompressed signal back in") },
+        { { K::ridgeStrip, "eq to sc" }, TR_NOOP ("The filters and the EQ shape only what the dynamics hear (de-essing, frequency-conscious compression); the audio keeps neither") },
         { { K::ridgeStrip, "filter split" }, TR_NOOP ("The filters go before the dynamics, even when the EQ is after them") },
         // round 145: the Vocal strip voicing
         { { K::ridgeStrip, "vocal strip" }, TR_NOOP ("The vocal channel strip: de-esser, de-ploser, three-band EQ and compander in any order") },
