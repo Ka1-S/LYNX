@@ -6,6 +6,7 @@
 #include "core/NativeEngines.h"
 #include "core/Preferences.h"
 #include "core/ProjectContents.h"
+#include "core/VideoPlayer.h"
 #include "core/VoltageController.h"
 #include "core/Vfx.h"
 #include "engine/PluginHost.h"
@@ -51,6 +52,13 @@ std::vector<GeneratorEntry> generatorEntries (AudioEngine& engine)
         c.name = "Voltage Controller";
         c.instrument = InstrumentKind::voltage;
         c.pluginState = voltage::write (voltage::Settings {});
+        return std::optional<ChannelDef> (c);
+    });
+    add ("Fruity Video Player", "Fruity Video Player", tr ("built-in"), 0, [] {
+        ChannelDef c;
+        c.name = "Fruity Video Player";
+        c.instrument = InstrumentKind::videoplayer;
+        c.pluginState = video::write (video::Settings {});
         return std::optional<ChannelDef> (c);
     });
 

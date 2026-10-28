@@ -3,6 +3,7 @@
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "core/Vfx.h"
+#include "core/VideoPlayer.h"
 #include "core/Scheduler.h"
 
 #include "core/DirectWave.h"
@@ -238,6 +239,7 @@ private:
             case InstrumentKind::dashboard:
             case InstrumentKind::voltage:
             case InstrumentKind::vfx:
+            case InstrumentKind::videoplayer:
             case InstrumentKind::patcher:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
@@ -2980,6 +2982,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return voltage::makeInstrument();
     if (kind == InstrumentKind::vfx)
         return std::make_unique<VfxInstrument>();
+    if (kind == InstrumentKind::videoplayer) // the video's sound, in sync with the song (round 165g)
+        return video::makeInstrument();
 
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
         return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);

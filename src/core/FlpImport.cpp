@@ -4,6 +4,7 @@
 #include "core/VoltageController.h"
 #include "core/XyController.h"
 #include "core/Vfx.h"
+#include "core/VideoPlayer.h"
 #include "core/Patcher.h"
 #include <filesystem>
 #include "core/EditorPolish.h"
@@ -1618,6 +1619,19 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                 }
             }
+            else if (name == "fruity video player")
+            {
+                // FL's state as it is (round 165g, core/VideoPlayer.h); the video's path through FL's folder names
+                if (auto vs = video::read (c.pluginState))
+                {
+                    if (vs->path.find ('%') != std::string::npos)
+                        if (const auto resolved = resolveFlPath (vs->path, options.roots); ! resolved.empty())
+                            vs->path = resolved;
+                    def.instrument = InstrumentKind::videoplayer;
+                    def.pluginState = video::write (*vs);
+                    adoptedFromPlugin = true;
+                }
+            }
             else if (name == "fruity dance")
             {
                 // a visual plugin: notes change the dance, its Gen_Render writes nothing (REA_rodada68 §8)
@@ -1921,6 +1935,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::flkeys
                      || def.instrument == InstrumentKind::granulizer || def.instrument == InstrumentKind::drumaxx
                      || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance
+                     || def.instrument == InstrumentKind::videoplayer
                      || def.instrument == InstrumentKind::directwave || def.instrument == InstrumentKind::soundfont)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
@@ -1946,7 +1961,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      && def.instrument == InstrumentKind::synth)
             {
                 const auto note = flextra::inertPluginNote (c.pluginName); // round 165g: ReWired, Video Player, FL Studio Mobile
-                if (c.pluginName == "ReWired" || c.pluginName == "Fruity Video Player")
+                if (c.pluginName == "ReWired")
                     def.muted = true; // no sound of their own in LYNX: the stand-in synth must not play their notes
                 ++r.unsupported[note.empty() ? c.pluginName : note]; // (Keyboard Controller only sends notes to other channels)
             }
