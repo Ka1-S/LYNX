@@ -1,5 +1,6 @@
 #include "ui/QuickAddPalette.h"
 #include "core/ControlSurface.h"
+#include "core/VideoPlayer.h"
 #include "core/VoltageController.h"
 
 #include "core/Effects.h"
@@ -168,6 +169,14 @@ public:
                                         targets.addInstrument (c);
                                     },
                                      "lynx:gen:Voltage Controller" });
+        instruments.all.push_back ({ "Fruity Video Player", tr ("built-in"), [this] {
+                                        ChannelDef c;
+                                        c.name = "Fruity Video Player";
+                                        c.instrument = InstrumentKind::videoplayer;
+                                        c.pluginState = video::write (video::Settings {});
+                                        targets.addInstrument (c);
+                                    },
+                                     "lynx:gen:Fruity Video Player" });
 
         // FL's own instrument engines (round 142): those this PC can make (the user's FL installation)
         for (const auto& e : natives::instrumentEngines())

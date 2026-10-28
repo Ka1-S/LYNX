@@ -48,6 +48,7 @@
 #include "ui/WaveformView.h"
 #include "ui/SoundFontEditor.h"
 #include "ui/VfxEditors.h"
+#include "ui/VideoPlayerView.h"
 
 namespace lynx
 {
@@ -3305,6 +3306,8 @@ std::unique_ptr<juce::Component> makeInstrumentPage (AudioEngine& engine, const 
     const auto kind = def->instrument;
     if (kind == InstrumentKind::fruitydance && ref.index >= 0)
         return makeDanceEditor (engine, ref.index); // round 165e
+    if (kind == InstrumentKind::videoplayer)
+        return makeVideoPlayerEditor (engine, ref.locate, ref.index); // round 165g
     if (kind == InstrumentKind::synth)
         return std::make_unique<SynthPanel> (engine, ref);
     if (isModelKind (kind))
@@ -3511,6 +3514,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return makeVfxEditor (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::fruitydance)
         return makeDanceEditor (engine, channel); // round 165e
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::videoplayer)
+        return makeVideoPlayerEditor (engine, channel); // round 165g
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
