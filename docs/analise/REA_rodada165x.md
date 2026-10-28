@@ -7,7 +7,10 @@ hosted in our own `tools/fxmeasure` (public VST3 parameters, saved states, rende
 
 ## Where I stopped
 
-@@STOPPED@@
+2026-10-28 12:25 (resumed after the 2nd BSOD, 09:14): all four items are coded (commits 4b1b4948 + checkpoint
+f5fd3e39, the attack's slow-cell cap / low-pass refit). Now: rebuild fxlynx + tests, re-run `glow/cmpatt.sh` and the
+tests, check the first-10-ms overshoot, then merge origin/main (23 behind), build-local with FL Data, Windows build,
+--plugui shots of Glow / Hush / Ember, land.
 
 ## 1. Glow Leveler ← CLA-2A: the attack
 
