@@ -2,7 +2,7 @@
 
 ## Where I stopped
 - 2026-10-28 19:40: fixes committed (driver panel helper + selftest "driver_panel", SerialJobs for audio-device.xml and
-  the glitch log, core tests tests/Crash13Tests.inc). build-local + Windows build (OUT=build-win-crash13) running.
+  the glitch log, core tests tests/Crash13Tests.inc). 20:30 Linux froze (disk full, zig caches); rebuilding from scratch (ZIG cache ~/.cache/zig-crash13*). Big data now on /mnt/e/lynx-work/crash13 (0.1.17 exe+pdb, symbolized crash).
   Next: Windows check of the build (panel buffer kept, no hang file from saveAudioDeviceState), land, notes, reply.
 
 ## Crash (LYNX.exe 0.1.17 + LYNX.pdb from /mnt/d/lynx-work/crash-reports/symbols/0.1.17, `LYNX.exe --symbolize`)
