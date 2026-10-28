@@ -65,3 +65,45 @@
   setNormalizedValue) and the error that stops the script. Script: code editor with Python colours and line
   numbers, Apply (Ctrl+Enter), Revert, Restart, "Line N: error" button that jumps to the line. Log: print() and
   errors (the same error repeated is counted, not flooded). API reference: LYNX's own text.
+
+## 3. Verification
+
+- Core tests (build-local with FL Data): every vfx_script test passes; 89/89 of FL's factory VFX Script presets
+  compile and run 2 s with a held chord without an error (slowest: Sustain Pedal Weighted / Constant Speed Slowdown,
+  2 s of audio in 0.25–0.5 s). Endless loop: stopped, audio block wait p95 1.9 ms, worst 5.9 ms. Runaway memory:
+  stopped at 768 MB with "MemoryError" in the editor.
+- FL vs LYNX renders [EXEC: FL64.exe /R of 12 projects made from FL's "Patcher (generator)" render test, a VFX
+  Script node with a factory script before Sytrus; LYNX --export of the same .flp]. Note detection per 11.6 ms frame
+  (tmp/vfxscript165/py/compare.py) and energy onsets (env.py), within FL's render length:
+
+| case | script | same notes per frame | onsets (time) |
+|---|---|---|---|
+| tut1 | Tutorial 1 (pass-through) | 100 % | identical |
+| tut2 | Tutorial 2 (+7, pan, velocity) | 98.8 % | identical |
+| tut3 | Tutorial 3 (onTick pulse every 48 ticks) | 91.3 % (release tails) | identical |
+| arp | Arpeggiator (Up, 2/beat) | 94.8 % | identical |
+| arpsync | Arpeggiator Sync, Speed 3 | 90.6 % | identical (after fix 2) |
+| harm | Harmonize | 100 % | identical notes |
+| snap | Snap To Scale (Enable, Down) | 100 % | identical |
+| contrary | Contrary Motion | 94.6 % | identical |
+| formula | Note Formula "note + 12" | 100 % (after fix 1) | identical |
+| repeat | Note Repeat | 97.3 % | identical |
+| micro | Microtune | 100 % | identical |
+| diag | own script: velocity, PPQ, tempo, onTick count | 84.3 % | identical; onTick count = FL's (after fix 1) |
+
+- Fix 1 [EXEC]: FL calls onTick while the song is stopped too, so before a render's first note a script has ticked
+  (FL's Note Formula compiles its formula in onTick: FL's first note was +12, LYNX's was not; the diag script's tick
+  counter at tick 288 was one lower in LYNX). LYNX now runs one stopped onTick before the first block after a
+  compile; the diag counter and the first note now match FL.
+- Fix 2 [EXEC]: the render test's Patcher channel has "cut itself" (cut group 1, cut by 1). LYNX turned each new
+  note's cut into an all-notes-off of the Patcher, which cleared the VFX Script's held input voices, so the synced
+  arpeggio never heard the release of the notes that started earlier and played on to the end of the render. FL
+  keeps them (its arpeggio stops at the notes' end, 2.17 s). A cut-group cut now stops the Patcher's instruments but
+  leaves its VFX nodes' voices (`Instrument::cut()`); stop / panic still clear them.
+- Left open: Contrary Motion: FL has a ~40 ms one-semitone-lower blip at each release (both pitches sound), LYNX
+  not; the tails then match. FL's onTick runs a few extra times before playback (diag: 290–299 by tick 288); LYNX's
+  one warm-up tick matches the measured note. FL renders stop at the song end, LYNX's export renders tails (tut3 /
+  arpsync keep generating notes while the transport runs on in the tail).
+- Screenshots: `LYNX --vfxshot prefix` (with LYNX_FL_INSTALL pointing at FL) writes the VFX Script editor with FL's
+  Snap To Scale (User interface tab), its Script / Log / API reference tabs and a script with a syntax error
+  (Script tab: "Line 8: SyntaxError: expected an expression, got def").

@@ -2470,7 +2470,10 @@ private:
             if (c.type == T::checkbox)
                 r.widget->setBounds (cell.removeFromLeft (28).withSizeKeepingCentre (26, 24));
             else if (c.type == T::combo || c.type == T::text)
-                r.widget->setBounds (cell.removeFromLeft (std::min (190, cell.getWidth() - 6)).withSizeKeepingCentre (std::min (190, cell.getWidth() - 6), 24));
+            {
+                const auto w = std::max (40, std::min (190, cell.getWidth() - 6));
+                r.widget->setBounds (cell.removeFromLeft (w).withSizeKeepingCentre (w, 24));
+            }
             else
                 r.widget->setBounds (cell.removeFromLeft (56));
             lineHeight = std::max (lineHeight, h);
