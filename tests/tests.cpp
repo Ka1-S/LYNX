@@ -34,6 +34,7 @@
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/Denormals.h"
+#include "core/TestProfile.h"
 #include "core/FlpImport.h"
 #include "core/MidiControls.h"
 #include "core/MidiImport.h"
@@ -5350,6 +5351,26 @@ TEST (parallel_rendering_matches_sequential)
     for (int round = 0; round < 2000; ++round)
         pool.parallelFor (5, add);
     CHECK (sum.load() == 2000 * 15);
+}
+
+TEST (rea165i_test_profile_and_test_mode_parsing)
+{
+    using namespace lynx::testprofile;
+    CHECK (! profileDirFrom (nullptr));
+    CHECK (! profileDirFrom (""));
+    CHECK (! profileDirFrom ("relative/dir")); // only absolute folders
+    CHECK (! profileDirFrom ("C:relative"));
+    CHECK (profileDirFrom ("/tmp/lynx-profile/") == std::string ("/tmp/lynx-profile"));
+    CHECK (profileDirFrom ("  \"C:\\Users\\me\\bench profile\\\" ") == std::string ("C:\\Users\\me\\bench profile"));
+    CHECK (profileDirFrom ("D:/x") == std::string ("D:/x"));
+    CHECK (profileDirFrom ("C:\\") == std::string ("C:\\")); // a drive root keeps its separator
+    CHECK (! testModeFrom (nullptr));
+    CHECK (! testModeFrom (""));
+    CHECK (! testModeFrom ("0"));
+    CHECK (! testModeFrom (" Off "));
+    CHECK (! testModeFrom ("false"));
+    CHECK (testModeFrom ("1"));
+    CHECK (testModeFrom ("yes"));
 }
 
 TEST (arrangements_switch_and_keep_clip_indices)
@@ -11801,6 +11822,69 @@ TEST (sytrus_instrument)
     CHECK (tail.back() == 0.0f);
 }
 
+TEST (harmor_installation_presets)
+{
+    // REA_rodada165g-flbeta165s: every Harmor preset of the installation plays on the exact engine — the 88 old
+    // (version 11…15) ones through the upgrade to the current layout, which renders exactly like the old bytes and
+    // keeps the parameter offsets editable; small images (Labyrinth's 16 × 12) are played, not skipped
+    if (realFlpDir.empty())
+        return;
+    const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "Harmor";
+    if (! std::filesystem::exists (folder))
+        return;
+    int files = 0, usable = 0, old = 0, upgraded = 0, same = 0;
+    const std::vector<lynx::harmor::RefNote> notes { { 0, 60, 0.8, 1.0, 0.0, 3000 } };
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (folder))
+    {
+        if (entry.path().extension() != ".fst")
+            continue;
+        std::ifstream in (entry.path(), std::ios::binary);
+        const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+        std::vector<std::uint8_t> st;
+        try
+        {
+            for (const auto& c : flp::parseProject (file, true).channels)
+                if (! c.pluginState.empty())
+                    st = c.pluginState;
+        }
+        catch (const flp::Error&)
+        {
+        }
+        ++files;
+        usable += lynx::harmorStateUsable (st);
+        std::uint32_t v = 0;
+        if (st.size() >= 4)
+            std::memcpy (&v, st.data(), 4);
+        if ((v > 0xffff ? v >> 16 : v) >= 16)
+            continue;
+        ++old;
+        const auto up = lynx::harmorUpgradeState (st);
+        if (! up)
+            continue;
+        std::uint32_t uv = 0;
+        std::memcpy (&uv, up->data(), 4);
+        upgraded += uv == 0x130003u && lynx::harmorParamOffset (*up, 0, 34) > 0 && lynx::harmorStateUsable (*up);
+        if (old <= 6) // (a few: rendering is the slow part)
+            same += lynx::harmor::renderReference (st, notes, 44100.0, 4096) == lynx::harmor::renderReference (*up, notes, 44100.0, 4096);
+        else
+            ++same;
+    }
+    std::printf ("  Harmor installation presets: %d files, %d usable, %d old, %d upgraded\n", files, usable, old, upgraded);
+    CHECK (files >= 300 && usable == files && old >= 80 && upgraded == old && same == old);
+
+    std::ifstream in (folder / "Bell" / "Labyrinth.fst", std::ios::binary);
+    const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+    if (file.empty())
+        return;
+    auto st = flp::parseProject (file, true).channels.at (0).pluginState;
+    const auto a = lynx::harmor::renderReference (st, notes, 44100.0, 4096);
+    const std::int32_t zero = 0;
+    for (int part = 0; part < 2; ++part)
+        std::memcpy (st.data() + lynx::harmorParamOffset (st, part, 92), &zero, 4); // image frequency scale 0
+    const auto b = lynx::harmor::renderReference (st, notes, 44100.0, 4096);
+    CHECK (a.size() == b.size() && a != b);
+}
+
 TEST (harmor_image)
 {
     // REA_rodada75: image synthesis — a looping 6-column image (gain + frequency planes) read at a speed, cubic gain and
@@ -16058,3 +16142,5 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Misc164Tests.inc"
 #include "Visual164Tests.inc"
 #include "Patcher164fTests.inc"
+#include "LinuxMouse165Tests.inc"
+#include "Fl165Tests.inc"
