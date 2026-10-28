@@ -601,6 +601,7 @@ private:
         // playback quality, no stems — the controls it doesn't use are off
         for (auto* c : std::initializer_list<juce::Component*> { &rateBox, &stemsBox, &masterFxToggle, &hqToggle, &polyToggle, &warmUpToggle })
             c->setEnabled (! realtime);
+        stemsBox.setEnabled (! realtime && onlyTracks.empty()); // a list of tracks locks the stem choice
         rangeBox.setItemEnabled (2, ! realtime);
         {
             // the boxes show what the export will use: real time = the Master's effects, the playback quality
