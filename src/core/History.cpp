@@ -48,13 +48,18 @@ bool sameRouting (const MixerTrack& a, const MixerTrack& b) noexcept
     return a.sends == b.sends && a.toMaster == b.toMaster && a.masterLevel == b.masterLevel;
 }
 
+bool sameLatency (const MixerTrack& a, const MixerTrack& b) noexcept
+{
+    return a.latencyMs == b.latencyMs && a.latencyBypass == b.latencyBypass && a.compensateMasterLatency == b.compensateMasterLatency;
+}
+
 bool sameTrack (const MixerTrack& a, const MixerTrack& b) noexcept
 {
     return a.name == b.name && a.volume == b.volume && a.pan == b.pan && a.muted == b.muted && a.solo == b.solo && sameEffects (a, b)
            && sameRouting (a, b) && a.stereo == b.stereo && a.colour == b.colour && a.invertPhase == b.invertPhase
            && a.swapChannels == b.swapChannels && a.eq == b.eq
            && a.inputChannel == b.inputChannel && a.inputStereo == b.inputStereo && a.monitor == b.monitor && a.recordSafe == b.recordSafe
-           && a.outputChannel == b.outputChannel && a.outputMode == b.outputMode;
+           && a.outputChannel == b.outputChannel && a.outputMode == b.outputMode && sameLatency (a, b);
 }
 
 bool sameClip (const Clip& a, const Clip& b) noexcept
@@ -171,6 +176,8 @@ ChangeLabel describeChange (const Song& before, const Song& after)
             return label (TR_NOOP ("Routing: {0}"), b.name);
         if (a.volume != b.volume || a.pan != b.pan)
             return label (TR_NOOP ("Mixer level: {0}"), b.name);
+        if (! sameLatency (a, b))
+            return label (TR_NOOP ("Track latency: {0}"), b.name);
         return label (TR_NOOP ("Mixer: {0}"), b.name);
     }
 
