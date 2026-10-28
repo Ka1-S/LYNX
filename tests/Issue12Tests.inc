@@ -272,3 +272,28 @@ TEST (issue12_sort_reads_each_changing_key_once)
     lynx::sortonce::byKey<int> (few, [] (int v) { return v * 10; }, [] (int a, int b) { return a < b; }, true);
     CHECK ((few == std::vector<int> { 3, 2, 1 }));
 }
+
+// Round 165q's find (issue #12, shortcuts): with the Undo history, Settings, Tempo tapper, Quick-add, Audio editor or a
+// plugin / channel window focused, Space, F12 or a user's key did nothing — those windows only knew Esc. The keys they
+// leave unused now run the global actions (as in FL), never a panel's keys, and a focused text field keeps its typing.
+TEST (issue12_secondary_windows_run_the_global_shortcuts)
+{
+    using namespace lynx::keys;
+    KeyMap map;
+    CHECK (map.findFromSecondaryWindow ({ space }, false, false) == "transport.playStop");
+    CHECK (map.findFromSecondaryWindow ({ f12 }, false, false) == "view.closeWindows");
+    CHECK (map.findFromSecondaryWindow ({ f10 }, false, false) == "view.midiSettings");
+    CHECK (map.findFromSecondaryWindow ({ 'M', ctrl }, false, false) == "transport.metronome");
+    CHECK (map.findFromSecondaryWindow ({ 'C' }, false, false).empty()); // the Playlist's Knife stays the Playlist's
+    CHECK (map.findFromSecondaryWindow ({ escape }, false, false).empty()); // Esc closes the window
+    // the user's key for a global action works there too (the 'C' Metronome of the report)
+    map.setChords ("transport.metronome", { { 'C' } });
+    CHECK (map.findFromSecondaryWindow ({ 'C' }, false, false) == "transport.metronome");
+    // typing into a text field: its letters, Space, arrows, Enter are text; F-keys and Ctrl chords still work
+    CHECK (map.findFromSecondaryWindow ({ 'C' }, true, false).empty());
+    CHECK (map.findFromSecondaryWindow ({ space }, true, false).empty());
+    CHECK (map.findFromSecondaryWindow ({ left }, true, false).empty());
+    CHECK (map.findFromSecondaryWindow ({ f12 }, true, false) == "view.closeWindows");
+    // the typing piano owns its letters
+    CHECK (map.findFromSecondaryWindow ({ 'C' }, false, true).empty());
+}

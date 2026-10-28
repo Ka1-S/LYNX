@@ -545,10 +545,16 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
             if (safe != nullptr)
                 safe->engine.getPluginHost().startBackgroundScan();
         });
+
+    // the keys a secondary window (tool, plugin, channel window) leaves unused run the global shortcuts, as in FL
+    setSecondaryWindowKeyHandler ([safe = juce::Component::SafePointer<MainComponent> (this)] (const juce::KeyPress& key) {
+        return safe != nullptr && safe->keyFromSecondaryWindow (key);
+    });
 }
 
 MainComponent::~MainComponent()
 {
+    setSecondaryWindowKeyHandler (nullptr);
     cancelProjectLoad(); // an open in progress uses the engine from its thread
     if (sessionLock != nullptr) // a clean exit: no "LYNX did not close properly" next time
         sessionMarker.deleteFile();
@@ -1112,6 +1118,14 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
 
     // 4. the key map
     const auto action = keyMap.find (chord, focusContext(), typingPiano);
+    return ! action.empty() && runAction (action);
+}
+
+bool MainComponent::keyFromSecondaryWindow (const juce::KeyPress& key)
+{
+    // (round 165q / issue #12) a text field keeps its typing keys; the rest runs the global actions
+    const auto typingIntoText = dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) != nullptr;
+    const auto action = keyMap.findFromSecondaryWindow (chordFromKeyPress (key), typingIntoText, typingPiano);
     return ! action.empty() && runAction (action);
 }
 
