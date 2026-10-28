@@ -3,16 +3,11 @@
 TEST (audit165_drop_targets_take_every_sample_the_browser_lists)
 {
     // FL's own pack samples are WavPack (.wv): the Browser listed and previewed them, but the Channel Rack ignored
-    // them when dropped (it only knew wav/aif/flac/ogg/mp3). Every drop target now asks SampleLibrary::isSampleFile.
-    using lynx::SampleLibrary;
-    for (const auto* name : { "Attack Kick 01.wv", "a.wav", "B.WAV", "c.aif", "d.aiff", "e.flac", "f.ogg", "g.mp3" })
-        CHECK (SampleLibrary::isSampleFile (juce::File::getCurrentWorkingDirectory().getChildFile (name)));
-    for (const auto* name : { "a.mid", "b.sf2", "c.flp", "d.txt", "e" })
-        CHECK (! SampleLibrary::isSampleFile (juce::File::getCurrentWorkingDirectory().getChildFile (name)));
-
-    // and the library has a reader for each of those extensions
-    SampleLibrary library;
-    const auto wildcard = library.wildcard().toLowerCase();
-    for (const auto& ext : juce::StringArray::fromTokens (SampleLibrary::sampleExtensions, ";", ""))
-        CHECK (wildcard.contains ("*." + ext));
+    // them when dropped (it only knew wav/aif/flac/ogg/mp3). Every drop target now asks one list (core/SampleFiles.h).
+    using lynx::isSampleExtension;
+    for (const auto* ext : { "wv", ".wv", "WV", "wav", ".WAV", "aif", "aiff", "flac", "ogg", "mp3" })
+        CHECK (isSampleExtension (ext));
+    for (const auto* ext : { "", ".", "mid", ".sf2", "flp", "wave", "w", "txt", "mp" })
+        CHECK (! isSampleExtension (ext));
+    CHECK (lynx::sampleFileExtensions.size() == 7);
 }

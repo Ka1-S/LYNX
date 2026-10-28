@@ -51,6 +51,7 @@
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
 #include "core/WavPack.h"
+#include "core/SampleFiles.h"
 #include "core/FlWrapper.h"
 #include "core/FlPluginDb.h"
 #include "core/MissingFiles.h"

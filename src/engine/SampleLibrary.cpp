@@ -10,6 +10,7 @@
 #include <set>
 
 #include "core/AudioEdit.h"
+#include "core/SampleFiles.h"
 #include "core/OggVorbis.h"
 #include "core/Mp3Decoder.h"
 #include "core/TimeStretch.h"
@@ -163,7 +164,7 @@ SampleLibrary::SampleLibrary()
 
 bool SampleLibrary::isSampleFile (const juce::File& file)
 {
-    return file.hasFileExtension (sampleExtensions);
+    return isSampleExtension (file.getFileExtension().toStdString());
 }
 
 juce::String SampleLibrary::wildcard() const
