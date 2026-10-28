@@ -129,7 +129,20 @@ struct RackState
     std::vector<int> threadedChannels, audioThreadChannels;
     std::vector<std::vector<int>> threadedLayers, audioThreadLayers;
     bool parallel = false;                            // worth splitting across threads
+    // Task graph (round 165i): the channels and the inserts as one dependency graph, so an insert starts as soon as
+    // the channels and inserts feeding it are done instead of waiting for every channel and for the whole previous
+    // layer (FL hands its mixer tracks to its threads by readiness too, REA_rodada165i). Tasks: channel c = c, insert
+    // t = graphChannels + t − 1. Each insert sums its own channels (in channel order) before its effects, so the
+    // arithmetic is the layered path's, bit for bit. Off (layers) when an insert or channel is pinned to the audio
+    // thread or the mixer routing has a cycle.
+    bool graphOk = false;
+    int graphChannels = 0;                            // channels in the graph (the first ones of song.channels)
+    std::vector<int> graphIndegree;                   // [task] tasks that must finish first
+    std::vector<int> graphNextStart, graphNext;       // [task] → successors (CSR)
+    std::vector<int> graphRoots;                      // tasks with nothing before them, heaviest kind first
+    std::vector<std::vector<int>> trackChannels;      // [track] the channels playing into it, in channel order
     void buildMixerGraph();
+    void buildTaskGraph (const std::vector<int>& depth);
 
     void buildAutomationTables();
     // The automation slots that drive `target` in a snapshot of `song` (its automations, then its pattern event
@@ -373,6 +386,16 @@ private:
     void mixHardwareOutputs (const RackState& state, int n) noexcept;
     int liveInputOffset = 0; // of the chunk within the process() block
     void mixLiveInput (const RackState& state, bool playing, int n) noexcept;
+    void mixLiveInputTrack (const RackState& state, int track, bool recording, bool playing, int n) noexcept;
+    // the task graph run (RackState::graphOk): per chunk, each task's unfinished predecessors and the ready queue
+    // (positions are taken in order by the pool's indices; a task is written to the next free position when its last
+    // predecessor finishes)
+    static constexpr int graphCapacity = maxChannels + maxMixerTracks;
+    std::unique_ptr<std::atomic<int>[]> graphPending = std::make_unique<std::atomic<int>[]> (graphCapacity);
+    std::unique_ptr<std::atomic<int>[]> graphSlots = std::make_unique<std::atomic<int>[]> (graphCapacity);
+    std::atomic<int> graphPushed { 0 };
+    bool runTaskGraph (const RackState& state, bool playing, int channels, int numSamples, MeterBank* meters) noexcept;
+    void sumChannelsInto (const RackState& state, int track, int channels, int n) noexcept;
     std::atomic<bool> profiling { false };
     std::unique_ptr<UnitTimes> units = std::make_unique<UnitTimes>();
     std::unique_ptr<ProcessTimes> times = std::make_unique<ProcessTimes>();

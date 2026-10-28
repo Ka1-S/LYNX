@@ -7,8 +7,9 @@
 #   version  (ubuntu)   reads the version (CMakeLists.txt) and the package label
 #   build    (ubuntu)   cross-compiles LYNX.exe with Zig 0.14.1 + JUCE 8.0.4 (scripts/build-windows-zig.sh)
 #   sign     (ubuntu)   SignPath signing request; skipped until the repository variable SIGNPATH_ENABLED is 'true'
-#   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip and the per-user
-#                       installer (NSIS, resources/installer/LYNX.nsi)
+#   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip, the per-user
+#                       installer (NSIS, resources/installer/LYNX.nsi) and the Microsoft Store package (MSIX,
+#                       docs/STORE.md), which it installs and self-tests with a test identity
 #   linux    (ubuntu)   CMake + GCC 13 build in an Ubuntu 22.04 container (glibc 2.35), glibc check, self-test,
 #                       AppImage and .tar.gz (scripts/package-linux.sh), offline start check of the AppImage
 #   macos    (macos)    CMake universal (arm64 + x86_64) build, self-test, ad-hoc signature (no Apple Developer ID,
@@ -231,6 +232,66 @@ jobs:
           if (-not (Test-Path "$inst\LYNX.exe")) { throw "installer did not install LYNX.exe" }
           Start-Process "$inst\Uninstall.exe" -ArgumentList '/S', "_?=$inst" -Wait
           if (Test-Path "$inst\LYNX.exe") { throw "uninstaller left LYNX.exe" }
+
+      # Microsoft Store package (round 165n, docs/STORE.md): an unsigned .msix the Store signs after certification.
+      # Its identity comes from Partner Center (Product identity) through repository variables; placeholders until then.
+      - name: Microsoft Store package (MSIX)
+        shell: pwsh
+        continue-on-error: true   # (new in 0.1.20: must not hold back the other packages; the step's result shows)
+        env:
+          MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          MSIX_PUBLISHER_DISPLAY: ${{ vars.MSIX_PUBLISHER_DISPLAY }}
+          MSIX_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME }}
+        run: |
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+          if (-not $sdk) { throw "Windows SDK (makeappx) not found" }
+          $tools = $sdk.DirectoryName; "Windows SDK tools: $tools"
+          $demo = "pkg\LYNX-$env:LABEL-windows-x64\Demo.lynx"
+          function Pack($layout, $out, [switch]$test) {
+            $a = @('scripts\make-msix-layout.py', '--version', $env:VERSION, '--bin', 'bin', '--out', $layout, '--extra', $demo, 'LICENSE', 'THIRD_PARTY.md', 'PRIVACY.md')
+            if ($test) { $a += '--test-identity' }
+            python @a; if ($LASTEXITCODE -ne 0) { throw "make-msix-layout failed" }
+            & "$tools\makepri.exe" createconfig /cf "$layout.priconfig.xml" /dq en-US_pt-BR /pv 10.0.0 /o | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
+            & "$tools\makepri.exe" new /pr $layout /cf "$layout.priconfig.xml" /of "$layout\resources.pri" /o
+            if ($LASTEXITCODE -ne 0) { throw "makepri new failed" }
+            & "$tools\makeappx.exe" pack /d $layout /p $out /o
+            if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed" }
+          }
+          New-Item -ItemType Directory -Force msix | Out-Null
+          Pack 'msix\store' "dist\LYNX-$env:LABEL-store.msix"
+          Pack 'msix\test' 'msix\LYNX-test.msix' -test
+          Get-Item "dist\LYNX-$env:LABEL-store.msix", 'msix\LYNX-test.msix' | Format-Table Name, Length
+
+      # the package installed for real (the test identity carries Windows' "unsigned" publisher OID, so it installs
+      # without a certificate) and LYNX run inside it: package identity, settings folder on the real disk (what
+      # Explorer opens), the self-test; then removed
+      - name: MSIX install test
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-AppxPackage -Path msix\LYNX-test.msix -AllowUnsigned
+          $pkg = Get-AppxPackage | Where-Object { $_.Name -eq ([xml](Get-Content msix\test\AppxManifest.xml)).Package.Identity.Name } | Select-Object -First 1
+          if (-not $pkg) { throw "package not installed" }
+          "installed: $($pkg.PackageFullName) at $($pkg.InstallLocation)"
+          try {
+            $alias = "$env:LOCALAPPDATA\Microsoft\WindowsApps\lynx.exe"
+            if (-not (Test-Path $alias)) { throw "execution alias lynx.exe missing" }
+            $p = Start-Process $alias -ArgumentList '--packageinfo', "$PWD\packageinfo.txt" -Wait -PassThru
+            Get-Content packageinfo.txt
+            if (-not (Select-String -Path packageinfo.txt -Pattern '^packaged=yes' -Quiet)) { throw "LYNX did not run with the package identity" }
+            if (-not (Select-String -Path packageinfo.txt -Pattern '^result=OK' -Quiet)) { throw "packageinfo failed (exit $($p.ExitCode))" }
+            $probe = "$env:LOCALAPPDATA\Packages\$($pkg.PackageFamilyName)\LocalCache\Roaming\LYNX\package-probe.txt"
+            if (-not (Test-Path $probe)) { throw "the settings folder is not on the real disk: $probe" }
+            "seen from outside the package: $probe"
+            $p = Start-Process $alias -ArgumentList '--selftest', "$PWD\msix-selftest.txt", "$PWD\msix-selftest.lynx" -Wait -PassThru
+            Get-Content msix-selftest.txt -Tail 3
+            if ($p.ExitCode -ne 0 -or -not (Select-String -Path msix-selftest.txt -Pattern '^result=OK' -Quiet)) { throw "self-test inside the package failed (exit $($p.ExitCode))" }
+          } finally {
+            Remove-AppxPackage -Package $pkg.PackageFullName
+          }
+          if (Get-AppxPackage | Where-Object { $_.PackageFullName -eq $pkg.PackageFullName }) { throw "package not removed" }
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:

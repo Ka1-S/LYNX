@@ -15,6 +15,8 @@ a tag push builds `LYNX.exe` from the tagged source, runs the self-test on Windo
   (`resources/linux/com.lynx_share.LYNX.appdata.xml`).
 - `LYNX-x.y.z-linux-x86_64.tar.gz` — Linux folder with `install.sh` (per-user install).
 - `LYNX-x.y.z-macos-universal.dmg` — macOS, ad-hoc signed.
+- `LYNX-x.y.z-store.msix` — the Microsoft Store package (unsigned; the Store signs it), uploaded by hand in Partner
+  Center. The workflow installs a test-identity copy of it and runs LYNX inside the package (`docs/STORE.md`).
 - `LYNX.exe` and `SHA256SUMS.txt` (SHA-256 of every file above).
 
 `workflow_dispatch` (Actions → Release → Run workflow, or `gh workflow run release.yml --ref <branch>`) builds and
@@ -32,3 +34,5 @@ Steps:
    `setup.exe /S /D=C:\some\test\folder`, then `C:\some\test\folder\Uninstall.exe /S`.
 4. `git tag vx.y.z-alpha && git push origin vx.y.z-alpha`; when the workflow finishes, edit the draft release notes
    and publish it.
+5. Microsoft Store: upload `LYNX-x.y.z-alpha-store.msix` as a new submission (`docs/STORE.md` › *Updating the Store
+   version*).
