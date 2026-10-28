@@ -88,7 +88,18 @@ analysed FLEngine project ([DECOMP], /mnt/d/lynx-work/rea165-rack), FL's demo pr
 - No FL audio null-compare of a looped pattern this round (no small FL project with loops to render); evidence is the
   REA rules + the demo .flp loop events import test (rack165_fl_demo_song_loops).
 
+## 4. Verification
+- Tests (tests/Rack165Tests.inc, 11): loop-length rules, loop types, polyrhythm expansion, burn to pattern, loop points
+  following channel delete / move, .flp loop events, FL demo "Song For You" pattern loops, Burn MIDI (echo + swing +
+  time, arpeggio to a new pattern), auto-sampler plan / render song / cuts / channel.
+- Windows GUI (scratch profile, test mode): looping project with Kick Bar / Hat Step (3 steps) / Snare 5 steps draws
+  the faint repeats and the loop-point column; the channel menu shows Receive notes from / Burn MIDI to / Loop point /
+  Create sampled instrument...; sampling the Kick (defaults: 12 takes of 6 s) finished in < 1 s and added
+  "Kick (sampled)" with 12 zones (16-bit stereo WAVs, peak −0.2 dBFS); the channel loops stayed on their channels.
+- Perf: the loop expansion runs when the engine snapshot is built (never on the audio thread). One-pass expansion:
+  100 patterns × 64 looping channels (410k played notes) = 35 ms per snapshot (was 226 ms before the one-pass
+  rewrite); a typical looping 4-bar pattern with 16 channels is well under 0.1 ms. Non-looping patterns cost nothing.
+
 ## Where I stopped
-- 2026-10-28 02:50: loops + Burn MIDI + Receive notes from implemented; building tests / GUI (batch 1).
-- Next: land batch 1; then the auto-sampler (design: render song with only the channel via ExportJob off the UI
-  thread, cut takes, write WAVs, new sampler channel with zones; header draft kept outside the tree).
+- 2026-10-28 03:40: everything implemented and verified (tests, Windows GUI); landing one batch (build-local with FL
+  Data + Windows build, then land.sh). Left: see §3.
