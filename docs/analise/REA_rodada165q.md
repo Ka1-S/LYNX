@@ -7,6 +7,8 @@ works (real windows, mouse and keyboard), with a fresh `LYNX_PROFILE_DIR` + `LYN
 (shots in /mnt/d/lynx-work/audit165/, not in git).
 
 ## Where I stopped
+- 2026-10-28 09:30: session 4 done (Sampler, export, Piano Roll, abuse). F4 + F6 committed (d3eae9c9). Next: verify
+  F2/F4/F6 on the branch's Windows build + --windowtest, then land.
 - 2026-10-28 09:10: sessions 1-3 done; F2 fix committed (05ab9e97), F4 cosmetic fix in progress; Windows build of
   the branch running. Earlier: 08:50 session 1-2 done on main's own Windows build (ea719caf, build-win/LYNX.exe). Results below.
   Next: Channel Rack / Sampler / Mixer / Piano Roll items, export overwrite, #11 items, abuse cases; then fix the FAILs
@@ -55,6 +57,10 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
 | 11 | Drop a Browser sample into the Channel Rack | PASS | f15: new "DL Breaker" sampler channel (drop from the OS file manager not automated) |
 | 11 | Double right-click-and-hold mutes a clip | PASS | j2/j3: clip veiled + strike line (the muted look) |
 | 11 | Playlist vertical zoom with Alt+wheel | PASS | j0/j1 |
+| 9 | Sampler fine tune reaches the audio | PASS | +53 cents on a 440 Hz sine → exported WAV peak 453.67 Hz (expected 453.63) |
+| 9 | Export over an existing file | PASS | Windows "replace?" prompt, file rewritten, "Export complete" |
+| 9 | Quantize 50% / Quantize starts in Piano Roll | PASS | menu entries with their shortcuts |
+| 11 | Piano Roll keyboard: velocity from the click position | PASS | left edge soft, right edge loud (master meter) |
 | 11 | FL window keys (Ctrl+F5 …) | PARTIAL | Ctrl+F5 works; F-keys are swallowed while the Playlist / Piano Roll has the focus (see Findings F1) |
 
 ## Findings (not in the posted claims, found on the way)
@@ -71,5 +77,13 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
   The driver now sends real scan codes; Ctrl+letter results from sessions 1-3 (Ctrl+A, Ctrl+H, Ctrl+Z) are re-checked.
 - F5 (minor, by design): clicking a built-in drum channel's name (Kick, Clap…) only selects it, while the hint bar says
   "[LMB] open/close the editor". They have no editor window (ChannelRackComponent::toggleEditor).
+- F6 (fixed here): Esc did not close the Quick-add palette while its search box had the focus (the TextEditor eats
+  Esc), though the palette's own hint says "Esc closes". search.onEscapeKey now closes the tool window.
+- F7 (note, not investigated): double-clicking a channel name opened Channel settings, while the hint promises the
+  Piano Roll.
+- Abuse (session 4, all survived): Pattern/Song toggled 40x while playing; Ctrl+Z/Ctrl+Y spam while playing; 6 Pro-Q 4
+  instances on the Master with windows opened while playing, 3 deleted (windows closed), undo/redo spam, Alt+F12.
+- Not testable here: MIDI input light / pitch bend (no MIDI device or loopMIDI on this machine); fine tune / stretch
+  are also covered by tests/Sampler162Tests.inc.
 - F4 (cosmetic, fixed here): Quick-add palette — long names ran under the right-hand source label; the source is now
   laid out first and the name is cut with "...".
