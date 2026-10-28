@@ -5,6 +5,7 @@
 #include "core/LoadTrace.h"
 #include "core/Patcherize.h"
 #include "core/Performance.h"
+#include "core/VideoPlayer.h"
 #include "core/Effects.h"
 #include "core/MixSuite.h"
 #include "core/HardwareInsert.h"
@@ -32,6 +33,7 @@
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
 #include "platform/Package.h"
+#include "ui/VideoPlayerView.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
 #include "ui/FlExtraEditors.h"
@@ -62,6 +64,7 @@
 #include "core/VoltageController.h"
 #include "ui/Controllers164.h"
 #include "ui/ExportDialog.h"
+#include "ui/QuickAddPalette.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
 #include "engine/ProjectPackage.h"
@@ -908,6 +911,15 @@ public:
             return;
         }
 
+        if (args.contains ("--videoshot") && args.indexOf ("--videoshot") + 2 < args.size())
+        {
+            // LYNX.exe --videoshot prefix video: the Video Player's editor (round 165g) at a few song positions, with
+            // the user's ffmpeg, as PNGs + report.txt (frames decoded, the sound track)
+            const auto i = args.indexOf ("--videoshot");
+            runVideoShot (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
         if (args.contains ("--vfxshot"))
         {
             // LYNX.exe --vfxshot prefix: the VFX note effects' editors (round 164b), on channels and in a Patcher, as PNGs
@@ -1104,6 +1116,7 @@ public:
     {
         startupTrace.mark ("before the audio engine");
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         startupTrace.mark ("audio engine + device");
         crashEngine = engine.get();
         lynx::crashreporter::watchAudioDevice (engine->getDeviceManager()); // (the session file names the device: crash reports)
@@ -3476,6 +3489,7 @@ private:
     {
         startupOptions = lynx::StartupOptions::load();
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         crashEngine = engine.get();
         createMainWindow();
         mainWindow->reveal();
@@ -3650,6 +3664,7 @@ private:
     {
         startupOptions = lynx::StartupOptions::load();
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         crashEngine = engine.get();
         // the user's saved device stays as it was: this run's choices are undone before quitting
         savedDeviceState = engine->getDeviceManager().createStateXml();
@@ -3773,6 +3788,7 @@ private:
                         const juce::String& inputName, int mode, int pdcSamples, int bufferSize)
     {
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         savedDeviceState = engine->getDeviceManager().createStateXml();
         auto text = std::make_shared<juce::String>();
         auto step = [report, text] (const juce::String& line) { *text << line << "\n"; report.replaceWithText (*text); };
@@ -3994,6 +4010,7 @@ private:
                           const juce::String& inputName, int bufferSize, bool inPatcher = false, juce::File bounceFile = {})
     {
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         savedDeviceState = engine->getDeviceManager().createStateXml();
         auto text = std::make_shared<juce::String>();
         auto step = [report, text] (const juce::String& line) { *text << line << "\n"; report.replaceWithText (*text); };
@@ -5191,6 +5208,65 @@ private:
         quit();
     }
 
+    void runVideoShot (const juce::String& prefix, const juce::String& videoPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        // the message loop runs while the frames decode (modal loops are off): a timer takes one snapshot per step
+        struct VideoShot final : juce::Timer
+        {
+            lynx::AudioEngine offline { false };
+            std::unique_ptr<juce::Component> editor;
+            juce::String prefix, report;
+            int step = 0;
+            std::function<void()> done;
+            void moveTo (double seconds)
+            {
+                offline.getTransport().positionTicks.store (seconds * offline.getSong().bpm / 60.0 * lynx::ppq);
+            }
+            void timerCallback() override
+            {
+                static constexpr double times[] = { 0.0, 1.5, 3.25 };
+                if (step > 0 && editor != nullptr)
+                    savePng (editor->createComponentSnapshot (editor->getLocalBounds()), prefix + "-" + juce::String (step - 1) + ".png");
+                if (editor == nullptr || step >= (int) std::size (times))
+                {
+                    stopTimer();
+                    juce::File (prefix + "-report.txt").replaceWithText (report);
+                    if (done)
+                        done();
+                    return;
+                }
+                moveTo (times[step++]);
+            }
+        };
+        static std::unique_ptr<VideoShot> shot;
+        shot = std::make_unique<VideoShot>();
+        shot->prefix = prefix;
+        auto& offline = shot->offline;
+        lynx::videoview::install (offline);
+        lynx::Song song;
+        song.mixer = lynx::Song::defaultMixer (2);
+        lynx::ChannelDef c;
+        c.name = "Fruity Video Player";
+        c.instrument = lynx::InstrumentKind::videoplayer;
+        lynx::video::Settings vs;
+        vs.path = juce::File (videoPath).getFullPathName().toStdString();
+        vs.delay = lynx::video::unitsPerSecond / 2; // the video starts at 0.5 s
+        c.pluginState = lynx::video::write (vs);
+        song.channels.push_back (c);
+        song.patterns.emplace_back();
+        offline.setSong (std::move (song));
+        offline.dispatchPendingMessages();
+        auto& report = shot->report;
+        report << "ffmpeg: " << lynx::findFfmpeg().getFullPathName() << "\n";
+        report << lynx::videoview::report (vs.path).fromFirstOccurrenceOf ("Input #0", true, false).upToFirstOccurrenceOf ("At least", false, false) << "\n";
+        shot->editor = lynx::makeChannelSettingsPanel (offline, 0);
+        if (shot->editor != nullptr)
+            shot->editor->setVisible (true);
+        shot->done = [this] { juce::MessageManager::callAsync ([this] { shot.reset(); quit(); }); };
+        shot->startTimer (1500);
+    }
+
     void runDanceShot (const juce::String& prefix)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -5579,6 +5655,34 @@ private:
         lynx::PatcherWindows::shootMenus (offline, true, lynx::vfx::kindCount, 0, [&] (const juce::Image& image, const juce::String& name) {
             savePng (image, prefix + "-patcher-menu-" + name + ".png");
         });
+
+        // a plugin renamed in the Plugin database ("1_EQ", FL): the Quick-add palette and the mixer slot show the new name
+        if (juce::SystemStats::getEnvironmentVariable ("LYNX_TEST_MODE", {}).isNotEmpty())
+        {
+            const auto key = std::string ("lynx:fx:") + lynx::effectInfo (lynx::EffectKind::parametricEq).name;
+            offline.getPluginHost().setPluginName (key, "1_EQ");
+            offline.editSong ([] (lynx::Song& s) {
+                if (s.mixer.size() > 1)
+                {
+                    lynx::EffectSlot slot;
+                    slot.kind = lynx::EffectKind::parametricEq;
+                    s.mixer[1].effects.push_back (slot);
+                }
+            });
+            offline.dispatchPendingMessages();
+            {
+                lynx::QuickAddTargets targets;
+                targets.addInstrument = [] (lynx::ChannelDef) {};
+                targets.addEffect = [] (lynx::EffectSlot) {};
+                auto palette = lynx::makeQuickAddPalette (offline, std::move (targets));
+                savePng (palette->createComponentSnapshot (palette->getLocalBounds()), prefix + "-quickadd-renamed.png");
+            }
+            ui.selectTabForSnapshot (3);
+            ui.getMixerForSnapshot().selectTrack (1);
+            offline.dispatchPendingMessages();
+            savePng (ui.createComponentSnapshot (ui.getLocalBounds()), prefix + "-mixer-renamed.png");
+            offline.getPluginHost().setPluginName (key, "");
+        }
     }
 
     void runPerfShot (const juce::String& prefix, const juce::String& projectPath)

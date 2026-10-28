@@ -69,6 +69,8 @@ struct MidiPortRoute
     bool operator== (const MidiPortRoute&) const = default;
 };
 std::vector<MidiPortRoute> midiOutputsOf (const PatcherDoc& doc, int fromPin);
+// The "To LYNX" MIDI ports a VFX node's outputs are cabled to (round 165c): what the VFX plays goes out on them
+std::vector<int> vfxHostPorts (const PatcherDoc& doc);
 // Pin menu helpers (FL's Events submenu): "Deactivate unused" keeps only the pins with a cable.
 void deactivateUnusedMidiPins (PatcherDoc& doc, bool fromNode);
 
@@ -109,6 +111,11 @@ public:
     void queueNoteOnPort (int port, int key, float velocity, int midiChannel, int offset) noexcept;
     void queueNoteOffPort (int port, int key, int midiChannel, int offset) noexcept;
     bool takesMidiPort (int port) const noexcept;
+    // a voice property of a note that came in on MIDI port `port` (a Channel Rack VFX's output, round 165c): the
+    // instruments on that pin take it (VFX nodes as a property event of that voice)
+    void voicePropertyPort (int port, int key, int prop, float value, int midiChannel) noexcept;
+    // what the VFX nodes sent to "To LYNX" MIDI ports since the last call (round 165c); the rest wait
+    int takeHostEvents (Instrument::PortEvent* out, int max) noexcept;
     // a controller's mod wheel, other CCs, channel pressure and pitch wheel played into the Patcher's channel (round
     // 164e): like FL's Patcher (it takes MIDI input and passes it on), the instruments cabled to "From LYNX" notes get
     // them as if they were the channel (hosted plugins the MIDI message, LYNX's samplers the bend)
@@ -220,6 +227,9 @@ private:
     bool playing = false;
     void runVfx (int n, double bpm) noexcept;
     void routeVfxOutput (int node, const vfx::Event& e) noexcept;
+    static constexpr int hostEventCapacity = 512;
+    std::array<Instrument::PortEvent, hostEventCapacity> hostEvents {};
+    int hostEventCount = 0;
     void playNoteOut (const NoteOut& o) noexcept;
     void renderNodes (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int start, int n, double bpm) noexcept;
     std::vector<PatchParam> published;

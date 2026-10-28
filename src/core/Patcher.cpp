@@ -219,6 +219,7 @@ struct Graph::Node
     vfx::Processor* vfx = nullptr;                    // a VFX node's processor (owned by its instrument)
     std::vector<MidiTarget> midiOutTargets;           // a plugin node: what its MIDI output pin reaches
     std::vector<std::vector<MidiTarget>> vfxTargets;  // [voice output] what it reaches
+    std::vector<std::vector<int>> vfxHostPorts;       // [voice output] the "To LYNX" MIDI ports it is cabled to
 
     struct Head
     {
@@ -450,7 +451,15 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
         node.vfx->prepare (rate);
         const auto kind = node.vfx->kind();
         for (int k = 0; k < vfx::outputCount (kind); ++k)
+        {
             node.vfxTargets.push_back (midiTargetsOf (doc, i, k));
+            std::vector<int> ports;
+            for (const auto& w : doc.wires)
+                if (w.kind == PatchWire::Kind::midi && w.enabled && w.from == i && w.fromPort == k && w.to == patchToHost && w.toPort >= 0
+                    && w.toPort < patchMidiPorts && std::find (ports.begin(), ports.end(), w.toPort) == ports.end())
+                    ports.push_back (w.toPort);
+            node.vfxHostPorts.push_back (std::move (ports));
+        }
         vfxQueues[(std::size_t) i] = std::make_unique<VfxQueue>();
         hasVfx = true;
     }
@@ -954,6 +963,41 @@ void Graph::controlChange (int cc, float value) noexcept
     forNoteTargets ([&] (Instrument& i) { i.controlChange (cc, value); });
 }
 
+void Graph::voicePropertyPort (int port, int key, int prop, float value, int midiChannel) noexcept
+{
+    if (port < 0 || port >= patchMidiPorts)
+        return;
+    forLayeredTargets (pinTargets[(std::size_t) patchMidiPortPin (port)], 2, key, [&] (const MidiTarget& t, int k, float, float, float, bool) {
+        if (t.vfx)
+        {
+            if (auto& q = vfxQueues[(std::size_t) t.node])
+            {
+                vfx::Event e;
+                e.type = vfx::Event::Type::prop;
+                e.voice.key = k;
+                e.voice.colour = (t.midiChannel >= 0 ? t.midiChannel : std::max (0, midiChannel)) & 15;
+                e.id = vfx::inputId (k, e.voice.colour);
+                e.prop = (vfx::Prop) std::clamp (prop, 0, 4);
+                e.value = value;
+                q->in.add (e);
+            }
+        }
+        else if (auto& i = nodes[(std::size_t) t.node]->instrument)
+            i->voiceProperty (k, prop, value);
+    });
+}
+
+int Graph::takeHostEvents (Instrument::PortEvent* out, int max) noexcept
+{
+    const auto n = std::min (hostEventCount, std::max (0, max));
+    for (int k = 0; k < n; ++k)
+        out[k] = hostEvents[(std::size_t) k];
+    for (int k = n; k < hostEventCount; ++k)
+        hostEvents[(std::size_t) (k - n)] = hostEvents[(std::size_t) k];
+    hostEventCount -= n;
+    return n;
+}
+
 bool Graph::takesMidiPort (int port) const noexcept
 {
     return port >= 0 && port < patchMidiPorts && ! pinTargets[(std::size_t) patchMidiPortPin (port)].empty();
@@ -1201,6 +1245,23 @@ void Graph::routeVfxOutput (int node, const vfx::Event& e) noexcept
     const auto& targets = nodes[(std::size_t) node]->vfxTargets;
     if (e.output < 0 || e.output >= (int) targets.size())
         return;
+    // cabled to "To LYNX" MIDI ports (round 165c): the rack plays it on those ports at the next chunk
+    if (e.type != vfx::Event::Type::program)
+        for (const auto port : nodes[(std::size_t) node]->vfxHostPorts[(std::size_t) e.output])
+            if (hostEventCount < hostEventCapacity)
+            {
+                auto& h = hostEvents[(std::size_t) hostEventCount++];
+                h.port = port;
+                h.key = e.voice.key;
+                h.channel = e.voice.colour & 15;
+                h.prop = e.type == vfx::Event::Type::prop ? (int) e.prop : -1;
+                h.value = e.type == vfx::Event::Type::prop ? e.value : e.type == vfx::Event::Type::on ? std::max (1.0e-6f, e.voice.velocity) : 0.0f;
+                h.pan = e.voice.pan;
+                h.cents = e.voice.cents;
+                h.modX = e.voice.modX;
+                h.modY = e.voice.modY;
+                h.release = e.voice.release;
+            }
     const auto type = e.type == vfx::Event::Type::on ? 1 : e.type == vfx::Event::Type::off ? 0 : 2;
     forLayeredTargets (targets[(std::size_t) e.output], type, e.voice.key, [&] (const MidiTarget& t, int k, float gain, float pan, float cents, bool viaLayer) {
         auto ev = e;
@@ -1263,6 +1324,12 @@ void Graph::playNoteOut (const NoteOut& o) noexcept
         case vfx::Event::Type::prop:
             i->voiceProperty (v.key, (int) e.prop, e.value);
             break;
+        case vfx::Event::Type::program: // (a VFX Sequencer passing a program change on, round 165c)
+        {
+            const std::uint8_t m[2] { (std::uint8_t) (0xC0 | (channel & 15)), (std::uint8_t) std::clamp ((int) e.value, 0, 127) };
+            i->midiMessage (m, 2);
+            break;
+        }
     }
 }
 
@@ -1471,6 +1538,11 @@ public:
     void noteOffMidi (int key, int midiChannel) noexcept override { graph.noteOffMidi (key, midiChannel); }
     void noteOnPort (int port, int key, float velocity, int midiChannel) noexcept override { graph.noteOnPort (port, key, velocity, midiChannel); }
     void noteOffPort (int port, int key, int midiChannel) noexcept override { graph.noteOffPort (port, key, midiChannel); }
+    void voicePropertyPort (int port, int key, int prop, float value, int midiChannel) noexcept override
+    {
+        graph.voicePropertyPort (port, key, prop, value, midiChannel);
+    }
+    int takePortEvents (PortEvent* out, int max) noexcept override { return graph.takeHostEvents (out, max); }
     void slideTo (int key, float cents, float samples) noexcept override { graph.slideTo (key, cents, samples); }
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override { graph.setNextNoteExpression (pan, cents, porta); }
     void setNextNoteModulation (float modX, float modY) noexcept override { graph.setNextNoteModulation (modX, modY); }
@@ -1817,6 +1889,16 @@ std::vector<int> midiInputPorts (const PatcherDoc& doc)
         if (w.kind == PatchWire::Kind::midi && w.enabled && w.from == patchFromHost && w.fromPort > 0
             && patchPinMidiPort (w.fromPort) < patchMidiPorts)
             addSorted (ports, patchPinMidiPort (w.fromPort));
+    return ports;
+}
+
+std::vector<int> vfxHostPorts (const PatcherDoc& doc)
+{
+    std::vector<int> ports;
+    for (const auto& w : doc.wires)
+        if (w.kind == PatchWire::Kind::midi && w.enabled && w.to == patchToHost && w.toPort >= 0 && w.toPort < patchMidiPorts && w.from >= 0
+            && w.from < (int) doc.nodes.size() && doc.nodes[(std::size_t) w.from].generator && vfx::kindOf (doc.nodes[(std::size_t) w.from].channel))
+            addSorted (ports, w.toPort);
     return ports;
 }
 
