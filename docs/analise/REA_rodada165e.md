@@ -33,7 +33,7 @@ art (procedural dancer, moves picked by notes), FL's Fruity Dance channels impor
 ## GPU safety (after the BSOD)
 
 - No continuous repainting: frames only when the message thread hands one over (30/s editor, 60/s full screen,
-  a third in silence), vsync on; live picture at most 1920 x 1080; fixed small loop counts in the shaders.
+  a third in silence), vsync on; live picture at most 1280 x 720 (scaled up on screen); fixed small loop counts in the shaders.
 - Session note "visualizer GPU: start/stop": a crash with the GPU view drawing turns the GPU path off at the next
   start (Main.cpp) with a message.
 - Checks: shaders compiled and rendered on Linux (Xvfb + Mesa llvmpipe, software); real Windows GPU at most a few
@@ -91,3 +91,32 @@ art (procedural dancer, moves picked by notes), FL's Fruity Dance channels impor
   project has no dance channel). The channel's editor (live preview, move, mirrored, shown, size, speed, outfit
   colour, put back, the key map) replaces the old "silent" page. Channel Rack › Add › Fruity Dance makes one.
 - The audio thread only stores the note's key in a 16-entry lock-free ring (`dance::Signals`); the UI reads it.
+
+## 4. ZGameEditor presets on import [CODE]
+
+- `visual::fromZge` (VisualFx.cpp) now maps ZGE's GPU categories to the shader layers instead of dropping them or
+  faking them with a flash: Feedback\ (Kaleido → Kaleido feedback, WormHole → Spin tunnel, WarpBack → Warp,
+  BoxedIn / FrameBlur → Echo, the rest → Zoom trails); Postprocess\ (Bloom / Blooming / Starburst / Whitehole →
+  Bloom with Youlean Bloom's amount / threshold / radius / opacity read; blurs, Smudge, Watercolor, Raindrops → Blur;
+  Color Correction / Shaper / Fast HSV / Luminosity / ColorCyclePalette → Colour correction (Youlean's contrast and
+  saturation read); Dot Matrix / Point Cloud / Ascii → Dot matrix; Dither / Fast Static → Film grain; Inverter,
+  Glitch, Edge Detect (+ Notebook Drawings), RGB Shift, ScanLines, Vignette (amount + size read), Kaleidoscope,
+  Pixelate; AudioShake / ParameterShake / Handheld → Shake); Terrain\ and Physics\Heightfield → Spectrum mountains /
+  Shaded hills (CubesAndSpheres → Cube grid); Object Arrays\, Physics\, MatCap → Reactive sphere / Ring tunnel / Cube
+  grid by name; Scenes\ by name → 3D object, hills, clouds, cubes or tunnel; Clouds\, Tunnel\, Canvas effects\ and
+  Patterns\ → the Canvas effects by name (cells, electric, warp stars, kaleidoscope, plasma).
+- A ZGE scene left with only feedback / post-process layers keeps them over LYNX's default scene (they need a
+  picture below). Effects still without a counterpart are listed in the import report as before.
+- Tests: visual165_zgameeditor_gpu_mapping; Visual164's GoopFlow case now maps its terrain (4 layers).
+
+## 5. Verification
+
+- Tests (tests/Visual165Tests.inc): shader layers round trip (type, effect, blend), ZGE GPU mapping, dance state /
+  key map / poses, the silent dance channel's signals. build-local with FL Data: see "Where I stopped".
+- Linux, Xvfb + Mesa llvmpipe (software GL, no real GPU): every GPU scene compiled and drew (`--visualtest`, report
+  "GPU views 8, result=OK"); llvmpipe time per 1040 x 720 frame 5.6–24 ms (Spectrum mountains and Cube city the
+  heaviest) — a real GPU is far faster; the audio-path cost of the Visualizer is unchanged (~0.01 % of a block).
+  Bugs found and fixed there: JUCE's text vanished after a shader layer (texture units left bound → `resetState()`
+  resets units 4..0 and the 2D pass calls it first); the canvas pass sampled its own target.
+- `--danceshot`: the moves sheet (11 moves × 4 phases), the editor and a frame over the workspace — original lynx
+  character, readable at 0.6 to 2× size; a mirrored dancer faces the other way.
