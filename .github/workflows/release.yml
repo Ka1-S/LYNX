@@ -237,6 +237,7 @@ jobs:
       # Its identity comes from Partner Center (Product identity) through repository variables; placeholders until then.
       - name: Microsoft Store package (MSIX)
         shell: pwsh
+        continue-on-error: true   # (new in 0.1.20: must not hold back the other packages; the step's result shows)
         env:
           MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
           MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
@@ -268,6 +269,7 @@ jobs:
       # Explorer opens), the self-test; then removed
       - name: MSIX install test
         shell: pwsh
+        continue-on-error: true
         run: |
           Add-AppxPackage -Path msix\LYNX-test.msix -AllowUnsigned
           $pkg = Get-AppxPackage | Where-Object { $_.Name -eq ([xml](Get-Content msix\test\AppxManifest.xml)).Package.Identity.Name } | Select-Object -First 1
