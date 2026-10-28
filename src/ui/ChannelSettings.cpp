@@ -383,7 +383,9 @@ private:
             lfos.show (c->sampler.lfo);
         }
 
-        if (auto* w = findParentComponentOfClass<juce::DocumentWindow>())
+        // only its own window: as a tab of the channel's window it left that window titled "Modulation - ..." while the
+        // Sampler page showed (issue #12)
+        if (auto* w = findParentComponentOfClass<juce::DocumentWindow>(); w != nullptr && w->getContentComponent() == this)
             w->setName (tr ("Modulation - {0}", { juce::String::fromUTF8 (c->name.c_str()) }));
     }
 

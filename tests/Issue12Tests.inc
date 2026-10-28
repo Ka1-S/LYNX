@@ -235,4 +235,40 @@ TEST (issue12_send_level_is_an_automation_target)
 
     mixerops::swapTracks (song, 2, 3);
     CHECK (song.patterns[(std::size_t) song.currentPattern].events.back().target == (AutomationTarget { AutomationTargetKind::mixerSend, 1, 3 }));
+
+// Crash (0.1.18, the user's crash report): cycling quickly through samples crashed in WaveformCache's disk-cache pruning
+// — std::sort's comparator read each file's access time on every comparison, the times changed during the sort, and
+// the sort ran past the array. The pruning now reads every key once (sortonce::byKey, used by engine/FileSort.h).
+TEST (issue12_sort_reads_each_changing_key_once)
+{
+    // a key that changes on every read, like a cache file's access time while other threads read and delete files
+    std::vector<int> items;
+    for (int i = 0; i < 2000; ++i)
+        items.push_back ((i * 7919) % 2000);
+    std::vector<int> reads (2000, 0);
+    unsigned clock = 12345;
+    auto changingKey = [&] (int item) {
+        ++reads[(std::size_t) item];
+        clock = clock * 1103515245u + 12345u;
+        return (long long) (clock >> 8) % 50; // (many ties too)
+    };
+    std::vector<long long> seen (2000, 0);
+    auto recordingKey = [&] (int item) { return seen[(std::size_t) item] = changingKey (item); };
+    lynx::sortonce::byKey<int> (items, recordingKey, [] (int a, int b) { return a < b; });
+    CHECK (items.size() == 2000);
+    CHECK (std::all_of (reads.begin(), reads.end(), [] (int n) { return n == 1; }));
+    for (std::size_t i = 1; i < items.size(); ++i)
+    {
+        const auto a = seen[(std::size_t) items[i - 1]], b = seen[(std::size_t) items[i]];
+        CHECK (a < b || (a == b && items[i - 1] < items[i]));
+    }
+    auto sorted = items;
+    std::sort (sorted.begin(), sorted.end());
+    for (int i = 0; i < 2000; ++i)
+        CHECK (sorted[(std::size_t) i] == i); // nothing lost or duplicated
+
+    // newest first
+    std::vector<int> few { 3, 1, 2 };
+    lynx::sortonce::byKey<int> (few, [] (int v) { return v * 10; }, [] (int a, int b) { return a < b; }, true);
+    CHECK ((few == std::vector<int> { 3, 2, 1 }));
 }
