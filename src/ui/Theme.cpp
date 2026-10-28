@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <vector>
 
 #include "ui/Icons.h"
 #include "ui/PluginSkin.h"
@@ -414,7 +415,9 @@ LookAndFeel::LookAndFeel()
 juce::String uiFontForLanguage (const juce::String& languageId)
 {
     // first installed family wins (Windows 10/11 and macOS ship these; Linux: Noto CJK / Source Han / WenQuanYi...)
-    std::initializer_list<const char*> families;
+    // (a std::vector: assigning a braced list to a std::initializer_list variable leaves it dangling — it crashed
+    // LYNX at start-up on Windows in Japanese / Chinese)
+    std::vector<const char*> families;
     if (languageId == "ja")
         families = { "Yu Gothic UI", "Meiryo UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", "Noto Sans JP",
                      "Source Han Sans JP", "IPAexGothic", "IPAPGothic", "TakaoPGothic", "VL PGothic" };
