@@ -87,6 +87,10 @@ struct RackState
         std::shared_ptr<DelayLine> delay;
     };
     std::vector<HwRoute> hwRoutes;
+    // FL's "Bypass track latency compensation › When recording or not playing" (REA round 165f-mixer): these tracks'
+    // output delays (sendDelays[t], their hardware route) are skipped while the transport is stopped or recording.
+    std::vector<char> bypassWhenIdle; // [track]
+    bool anyBypassWhenIdle = false;
 
     // Current latencies of instruments and effects, in the same layout as `latencies`.
     std::vector<int> currentLatencies() const;
@@ -336,6 +340,7 @@ private:
     void renderChannel (const RackState& state, int channel, int n) noexcept;
     void processTrack (const RackState& state, int track, int n, MeterBank* meters) noexcept;
     void pullInputs (const RackState& state, int track, int n) noexcept;
+    void updatePdcBypass (const RackState& state, bool playing) noexcept;
     static void applyStereo (const MixerTrack& track, float* l, float* r, int n) noexcept;
     void deliverToEffects (const RackState& state, const NoteEvent& e) noexcept; // (round 162)
     float* channelBuffer (int channel, int side) noexcept;
@@ -432,6 +437,8 @@ private:
     std::vector<TrackEqState> trackEqs; // built-in EQ of each track
     double chunkTick = 0.0;             // start of the block (for the global LFOs)
     bool chunkPlaying = false;          // the song plays during the block (effects that follow the transport)
+    bool pdcBypassNow = false;          // the "When recording or not playing" tracks skip their PDC delays this chunk
+    bool pdcBypassBefore = false;       // ... and did in the previous chunk (back to compensated: their lines are emptied)
     void applyTrackEq (const MixerTrack& track, int t, bool bypassed, float* l, float* r, int n) noexcept;
     static constexpr float silenceLevel = 1.5849e-5f;  // -96 dBFS
     int blockCapacity = 0;

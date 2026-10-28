@@ -291,6 +291,135 @@ int sidechainTo (Song& song, int from, int to)
     return linked;
 }
 
+namespace
+{
+// FL's "only": the source stops sending anywhere (its sends and its route to the Master)
+void clearRoutes (Song& song, int from)
+{
+    auto& track = song.mixer[(std::size_t) from];
+    track.sends.clear();
+    track.toMaster = false;
+}
+
+bool routeOne (Song& song, int from, int to, RouteKind kind)
+{
+    if (! isInsert (song, from) || from == to || to < 0 || to >= (int) song.mixer.size())
+        return false;
+    const auto sidechain = kind == RouteKind::sidechain || kind == RouteKind::sidechainOnly;
+    if (sidechain && to == 0)
+        return false; // the Master has no side input
+    if (to != 0 && ! song.routes (from, to) && ! song.canRoute (from, to))
+        return false;
+
+    if (kind == RouteKind::routeOnly || kind == RouteKind::sidechainOnly)
+        clearRoutes (song, from);
+
+    if (sidechain)
+        sidechainTo (song, from, to);
+    else
+        song.setRoute (from, to, true);
+    return true;
+}
+} // namespace
+
+int routeSelectedTo (Song& song, const std::vector<int>& selected, int to, RouteKind kind)
+{
+    int routed = 0;
+    for (auto from : selected)
+        if (from != to && routeOne (song, from, to, kind))
+            ++routed;
+    return routed;
+}
+
+int routeToSelected (Song& song, int from, const std::vector<int>& selected, RouteKind kind)
+{
+    if (! isInsert (song, from))
+        return 0;
+    if (kind == RouteKind::routeOnly || kind == RouteKind::sidechainOnly)
+    {
+        // (only once, before the first route: FL clears this track's routes, then adds each selected one)
+        clearRoutes (song, from);
+        kind = kind == RouteKind::routeOnly ? RouteKind::route : RouteKind::sidechain;
+    }
+    int routed = 0;
+    for (auto to : selected)
+        if (to != from && routeOne (song, from, to, kind))
+            ++routed;
+    if (routed == 0 && song.mixer[(std::size_t) from].sends.empty())
+        song.mixer[(std::size_t) from].toMaster = true; // nothing could be routed: never leave it without an output
+    return routed;
+}
+
+bool hasDefaultName (const Song& song, int track)
+{
+    if (track < 0 || track >= (int) song.mixer.size())
+        return false;
+    const auto& name = song.mixer[(std::size_t) track].name;
+    return name.empty() || name == "Insert " + std::to_string (track);
+}
+
+int createSubmix (Song& song, const std::vector<int>& selected, int to, const std::string& name)
+{
+    if (! isInsert (song, to))
+        return 0;
+
+    std::vector<int> routed;
+    for (auto from : selected)
+        if (from != to && routeOne (song, from, to, RouteKind::routeOnly))
+            routed.push_back (from);
+    if (routed.empty())
+        return 0;
+
+    const auto colour = song.mixer[(std::size_t) to].colour;
+    for (auto t : routed)
+    {
+        song.mixer[(std::size_t) t].colour = colour;
+        if (! name.empty() && hasDefaultName (song, t))
+            song.mixer[(std::size_t) t].name = name;
+    }
+    if (! name.empty())
+        song.mixer[(std::size_t) to].name = name + " master";
+
+    // a group when the routed tracks are one contiguous run of one dock (and `to` joins it when it is next to it)
+    const auto order = displayOrder (song);
+    auto position = [&] (int t) { return (int) (std::find (order.begin(), order.end(), t) - order.begin()); };
+    std::vector<int> places;
+    for (auto t : routed)
+        places.push_back (position (t));
+    std::sort (places.begin(), places.end());
+    const auto dock = song.mixer[(std::size_t) routed.front()].dock;
+    const auto sameDock = std::all_of (routed.begin(), routed.end(), [&] (int t) { return song.mixer[(std::size_t) t].dock == dock; });
+    if (sameDock && places.back() - places.front() + 1 == (int) places.size())
+    {
+        auto first = places.front(), last = places.back();
+        const auto at = position (to);
+        if (song.mixer[(std::size_t) to].dock == dock)
+        {
+            if (at == first - 1)
+                first = at;
+            else if (at == last + 1)
+                last = at;
+        }
+        if (order[(std::size_t) first] > 0)
+            song.mixer[(std::size_t) order[(std::size_t) first]].separator = true;
+        if (last + 1 < (int) order.size() && order[(std::size_t) last + 1] > 0)
+            song.mixer[(std::size_t) order[(std::size_t) last + 1]].separator = true;
+    }
+    return (int) routed.size();
+}
+
+int resetManualLatency (Song& song)
+{
+    int count = 0;
+    for (auto& t : song.mixer)
+        if (t.latencyMs != 0.0f)
+        {
+            t.latencyMs = 0.0f;
+            ++count;
+        }
+    return count;
+}
+
 bool moveEffectSlot (Song& song, int track, int from, int to)
 {
     if (track < 0 || track >= (int) song.mixer.size())

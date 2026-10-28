@@ -76,16 +76,23 @@ private:
         }
 
         const auto& e = shown[(std::size_t) row];
-        g.setFont (theme::font (theme::type::body));
-        g.setColour (theme::colour::textPrimary);
-        g.drawText (e.name, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
+        auto area = juce::Rectangle<int> (8, 0, width - 16, height);
 
+        // the source on the right first, then the name in what is left (cut with "..."): a long name no longer runs
+        // under the source (round 165q)
         if (e.detail.isNotEmpty())
         {
-            g.setFont (theme::font (theme::type::caption));
+            const auto caption = theme::font (theme::type::caption);
+            const auto detailWidth = juce::jmin (juce::GlyphArrangement::getStringWidthInt (juce::Font (caption), e.detail) + 2, area.getWidth() * 2 / 5);
+            g.setFont (caption);
             g.setColour (theme::colour::textSecondary);
-            g.drawText (e.detail, 8, 0, width - 16, height, juce::Justification::centredRight, true);
+            g.drawText (e.detail, area.removeFromRight (detailWidth), juce::Justification::centredRight, true);
+            area.removeFromRight (10);
         }
+
+        g.setFont (theme::font (theme::type::body));
+        g.setColour (theme::colour::textPrimary);
+        g.drawText (e.name, area, juce::Justification::centredLeft, true);
     }
 
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override
@@ -106,6 +113,8 @@ public:
         search.addListener (this);
         search.addKeyListener (this);
         search.setWantsKeyboardFocus (true);
+        // "Esc closes" (the hint below): the search box used to swallow Esc, so the window stayed open (round 165q)
+        search.onEscapeKey = [this] { closeToolWindowOf (*this); };
         addAndMakeVisible (search);
 
         for (auto* l : { &instrumentsTitle, &effectsTitle })
