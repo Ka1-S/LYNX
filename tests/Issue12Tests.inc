@@ -301,3 +301,43 @@ TEST (issue12_secondary_windows_run_the_global_shortcuts)
     // the typing piano owns its letters
     CHECK (map.findFromSecondaryWindow ({ 'C' }, false, true).empty());
 }
+
+// Issue #12: an automation clip on the Sampler's Cutoff reaches the sound (setParameter on the audio thread), keeps its
+// value when the song is re-applied unchanged, and lets go when the knob is turned by hand.
+TEST (issue12_sampler_cutoff_automation_changes_the_sound)
+{
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    for (int i = 0; i < 6000; ++i)
+        data->left.push_back (std::sin (0.6f * (float) i) * 0.25f); // ~4.6 kHz
+
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sampler;
+    auto energyOf = [] (lynx::Instrument& sampler) {
+        sampler.allNotesOff();
+        sampler.noteOn (60, 0.8f);
+        std::vector<float> l (4000), r (4000);
+        sampler.render (l.data(), r.data(), 4000, 0.7f, 0.7f);
+        double e = 0.0;
+        for (std::size_t i = 1000; i < l.size(); ++i)
+            e += (double) l[i] * l[i];
+        return e;
+    };
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    sampler->prepare (48000.0);
+    sampler->configure (c, 120.0);
+    const auto open = energyOf (*sampler);
+
+    sampler->setParameter (lynx::samplerparam::cutoff, 0.0f); // the clip at its bottom: 20 Hz
+    const auto automated = energyOf (*sampler);
+    sampler->configure (c, 120.0); // the song re-applied unchanged (any edit elsewhere): the automation keeps its value
+    const auto kept = energyOf (*sampler);
+    c.sampler.cutoff = 19000.0f; // the knob turned by hand
+    sampler->configure (c, 120.0);
+    const auto byHand = energyOf (*sampler);
+
+    CHECK (open > 1.0);
+    CHECK (automated < open * 0.05);
+    CHECK (kept < open * 0.05);
+    CHECK (byHand > open * 0.5);
+}
