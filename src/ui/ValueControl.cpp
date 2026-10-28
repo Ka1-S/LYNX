@@ -403,6 +403,29 @@ void hideValueTip()
 
 // --- hints -------------------------------------------------------------------------------------
 
+void drawFittingText (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area, juce::Justification just, juce::Font font,
+                      float minHeight, float room, float minScale)
+{
+    room = juce::jmax (area.getWidth(), room);
+    auto width = juce::GlyphArrangement::getStringWidth (font, text);
+    for (auto h = font.getHeight(); width > room && h > minHeight;)
+    {
+        h = juce::jmax (minHeight, h - 0.5f);
+        font = font.withHeight (h);
+        width = juce::GlyphArrangement::getStringWidth (font, text);
+    }
+    g.setFont (font);
+    auto box = area;
+    if (width > area.getWidth() && room > area.getWidth())
+    {
+        const auto w = juce::jmin (room, width + 2.0f);
+        box = just.testFlags (juce::Justification::left)    ? area.withWidth (w)
+              : just.testFlags (juce::Justification::right) ? area.withLeft (area.getRight() - w)
+                                                            : area.withSizeKeepingCentre (w, area.getHeight());
+    }
+    g.drawFittedText (text, box.toNearestInt(), just, 1, minScale);
+}
+
 void setHint (juce::Component& c, const juce::String& text, bool hasMenu, bool automatable)
 {
     c.getProperties().set (hintProperty, text);

@@ -1,6 +1,7 @@
 #include "ui/SettingsPages.h"
 #include "platform/Paths.h"
 #include "platform/FileTypes.h"
+#include "platform/Package.h"
 
 #include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
@@ -93,7 +94,7 @@ public:
 
         for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
                                                                  &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox, &menuLabel, &menuBox,
-                                                                 &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &gpuRendering, &splash, &startupSound, &scanAtStart, &menuEntry,
+                                                                 &wavesLabel, &wavesBox, &stereoWaves, &noteNamesLabel, &noteNamesBox, &blackNotesLabel, &blackNotesBox, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &gpuRendering, &splash, &startupSound, &scanAtStart, &menuEntry,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups, &unusedTakes,
                                                                  &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote,
@@ -134,6 +135,17 @@ public:
         wavesBox.setSelectedId (options.waveSpectral ? 2 : 1, juce::dontSendNotification);
         wavesBox.onChange = [this] { change ([&] { options.waveSpectral = wavesBox.getSelectedId() == 2; }); };
         toggle (stereoWaves, tr ("Stereo (left and right channels apart)"), options.waveStereo, [this] (bool on) { options.waveStereo = on; });
+        styleLabel (noteNamesLabel, tr ("Note names"));
+        noteNamesBox.addItem (tr ("English (C, D, E)"), 1);
+        noteNamesBox.addItem (tr ("Germanic (H for B)"), 2);
+        noteNamesBox.addItem (tr ("Solfège (do, re, mi)"), 3);
+        noteNamesBox.setSelectedId (juce::jlimit (0, 2, options.noteNames) + 1, juce::dontSendNotification);
+        noteNamesBox.onChange = [this] { change ([&] { options.noteNames = noteNamesBox.getSelectedId() - 1; }); };
+        styleLabel (blackNotesLabel, tr ("Black notes"));
+        blackNotesBox.addItem (tr ("Sharps (#)"), 1);
+        blackNotesBox.addItem (tr ("Flats (b)"), 2);
+        blackNotesBox.setSelectedId (options.noteFlats ? 2 : 1, juce::dontSendNotification);
+        blackNotesBox.onChange = [this] { change ([&] { options.noteFlats = blackNotesBox.getSelectedId() == 2; }); };
         styleLabel (pluginStyleLabel, tr ("Plugin style"));
         pluginStyleBox.addItem (tr ("Automatic (each plugin its own style)"), 1);
         for (int i = 0; i < skin::styleCount; ++i)
@@ -228,7 +240,7 @@ public:
                                   "your name, file names or projects. It goes to lynx-share.com only with your consent (Help > Report a problem... "
                                   "sends one by hand)."));
 
-        for (auto* b : { &languageBox, &scaleBox, &menuBox, &wavesBox, &pluginStyleBox, &editInBox, &undoBox, &autosaveBox, &keepBox, &crashBox })
+        for (auto* b : { &languageBox, &scaleBox, &menuBox, &wavesBox, &noteNamesBox, &blackNotesBox, &pluginStyleBox, &editInBox, &undoBox, &autosaveBox, &keepBox, &crashBox })
             styleCombo (*b);
         juce::ignoreUnused (engine, persistent);
     }
@@ -244,6 +256,8 @@ private:
         menuBox.setBounds (r.row (menuLabel, 160));
         wavesBox.setBounds (r.row (wavesLabel, 0));
         stereoWaves.setBounds (r.indented (24));
+        noteNamesBox.setBounds (r.row (noteNamesLabel, 220));
+        blackNotesBox.setBounds (r.row (blackNotesLabel, 160));
         pluginStyleBox.setBounds (r.row (pluginStyleLabel, 300));
         reducedEffects.setBounds (r.full (24));
        #if JUCE_WINDOWS
@@ -322,8 +336,8 @@ private:
     GeneralOptions options;
     SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") };
-    juce::Label languageLabel, languageNote, scaleLabel, menuLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
-    juce::ComboBox crashBox, languageBox, scaleBox, menuBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
+    juce::Label languageLabel, languageNote, scaleLabel, menuLabel, wavesLabel, noteNamesLabel, blackNotesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
+    juce::ComboBox crashBox, languageBox, scaleBox, menuBox, wavesBox, noteNamesBox, blackNotesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
     juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, menuEntry, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };
@@ -822,6 +836,9 @@ private:
             case prefs::DriverKind::asio:
                 return tr ("Low-latency drivers. LYNX ASIO, FL Studio ASIO and ASIO4ALL work with any device; a manufacturer's ASIO driver works with its own device.");
             case prefs::DriverKind::lynxAsio:
+                if (platform::runningPackaged()) // the Store build: the package folder moves with every update
+                    return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
+                               "To use it in other programs, install LYNX from lynx-share.com (the installer registers it).");
                 return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
                            "For other programs, run \"Register LYNX ASIO\" in LYNX's folder once.");
             case prefs::DriverKind::coreAudio:

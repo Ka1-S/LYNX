@@ -55,7 +55,7 @@ CORE="$CORE src/core/SoundFont.cpp src/core/SoundFontLoad.cpp src/core/SoundFont
 # Ogg Vorbis decoding as FL does (REA round 77)
 CORE="$CORE src/core/OggVorbis.cpp"
 # export options, MP3 encoding, plugin performance monitor, clip properties / arrangements (round 84)
-CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/Mp3Decoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp src/core/ProjectContents.cpp src/core/TempoDetect.cpp"
+CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/Mp3Decoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp src/core/ProjectContents.cpp src/core/TempoDetect.cpp src/core/ScoreLog.cpp"
 # LYNX's Facet EQ and Apex Limiter (round 99)
 CORE="$CORE src/core/FacetEq.cpp src/core/ApexLimiter.cpp"
 # LYNX's dynamics suite and FabFilter state translation (round 108)
@@ -68,7 +68,7 @@ CORE="$CORE src/core/VoiceShift.cpp"
 # FL engines usable in native projects (round 142, issue #5)
 CORE="$CORE src/core/NativeEngines.cpp"
 # FL's Layer channel and the round 164 controllers
-CORE="$CORE src/core/Layer.cpp src/core/XyController.cpp src/core/ControlSurface.cpp src/core/VoltageController.cpp"
+CORE="$CORE src/core/Layer.cpp src/core/XyController.cpp src/core/FlCurve.cpp src/core/ControlSurface.cpp src/core/VoltageController.cpp"
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 CORE="$CORE src/core/CrashReport.cpp"
 # WavPack decoder (C)

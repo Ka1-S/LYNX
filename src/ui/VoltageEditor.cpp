@@ -16,7 +16,8 @@ class VoltageEditor final : public juce::Component,
                             private juce::ChangeListener
 {
 public:
-    VoltageEditor (AudioEngine& e, std::function<ChannelDef* (Song&)> l) : engine (e), locate (std::move (l))
+    // `channel`: the Channel Rack channel (its offsets / scales are automation and link targets, round 165); −1 in a Patcher
+    VoltageEditor (AudioEngine& e, std::function<ChannelDef* (Song&)> l, int channel = -1) : engine (e), locate (std::move (l))
     {
         enable.setButtonText (tr ("On"));
         enable.setClickingTogglesState (true);
@@ -70,6 +71,8 @@ public:
             ui::ValueSpec off;
             off.name = tr ("{0} offset", { voltage::outputName (o) });
             off.defaultValue = 0.5;
+            if (channel >= 0)
+                off.target = AutomationTarget { AutomationTargetKind::channelParam, channel, 0, o };
             off.toText = [this, o] (double v) {
                 auto s = current();
                 s.params[(std::size_t) o] = juce::roundToInt (v * 65536.0);
@@ -85,6 +88,8 @@ public:
             ui::ValueSpec sc;
             sc.name = tr ("{0} scale", { voltage::outputName (o) });
             sc.defaultValue = 1.0;
+            if (channel >= 0)
+                sc.target = AutomationTarget { AutomationTargetKind::channelParam, channel, 0, 8 + o };
             sc.toText = [] (double v) { return juce::String::charToString (0xd7) + juce::String (v * 2.0 - 1.0, 2); };
             row.scale = std::make_unique<ctlui::Knob> (&engine, sc, [this, o] { return current().params[(std::size_t) (8 + o)] / 65536.0; },
                                                        [this, o] (double v) {
@@ -252,6 +257,6 @@ std::unique_ptr<juce::Component> makeVoltageControllerEditor (AudioEngine& engin
         return channel >= 0 && channel < (int) s.channels.size() && s.channels[(std::size_t) channel].instrument == InstrumentKind::voltage
                    ? &s.channels[(std::size_t) channel]
                    : nullptr;
-    });
+    }, channel);
 }
 } // namespace lynx

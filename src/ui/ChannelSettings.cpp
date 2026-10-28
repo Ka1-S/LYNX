@@ -1,4 +1,5 @@
 #include "ui/WindowOwner.h"
+#include "core/NoteNames.h"
 #include "ui/ChannelSettings.h"
 #include "ui/LayerEditor.h"
 #include "ui/DanceView.h"
@@ -2433,8 +2434,7 @@ public:
 
     static juce::String keyName (int key)
     {
-        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-        return juce::String (names[key % 12]) + juce::String (key / 12);
+        return juce::String (notenames::keyName (key)); // Settings › General › Note names (round 165f)
     }
 
 private:

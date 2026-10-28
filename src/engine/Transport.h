@@ -15,6 +15,8 @@ struct Transport
 {
     std::atomic<bool> playing { false };
     std::atomic<bool> metronome { false };
+    // the metronome's sound (FL's Metronome sound menu, REA round 165f): 0 click, 1 hi-hat, 2 tick, 3 beep, 4 cowbell, 5 pulse
+    std::atomic<int> metronomeSound { 0 };
     std::atomic<float> metronomeVolume { 1.0f }; // the metronome's volume (0..1.25, 1 = the default click level)
     std::atomic<bool> recording { false };
     std::atomic<double> bpm { 130.0 };
