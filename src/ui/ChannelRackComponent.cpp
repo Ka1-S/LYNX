@@ -1,5 +1,6 @@
 #include "ui/EditorTools.h"
 #include "core/FruityDance.h"
+#include "core/VideoPlayer.h"
 #include "ui/ColourPicker.h"
 #include "ui/PatcherEditor.h"
 #include "ui/UiTrace.h"
@@ -90,6 +91,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::dashboard: return "Dashboard";
         case InstrumentKind::voltage: return "Voltage Controller";
         case InstrumentKind::vfx: return "VFX";
+        case InstrumentKind::videoplayer: return "Fruity Video Player";
     }
     return "?";
 }
@@ -1011,8 +1013,8 @@ void ChannelRackComponent::toggleEditor (int channel, bool keepOthers)
             PatcherWindows::openChannel (engine, channel);
         return;
     }
-    if (kind != InstrumentKind::plugin && ! hasChannelSettings (kind))
-        return; // built-in drums and audio clips have no editor window: the click only selects
+    // built-in drums and audio clips have no instrument page: as in FL, the click opens their channel window anyway
+    // (header + Misc tab — levels, polyphony, cut groups, arpeggiator), as the hint says; it only selected (round 165q)
 
     if (isEditorOpen (channel))
     {
@@ -2174,6 +2176,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         c.name = "Fruity Dance";
         c.instrument = InstrumentKind::fruitydance;
         c.pluginState = dance::toState (dance::Settings {});
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Fruity Video Player (round 165g): a video in sync with the song, decoded by the user's ffmpeg
+    menu.addItem ("Fruity Video Player", [this, add] {
+        ChannelDef c;
+        c.name = "Fruity Video Player";
+        c.instrument = InstrumentKind::videoplayer;
+        c.pluginState = video::write (video::Settings {});
         const auto added = add (c);
         openChannelSettings (engine, added);
     });

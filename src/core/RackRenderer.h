@@ -174,12 +174,14 @@ struct RackState
     {
         int other = 0;        // [source] → the target channel; [target] → the source channel
         int port = 0, midiChannel = 0;
+        bool portOnly = false; // only what the source sends on that port (a Patcher's VFX output, round 165c)
     };
     std::vector<std::vector<MidiRoute>> midiRoutesOut; // [source channel] → targets
     std::vector<std::vector<MidiRoute>> midiRoutesIn;  // [target channel] → sources
     struct EffectMidiRoute
     {
         int track = 0, slot = 0, port = 0, midiChannel = 0;
+        bool portOnly = false;
     };
     std::vector<std::vector<EffectMidiRoute>> effectMidiRoutes; // [source channel] → mixer-slot Patchers on its port
     bool hasEffectMidiRoutes = false;
@@ -189,6 +191,8 @@ struct RackState
     // VFX channels (round 164b): their notes go through their processor; output k goes out on MIDI port vfxPort + k
     std::vector<int> vfxChannels;
     std::vector<int> vfxPort; // [channel] (−1 = not a VFX channel)
+    // generator Patchers whose VFX nodes send to "To LYNX" MIDI ports (round 165c): taken at each chunk's start
+    std::vector<int> portEventChannels;
     // Dashboard channels (round 165): what their controls send in MIDI goes to the plugins on their port (midiTargets)
     std::vector<int> dashboardChannels;
     void buildMidiRoutes();

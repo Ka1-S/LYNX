@@ -3,6 +3,7 @@
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "core/Vfx.h"
+#include "core/VideoPlayer.h"
 #include "core/Scheduler.h"
 
 #include "core/DirectWave.h"
@@ -238,6 +239,7 @@ private:
             case InstrumentKind::dashboard:
             case InstrumentKind::voltage:
             case InstrumentKind::vfx:
+            case InstrumentKind::videoplayer:
             case InstrumentKind::patcher:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
@@ -2963,6 +2965,17 @@ public:
     void render (float*, float*, int, float, float) noexcept override {}
     bool idle() const noexcept override { return true; }
     vfx::Processor* noteProcessor() noexcept override { return processor.get(); }
+    // an automation / a Patcher control cable on one of its parameters, an incoming program change (round 165c)
+    void setParameter (int index, float value) noexcept override
+    {
+        if (processor != nullptr)
+            processor->setParameter (index, value);
+    }
+    void midiMessage (const std::uint8_t* bytes, int size) noexcept override
+    {
+        if (processor != nullptr && bytes != nullptr && size >= 2 && (bytes[0] & 0xF0) == 0xC0)
+            processor->programChange (bytes[1] & 127);
+    }
     // (UI thread: the first call builds the processor before the instrument reaches the audio thread; later ones only
     // hand the new settings over)
     void configure (const ChannelDef& channel, double) noexcept override
@@ -2986,13 +2999,8 @@ public:
             processor->configure (state->fl);
         lastState = state->fl;
     }
-    // a VFX Script's output controllers and controls (round 165d)
+    // a VFX Script's output controllers (round 165d; its controls come in through setParameter above)
     float controlOutput (int output) const noexcept override { return processor != nullptr ? processor->controlOutput (output) : 0.0f; }
-    void setParameter (int index, float value) noexcept override
-    {
-        if (processor != nullptr)
-            processor->setParameter (index, value);
-    }
 
 private:
     std::unique_ptr<vfx::Processor> processor;
@@ -3020,6 +3028,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return voltage::makeInstrument();
     if (kind == InstrumentKind::vfx)
         return std::make_unique<VfxInstrument>();
+    if (kind == InstrumentKind::videoplayer) // the video's sound, in sync with the song (round 165g)
+        return video::makeInstrument();
 
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
         return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);
