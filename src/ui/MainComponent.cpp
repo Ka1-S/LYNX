@@ -32,6 +32,7 @@
 #include "platform/FileTypes.h"
 #include "platform/CrashGuard.h"
 #include "platform/LinuxRealtime.h"
+#include "platform/Package.h"
 
 #include "engine/Text.h"
 
@@ -4563,7 +4564,7 @@ void MainComponent::showLanguageChoice (const juce::String& id)
     i18n::save (id);
     const auto restart = [this] {
         confirmDiscard ([] {
-            juce::File::getSpecialLocation (juce::File::currentExecutableFile).startAsProcess();
+            lynx::platform::relaunchApp(); // through the package in the Store build (platform/Package.h)
             juce::JUCEApplication::quit();
         });
     };

@@ -1717,6 +1717,14 @@ bool modulated (const EffectParams& p) noexcept
     return false;
 }
 bool measuredEffects (const EffectParams& p) noexcept { return on (p[effectLaw]); }
+
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value)
+{
+    std::vector<std::pair<int, float>> edits { { param, value } };
+    if (param == classicDrive && on (p[classicAuto]))
+        edits.push_back ({ classicOutput, emberclassic::autoOutput (p[classicOutput], p[classicDrive], value) });
+    return edits;
+}
 double collapseRatio (double referenceDrive) noexcept { return std::exp2 (-2.0 * std::clamp (referenceDrive, 0.0, 1.0)); }
 
 float shape (Style s, float x) noexcept
@@ -2730,6 +2738,7 @@ private:
         c.steep = on (p[classicSteep]);
         c.mix = std::clamp ((double) p[classicMix], 0.0, 1.0);
         c.outputDb = emberclassic::outputDb (p[classicOutput]);
+        c.measuredPunish = on (p[classicLaw]);
         if (! classicOn || ! (c == classicSet))
         {
             if (! classicOn)
@@ -2922,7 +2931,9 @@ const EffectInfo& emberInfo()
                                      { "Mod 2 source", 0.0f }, { "Mod 2 target", 0.0f }, { "Mod 2 amount", 0.5f },
                                      { "Mod 3 source", 0.0f }, { "Mod 3 target", 0.0f }, { "Mod 3 amount", 0.5f },
                                      { "Mod 4 source", 0.0f }, { "Mod 4 target", 0.0f }, { "Mod 4 amount", 0.5f },
-                                     { "Effect law", 1.0f } } };
+                                     { "Effect law", 1.0f },
+                                     // round 165 (Decapitator: Auto, the Classic law)
+                                     { "Classic auto", 1.0f }, { "Classic law", 1.0f } } };
     return info;
 }
 
@@ -3200,6 +3211,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case mod1Target: case mod2Target: case mod3Target: case mod4Target: return modTargetName (modTargetOf (v));
             case mod1Amount: case mod2Amount: case mod3Amount: case mod4Amount: return fmt ("%+.3f", modAmount (v));
             case effectLaw: return on (v) ? "measured" : "static";
+            case classicAuto: return onOff (v);
+            case classicLaw: return on (v) ? "measured" : "round 136";
             case band2Style: case band3Style: case band4Style: case band5Style: case band6Style:
             {
                 static const char* names[] = { "tube", "tape", "transistor", "fuzz" };
