@@ -114,7 +114,7 @@ const std::vector<InstrumentEngine>& instrumentEngines()
         { InstrumentKind::toxic, "Toxic Biohazard", "Toxic Biohazard", fl, false },
         { InstrumentKind::poizone, "PoiZone", "PoiZone", fl, false },
         { InstrumentKind::sakura, "Sakura", "Sakura", fl, false },
-        { InstrumentKind::kepler, "Kepler", "Kepler", fl, true },
+        { InstrumentKind::kepler, "Kepler", "Kepler", fl, false },
         { InstrumentKind::transistorbass, "Transistor Bass", "Transistor Bass", fl, false },
         { InstrumentKind::boobass, "BooBass", "", fl, false }, // (its multisample: the user's BooBass_Eng_x64.dll)
         { InstrumentKind::simsynth, "SimSynth", "SimSynth", own, false },

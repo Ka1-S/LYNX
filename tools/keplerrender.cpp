@@ -1,5 +1,6 @@
 // Renders a Kepler state with LYNX's engine the way the REA round-46 EXEC harness drives FL's engine DLL (verification,
 // REA_rodada46 §6): keplerrender <state.bin> <engine_x64.dll> <out.f32> <length> <rate> [tempo=X] [blk=N]
+// [warm=N] [midivol=V] [midipan=P] [transport]   (FL's export: warm-up, channel levels as MIDI, song playing)
 // [note=start,key,initVol,finalPan,pitchCents,off ...]   (off = −1: held). Output: interleaved stereo float32.
 
 #include <chrono>
@@ -35,6 +36,14 @@ int main (int argc, char** argv)
             opt.tempo = std::atof (val().c_str());
         else if (a.rfind ("blk=", 0) == 0)
             opt.block = std::atoi (val().c_str());
+        else if (a.rfind ("warm=", 0) == 0)
+            opt.warmup = std::atoi (val().c_str());
+        else if (a.rfind ("midivol=", 0) == 0)
+            opt.midiVolume = std::atoi (val().c_str());
+        else if (a.rfind ("midipan=", 0) == 0)
+            opt.midiPan = std::atoi (val().c_str());
+        else if (a == "transport")
+            opt.transport = true;
         else if (a.rfind ("note=", 0) == 0)
         {
             std::stringstream ss (val());

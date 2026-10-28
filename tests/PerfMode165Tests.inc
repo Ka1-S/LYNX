@@ -535,3 +535,68 @@ TEST (perfmode165_midi_channel_launches_clips)
     CHECK (prefs::MidiPrefs::fromText (p.toText()).performanceChannel == 16);
     CHECK (prefs::MidiPrefs::fromText (prefs::MidiPrefs {}.toText()).performanceChannel == 0);
 }
+
+TEST (perfmode165_midi_modifiers_and_prepare_macro)
+{
+    using namespace lynx;
+    // [DECOMP] FUN_01221c00: 125 held → the clip's column on every track, 126 → only tracks playing, 127 → next bar
+    perf::MidiMapping m;
+    perf::Command c;
+    CHECK (! m.note (125, true, c) && m.columnHeld);
+    CHECK (m.note (1, true, c) && c.scope == perf::Command::Scope::column && ! c.barSync);
+    CHECK (! m.note (125, false, c) && ! m.columnHeld);
+    CHECK (! m.note (127, true, c));
+    CHECK (m.note (0, true, c) && c.scope == perf::Command::Scope::track && c.barSync);
+    CHECK (! m.note (127, false, c) && ! m.note (126, true, c));
+    CHECK (m.note (0, true, c) && c.scope == perf::Command::Scope::columnPlaying);
+
+    {
+        // a column launch from track 0's second clip reaches track 2's clip in the same column only
+        auto s = perfmode165::zoneSong();
+        Clip other;
+        other.pattern = 0, other.track = 2, other.start = 4 * ppq, other.length = 4 * ppq;
+        s.playlist.push_back (other);
+        Clip elsewhere = other;
+        elsewhere.track = 3, elsewhere.start = 8 * ppq;
+        s.playlist.push_back (elsewhere);
+        s.playlistTracks.resize (4);
+        perfmode165::Run r (std::move (s));
+        perf::Command col;
+        col.type = perf::Command::Type::press, col.track = 0, col.column = 1, col.scope = perf::Command::Scope::column;
+        r.live.midiCommands.push (col);
+        r.runTo (120.0);
+        CHECK (r.playing (0) == 4 * ppq && r.playing (2) == 4 * ppq && r.playing (3) == -1);
+    }
+    {
+        // the next bar instead of the 1/4 beat sync
+        auto s = perfmode165::zoneSong();
+        s.playlistTracks[0].performance.triggerSync = TrackPerformance::Sync::quarterBeat;
+        s.playlistTracks[0].performance.tolerant = false;
+        perfmode165::Run r (std::move (s));
+        r.runTo (600.0);
+        perf::Command bar;
+        bar.type = perf::Command::Type::press, bar.track = 0, bar.clipStart = 0, bar.barSync = true;
+        r.live.midiCommands.push (bar);
+        r.runTo (1200.0);
+        CHECK (r.playing (0) == -1);
+        r.runTo (4.0 * ppq + 120.0);
+        CHECK (r.playing (0) == 0);
+    }
+    {
+        // the macro: 16 one-bar columns before the song, the Start marker where it begins
+        auto s = perfmode165::zoneSong();
+        s.performanceMode = false;
+        for (auto& m : s.markers())
+            m.action = 0; // (no Start yet)
+        const auto firstClip = s.playlist[0].start;
+        perf::prepareForPerformance (s, 16, 4 * ppq);
+        CHECK (s.performanceMode && s.mode == PlayMode::song);
+        CHECK (s.performanceZoneEnd() == 64 * ppq);
+        CHECK (s.playlist[0].start == firstClip + 64 * ppq);
+        int columns = 0;
+        for (const auto& m : s.markers())
+            columns += m.tick < 64 * ppq && m.tick % (4 * ppq) == 0 && m.action == 0 ? 1 : 0;
+        CHECK (columns == 16);
+        CHECK (perf::zoneClips (s).empty()); // the song's clips moved after the Start marker
+    }
+}
