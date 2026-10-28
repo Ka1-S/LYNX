@@ -94,7 +94,8 @@ struct RecordedValue
 };
 
 // The song position of a recorded transport position (song mode loops over the loop region or the whole song).
-std::int64_t songTickForRecorded (const Song& song, double tick);
+// `linear`: the song played on past its end (a take recorded in Song mode without a loop region): no wrap.
+std::int64_t songTickForRecorded (const Song& song, double tick, bool linear = false);
 
 // One parameter's part of a take. `continuing` = the points follow the previous batch of the same gesture (what lies
 // between them is replaced too). Returns the automation written (or -1); `automation` is a hint: the automation this
@@ -108,7 +109,10 @@ struct AutomationWrite
     bool createdByTake = false; // in/out
 };
 // Song mode.
-void commitAutomationPoints (Song& song, AutomationWrite& w, std::vector<RecordedValue> points, std::int64_t grid);
+void commitAutomationPoints (Song& song, AutomationWrite& w, std::vector<RecordedValue> points, std::int64_t grid, bool linear = false);
+// While recording goes on (song mode): the take's own clip reaches the playhead at `tick` (it keeps growing, holding
+// the last value, until recording stops — FL); `finished`: the take ended, the clip ends at the end of that bar.
+void growTakeClip (Song& song, const AutomationWrite& w, std::int64_t tick, bool finished);
 // Pattern mode: into `pattern`'s event lane for the target (one event per tick; held until the next one).
 void commitEventPoints (Song& song, int pattern, AutomationWrite& w, std::vector<RecordedValue> points, std::int64_t loopLength,
                         std::int64_t grid);

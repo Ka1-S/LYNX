@@ -677,7 +677,22 @@ namespace
 class ItemHeader final : public juce::PopupMenu::CustomComponent
 {
 public:
-    ItemHeader (juce::String k, juce::String n, juce::Colour c) : juce::PopupMenu::CustomComponent (false), kind (std::move (k)), name (std::move (n)), colour (c) {}
+    ItemHeader (juce::String k, juce::String n, juce::Colour c, std::function<void()> dc = {})
+        : juce::PopupMenu::CustomComponent (false), kind (std::move (k)), name (std::move (n)), colour (c), onDoubleClick (std::move (dc))
+    {
+        if (onDoubleClick)
+            setMouseCursor (juce::MouseCursor::IBeamCursor);
+    }
+
+    // issue #12: a double-click on the title renames (the pattern's, the mixer insert's menu); the menu closes first
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        if (! onDoubleClick)
+            return;
+        auto action = onDoubleClick;
+        juce::PopupMenu::dismissAllActiveMenus();
+        juce::MessageManager::callAsync (std::move (action));
+    }
 
     void getIdealSize (int& width, int& height) override
     {
@@ -711,13 +726,15 @@ public:
 private:
     juce::String kind, name;
     juce::Colour colour;
+    std::function<void()> onDoubleClick;
 };
 } // namespace
 
-void addItemHeader (juce::PopupMenu& menu, const juce::String& kind, const juce::String& name, juce::Colour colour)
+void addItemHeader (juce::PopupMenu& menu, const juce::String& kind, const juce::String& name, juce::Colour colour,
+                    std::function<void()> onDoubleClick)
 {
     juce::PopupMenu::Item item (name);
-    item.customComponent = new ItemHeader (kind, name, colour);
+    item.customComponent = new ItemHeader (kind, name, colour, std::move (onDoubleClick));
     item.isEnabled = false;
     menu.addItem (std::move (item));
 }

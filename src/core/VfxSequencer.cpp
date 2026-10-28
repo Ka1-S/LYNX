@@ -173,13 +173,16 @@ int S::program() const noexcept
 S::Program& S::current() { return programs[(std::size_t) program()]; }
 const S::Program& S::current() const { return programs[(std::size_t) program()]; }
 
-int S::get (int param) const noexcept
+int S::get (int param) const noexcept { return getFor (param, program()); }
+
+int S::getFor (int param, int programIndex) const noexcept
 {
+    const auto at = programs.empty() ? 0 : std::clamp (programIndex, 0, (int) programs.size() - 1);
     if (param >= 0x80 && param < 0x200)
     {
         if (programs.empty())
             return 0;
-        return current().lanes[(std::size_t) ((param - 0x80) / 64)][(std::size_t) ((param - 0x80) % 64)];
+        return programs[(std::size_t) at].lanes[(std::size_t) ((param - 0x80) / 64)][(std::size_t) ((param - 0x80) % 64)];
     }
     const auto* i = info (param);
     if (i == nullptr)
@@ -191,7 +194,7 @@ int S::get (int param) const noexcept
     {
         if (programs.empty())
             return i->def;
-        const auto& p = current().params;
+        const auto& p = programs[(std::size_t) at].params;
         return k < p.size() ? std::clamp ((int) p[k], i->min, i->max) : i->def;
     }
     return k < fpgp.size() ? std::clamp ((int) fpgp[k], i->min, i->max) : i->def;
@@ -618,48 +621,85 @@ struct Runtime
     std::array<std::array<std::int8_t, 64>, 6> lanes {};
 };
 
-Runtime resolve (const S& s)
+Runtime resolve (const S& s, int program)
 {
     Runtime r;
-    r.midiIn = s.get (S::midiIn);
-    r.arpMode = s.get (S::arpMode);
-    r.steps = s.get (S::steps);
-    r.gate = s.get (S::gate);
-    r.sync = s.get (S::sync);
-    r.latch = s.get (S::latch);
-    r.missing = s.get (S::missingKeys);
-    r.inLow = s.get (S::inputLow);
-    r.inHigh = s.get (S::inputHigh);
-    r.outLow = s.get (S::outputLow);
-    r.outHigh = s.get (S::outputHigh);
-    r.order = s.get (S::order);
-    r.fixedKey = s.get (S::fixedKey);
-    r.transposeOctaves = s.get (S::transposeOctaves);
-    r.inputQuantize = s.get (S::inputQuantize);
-    r.transposeSemitones = s.get (S::transposeSemitones);
-    r.swing = s.get (S::swing);
-    r.restartOn = s.get (S::restartOn);
-    r.forceKey = s.get (S::forceKey);
-    r.forceScale = s.get (S::forceScale);
-    r.forceMode = s.get (S::forceMode);
-    r.pageLock = s.get (S::pageLock);
-    r.page = s.get (S::page);
-    r.wrapLow = s.get (S::inputWrapLow);
-    r.wrapHigh = s.get (S::inputWrapHigh);
-    r.polyOctave = s.get (S::polyOctave);
-    r.polyKeys = s.get (S::polyKeys);
-    r.missingOctave = s.get (S::missingOctave);
-    r.gateLaneMode = s.get (S::gateLaneMode);
-    r.randomVelocity = s.get (S::randomVelocity);
-    r.randomGate = s.get (S::randomGate);
-    r.randomStart = s.get (S::randomStart);
-    r.smartBend = s.get (S::smartBend);
-    r.programMode = s.get (S::programMode);
-    r.inputRangeMode = s.get (S::inputRangeMode);
-    r.velocityMode = s.get (S::velocityMode);
+    r.midiIn = s.getFor (S::midiIn, program);
+    r.arpMode = s.getFor (S::arpMode, program);
+    r.steps = s.getFor (S::steps, program);
+    r.gate = s.getFor (S::gate, program);
+    r.sync = s.getFor (S::sync, program);
+    r.latch = s.getFor (S::latch, program);
+    r.missing = s.getFor (S::missingKeys, program);
+    r.inLow = s.getFor (S::inputLow, program);
+    r.inHigh = s.getFor (S::inputHigh, program);
+    r.outLow = s.getFor (S::outputLow, program);
+    r.outHigh = s.getFor (S::outputHigh, program);
+    r.order = s.getFor (S::order, program);
+    r.fixedKey = s.getFor (S::fixedKey, program);
+    r.transposeOctaves = s.getFor (S::transposeOctaves, program);
+    r.inputQuantize = s.getFor (S::inputQuantize, program);
+    r.transposeSemitones = s.getFor (S::transposeSemitones, program);
+    r.swing = s.getFor (S::swing, program);
+    r.restartOn = s.getFor (S::restartOn, program);
+    r.forceKey = s.getFor (S::forceKey, program);
+    r.forceScale = s.getFor (S::forceScale, program);
+    r.forceMode = s.getFor (S::forceMode, program);
+    r.pageLock = s.getFor (S::pageLock, program);
+    r.page = s.getFor (S::page, program);
+    r.wrapLow = s.getFor (S::inputWrapLow, program);
+    r.wrapHigh = s.getFor (S::inputWrapHigh, program);
+    r.polyOctave = s.getFor (S::polyOctave, program);
+    r.polyKeys = s.getFor (S::polyKeys, program);
+    r.missingOctave = s.getFor (S::missingOctave, program);
+    r.gateLaneMode = s.getFor (S::gateLaneMode, program);
+    r.randomVelocity = s.getFor (S::randomVelocity, program);
+    r.randomGate = s.getFor (S::randomGate, program);
+    r.randomStart = s.getFor (S::randomStart, program);
+    r.smartBend = s.getFor (S::smartBend, program);
+    r.programMode = s.getFor (S::programMode, program);
+    r.inputRangeMode = s.getFor (S::inputRangeMode, program);
+    r.velocityMode = s.getFor (S::velocityMode, program);
     if (! s.programs.empty())
-        r.lanes = s.current().lanes;
+        r.lanes = s.programs[(std::size_t) std::clamp (program, 0, (int) s.programs.size() - 1)].lanes;
     return r;
+}
+
+// The whole bank resolved (round 165c): program changes and chains switch the sequence on the audio thread
+struct Bank
+{
+    std::vector<Runtime> programs; // [program] (never empty)
+    int current = 0;               // the state's CurProgram
+    int chain = -1;                // Cur_Chain (−1: none)
+    int chainQuantize = 5;         // when a chain change takes effect (Input quantize's list)
+    int chainRestart = 0;          // a chain change restarts the chain's clock
+    int programChange = 0;         // incoming program changes: 0 ignored, 1 select the sequence, 2 passed on
+    int maxProgram = 127;
+    std::array<std::array<int, 8>, 16> chains {}; // [chain][slot] the program (−1 empty)
+};
+
+Bank resolveBank (const S& s)
+{
+    Bank b;
+    const auto count = std::max<int> (1, (int) s.programs.size());
+    b.programs.reserve ((std::size_t) count);
+    for (int p = 0; p < count; ++p)
+        b.programs.push_back (resolve (s, p));
+    b.current = s.program();
+    b.chain = s.get (S::currentChain);
+    b.chainQuantize = s.get (S::chainQuantize);
+    b.chainRestart = s.get (S::chainRestart);
+    b.programChange = s.get (S::programChange);
+    // FL clamps a program change to NumPrograms + 7 [DECOMP FUN_180010e00]
+    b.maxProgram = std::min (count - 1, s.get (S::numPrograms) + 7);
+    for (auto& c : b.chains)
+        c.fill (-1);
+    for (std::size_t c = 0; c < s.chains.size() && c < b.chains.size(); ++c)
+        for (std::size_t k = 0; k < 8; ++k)
+            b.chains[c][k] = s.chains[c].slots[k] >= 0 && s.chains[c].slots[k] < count ? (int) s.chains[c].slots[k] : -1;
+    if (b.chain >= (int) s.chains.size())
+        b.chain = -1;
+    return b;
 }
 
 // FL's "MIDI velocity" here is the voice volume × 100 (velocity 100/128 = 100)
@@ -678,7 +718,14 @@ float voiceVelocity (int midi) noexcept
 class Sequencer final : public Processor
 {
 public:
-    explicit Sequencer (const S& s) : settings (resolve (s)) {}
+    explicit Sequencer (const S& s) : settings (resolveBank (s))
+    {
+        prog = std::clamp (settings.get().current, 0, (int) settings.get().programs.size() - 1);
+        chain = settings.get().chain;
+        stateProgram = settings.get().current;
+        stateChain = chain;
+        smartBend = settings.get().programs[(std::size_t) prog].smartBend;
+    }
 
     Kind kind() const noexcept override { return Kind::sequencer; }
 
@@ -687,9 +734,12 @@ public:
         const auto s = parseSequencer (fl);
         if (! s)
             return false;
-        settings.publish (resolve (*s));
+        settings.publish (resolveBank (*s));
         return true;
     }
+
+    // (audio thread) FL's Prog.chng msg = 1: the program change selects the sequence; 2: it is passed on
+    void programChange (int program) noexcept override { pendingProgram = std::clamp (program, 0, 127); }
 
     bool busy() const noexcept override { return heldCount > 0 || arpCount > 0 || soundingCount > 0 || thruCount > 0 || freeRun != 0; }
 
@@ -705,18 +755,49 @@ public:
     {
         if (settings.take())
         {
-            const auto& r = settings.get();
+            const auto& b = settings.get();
+            // the editor picked another sequence or chain: it plays (a program change or a chain switched it here
+            // otherwise; the state keeps what was picked)
+            if (b.current != stateProgram)
+                prog = b.current;
+            stateProgram = b.current;
+            prog = std::clamp (prog, 0, (int) b.programs.size() - 1);
+            if (b.chain != stateChain)
+            {
+                pendingChain = b.chain;
+                chainSwitch = true;
+            }
+            stateChain = b.chain;
+            const auto& r = b.programs[(std::size_t) prog];
             if (r.arpMode != lastArpMode && lastArpMode >= 0)
             {
                 killAll (0, out);
                 lastStep = -1;
             }
+            // Smart bend moved: the current step plays again at once, shifted; the notes sounding are cut but the
+            // first (a glide on a mono instrument) [DECOMP FUN_18000bde0 case 0x50, FUN_180009dc0]
+            if (r.smartBend != smartBend)
+            {
+                smartBend = r.smartBend;
+                if (lastStep >= 0)
+                {
+                    regenerate = true;
+                    cutButFirst = true;
+                }
+            }
             keysDirty = arpCount > 0;
         }
-        const auto& r = settings.get();
+        if (pendingProgram >= 0)
+        {
+            onProgram (pendingProgram, 0, out);
+            pendingProgram = -1;
+        }
+        const Runtime* rp = &current();
+        const Runtime& r = *rp; // (the block's program; a chain or program change switches it at the next block)
         lastArpMode = r.arpMode;
         sampleRate = t.sampleRate > 0.0 ? t.sampleRate : 44100.0;
         const auto bpm = std::max (1.0, t.bpm);
+        blockBpm = bpm;
         const auto beatsPerSample = bpm / 60.0 / sampleRate;
         stepSamples = sampleRate * 60.0 / bpm * syncBeats[std::clamp (r.sync, 0, 12)];
 
@@ -733,6 +814,8 @@ public:
             }
             freeRun = 0;
             lastStep = -1;
+            chainStart = 0.0;
+            lastChainRel = -1.0;
         }
         else if (! t.playing && wasPlaying)
         {
@@ -756,28 +839,35 @@ public:
         for (int s = 0; s < n; ++s)
         {
             while (next < count && in[next].offset <= s)
-                input (in[next++], s, songBeats + s * beatsPerSample, t.playing, r, out);
+            {
+                const auto& e = in[next++];
+                if (e.type == Event::Type::program)
+                    onProgram ((int) e.value, s, out);
+                else
+                    input (e, s, songBeats + s * beatsPerSample, t.playing, current(), out);
+            }
 
-            const auto playingArp = mode (r) == Mode::arp;
+            const auto playingArp = mode (current()) == Mode::arp;
             if (playingArp && arpCount > 0 && (t.playing || freeRun != 0))
             {
                 const auto pos = t.playing ? songBeats + s * beatsPerSample : freeBeats;
-                const auto rel = t.playing ? pos - (r.restartOn == 0 ? 0.0 : restartOffset) : pos;
+                const auto rel = t.playing ? pos - (current().restartOn == 0 ? 0.0 : restartOffset) : pos;
                 if (rel >= -1e-9)
                 {
-                    const auto step = stepIndex (std::max (0.0, rel), r);
+                    const auto x = chainPosition (std::max (0.0, rel), s, out); // (a chain may switch the program here)
+                    const auto& rc = current();
+                    const auto step = stepIndex (x, rc);
                     if (step != lastStep || regenerate)
                     {
-                        const auto grid = quantizeBeats[std::clamp (r.inputQuantize, 0, 8)];
+                        const auto grid = quantizeBeats[std::clamp (rc.inputQuantize, 0, 8)];
                         const auto cell = grid > 0.0 ? (long long) std::floor (rel / grid + 1e-9) : -1;
                         if (keysDirty && (grid <= 0.0 || cell != lastCell || keyCount == 0))
                         {
-                            buildKeys (r);
+                            buildKeys (rc);
                             keysDirty = false;
                         }
                         lastCell = cell;
-                        if (step != lastStep || regenerate)
-                            generate (step, s, r, out);
+                        generate (step, s, rc, out);
                         lastStep = step;
                         regenerate = false;
                     }
@@ -796,11 +886,94 @@ public:
             }
         }
         while (next < count)
-            input (in[next++], std::max (0, n - 1), songBeats + n * beatsPerSample, t.playing, r, out);
+        {
+            const auto& e = in[next++];
+            if (e.type == Event::Type::program)
+                onProgram ((int) e.value, std::max (0, n - 1), out);
+            else
+                input (e, std::max (0, n - 1), songBeats + n * beatsPerSample, t.playing, current(), out);
+        }
         lastSongBeats = songBeats + n * beatsPerSample;
     }
 
 private:
+    const Runtime& current() const noexcept { return settings.get().programs[(std::size_t) prog]; }
+
+    // another sequence plays from here (a program change, a chain's next slot)
+    void selectProgram (int program, int offset, EventList& out) noexcept
+    {
+        const auto& bank = settings.get();
+        program = std::clamp (program, 0, (int) bank.programs.size() - 1);
+        if (program == prog)
+            return;
+        const auto before = mode (current());
+        prog = program;
+        const auto& r = current();
+        stepSamples = sampleRate * 60.0 / blockBpm * syncBeats[std::clamp (r.sync, 0, 12)];
+        keysDirty = arpCount > 0;
+        if (mode (r) != before || r.steps < 2) // [DECOMP FUN_180010e00: a thru program kills and restarts]
+            modeChanged (offset, out);
+    }
+
+    void onProgram (int program, int offset, EventList& out) noexcept
+    {
+        const auto& bank = settings.get();
+        if (bank.programChange == 1)
+            selectProgram (std::clamp (program, 0, bank.maxProgram), offset, out);
+        else if (bank.programChange == 2)
+            out.add (programEvent (program, offset));
+    }
+
+    // FL's chains [DECOMP FUN_18000cde0]: the chain's slots play one after the other, each for its program's steps ×
+    // step length; the position in the chain picks the slot (and so the program), and the steps count from the slot's
+    // start. A chain picked while playing takes over on the chain quantize grid. Returns the position for the steps.
+    double chainPosition (double rel, int offset, EventList& out) noexcept
+    {
+        const auto& bank = settings.get();
+        if (chainSwitch)
+        {
+            const auto grid = quantizeBeats[std::clamp (bank.chainQuantize, 0, 8)];
+            if (grid <= 0.0 || lastChainRel < 0.0 || std::floor (rel / grid + 1e-9) != std::floor (lastChainRel / grid + 1e-9))
+            {
+                chain = pendingChain;
+                chainSwitch = false;
+                if (bank.chainRestart != 0)
+                    chainStart = grid > 0.0 ? std::round (rel / grid) * grid : rel;
+            }
+        }
+        lastChainRel = rel;
+        if (chain < 0 || chain >= (int) bank.chains.size())
+            return rel;
+        const auto& slots = bank.chains[(std::size_t) chain];
+        auto length = [&] (int program) {
+            const auto& r = bank.programs[(std::size_t) program];
+            return std::max (0, r.steps) * syncBeats[std::clamp (r.sync, 0, 12)];
+        };
+        double total = 0.0;
+        for (const auto p : slots)
+            if (p >= 0)
+                total += length (p);
+        if (total <= 0.0)
+            return rel;
+        const auto at = std::max (0.0, rel - chainStart);
+        const auto cycles = std::floor (at / total + 1e-9);
+        const auto within = at - cycles * total;
+        double start = 0.0;
+        for (const auto p : slots)
+        {
+            if (p < 0)
+                continue;
+            const auto end = start + length (p);
+            if (within < end - 1e-9)
+            {
+                selectProgram (p, offset, out);
+                return std::max (0.0, within - start);
+            }
+            start = end;
+        }
+        return rel;
+    }
+
     enum class Mode { off, arp, thru };
     struct Key
     {
@@ -1206,6 +1379,14 @@ private:
     {
         if (keyCount == 0 && r.programMode == 0)
             return;
+        if (cutButFirst) // (Smart bend changed: the sounding notes are cut but the first)
+        {
+            for (int i = 1; i < soundingCount; ++i)
+                if (sounding[(std::size_t) i].started)
+                    off (sounding[(std::size_t) i].id, sounding[(std::size_t) i].note, offset, out);
+            soundingCount = std::min (soundingCount, 1);
+            cutButFirst = false;
+        }
         const auto s = (std::size_t) std::clamp (step, 0, 63);
         const auto type = (int) r.lanes[S::stepType][s];
         if (type == S::off || type == S::rest)
@@ -1425,7 +1606,10 @@ private:
         out.add (e);
     }
 
-    Handoff<Runtime> settings;
+    Handoff<Bank> settings;
+    int prog = 0, chain = -1, pendingChain = -1, stateProgram = 0, stateChain = -1, smartBend = 0, pendingProgram = -1;
+    bool chainSwitch = false, cutButFirst = false;
+    double chainStart = 0.0, lastChainRel = -1.0, blockBpm = 140.0;
     std::array<Key, 16> held {}, arp {}, keys {};
     int heldCount = 0, arpCount = 0, keyCount = 0, realKeys = 0, filled = 0;
     int chordIndex = -1, root = 60;

@@ -1,4 +1,5 @@
 #include "core/Performance.h"
+#include "core/NoteEdit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -119,7 +120,7 @@ void Player::stopAll() noexcept
 }
 
 void Player::launch (const Song& song, const std::vector<int>& zone, TrackState& t, std::int64_t clipStart, double now,
-                     bool immediate) noexcept
+                     bool immediate, double syncOverride) noexcept
 {
     const auto index = findZoneClip (song, zone, t.track, clipStart);
     if (index < 0)
@@ -131,7 +132,7 @@ void Player::launch (const Song& song, const std::vector<int>& zone, TrackState&
     // when it starts: the next trigger sync grid point; with Queue, the end of the playing pass; Tolerant: a launch
     // within the first 1/8 of a grid step after a grid point is taken as on it (it starts now, already that far in)
     double from = std::ceil (now - 1.0e-6), grid = from;
-    const auto step = (double) syncTicks (s.triggerSync, clip.length);
+    const auto step = syncOverride > 0.0 ? syncOverride : (double) syncTicks (s.triggerSync, clip.length);
     const auto& cur = t.current;
     if (! immediate && s.queue && cur.clipStart >= 0 && cur.until == never)
     {
@@ -225,6 +226,32 @@ void Player::apply (const Song& song, const std::vector<int>& zone, const Comman
             return;
         c.clipStart = clips[(std::size_t) c.column];
     }
+    const auto barTicks = c.barSync ? (double) ppq * 4.0 * song.beatsPerBar / 4.0 : 0.0;
+    if (c.type == Command::Type::press && c.scope != Command::Scope::track)
+    {
+        // a controller's column launch: every track's zone clip that starts within the pressed clip's span
+        const auto index = findZoneClip (song, zone, c.track, c.clipStart);
+        if (index < 0)
+            return;
+        const auto& pressed = clipAt (song, index);
+        int lastTrack = -1;
+        for (const auto i : zone)
+        {
+            const auto& clip = clipAt (song, i);
+            if (clip.track == lastTrack || clip.start < pressed.start || clip.start >= pressed.start + std::max<std::int64_t> (1, pressed.length))
+                continue;
+            if (c.scope == Command::Scope::columnPlaying)
+            {
+                const auto* playing = stateOf (clip.track, false);
+                if (playing == nullptr || playing->current.clipStart < 0)
+                    continue;
+            }
+            lastTrack = clip.track;
+            if (auto* t = stateOf (clip.track, true))
+                launch (song, zone, *t, clip.start, now, false, barTicks);
+        }
+        return;
+    }
     switch (c.type)
     {
         case Command::Type::stopAll:
@@ -262,7 +289,7 @@ void Player::apply (const Song& song, const std::vector<int>& zone, const Comman
                 return;
             }
             t->held = s.press == P::holdStop || s.press == P::holdMotion;
-            launch (song, zone, *t, c.clipStart, now, false);
+            launch (song, zone, *t, c.clipStart, now, false, barTicks);
             return;
         }
         case Command::Type::release:
@@ -501,6 +528,11 @@ bool MidiMapping::note (int key, bool on, Command& out) noexcept
 {
     if (key < 0 || key > 127)
         return false;
+    if (key >= 125)
+    {
+        (key == 125 ? columnHeld : key == 126 ? playingHeld : barHeld) = on;
+        return false;
+    }
     if (key >= 120)
     {
         if (on)
@@ -519,6 +551,8 @@ bool MidiMapping::note (int key, bool on, Command& out) noexcept
     out.type = on ? Command::Type::press : Command::Type::release;
     out.track = key / 12 + trackOffset;
     out.column = key % 12 + columnOffset;
+    out.scope = playingHeld ? Command::Scope::columnPlaying : columnHeld ? Command::Scope::column : Command::Scope::track;
+    out.barSync = barHeld;
     return out.track < maxTracks;
 }
 
@@ -534,5 +568,30 @@ bool recordedClip (const Song& song, const RecordedPass& pass, Clip& out)
     out.length = std::max<std::int64_t> (1, (std::int64_t) std::llround (pass.length));
     out.offset = clip.offset + (std::int64_t) std::llround (pass.offset);
     return true;
+}
+} // namespace lynx::perf
+
+namespace lynx::perf
+{
+void prepareForPerformance (Song& song, int count, std::int64_t spacing)
+{
+    count = std::clamp (count, 1, 256);
+    spacing = std::max<std::int64_t> (1, spacing);
+    const auto zone = (std::int64_t) count * spacing;
+    noteedit::insertTime (song.playlist, song.markers(), 0, zone);
+    for (int k = 0; k < count; ++k)
+    {
+        Marker m;
+        m.tick = k * spacing;
+        m.name = std::to_string (k + 1);
+        song.addMarker (m);
+    }
+    Marker start;
+    start.tick = zone;
+    start.name = "Start";
+    start.action = Marker::songStart;
+    song.addMarker (start);
+    song.performanceMode = true;
+    song.mode = PlayMode::song;
 }
 } // namespace lynx::perf

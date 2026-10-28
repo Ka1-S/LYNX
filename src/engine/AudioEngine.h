@@ -288,6 +288,12 @@ public:
     // Settings, else the default), all of its channels. UI thread.
     RecordingNotice openAudioInput (const juce::String& deviceName = {});
     bool hasAudioInput() const;
+    // Closes the device input again when nothing needs it (no insert takes an input, no armed recording, no hardware
+    // insert returning from it): a capture the Audio editor opened for one recording no longer keeps the input — and
+    // Windows' microphone-in-use icon — on until LYNX quits, as in FL (round 165q). The input device's name is kept
+    // for the next openAudioInput(). UI thread.
+    void releaseAudioInputIfUnused();
+    bool audioInputNeeded() const;
     // Sets an insert's input source (undoable; -1 = none) and opens the device input when needed.
     void setInsertInput (int track, int channel, bool stereo);
     void setInsertMonitor (int track, InputMonitor mode);
@@ -630,6 +636,11 @@ private:
     void markHeldKey (int key, bool on) noexcept;
     KeyLedger playedKeys;        // UI thread: the keys the typing piano started (after the scale snap)
     SpscQueue<RecordedEvent, 1024> midiRecordQueue; // MIDI thread -> UI (recording)
+    // a controller's pitch wheel while recording (MIDI thread -> UI): key = its MIDI channel 0…15, velocity = 0..1;
+    // written as the channel's pitch bend automation like a moved knob (issue #12: the bend was heard, not recorded)
+    SpscQueue<RecordedEvent, 2048> bendRecordQueue;
+    std::map<int, float> liveBends; // UI thread: the last recorded bend of each channel (its "current value")
+    void takeRecordedBends();
 
     struct ControllerEvent
     {
@@ -662,6 +673,10 @@ private:
     int automationPattern = 0;
     int recordedAutomationPoints = 0;
     bool automationOverrideActive = false; // touched targets override their automation in the renderer
+    // Song mode, no loop region: once a parameter moved while recording, the song plays on past its end (no wrap to
+    // the start) until recording stops, and the take's clip grows with the playhead (issue #12: it cut itself)
+    bool automationLinear = false;
+    std::int64_t lastAutomationTick = -1; // the song position of the take's last update (song mode)
     std::vector<AutomationWrite> takeWrites; // per target: where this take writes (its own clip grows)
     bool takeHasUndoStep = false;
     bool perfTakeHasUndoStep = false; // the first clip a performance recording writes is the take's undo step
@@ -672,6 +687,7 @@ private:
     std::atomic<bool> waitingForInput { false };
     void startOnInput() noexcept; // MIDI or UI thread: the first note while waiting starts playback
     std::vector<int> armedInserts;
+    juce::String releasedInputDevice; // the input device releaseAudioInputIfUnused closed (reopened by name)
     double lastPlayingTick = 0.0;
     std::atomic<int> inputScale { 0 }, inputScaleRoot { 0 };
     std::atomic<int> liveChannel { 0 };              // selected channel, read by the MIDI thread
@@ -774,7 +790,7 @@ private:
     // the audio thread's view of the above while takes record (false when none is open)
     void updateLinearSong() noexcept
     {
-        const auto on = takeCount > 0 && linearRecording();
+        const auto on = (takeCount > 0 || automationLinear) && linearRecording();
         liveInput.linearSong.store (on || bouncing);
         liveInput.noLoopRegion.store ((on && song.hasLoop()) || bouncing);
     }

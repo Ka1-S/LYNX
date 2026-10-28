@@ -150,8 +150,8 @@ Core Audio / ALSA + JACK (PipeWire).
   DX10 on its engine with the channel processor it keeps (REA round 42: bit-identical to the reference model, which is
   bit-identical to FL's DLL on all 64 distinct installation states and on the 12 project channels with their channel
   envelopes/filter); Kepler on its engine (REA round 46: the whole Kepler-1 engine with the DLL's rounding mode, LFO
-  shape and noise read from the user's own engine DLL; the default patch bit-exact against FL's DLL, the 4 demo channels
-  within −124 dB, 273 of 283 preset/demo states within −99 dB); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
+  shape and noise read from the user's own engine DLL; REA round 165g flbeta165k: all 277 presets + 6 demo/test states
+  bit-exact against FL's DLL at 22.05/44.1/96 kHz, FL's own renders of 253 of 277 null at the 16-bit floor — no longer "beta"); PoiZone on its engine (REA round 44: voices, gate, arpeggiator, chorus and tape delay from the raw state;
   bit-identical to FL's DLL on 384 of 385 presets with the delay off and on the render test, the delay's low/high-cut
   coefficients differ by the CRT's low-accuracy sincosf: median −79 dB, worst −48 dB); Fruit Kick and BassDrum on their engines (REA round 43: Fruit Kick bit-exact with FL's
   DLL, release fades included (REA round 74: IPP's cosine restated, 441-entry fade at every rate), with FL's host waveshaper (its x87 live / file-render
@@ -173,7 +173,9 @@ Core Audio / ALSA + JACK (PipeWire).
   (REA round 65 §3: PoiZone's framework, 6× oversampled filter, phaser and reverb; all 423 preset states bit-identical to
   FL's DLL with the effects off, as saved bit-identical except the reverb's −137…−155 dB residual); Fruity Granulizer on its engine (REA round 67: grains on the channel's sample with the library's 24-point windowed-sinc reader, grain
   envelope, stereo separation, randomness, wobble, freeze, loop, sample start, key modes, and the plugin voice processor;
-  within −128 dB of FL's DLL on 100 random states/scenarios and on every installation state without slices); Drumaxx on
+  within −128 dB of FL's DLL on 100 random states/scenarios; round 165g: slices from the WAV's markers or FL's auto
+  slicing with the transient hold, tempo lock on the ACID beats / stretch TIME, "Step" and "Transient" keys, FL's
+  32-point render quality — 17 FL renders matched end to end at the 16-bit floor, 127 random cases within −106 dB of the DLL); Drumaxx on
   its physical drum engine (REA round 67 §6–§9: 16 pads at 38 kHz — mallet and noise, 128 four-lane delay-line membrane,
   SOF, LOW, HIGH and enveloped MID sections, hold/release, lo-fi —, cut groups, velocity modulation, master EQ and
   limiter, with the engine's own C-runtime powf/sinf/cosf ported; all 133 distinct installation states bit-identical to
@@ -242,6 +244,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   CPU: AVX bank kernel (8 partials per pass), running sine pairs across frequency changes (steps by complex rotation
   along the harmonic series), fast per-partial exp/log, cached k^m, idle records/channels skipped; "Square a Saw —
   Oxygen" (23 Harmor channels, 260 s) exports in 50 s, "JuiceBass — Menagerie" (8, 474 s) in 78 s.
+  **REA round 165g (flbeta165h):** the note start delay (part parameter 2), the part attack fade, velocity →
+  volume-envelope speed (part parameter 15), and precision "Average" with IPP's 11-bit Exp/Ln as FL's DLL computes
+  them: 298 of the 325 factory presets null within −60 dB of the DLL, 21 more match their spectrum (STFT < −40 dB),
+  6 still audible (was 262 / 44 / 19) — see
+  REA_rodada165g-flbeta165h.md §4; Harmor stays beta.
   **REA round 165g (flbeta165s):** the 88 old (version 11…15) factory presets, Default.fst included, are upgraded
   the way FL's loader does (byte-identical to the DLL's own re-save; a new Harmor starts from Default.fst), filter
   shapes 8, 10…13, 15 and 16, images of any size (Labyrinth's 16 × 12), portamento time following the velocity.
@@ -351,8 +358,13 @@ accordingly. Highlights of what is **confirmed and applied**:
   synced), LFO1 (shape table, delay ramp, trig mode, BPM sync from the song position), the half-band decimator, the
   high-pass, the Juno chorus with its mode cross-fade and the main volume/pan — every float operation in the engine's
   order and rounding mode (toward zero in the render). Checked against FL's DLL (`kepler_engine`: the default patch
-  bit-exact; `kepler_demo_channels`: the 4 demo channels). The synth conversion (`synthFromKepler`) stays the fallback
-  (Kepler Exo / "Kepler-2" states, gate/noise/×4 bytes, DLL missing).
+  bit-exact; `kepler_demo_channels`: the 4 demo channels). **REA round 165g (flbeta165k):** powers of two and the
+  chorus filter's sin/cos as the engine's library computes them (every preset bit-exact against the DLL); FL's channel
+  volume and pan reach the engine as FL's MIDI events (the engine's cubic volume law, the pan counted twice as in FL),
+  cut groups no longer cut it (FL ignores them for Kepler). FL's renders of 253 of the 277 presets null against LYNX's engine
+  fed like FL's export (the other 24 differ the same way with FL's DLL itself) (see REA_rodada165g-flbeta165k §4). The synth conversion (`synthFromKepler`) stays the fallback
+  (gate/noise/×4 bytes, DLL missing). **Kepler Exo** ("Kepler-2" states) has no LYNX engine yet: its channels import as
+  an unsupported FL plugin (§5 of that round doc).
   **BassDrum** (fallback when the engine can't run): Peak `1 + 100x³·s⁴`.
   **Sakura:** ADSR, Tune, Mix, Hi-Cut. **BooBass:** 3-band EQ. **Drumpad:** Pitch and Mallet Amplitude.
 - **GMS:** its own instrument (`core/Gms.cpp`, REA round 39 §1): FL's wrapper (velocity from Init.Vol, per-note
@@ -656,13 +668,15 @@ accordingly. Highlights of what is **confirmed and applied**:
   calls to mixer effects were not observed; LYNX starts the gains settled (FL's fresh instance fades in over 23 ms /
   2.3 ms) with PanOMatic's LFO at phase 0, and steps the LFO and ramps once per 512-frame call. Blood Overdrive's
   editor-only state field is not identified.
-- Kepler (REA round 46 §6–§7): single-ulp differences of the DLL library's pow inside the render remain (−125…−135 dB
-  on the signal; self-oscillating patches — Resonance 1 — amplify them to audible phase differences of the
-  self-oscillation, 10 of 277 presets, no demo); LYNX applies the channel volume as an output gain (how FL applies it
-  to this plugin is not confirmed: the wrapper ignores Final.Vol and gets no MIDI-volume event); the free-running
-  oscillators/LFO pause while LYNX skips an idle channel (FL's run from instance creation); old (version < 4) synced
-  states get the converted LFO1 rate at the rate set-up after loading (whether FL re-sends it is not confirmed); the
-  synth fallback keeps its earlier approximations (chorus, LFO1).
+- Kepler (REA round 165g flbeta165k §4): FL's export runs the engine 1536…2304 samples before the song (varies between
+  FL runs) and feeds the song position in 441-sample blocks, so an FL render and a LYNX export differ in the
+  free-running oscillators' phase (as two FL renders do) and a synced arpeggio step that falls exactly on a sample
+  boundary can move by one sample; the free-running oscillators/LFO pause while LYNX skips an idle channel; 24
+  presets (Laserband, Kromatone, Terminaline, Sawpulse, Choruvib, Slomoovez, Zarp and others, −60 … −3 dB) differ from
+  FL's render where FL's DLL itself, fed the same notes, differs the same way (host state not identified, possibly a
+  phase started at plugin creation); old (version < 4) synced states get the
+  converted LFO1 rate at the rate set-up after loading; the synth fallback keeps its earlier approximations (chorus,
+  LFO1). Kepler Exo is not ported.
 - Harmless: the rack compressor needs the user's FL installation (its four presets are read from it; otherwise it
   stays off and the import report says so); the chorus/delay use the x87 kernels FL picks on the test machine (another
   CPU may make FL round the chorus delay instead of truncating it — not confirmed); a fresh delay starts its feedback
@@ -701,12 +715,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   is not decoded; the reverb's coefficient rounding (CRT float functions) leaves −137…−155 dB; without the user's
   `data.saw` the channel stays unsupported.
 - Fruity Granulizer
-  (REA round 67 §5): the slice modes (the sample's regions, "auto slicing": 2 presets, no project) and the slice key
-  mode play as "no slices"; tempo sync (FL's beat count of the sample) is off; FL's interpolation quality message is not
-  confirmed (the plugin's default, 24-point sinc, is used); the DLL's rcpps reciprocal and IPP sines are replaced by
-  exact ones (−128 dB; isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational
-  speed); the sample's own loop points are not read (whole sample); one random seed
-  per instrument.
+  (REA round 67 §5, round 165g flgran165): the DLL's rcpps reciprocal and IPP sines are replaced by exact ones (−128 dB;
+  isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational speed); live playback
+  uses the plugin's 24-point sinc (FL's playback value is not measured; FL renders with 32 points, as LYNX's export);
+  the sample's own loop points are not read (whole sample); one random seed per instrument.
 - Drumaxx (REA round 67 §9): the pattern sequencer and swing are not played (a note on a pattern's trigger key — 100
   in every installation state — plays only the pads on that key); every pad plays on the channel (the plugin's
   separate mixer outputs are not routed; no installation state uses them); MIDI controllers are not wired; the CRT's

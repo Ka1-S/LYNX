@@ -85,6 +85,10 @@ public:
 
     // Editing shortcuts; the main window forwards keys when the Playlist is visible.
     bool handleKey (const juce::KeyPress& key);
+    // The key map's actions of this editor (its tools and single letters: "pianoRoll.tool.knife"...); false if not one.
+    bool runKeyAction (const std::string& id);
+    // The tool buttons' tooltips show the keys the key map gives them (`keyOf`: action id -> key text, "" = none).
+    void refreshToolKeys (const std::function<juce::String (const std::string&)>& keyOf);
 
     // The key map's playlist.* actions (zoom presets, ripple editing). False for unknown ids.
     bool runAction (const std::string& id);
@@ -229,6 +233,9 @@ private:
     juce::Rectangle<int> trackArrow (int track) const; // a group header's fold arrow (empty for other tracks)
     void editTrack (int track, std::function<void (PlaylistTrack&)> change);
     int currentTrack = -1; // the track selected by a click on its header (FL marks it next to the LED)
+    std::vector<int> selectedTracks; // Ctrl / Shift+click on headers: more selected tracks (round 165m)
+    bool isTrackSelected (int track) const;
+    std::vector<int> tracksForMenu (int track) const;
 
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true }; // hBar is hidden: the overview strip scrolls sideways

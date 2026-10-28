@@ -114,6 +114,7 @@ std::vector<Action> makeActions()
         { "rack.sendToInserts", TR_NOOP ("Send the selected channels to free mixer inserts"), Context::channelRack, { chord ('L', ctrl) } },
         { "rack.graphEditor", TR_NOOP ("Step graph lanes on/off"), Context::channelRack, { chord ('K', ctrl) } },
         { "rack.pianoRollView", TR_NOOP ("Piano-roll view of all channels on/off"), Context::channelRack, {} },
+        { "rack.follow", TR_NOOP ("Follow the playhead (page along with the playing step) on/off"), Context::channelRack, {} },
         { "rack.groupSelected", TR_NOOP ("Put the selected channels in a new filter group"), Context::channelRack, { chord ('G', alt) } },
         { "rack.rotateLeft", TR_NOOP ("Rotate the selected channels' steps left"), Context::channelRack, { chord (left, ctrl | shift) } },
         { "rack.rotateRight", TR_NOOP ("Rotate the selected channels' steps right"), Context::channelRack, { chord (right, ctrl | shift) } },
@@ -153,6 +154,22 @@ std::vector<Action> makeActions()
         { "pianoRoll.quantizeStarts", TR_NOOP ("Quantize starts"), Context::pianoRoll, { chord ('Q', shift) }, true },
         { "pianoRoll.quantizeHalf", TR_NOOP ("Quantize starts 50% (halfway to the grid)"), Context::pianoRoll, {} },
         { "pianoRoll.follow", TR_NOOP ("Follow the playhead (auto scrolling) on/off"), Context::pianoRoll, {} },
+        // the tools and the other single letters (FL's keys; issue #12: they were fixed in the editor and won over a
+        // global shortcut given the same key)
+        { "pianoRoll.tool.pencil", TR_NOOP ("Tool: Pencil"), Context::pianoRoll, { chord ('P') } },
+        { "pianoRoll.tool.brush", TR_NOOP ("Tool: Brush"), Context::pianoRoll, { chord ('B') } },
+        { "pianoRoll.tool.drumPaint", TR_NOOP ("Tool: Drum brush"), Context::pianoRoll, { chord ('N') } },
+        { "pianoRoll.tool.eraser", TR_NOOP ("Tool: Eraser"), Context::pianoRoll, { chord ('D') } },
+        { "pianoRoll.tool.mute", TR_NOOP ("Tool: Mute"), Context::pianoRoll, { chord ('T') } },
+        { "pianoRoll.tool.knife", TR_NOOP ("Tool: Knife"), Context::pianoRoll, { chord ('C') } },
+        { "pianoRoll.tool.lasso", TR_NOOP ("Tool: Lasso (select)"), Context::pianoRoll, { chord ('E') } },
+        { "pianoRoll.tool.zoom", TR_NOOP ("Tool: Zoom"), Context::pianoRoll, { chord ('Z') } },
+        { "pianoRoll.tool.listen", TR_NOOP ("Tool: Listen"), Context::pianoRoll, { chord ('Y') } },
+        { "pianoRoll.slide", TR_NOOP ("Slide notes on/off (new notes)"), Context::pianoRoll, { chord ('S') } },
+        { "pianoRoll.previousChannel", TR_NOOP ("Previous channel"), Context::pianoRoll, { chord ('G') } },
+        { "pianoRoll.nextChannel", TR_NOOP ("Next channel"), Context::pianoRoll, { chord ('K') } },
+        { "pianoRoll.previousChannelWithNotes", TR_NOOP ("Previous channel with notes"), Context::pianoRoll, { chord ('H') } },
+        { "pianoRoll.nextChannelWithNotes", TR_NOOP ("Next channel with notes"), Context::pianoRoll, { chord ('J') } },
 
         // Playlist (focused)
         { "playlist.zoomIn", TR_NOOP ("Zoom in"), Context::playlist, { chord (pageUp) } },
@@ -168,6 +185,15 @@ std::vector<Action> makeActions()
         { "playlist.quantizeStarts", TR_NOOP ("Quantize the clips' starts"), Context::playlist, { chord ('Q', ctrl) } },
         { "playlist.quantizeHalf", TR_NOOP ("Quantize the clips' starts 50% (halfway to the grid)"), Context::playlist, {} },
         { "playlist.follow", TR_NOOP ("Follow the playhead (auto scrolling) on/off"), Context::playlist, {} },
+        { "playlist.tool.pencil", TR_NOOP ("Tool: Pencil"), Context::playlist, { chord ('P') } },
+        { "playlist.tool.brush", TR_NOOP ("Tool: Brush"), Context::playlist, { chord ('B') } },
+        { "playlist.tool.eraser", TR_NOOP ("Tool: Eraser"), Context::playlist, { chord ('D') } },
+        { "playlist.tool.mute", TR_NOOP ("Tool: Mute"), Context::playlist, { chord ('T') } },
+        { "playlist.tool.knife", TR_NOOP ("Tool: Knife"), Context::playlist, { chord ('C') } },
+        { "playlist.tool.lasso", TR_NOOP ("Tool: Lasso (select)"), Context::playlist, { chord ('E') } },
+        { "playlist.tool.zoom", TR_NOOP ("Tool: Zoom"), Context::playlist, { chord ('Z') } },
+        { "playlist.tool.listen", TR_NOOP ("Tool: Listen"), Context::playlist, { chord ('Y') } },
+        { "playlist.tool.slip", TR_NOOP ("Tool: Slip"), Context::playlist, { chord ('S') } },
         // FL's Performance mode (round 165m; Ctrl+P on FL's Playlist menu [DFM])
         { "playlist.performanceMode", TR_NOOP ("Performance mode on/off (launch the clips before the Start marker)"), Context::playlist, { chord ('P', ctrl) } },
         { "playlist.zoomPerformance", TR_NOOP ("Zoom on the performance clips"), Context::playlist, {} },
@@ -409,6 +435,69 @@ void KeyMap::resetToDefaults()
 bool KeyMap::playsNote (const Chord& c, bool typingPiano) noexcept
 {
     return typingPiano && (c.mods & (ctrl | alt | shift)) == 0 && typingPianoNote (c.key) >= 0;
+}
+
+std::string KeyMap::findFromSecondaryWindow (const Chord& c, bool typingIntoText, bool typingPiano) const
+{
+    if (! c.isValid() || c.key == escape) // (Esc closes the window)
+        return {};
+    const auto editingKey = c.isPrintable() || c.key == space || c.key == enter || c.key == tab || c.key == backspace || c.key == del
+                            || c.key == insert || (c.key >= up && c.key <= end);
+    if (typingIntoText && editingKey && (c.mods & (ctrl | alt)) == 0)
+        return {};
+    if (auto own = findUserBound (c, Context::global, typingPiano); ! own.empty())
+        return own;
+    return find (c, Context::global, typingPiano);
+}
+
+std::string KeyMap::findUserBound (const Chord& c, Context focus, bool typingPiano) const
+{
+    if (! c.isValid() || playsNote (c, typingPiano))
+        return {};
+
+    const auto plainPrintable = c.isPrintable() && (c.mods & (ctrl | alt)) == 0;
+    const auto& list = actions();
+    const Action* globalMatch = nullptr;
+
+    for (std::size_t i = 0; i < list.size(); ++i)
+    {
+        const auto& a = list[i];
+
+        if ((a.context != Context::global && a.context != focus) || chords[i] == a.defaults)
+            continue;
+        if (std::find (chords[i].begin(), chords[i].end(), c) == chords[i].end()
+            || std::find (a.defaults.begin(), a.defaults.end(), c) != a.defaults.end())
+            continue; // (a default key keeps its usual priority)
+        if (typingPiano && plainPrintable && ! a.whilePiano)
+            continue;
+        if (a.context == focus && focus != Context::global)
+            return a.id;
+        if (globalMatch == nullptr)
+            globalMatch = &a;
+    }
+
+    return globalMatch != nullptr ? globalMatch->id : std::string();
+}
+
+std::vector<std::string> KeyMap::shadowedBy (const Chord& c, const std::string& actionId) const
+{
+    std::vector<std::string> out;
+    const auto* owner = findAction (actionId);
+    if (owner == nullptr || ! c.isValid())
+        return out;
+
+    const auto& list = actions();
+    for (std::size_t i = 0; i < list.size(); ++i)
+    {
+        const auto& a = list[i];
+        if (actionId == a.id || a.context == owner->context)
+            continue;
+        if (owner->context != Context::global && a.context != Context::global)
+            continue; // two different panels never meet
+        if (std::find (chords[i].begin(), chords[i].end(), c) != chords[i].end())
+            out.push_back (a.id);
+    }
+    return out;
 }
 
 std::string KeyMap::find (const Chord& c, Context focus, bool typingPiano) const

@@ -141,6 +141,7 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
+    void followPlayhead();
 
     Area areaAt (int x, int y, int& row) const;
     void moved() override;

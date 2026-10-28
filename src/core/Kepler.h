@@ -15,9 +15,12 @@
 //
 // Host interface as FL's wrapper: note number = key, MIDI velocity from Init.Vol (41.714·ln(10·Init.Vol + 1), 0…127),
 // per-note pan / pitch expressions from FinalLevels (pan law √(1 − p), √p with p = (pan + 1)/2), the X/Y (FCut/FRes)
-// modulation routes. Not modelled / differences: the Kepler-2 (Kepler Exo) layout, DCO2, the filter types 1/2, saturation,
+// modulation routes, the channel volume / pan as FL's MIDI events (REA_rodada165g-flbeta165k §3); cut groups do not
+// cut it. FL's renders of all 277 factory presets null against LYNX's engine at the 16-bit floor once FL's export
+// warm-up (1536…2304 samples, varies between FL runs) is given. Not modelled / differences: the Kepler-2 (Kepler Exo) layout, DCO2, the filter types 1/2, saturation,
 // EQ, delay, reverb and hyper chorus (all off in every Kepler-1 state); the chorus noise/gate (off in all FL data); the
-// oversampling ×4 flag (0 in all data). The free-running oscillators/LFO pause while LYNX skips an idle channel.
+// oversampling ×4 flag (0 in all data). The free-running oscillators/LFO pause while LYNX skips an idle channel (only
+// their phase at the next note differs, as between two FL runs).
 
 #include <cstdint>
 #include <memory>
@@ -55,6 +58,12 @@ struct RefOptions
 {
     double tempo = 125.0; // the wrapper's default tempo (ProcessEvent 0 never sent)
     int block = 512;      // host block (split at every event)
+    // FL's export (REA_rodada165g-flbeta165k §3): the channel volume / pan as MIDI events sent first (midiVolume ≥ 0:
+    // 0…127, midiPan −64…64), `warmup` samples rendered before the output starts (FL's warm-up, 1536…2304 observed)
+    // and, with `transport`, the song playing from beat 0 at the first output sample
+    int midiVolume = -1, midiPan = 0;
+    int warmup = 0;
+    bool transport = false;
 };
 
 // Renders `notes` from `state` with the tables of the DLL at `dll`. Interleaved stereo (2·length); empty if unusable.

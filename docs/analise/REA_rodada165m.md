@@ -6,12 +6,10 @@ Patcherize / Patcherize all (null before/after). Clean-room: FL behaviour from R
 menus/DFM, the demo projects and FL running; no copied code or graphics.
 
 ## Where I stopped
-- 2026-10-27 21:10: core + UI built (Linux GUI, core tests 0 failures for perf165), merged origin/main, landing batch 1:
-  Performance mode (zone before the Start marker, launching by click / column / MIDI channel, every track setting,
-  recording the passes as clips, .flp import of the settings and of the project flag), Patcherize / Patcherize all.
-- Left: FL's "Prepare for performance mode" macro; the Performance settings apply to the clicked track (FL: every
-  selected track); FL's modifier keys 125–127 on the MIDI channel (meaning not decoded); a controller-script layer
-  (Launchpad / APC grids) beyond the generic note mapping.
+- 2026-10-28: batch 1 landed (82f5dcec). Batch 2 (feature/perfmode165b): Prepare for performance mode, Performance
+  settings on every selected track (Playlist track multi-select: Ctrl / Shift+click on headers), the controller
+  modifier notes 125–127, clip progress drawn as FL does (the played part lighter). Left: Launchpad / APC grid
+  scripts (only the generic note mapping exists).
 
 ## 1. Evidence
 
@@ -90,3 +88,17 @@ FL's default track: motion Stay, press Retrigger, trigger sync 4 beats, tolerant
 - core/Patcherize.{h,cpp}: channel → generator Patcher (Notes → plugin → To LYNX), insert slot / all slots → effect
   Patcher in series (side-chain through the Patcher's side-chain pin); null tests (channel max diff 3e-8, slots 0);
   automation and links follow to the published parameters (FL loses them).
+
+## 3. Batch 2 [DECOMP]
+- `MacroPrepareForPerformanceModeActionExecute` 0xf1d980 → FUN_0122d010: confirmation "The project will be tweaked
+  for best results in a live performance situation (no undo)", then the "Marker settings" dialog
+  (TAddMarkerSettingsForm: Marker count 4 / 8 / 16 / 32 / 64, default 16 — table 0x15c1694; Spacing 1…128 steps,
+  default 16 — table 0x15c16a8 × ticks per step); turns two View options on (the progress ones), Performance mode on;
+  when stopped, one step "prepare for performance": a "Start" marker (type 5) at 0, count × spacing inserted at 0, a
+  marker every spacing over the new zone. LYNX: the same, as one undo step.
+- Launch FUN_01221c00 (track, column, flags, velocity): flags & 0x20 = release; bits 16–18 = what the column means;
+  0x80 (note 125 held) = the clip's whole column (re-dispatched with 0x20000 for every track); 0x100 (with 0x80, note
+  126) = only tracks whose 0xa0 (playing clip) ≥ 0; bits 3–4 = launch timing stored per track at +0xa8 and read by
+  FUN_0100b8d0: 0 = the track's trigger sync (and Tolerant), 1 (0x8, note 127) = the next bar (FUN_00e59e90), 2 =
+  immediate (the release path).
+- Performance settings handler FUN_012ead80 walks every selected track (FUN_012e87a0) under one undo step.

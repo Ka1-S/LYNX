@@ -1,4 +1,6 @@
+#include "ui/EditorTools.h"
 #include "core/FruityDance.h"
+#include "core/VideoPlayer.h"
 #include "ui/ColourPicker.h"
 #include "ui/PatcherEditor.h"
 #include "ui/UiTrace.h"
@@ -89,6 +91,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::dashboard: return "Dashboard";
         case InstrumentKind::voltage: return "Voltage Controller";
         case InstrumentKind::vfx: return "VFX";
+        case InstrumentKind::videoplayer: return "Fruity Video Player";
     }
     return "?";
 }
@@ -1010,8 +1013,8 @@ void ChannelRackComponent::toggleEditor (int channel, bool keepOthers)
             PatcherWindows::openChannel (engine, channel);
         return;
     }
-    if (kind != InstrumentKind::plugin && ! hasChannelSettings (kind))
-        return; // built-in drums and audio clips have no editor window: the click only selects
+    // built-in drums and audio clips have no instrument page: as in FL, the click opens their channel window anyway
+    // (header + Misc tab — levels, polyphony, cut groups, arpeggiator), as the hint says; it only selected (round 165q)
 
     if (isEditorOpen (channel))
     {
@@ -1260,7 +1263,7 @@ bool ChannelRackComponent::loadSampleIntoSelected (const juce::File& file)
     const auto row = engine.getSelectedChannel();
     const auto& song = engine.getSong();
 
-    if (row < 0 || row >= (int) song.channels.size() || ! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+    if (row < 0 || row >= (int) song.channels.size() || ! SampleLibrary::isSampleFile (file))
         return false;
 
     const auto kind = song.channels[(std::size_t) row].instrument;
@@ -2176,6 +2179,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         const auto added = add (c);
         openChannelSettings (engine, added);
     });
+    // FL's Fruity Video Player (round 165g): a video in sync with the song, decoded by the user's ffmpeg
+    menu.addItem ("Fruity Video Player", [this, add] {
+        ChannelDef c;
+        c.name = "Fruity Video Player";
+        c.instrument = InstrumentKind::videoplayer;
+        c.pluginState = video::write (video::Settings {});
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
     // FL's own instrument engines (round 142, issue #5): their editor opens
     {
         juce::PopupMenu engines;
@@ -2364,7 +2376,7 @@ void ChannelRackComponent::sliceChannel (int channel)
 bool ChannelRackComponent::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;sf2;sf3"))
+        if (SampleLibrary::isSampleFile (juce::File (f)) || juce::File (f).hasFileExtension ("sf2;sf3"))
             return true;
 
     return false;
@@ -2387,7 +2399,7 @@ void ChannelRackComponent::filesDropped (const juce::StringArray& files, int x, 
             target = -1;
             continue;
         }
-        if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+        if (! SampleLibrary::isSampleFile (file)) // (FL's WavPack pack samples too: round 165q)
             continue;
 
         assignSample (target, file);
@@ -2423,7 +2435,25 @@ void ChannelRackComponent::timerCallback()
         dirty (playheadStep);
         playheadStep = step;
         dirty (playheadStep);
+        followPlayhead();
     }
+}
+
+void ChannelRackComponent::followPlayhead()
+{
+    // Follow (issue #12): a pattern longer than the view pages along with the playing step, as the Playlist does
+    if (playheadStep < 0 || ! EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::channelRack))
+        return;
+    auto* viewport = findParentComponentOfClass<juce::Viewport>();
+    if (viewport == nullptr)
+        return;
+    const auto view = viewport->getViewArea();
+    const auto stepsLeft = view.getX() + gridLeft(); // (the controls column stays on the left of the view)
+    const auto x = gridLeft() + playheadStep * stepWidth;
+    if (x >= stepsLeft && x + stepWidth <= view.getRight())
+        return;
+    const auto maxX = juce::jmax (0, getWidth() - view.getWidth());
+    viewport->setViewPosition (juce::jlimit (0, maxX, x - gridLeft()), view.getY());
 }
 
 bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& details)
