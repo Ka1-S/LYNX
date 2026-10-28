@@ -744,7 +744,7 @@ public:
 
         if (args.contains ("--windowtest"))
         {
-            // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor and a plugin-like window
+            // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor, a plugin-like window and a name dialog
             // over the main window and checks that each one stays in front, owned by the main window, with the
             // keyboard focus (issue #4). The windows appear on screen for a few seconds.
             runWindowTest (args[args.indexOf ("--windowtest") + 1].unquoted());
@@ -2649,6 +2649,7 @@ private:
             lynx::MainComponent* ui = nullptr;
             std::unique_ptr<juce::DocumentWindow> main, pluginLike;
             juce::TextEditor* pluginField = nullptr;
+            std::unique_ptr<juce::AlertWindow> nameDialog;
             std::function<void()> done;
 
             void line (const juce::String& text)
@@ -2731,10 +2732,26 @@ private:
                         break;
                     case 5:
                         check ("main window takes the keyboard focus back when it is active", ui->hasKeyboardFocus (true));
+                        // round 165q: a name dialog (F4's next empty pattern, Rename and color...) opens ready to type
+                        nameDialog = lynx::makeNameAndColourDialog ("Rename pattern", "Pattern 2", 0xff808080u);
+                        nameDialog->enterModalState (true, nullptr, false);
+                        lynx::keepAboveMainWindow (*nameDialog);
+                        break;
+                    case 6:
+                    {
+                        auto* f = juce::Component::getCurrentlyFocusedComponent();
+                        auto* field = dynamic_cast<juce::TextEditor*> (f);
+                        check ("name dialog: its text field has the keyboard focus", field != nullptr && focusIn (nameDialog.get()));
+                        if (field != nullptr)
+                            field->keyPressed (juce::KeyPress ('x', {}, 'x'));
+                        check ("name dialog: typing replaces the name", nameDialog->getTextEditorContents ("name") == "x");
+                        nameDialog->exitModalState (0);
+                        nameDialog = nullptr;
                         line (ok ? "result=OK" : "result=FAILED");
                         stopTimer();
                         done();
                         break;
+                    }
                     default:
                         break;
                 }
