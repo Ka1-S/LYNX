@@ -458,10 +458,12 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                                    ? previous->echoes[c]
                                    : std::make_shared<channelmisc::NoteEcho>();
 
+    // (FL's Kepler keeps sounding when its cut group cuts it: FL's renders with and without "cut itself" are the same
+    // and both null against the engine fed every note to its end, REA_rodada165g-flbeta165k §3)
     for (std::size_t c = 0; c < channels.size(); ++c)
         if (channels[c].cutGroup > 0)
             for (std::size_t d = 0; d < channels.size(); ++d)
-                if (channels[d].cutBy == channels[c].cutGroup)
+                if (channels[d].cutBy == channels[c].cutGroup && channels[d].instrument != InstrumentKind::kepler)
                 {
                     state->cutTargets[c].push_back ((int) d);
                     state->hasCutGroups = true;

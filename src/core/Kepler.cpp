@@ -222,15 +222,6 @@ float sinF (float x) noexcept
     }
     return (float) r;
 }
-float cosF (float x) noexcept
-{
-    double r;
-    {
-        NearestMode m;
-        r = std::cos ((double) x);
-    }
-    return (float) r;
-}
 float lnF (float x) noexcept
 {
     double r;
@@ -246,6 +237,62 @@ float bitsF (std::uint32_t u) noexcept
     float f;
     std::memcpy (&f, &u, 4);
     return f;
+}
+
+std::uint32_t floatBits (float f) noexcept
+{
+    std::uint32_t u;
+    std::memcpy (&u, &f, 4);
+    return u;
+}
+
+// sine and cosine as the engine's library computes them for the chorus filter design (REA_rodada165g-flbeta165k §2):
+// for |x| ≥ 2⁻¹³ a four-lane float sine run on (x, |x| + π/2) — Cody-Waite reduction by π in four float products, an
+// odd degree-9 polynomial, the parity of the quotient flipping the sign; below 2⁻¹³ sin = x, cos = 1 − x²/2. Every step
+// in float, in the current rounding mode. Bit-exact against the DLL on 5·10⁵ inputs |x| < 3.2, both rounding modes
+// [EXEC]; the correctly rounded sin/cos differ from it by one ulp on 16–27 % of the inputs (at 44.1 kHz on both).
+// Valid for |x| < 10⁴ (the library's large-argument path is not needed: the argument is 2π·7 kHz/rate).
+float engineSinLane (float x) noexcept
+{
+    const auto ax = bitsF (floatBits (x) & 0x7fffffffu);
+    const auto sign = floatBits (x) & 0x80000000u;
+    auto t = ax * bitsF (0x3ea2f983u);
+    t = t + bitsF (0x4b400000u);
+    const auto parity = floatBits (t) << 31;
+    const auto n = t - bitsF (0x4b400000u);
+    const auto a = bitsF (0x40490000u) * n, b = bitsF (0x3a7da000u) * n, c = bitsF (0x34222000u) * n, d = bitsF (0x2cb4611au) * n;
+    auto r = ax - a;
+    r = r - b;
+    r = r - c;
+    r = r - d;
+    const auto r2 = r * r;
+    r = bitsF (floatBits (r) ^ parity);
+    auto p = bitsF (0x362edef8u) * r2;
+    p = p + bitsF (0xb94fb7ffu);
+    p = p * r2;
+    p = p + bitsF (0x3c088766u);
+    p = p * r2;
+    p = p + bitsF (0xbe2aaaa6u);
+    p = r2 * p;
+    p = p * r;
+    r = r + p;
+    return bitsF (floatBits (r) ^ sign);
+}
+
+void engineSinCos (float x, float& s, float& c) noexcept
+{
+    const auto ax = bitsF (floatBits (x) & 0x7fffffffu);
+    if (! (ax >= bitsF (0x39000000u)))
+    {
+        auto q = ax * ax;
+        q = q * 0.5f;
+        s = x;
+        c = 1.0f - q;
+        return;
+    }
+    const auto y = ax + bitsF (0x3fc90fdbu);
+    s = engineSinLane (x);
+    c = engineSinLane (y);
 }
 
 // --------------------------------------------------------------------------------------------- installation data (§2)
@@ -692,6 +739,33 @@ public:
         playing = isPlaying;
         if (isPlaying)
             beatPos = beats;
+    }
+
+    // FL's channel volume and pan as MIDI events (wrapper ProcessEvent 3 / 2 → engine setters, REA_rodada165g-flbeta165k
+    // §3): volume = MIDI value / 127, pan = MIDI pan / 128 + 0.5; output gains √(1 − pan)·k·(a·v³ − b·v² + c·v) and
+    // √pan·k·(…), which the render glides to by 0.05 per sample. `snap`: start at the targets (a fresh instance that
+    // FL's export warm-up has already run).
+    void setMidiLevels (float volume, float pan, bool snap) noexcept
+    {
+        midiVolume = volume;
+        midiPan = pan;
+        auto q = 0.0f;
+        if (! (midiPan < 0.0f))
+            q = std::min (midiPan, 1.0f);
+        const auto v = midiVolume;
+        const auto a = v * 6.210264205932617f;
+        auto b = v * 1.4609940052032471f;
+        auto c = v * v;
+        b = b * v;
+        const auto d = v * 1.5597299337387085f;
+        c = c * a;
+        c = c - b;
+        const auto sl = std::sqrt (1.0f - q) * 1.4144271612167358f;
+        c = c + d;
+        outTargetL = sl * c;
+        outTargetR = (std::sqrt (q) * 1.4144271612167358f) * c;
+        if (snap)
+            outGL = outTargetL, outGR = outTargetR;
     }
 
     void noteOn (int key, int velocity) noexcept // velocity 0…127
@@ -1942,7 +2016,8 @@ private:
     void designChorusBiquad() noexcept
     {
         const auto w = 7000.0f * 6.2831854820251465f / chorus.fs;
-        const auto s = sinF (w), c = cosF (w);
+        float s, c;
+        engineSinCos (w, s, c);
         const auto al = 0.5f / 0.7070000171661377f * s;
         const auto one = 1.0f - c, half = one * 0.5f;
         const auto inv = 1.0f / (al + 1.0f);
@@ -2132,6 +2207,7 @@ private:
     // gains
     float mainL = 0.0f, mainR = 0.0f, mainSL = 0.0f, mainSR = 0.0f, mainK = 0.0f;
     float outGL = 6.309000015258789f, outGR = 6.309000015258789f, outTargetL = 6.309000015258789f, outTargetR = 6.309000015258789f;
+    float midiVolume = 1.0f, midiPan = 0.5f; // the last MIDI volume / pan events (§3 of REA_rodada165g-flbeta165k)
     // notes, hold, arpeggiator
     std::vector<std::pair<int, int>> held;
     std::vector<int> order;
@@ -2154,8 +2230,9 @@ int velocityFromInitVol (double initVol) noexcept
 // ------------------------------------------------------------------------------------------------ LYNX instrument
 //
 // Levels: FL's wrapper reads only Final.Pan (note pan + channel pan, the engine's own pan law), Final.Pitch and Final.FCut/
-// FRes; it ignores Final.Vol, and the MIDI-volume event path is not enabled for Kepler's plugin flags (§5.2). How FL then
-// applies the channel volume to this plugin is not confirmed; LYNX applies its channel volume as an output gain. Init.Vol
+// FRes; it ignores Final.Vol. FL also sends the channel volume and pan as MIDI events, which set the engine's output
+// gains (REA_rodada165g-flbeta165k §3, FL renders: the channel pan counts twice, the volume follows the engine's cubic
+// law), so LYNX's channel gains reach this instrument only as those two events — not as an output gain. Init.Vol
 // = (11^(1.28·velocity) − 1)/10 from LYNX's velocity (as for GMS, REA_rodada28 inference). The tempo is the song tempo;
 // while the transport plays, the song position (beats) drives the synced LFO1 and the arpeggiator clock.
 
@@ -2267,6 +2344,19 @@ public:
                 if (noteCents[(std::size_t) k] != sentCents[(std::size_t) k])
                     synth->setPitchExpression (k, sentCents[(std::size_t) k] = noteCents[(std::size_t) k]);
             }
+        // the channel volume and pan as FL sends them (§3 of REA_rodada165g-flbeta165k): MIDI volume = raw volume
+        // (0…12800)·128/12800 truncated, at most 127; MIDI pan = (raw pan − 6400)/100 truncated. LYNX's gains are
+        // channelGain(volume) = (11^v − 1)/10 on its cos/sin pan law, so v comes back as log(10·g + 1)/log 11.
+        {
+            const auto v = vol > 0.0 ? std::log (10.0 * vol + 1.0) / std::log (11.0) : 0.0;
+            const auto midiVolume = (int) std::min<long long> (127, std::max<long long> (0, std::llround (v * 12800.0) / 100));
+            const auto midiPan = (int) std::clamp<long long> (std::llround (pan * 6400.0) / 100, -64, 64);
+            if (midiVolume != sentVolume || midiPan != sentMidiPan)
+            {
+                synth->setMidiLevels ((float) midiVolume * 0.007874015718698502f, (float) midiPan * 0.0078125f + 0.5f, sentVolume < 0);
+                sentVolume = midiVolume, sentMidiPan = midiPan;
+            }
+        }
         synth->setTempo ((double) tempo.load());
         synth->setTransport (playing, songBeats);
         for (int done = 0; done < n;)
@@ -2275,11 +2365,10 @@ public:
             std::fill (scratchL.begin(), scratchL.begin() + m, 0.0f);
             std::fill (scratchR.begin(), scratchR.begin() + m, 0.0f);
             synth->render (scratchL.data(), scratchR.data(), m);
-            const auto g = (float) vol;
             for (int i = 0; i < m; ++i)
             {
-                left[done + i] += scratchL[(std::size_t) i] * g;
-                right[done + i] += scratchR[(std::size_t) i] * g;
+                left[done + i] += scratchL[(std::size_t) i];
+                right[done + i] += scratchR[(std::size_t) i];
             }
             done += m;
         }
@@ -2306,6 +2395,7 @@ private:
             synth.reset (s);
             sounding.fill (false);
             quiet = 0;
+            sentVolume = sentMidiPan = -1000; // a new engine: the levels are sent again (snapped)
         }
     }
 
@@ -2319,7 +2409,7 @@ private:
     std::string dll;
     double lastTicks = -1.0, songBeats = 0.0;
     bool playing = false;
-    int quiet = 0;
+    int quiet = 0, sentVolume = -1000, sentMidiPan = -1000;
     std::array<bool, 128> sounding {};
     std::array<float, 128> notePan {}, noteCents {}, sentPan {}, sentCents {};
     float nextPan = 0.0f, nextCents = 0.0f;
@@ -2354,6 +2444,17 @@ std::vector<float> renderReference (const std::vector<std::uint8_t>& state, cons
     synth->setTempo (options.tempo);
     std::vector<float> out (2 * (std::size_t) length);
     std::vector<float> l ((std::size_t) std::max (1, options.block)), r ((std::size_t) std::max (1, options.block));
+    if (options.midiVolume >= 0)
+        synth->setMidiLevels ((float) std::min (options.midiVolume, 127) * 0.007874015718698502f,
+                              (float) std::clamp (options.midiPan, -64, 64) * 0.0078125f + 0.5f, false);
+    for (int w = 0; w < options.warmup;)
+    {
+        const auto len = std::min (std::max (1, options.block), options.warmup - w);
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        synth->render (l.data(), r.data(), len);
+        w += len;
+    }
     // the harness (and FL's wrapper): note-ons/offs between blocks, per-note Final levels sent at the next block
     struct Pending { int key; float pan, cents; };
     std::vector<Pending> pending;
@@ -2393,6 +2494,8 @@ std::vector<float> renderReference (const std::vector<std::uint8_t>& state, cons
         pending.clear();
         std::fill (l.begin(), l.end(), 0.0f);
         std::fill (r.begin(), r.end(), 0.0f);
+        if (options.transport)
+            synth->setTransport (true, (double) n0 / sampleRate * options.tempo / 60.0);
         synth->render (l.data(), r.data(), len);
         for (int i = 0; i < len; ++i)
         {
