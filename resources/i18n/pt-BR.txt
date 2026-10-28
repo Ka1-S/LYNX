@@ -5563,7 +5563,6 @@ countries: br
 "{0} was also {1}: your key wins there now." = "{0} também era {1}: agora a sua tecla vale lá."
 "Pattern length in bars: [LMB] drag or [Wheel] change it  [2xLMB] automatic (from the notes)  [RMB] menu" = "Tamanho do pattern em compassos: [LMB] arraste ou [Wheel] para mudar  [2xLMB] automático (pelas notas)  [RMB] menu"
 "Pattern length: {0} (automatic, from the notes)" = "Tamanho do pattern: {0} (automático, pelas notas)"
-"Pattern length: {0}" = "Tamanho do pattern: {0}"
 "Pattern length (bars, 0 = automatic)" = "Tamanho do pattern (compassos, 0 = automático)"
 "Pattern length" = "Tamanho do pattern"
 "Follow: a pattern longer than the Channel Rack pages along with the playing step; off, it stays where you scrolled" = "Seguir: um pattern maior que o Channel Rack passa de página junto com o step tocando; desligado, fica onde você rolou"

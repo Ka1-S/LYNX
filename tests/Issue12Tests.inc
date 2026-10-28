@@ -165,7 +165,11 @@ TEST (issue12_recorded_pitch_bend_plays_on_a_lynx_instrument)
         return c;
     };
     const auto a = crossings (plain.second), b = crossings (bent.second);
-    CHECK (a > 50 && b > a);
+    // (C5 = 261.6 Hz: ~45 crossings in the 4096 samples measured; +2 semitones = x1.122)
+    const auto ok = a > 30 && b * 100 > a * 105 && b * 100 < a * 120;
+    if (! ok)
+        std::printf ("  pitch bend: %d crossings plain, %d bent\n", a, b);
+    CHECK (ok);
 }
 
 // Crash (0.1.18, the user's crash report): cycling quickly through samples crashed in WaveformCache's disk-cache pruning
