@@ -1,3 +1,4 @@
+#include "platform/Paths.h"
 #include "ui/ColourPicker.h"
 #include "ui/MixerComponent.h"
 #include "ui/UiTrace.h"
@@ -36,6 +37,7 @@
 #include "ui/Theme.h"
 #include "ui/AudioEditor.h"
 #include "ui/Dialogs.h"
+#include "ui/QuickPick.h"
 
 namespace lynx
 {
@@ -1460,7 +1462,7 @@ namespace
 {
 juce::File mixerStatesFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Mixer states");
+    return lynx::platform::documentsFolder().getChildFile ("LYNX/Mixer states");
 }
 
 juce::Array<juce::File> savedMixerStates()
@@ -4047,6 +4049,29 @@ void EffectsPanel::showAddMenu (int)
 {
     juce::PopupMenu menu;
 
+    // FL's renamed plugins first (issue #11): "1_EQ" renamed in the Browser's Plugin database is added by typing 1
+    auto picks = quickpick::renamedEffects (engine, [this] (EffectSlot fx) {
+        const auto t = track;
+        bool added = false;
+        engine.editSong ([t, &fx, &added] (Song& song) {
+            if (t < 0 || t >= (int) song.mixer.size())
+                return;
+            auto& effects = song.mixer[(std::size_t) t].effects;
+            if ((int) effects.size() < maxEffectSlots)
+            {
+                effects.push_back (std::move (fx));
+                added = true;
+            }
+        });
+        if (! added)
+            return;
+        selectedSlot = (int) slots()->size() - 1;
+        if ((*slots())[(std::size_t) selectedSlot].kind == EffectKind::plugin)
+            openPluginWindow (selectedSlot);
+        repaint();
+    });
+    quickpick::addPicks (menu, picks);
+
     for (auto kind : allEffects)
         menu.addItem (addableEffectName (kind), addableEffectAvailable (kind), false, [this, kind] {
             const auto made = newAddableEffect (kind, engine.getSong().bpm);
@@ -4098,7 +4123,7 @@ void EffectsPanel::showAddMenu (int)
     menu.addSeparator();
     menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    quickpick::showMenu (menu, juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), std::move (picks));
 }
 
 void EffectsPanel::showSlotMenu (int slot)
@@ -4297,13 +4322,29 @@ void EffectsPanel::showSlotMenu (int slot)
         repaint();
     });
     menu.addSeparator();
-    menu.addItem (tr ("Delete"), [this, slot] {
-        engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });
-        selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
-        repaint();
-    });
+    menu.addItem (tr ("Delete") + "\tDel", [this, slot] { deleteSlot (slot); });
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    // FL: with the slot's menu open, Delete removes the plugin (issue #11)
+    quickpick::showMenu (menu, juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), {},
+                         [safe = juce::Component::SafePointer<EffectsPanel> (this), slot] (const juce::KeyPress& key) {
+                             if (! key.isKeyCode (juce::KeyPress::deleteKey) || safe == nullptr)
+                                 return false;
+                             juce::MessageManager::callAsync ([safe, slot] {
+                                 if (safe != nullptr)
+                                     safe->deleteSlot (slot);
+                             });
+                             return true;
+                         });
+}
+
+void EffectsPanel::deleteSlot (int slot)
+{
+    const auto* s = slots();
+    if (s == nullptr || slot < 0 || slot >= (int) s->size())
+        return;
+    engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });
+    selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
+    repaint();
 }
 
 void EffectsPanel::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -4561,6 +4602,8 @@ bool MixerComponent::runAction (const std::string& id)
         strips.linkSelectedChannels (true);
     else if (id == "mixer.selectLinkedChannels")
         strips.selectLinkedChannels();
+    else if (id == "mixer.deleteEffect") // FL: Delete on the selected effect slot (issue #11)
+        effects.deleteSlot (effects.getSelectedSlot());
     else
         return false;
 

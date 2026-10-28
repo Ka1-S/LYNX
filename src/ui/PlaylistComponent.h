@@ -137,7 +137,7 @@ public:
 
 private:
     enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint, autoTension,
-                      trackResize, preview, perfLaunch };
+                      trackResize, preview, trackZoom, perfLaunch };
     // Performance mode (round 165m): the clip a click launched (its release goes with the mouse button)
     int perfTrack = -1;
     std::int64_t perfClip = -1;
@@ -161,6 +161,15 @@ private:
     std::vector<int> trackTops;          // top of each track from the first one, plus the total at the end
     void refreshTrackLayout();
     int heightOf (int track) const;
+    // FL's vertical zoom (issue #11): scales every track's height; Alt+wheel, or drag the handle at the top of the
+    // vertical scroll bar (up = taller), double-click it: back to 100%
+    double trackZoom = 1.0;
+    int scaledHeight (int storedHeight) const { return juce::jlimit (8, 640, (int) std::lround (storedHeight * trackZoom)); }
+    int defaultRowHeight() const { return scaledHeight (trackHeight); }
+    juce::Rectangle<int> trackZoomHandle() const;
+    void setTrackZoom (double zoom, int anchorY);
+    double trackZoomStart = 1.0;
+    bool trackZoomHover = false;
     int tracksHeight() const;            // all tracks, top to bottom
     int dividerAt (juce::Point<int> p) const; // the track whose bottom edge (in the headers) is under p, or -1
     void setTrackHeights (std::vector<int> tracks, int height);
@@ -264,6 +273,9 @@ private:
     bool timeMoveCopy = false;
     juce::uint32 lastClipEraseTime = 0;  // double right-click on a clip: mute instead of delete
     juce::Point<int> lastClipErasePos;
+    juce::uint32 lastRightClickTime = 0; // FL: a double right-click (held) is the Mute tool, on clips or empty space
+    juce::Point<int> lastRightClickPos;
+    bool muteTargetPending = false;      // the mute drag takes its target (mute / unmute) from the first clip crossed
     // inline automation editing: points of automation clips are dragged, added on the curve, deleted by right-click
     int autoClip = -1, autoPoint = -1;
     juce::Rectangle<float> automationBody (const Clip& clip) const;

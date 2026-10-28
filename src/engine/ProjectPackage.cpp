@@ -1,3 +1,4 @@
+#include "platform/Paths.h"
 #include "engine/ProjectPackage.h"
 
 #include "core/MissingFiles.h"
@@ -146,6 +147,6 @@ juce::File extractZip (const juce::File& zipFile, const juce::File& destinationR
 
 juce::File defaultExtractRoot()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Projects/Unpacked");
+    return lynx::platform::documentsFolder().getChildFile ("LYNX/Projects/Unpacked");
 }
 } // namespace lynx::ProjectPackage
