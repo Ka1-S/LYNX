@@ -7,12 +7,13 @@ undoable, previewable, computed off the audio thread; nulls vs FL where the tool
 
 ## Where I stopped
 
-- 2026-10-27 17:05: core `src/core/AudioEditTools.{h,cpp}` (all tools), UI `src/ui/AudioEditorTools.{h,cpp}` (tool
-  windows + curve editor), AudioEditor integration (envelope edit mode, Tools menu in FL's groups, host), `--edisonshot`,
-  tests `tests/AudioEditToolsTests.inc`, pt-BR — written, NOT yet compiled (build slots busy). Ghidra decompile of the
-  Edison menu handlers queued (`tmp/edison165/g.sh`, output `tmp/edison165/menus1.c`).
-- Next: compile + tests (mini harness in the scratchpad, then build-local), Windows build `build-win-edison165`,
-  `--edisonshot` PNGs, compare with the decompiled tool code and adjust, FL side-by-side shots (wingui + FL lock).
+- 2026-10-27 21:15: everything compiles (Windows build OK, Linux syntax checks OK); the core tests pass in a mini
+  harness (209 checks, 0 failures) and the full `build-local` had only 2 failures, both fixed since (vocal denoiser
+  noise floor, events-to-automation simplification); a second `build-local` and Windows build are queued.
+  `--edisonshot` PNGs: `D:/lynx-work/edison165/shots/ed-*.png` (layout fixed after the first look: info text height,
+  check box widths, declipper on two rows, frequency labels). Merged origin/main (pt-BR conflict regenerated).
+- Next: bl2 + win3 green → new shots → notes → land.sh. FL side-by-side shots of the Edison forms not taken (FL GUI
+  automation of Edison's menus judged too risky for the shared desktop this round).
 
 ## 1. Inventory: Edison tool forms vs LYNX (before this round)
 
