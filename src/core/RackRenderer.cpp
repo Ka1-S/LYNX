@@ -1682,7 +1682,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         }
         else if (e.type == NoteEvent::Type::choke)
         {
-            instrument.allNotesOff(); // short fade, like FL's "cut"
+            instrument.cut(); // short fade, like FL's "cut"
             held = {};
             voiceOrders[(std::size_t) i].clear();
         }
