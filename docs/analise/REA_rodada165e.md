@@ -8,27 +8,9 @@ art (procedural dancer, moves picked by notes), FL's Fruity Dance channels impor
 
 ## Where I stopped
 
-- 2026-10-27 15:26: the PC blue-screened (kernel driver fault) while this round was running; the work on disk was
-  saved as the checkpoint commit "WIP zge165" (unverified). Resumed 16:00 from that commit.
-- State at resume (rebuilt from the diff): VisualFx (shader layer types, effects, blend modes, GPU presets, ZGE
-  mapping) done; VisualGl.{h,cpp} + VisualGlShaders.inc (renderer, live view, exporter) written but never compiled;
-  VisualEditors wired (LivePicture, GPU button, effect/blend boxes, export through the GPU, --visualtest);
-  core/FruityDance.{h,cpp} done; ui/DanceView.h declared but **DanceView.cpp not written**; no tests yet.
-- 16:20 PAUSED by the coordinator (machine load 33). Done since resume (all UNCOMPILED so far — no build ran yet,
-  the Linux build waited for a slot and was stopped):
-  - ui/DanceView.cpp written (vector lynx dancer, DanceStage over the workspace in MainComponent, DanceEditor as the
-    channel's page via makeInstrumentPage / makeChannelSettingsPanel), "Fruity Dance" in the Channel Rack Add menu,
-    `--danceshot prefix` CLI (moves sheet, editor, demo .lynx), CMake + build-windows-zig.sh sources.
-  - VisualGl: live picture capped at 1280 x 720 inside; LYNX_VISUALIZER_GPU=0 forces 2D; --visualtest env
-    LYNX_VISUALTEST_ONLY / _SECONDS / _SMALL / _NO_VIDEO / _VIDEO_SECONDS for short GPU checks.
-  - ZGE import: a scene with only feedback/post layers keeps them over the default scene.
-  - tests/Visual165Tests.inc (shader layers, ZGE GPU mapping, dance state/keys/poses/signals); Visual164 test updated.
-  - FL key map verified in the decompile (tmp/zge165/d2.c FUN_0071a410: keys 59.. = moves, 48.. down mirrored,
-    53 = 0x10000 hide, 54 = 0x10001 show).
-- Next on resume (respect LOAD LIMIT): Linux build (tmp/zge165/blinux.sh, PATH needs $DR for pkg-config) → fix compile
-  errors → build-local tests → Xvfb+llvmpipe shader check (LIBGL_ALWAYS_SOFTWARE=1) → --danceshot shots → pt-BR strings
-  (tools/i18n_keys.py --missing + dynamic names: moves, effects, blends, types) → Windows build + short GPU check →
-  notes-0.1.20.md → land.
+- 2026-10-27 15:26: the PC blue-screened (kernel driver fault) while this round was running; resumed at 16:00 from the
+  checkpoint commit, paused 16:20 for machine load, resumed again.
+- Done: everything below, verified (§5). Landed on main after build-local with FL Data (1762614 checks, 0 failures).
 
 ## GPU safety (after the BSOD)
 
@@ -120,3 +102,18 @@ art (procedural dancer, moves picked by notes), FL's Fruity Dance channels impor
   resets units 4..0 and the 2D pass calls it first); the canvas pass sampled its own target.
 - `--danceshot`: the moves sheet (11 moves × 4 phases), the editor and a frame over the workspace — original lynx
   character, readable at 0.6 to 2× size; a mirrored dancer faces the other way.
+- Windows (real GPU, a few seconds, 693 x 480 window, under ~/.cache/lynx-wingui.lock, killed by PID): Retro road and
+  Reactive sphere drew correctly through the GPU; the GPU video export of FL's ZGE demo (Astes - LIFE) wrote its
+  frames. Some frames are all black — the same frames are black in the 2D export and under llvmpipe (the demo's
+  canvas flashes on the beat), so it is the scene, not the readback.
+- Linux GPU export (llvmpipe): gpu=1, 30 frames at 1280 x 720, identical black/non-black pattern to the 2D export.
+  (`--visualtest` reports result=ERROR for that project only because its first sound is at 1.2 s, and the test
+  expects the default demo's immediate start.)
+- Main window snapshot with two dance channels: both dancers over the Playlist, outfits in their colours.
+
+## 6. Left for later
+
+- ZGE's own scripts and shaders are not run (by design): imported scenes are look-alikes, not copies.
+- The dancer's position is not undoable (FL's is not either); no picture-file dancers (FL's version 2 "picture
+  path") — the path is read and kept, LYNX always draws its lynx.
+- The GPU path is not measured on macOS hardware (CI builds it; OpenGL 3.2 core there).
