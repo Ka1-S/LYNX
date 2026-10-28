@@ -295,7 +295,8 @@ struct SequencerSettings
     // FL's parameter numbers
     enum Param
     {
-        midiIn = 1, arpMode = 5, currentProgram = 8, steps = 40, gate = 41, sync = 42, latch = 43, missingKeys = 44,
+        midiIn = 1, arpMode = 5, numPrograms = 7, currentProgram = 8, chainCount = 10, currentChain = 11, chainQuantize = 12,
+        programChange = 15, chainRestart = 19, steps = 40, gate = 41, sync = 42, latch = 43, missingKeys = 44,
         inputLow = 45, inputHigh = 46, outputLow = 47, outputHigh = 48, order = 49, fixedKey = 50, transposeOctaves = 51,
         inputQuantize = 52, transposeSemitones = 53, swing = 55, restartOn = 56, forceKey = 57, forceScale = 58,
         forceMode = 59, pageLock = 60, page = 61, patternShift = 62, inputWrapLow = 63, inputWrapHigh = 64, polyOctave = 65,
@@ -304,6 +305,7 @@ struct SequencerSettings
     };
     // A parameter's value as the plugin uses it (FL's lookup: per program or global); 0 when it does not exist
     int get (int param) const noexcept;
+    int getFor (int param, int program) const noexcept; // (as get, with `program` as the current one)
     void set (int param, int value);
     static bool perProgram (int param) noexcept;
     static int minimum (int param) noexcept;
@@ -427,6 +429,9 @@ public:
     // FL's automatable parameter `index` (an automation / a Patcher control cable), value 0..1 (audio thread; the
     // value holds until the next configure). Round 165c: the Level Scaler's 36 parameters.
     virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
+    // An incoming MIDI program change (round 165c; audio thread, between blocks): the VFX Sequencer selects that
+    // sequence when its "Program change" option says so. The others ignore it.
+    virtual void programChange (int /*program*/) noexcept {}
     Monitor& monitor() noexcept { return live; }
 
 protected:

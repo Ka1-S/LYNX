@@ -206,3 +206,245 @@ TEST (vfx165c_keyboard_splitter_manual_mapping)
         lynx::vfx::manualMapKey (s, m, 40 + 3 * k);
     CHECK (! m.on && s.zones[15].active() && s.zones[15].keyboard.at (1.0) > 0.999 && s.zones[15].keyboard.at (80.0 / 132.0) < 1e-9);
 }
+
+namespace vfx165c
+{
+struct Heard
+{
+    double time = 0.0;
+    int key = 0;
+    bool on = true;
+    bool program = false;
+};
+
+// 120 bpm / 48 kHz, the song playing from 0: the keys held from 0, `before (sample)` runs before each block (a program
+// change, a new state…); returns what came out
+std::vector<Heard> play (lynx::vfx::Processor& p, std::vector<int> keys, double seconds, std::function<void (long long, std::vector<lynx::vfx::Event>&)> before = {})
+{
+    constexpr int block = 480;
+    constexpr double rate = 48000.0;
+    std::vector<Heard> heard;
+    lynx::vfx::Transport t;
+    t.sampleRate = rate;
+    t.bpm = 120.0;
+    t.playing = true;
+    for (long long at = 0; at < (long long) (seconds * rate); at += block)
+    {
+        std::vector<lynx::vfx::Event> in;
+        if (at == 0)
+            for (const auto k : keys)
+                in.push_back (vfx164::on (k, 0, 0, 100.0f / 128.0f));
+        if (before)
+            before (at, in);
+        t.ticks = (double) at / rate * 2.0 * 960.0;
+        lynx::vfx::EventList out;
+        p.process (in.data(), (int) in.size(), block, t, out);
+        out.sortByOffset();
+        for (int k = 0; k < out.size(); ++k)
+            if (out[k].type != lynx::vfx::Event::Type::prop)
+                heard.push_back ({ (double) (at + out[k].offset) / rate, out[k].voice.key, out[k].type == lynx::vfx::Event::Type::on,
+                                   out[k].type == lynx::vfx::Event::Type::program });
+    }
+    return heard;
+}
+
+// the note-on keys in [from, to) seconds, their times shifted by `shift`
+std::vector<std::pair<long long, int>> onsIn (const std::vector<Heard>& h, double from, double to, double shift = 0.0)
+{
+    std::vector<std::pair<long long, int>> v;
+    for (const auto& e : h)
+        if (e.on && ! e.program && e.time >= from - 1e-9 && e.time < to - 1e-9)
+            v.emplace_back (std::llround ((e.time + shift) * 48000.0), e.key);
+    return v;
+}
+} // namespace vfx165c
+
+TEST (vfx165c_sequencer_program_change_selects_the_sequence)
+{
+    using namespace vfx164;
+    using S = lynx::vfx::SequencerSettings;
+    auto s = lynx::vfx::defaultSequencer();
+    s.set (S::currentProgram, 2); // "Up 4 keys"
+    auto up = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 1.0);
+    s.set (S::currentProgram, 3); // "Down 4 keys"
+    auto down = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 1.0);
+    CHECK (vfx165c::onsIn (up, 0.0, 0.5) != vfx165c::onsIn (down, 0.0, 0.5));
+    s.set (S::currentProgram, 2);
+    auto changeAt = [] (long long sample) {
+        return [sample] (long long at, std::vector<lynx::vfx::Event>& in) {
+            if (sample >= at && sample < at + 480)
+                in.push_back (lynx::vfx::programEvent (3, (int) (sample - at)));
+        };
+    };
+    // "Program change" off (FL's default): nothing changes
+    auto ignored = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 1.0, changeAt (24000));
+    CHECK (vfx165c::onsIn (ignored, 0.0, 1.0) == vfx165c::onsIn (up, 0.0, 1.0));
+    // on: from the change (half a second in) the other sequence plays, on the same steps
+    s.set (S::programChange, 1);
+    auto changed = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 1.0, changeAt (24000));
+    CHECK (vfx165c::onsIn (changed, 0.0, 0.5) == vfx165c::onsIn (up, 0.0, 0.5));
+    CHECK (vfx165c::onsIn (changed, 0.5, 1.0) == vfx165c::onsIn (down, 0.5, 1.0) && ! vfx165c::onsIn (down, 0.5, 1.0).empty());
+    // the host's MIDI program change (Processor::programChange) does the same at the next block
+    auto p = sequencer (s);
+    auto viaHost = vfx165c::play (*p, { 60, 64, 67 }, 1.0, [&p] (long long at, std::vector<lynx::vfx::Event>&) {
+        if (at == 24000)
+            p->programChange (3);
+    });
+    CHECK (vfx165c::onsIn (viaHost, 0.5, 1.0) == vfx165c::onsIn (down, 0.5, 1.0));
+    // "pass on": it goes out for the instruments after it
+    s.set (S::programChange, 2);
+    auto passed = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 1.0, changeAt (24000));
+    CHECK (std::count_if (passed.begin(), passed.end(), [] (const vfx165c::Heard& h) { return h.program; }) == 1);
+    CHECK (vfx165c::onsIn (passed, 0.0, 1.0) == vfx165c::onsIn (up, 0.0, 1.0));
+}
+
+TEST (vfx165c_sequencer_plays_its_chain)
+{
+    using namespace vfx164;
+    using S = lynx::vfx::SequencerSettings;
+    auto s = lynx::vfx::defaultSequencer();
+    s.set (S::currentProgram, 2);
+    auto up = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 2.0);
+    s.set (S::currentProgram, 3);
+    auto down = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 2.0);
+    // chain 1 = "Up 4 keys", then "Down 4 keys" (each 16 sixteenths = 2 s at 120 bpm), then again
+    s.chains[0].slots = { 2, -1, 3, -1, -1, -1, -1, -1 };
+    s.set (S::currentChain, 0);
+    s.set (S::currentProgram, 2);
+    auto chained = vfx165c::play (*sequencer (s), { 60, 64, 67 }, 6.0);
+    CHECK (vfx165c::onsIn (chained, 0.0, 2.0) == vfx165c::onsIn (up, 0.0, 2.0));
+    CHECK (vfx165c::onsIn (chained, 2.0, 4.0, -2.0) == vfx165c::onsIn (down, 0.0, 2.0));
+    CHECK (vfx165c::onsIn (chained, 4.0, 6.0, -4.0) == vfx165c::onsIn (up, 0.0, 2.0));
+    // a program of 8 steps in the chain: it plays once (1 s), and the chain goes on
+    auto shortProgram = s;
+    shortProgram.programs[5] = s.programs[3];
+    shortProgram.programs[5].params[(std::size_t) (S::steps - 39)] = 8;
+    shortProgram.chains[0].slots = { 5, 2, -1, -1, -1, -1, -1, -1 };
+    auto mixed = vfx165c::play (*sequencer (shortProgram), { 60, 64, 67 }, 3.0);
+    CHECK (vfx165c::onsIn (mixed, 0.0, 1.0) == vfx165c::onsIn (down, 0.0, 1.0));
+    CHECK (vfx165c::onsIn (mixed, 1.0, 3.0, -1.0) == vfx165c::onsIn (up, 0.0, 2.0));
+    // round trip: the chain is kept in the state
+    const auto again = lynx::vfx::parseSequencer (lynx::vfx::writeSequencer (s));
+    CHECK (again && again->chains[0].slots[2] == 3 && again->get (S::currentChain) == 0);
+}
+
+TEST (vfx165c_sequencer_smart_bend_cuts_all_but_the_first)
+{
+    using namespace vfx164;
+    using S = lynx::vfx::SequencerSettings;
+    auto s = blankProgram();
+    for (int i = 0; i < 64; ++i)
+        s.set (0x100 + i, S::chord);
+    auto p = sequencer (s);
+    auto bent = s;
+    bent.set (S::smartBend, 1); // (no scale: a semitone)
+    const auto fl = lynx::vfx::writeSequencer (bent);
+    auto heard = vfx165c::play (*p, { 60, 64, 67 }, 0.06, [&] (long long at, std::vector<lynx::vfx::Event>&) {
+        if (at == 960)
+            p->configure (fl);
+    });
+    // block 0: the chord; block 2 (sample 960): two cut, the step plays again a semitone up
+    std::vector<int> cut, again;
+    for (const auto& h : heard)
+        if (std::llround (h.time * 48000.0) == 960)
+            (h.on ? again : cut).push_back (h.key);
+    std::sort (cut.begin(), cut.end());
+    std::sort (again.begin(), again.end());
+    CHECK ((cut == std::vector<int> { 64, 67 })); // (the first, 60, keeps sounding: a mono instrument glides from it)
+    CHECK ((again == std::vector<int> { 61, 65, 68 }));
+}
+
+namespace vfx165c
+{
+// the master's energy over `blocks` blocks of 512 at 48 kHz, the song playing
+double songEnergy (const lynx::Song& song, int blocks = 40)
+{
+    auto state = lynx::RackState::build (song, nullptr, 48000.0);
+    lynx::RackRenderer r;
+    r.prepare (48000.0, 512);
+    std::vector<float> l (512), rr (512);
+    double e = 0.0, tick = 0.0;
+    for (int b = 0; b < blocks; ++b, tick += 512.0 * song.bpm * lynx::ppq / 60.0 / 48000.0)
+    {
+        r.process (state.get(), true, tick, 512, l.data(), rr.data(), nullptr);
+        for (const auto v : l)
+            e += (double) v * v;
+    }
+    return e;
+}
+
+// channel 0 plays note 60 (colour `colour`) for a beat; channel 1 is a Patcher whose "MIDI port 6" pin plays a synth
+lynx::Song portSong (int colour = 0)
+{
+    using namespace patcher162;
+    auto song = lynx::Song::makeDefault();
+    song.mixer.resize (4);
+    song.channels.resize (2);
+    song.channels[0] = {};
+    song.channels[0].mixerTrack = 1;
+    auto& target = song.channels[1];
+    target = {};
+    target.instrument = lynx::InstrumentKind::patcher;
+    target.mixerTrack = 1;
+    target.patcher.nodes = { generatorNode (lynx::InstrumentKind::synth) };
+    target.patcher.wires = { midi (lynx::patchFromHost, lynx::patchMidiPortPin (6), 0, 0), patcher141::audio (0, lynx::patchToHost) };
+    lynx::Pattern p;
+    lynx::Note n { 0, lynx::ppq, 0, 60, 0.8f };
+    n.colour = colour;
+    p.notes.push_back (n);
+    song.patterns = { p };
+    lynx::Clip clip;
+    clip.pattern = 0;
+    clip.length = lynx::ppq * 4;
+    song.playlist = { clip };
+    return song;
+}
+} // namespace vfx165c
+
+TEST (vfx165c_channel_rack_vfx_moves_its_voices_on_a_port)
+{
+    // a VFX Envelope channel on port 6 (FL's Default: the volume starts at 0, peaks at × 2 at 0.75 s): its voice
+    // properties now reach the Patcher on that port, so the note swells instead of staying silent
+    auto song = vfx165c::portSong();
+    lynx::vfx::makeChannel (song.channels[0], lynx::vfx::Kind::envelope);
+    lynx::vfx::State st { lynx::vfx::Kind::envelope, 6, lynx::vfx::writeEnvelope (lynx::vfx::defaultEnvelope()) };
+    song.channels[0].pluginState = lynx::vfx::writeState (st);
+    const auto enveloped = vfx165c::songEnergy (song);
+    auto plain = vfx165c::portSong (3); // (colour 3: no articulator, the note passes as it is)
+    plain.channels[0] = song.channels[0];
+    const auto passed = vfx165c::songEnergy (plain);
+    std::printf ("  enveloped %.4g, passed %.4g\n", enveloped, passed);
+    CHECK (passed > 1e-4 && enveloped > 0.05 * passed);
+}
+
+TEST (vfx165c_patcher_vfx_plays_on_to_lynx_ports)
+{
+    using namespace patcher162;
+    // channel 0: a Patcher, Notes → VFX Key Mapper (octave up) → "To LYNX" MIDI port 6; channel 1 takes port 6
+    auto song = vfx165c::portSong();
+    auto& source = song.channels[0];
+    source.instrument = lynx::InstrumentKind::patcher;
+    lynx::PatchNode v;
+    v.generator = true;
+    lynx::vfx::makeChannel (v.channel, lynx::vfx::Kind::keyMapper);
+    lynx::vfx::State st { lynx::vfx::Kind::keyMapper, 0, vfx164::hex (vfx164::keyMapperOctaveUp) };
+    v.channel.pluginState = lynx::vfx::writeState (st);
+    source.patcher.nodes = { v };
+    source.patcher.wires = { midi (lynx::patchFromHost, 0, 0, 0), midi (0, 0, lynx::patchToHost, 6) };
+    CHECK ((lynx::patcher::vfxHostPorts (source.patcher) == std::vector<int> { 6 }));
+    {
+        auto state = lynx::RackState::build (song, nullptr, 48000.0);
+        const auto& routes = state->midiRoutesOut[0];
+        CHECK (routes.size() == 1 && routes[0].other == 1 && routes[0].port == 6 && routes[0].portOnly);
+        CHECK (state->portEventChannels == std::vector<int> { 0 });
+    }
+    CHECK (vfx165c::songEnergy (song) > 1e-4);
+    // a Key Mapper that maps every key to nothing: silence, so the channel's own notes do not go out on that port
+    auto mute = lynx::vfx::defaultKeyMapper();
+    for (auto& row : mute.rows)
+        row.clear();
+    auto silent = song;
+    st.fl = lynx::vfx::writeKeyMapper (mute);
+    silent.channels[0].patcher.nodes[0].channel.pluginState = lynx::vfx::writeState (st);
+    CHECK (vfx165c::songEnergy (silent) == 0.0);
+}

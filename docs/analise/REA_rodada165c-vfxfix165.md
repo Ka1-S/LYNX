@@ -18,3 +18,20 @@ Evidence markers: [DECOMP addr], [DATA], [FL render], [EXEC FL], [TEST], [SHOT],
   Renamed plugins: Quick-add palette + mixer slot label use the Plugin database names (not built yet in the app).
   Next: Sequencer chains / program change / Smart bend cut (dec/ seq1 a190 seq4 decompiles), editors (Level Scaler
   Event persistence, Splitter Manual mapping button), voice props outside a Patcher, VFX → "To LYNX" ports.
+- 2026-10-28 later: Sequencer chains + program change + Smart bend cut, voice props outside a Patcher, VFX → "To LYNX"
+  ports, editors. Details:
+  - Sequencer [DECOMP FUN_18000cde0 chain position, FUN_180009620 MIDI input, FUN_180010e00 program select]: the
+    chain is a list of program slots, each `steps × syncBeats` long; Cur_Chain switches are quantized (Chain quantize)
+    and Chain restart restarts the chain at the switch. Program change mode 1 selects the sequence (clamped to
+    NumPrograms+7 like FL), mode 2 passes the program change on. Smart bend change regenerates and cuts every sounding
+    note but the first. Chain end actions (chnp params 21–24) [HYP]: only "loop" — not implemented.
+  - VfxInstrument: setParameter forwards to the processor (automation), MIDI 0xC0 → programChange; live MIDI program
+    changes reach VFX channels (AudioEngine → Scheduler controlProgram) [TEST].
+  - Voice properties outside a Patcher: a VFX channel targeting a LYNX channel sends its voice props as
+    NoteEvent::voiceProp, delivered via Instrument::voicePropertyPort [TEST: enveloped 82.68 vs passed 100.6].
+  - Patcher VFX node → "To LYNX" port: routeVfxOutput queues host events, the rack drains them each chunk
+    (portOnly routes keep the port silent for ordinary notes) [TEST]. One chunk of delay.
+  - Editors: Level Scaler "Persistence" + fading lollipop markers (FL fade formula, 30 Hz), Keyboard Splitter
+    "Manual mapping" toggle + hint, Sequencer Chain + Program change combos [SHOT build-linux vfxshot].
+  - Left: no automation target UI for VFX params; hosted plugins get no per-voice props; the program picked live by
+    program change / chain is not written back to the saved state; zone-16 auto-end of Manual mapping is [HYP].

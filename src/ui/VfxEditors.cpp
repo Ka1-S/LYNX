@@ -149,12 +149,20 @@ ui::ValueSpec intSpec (const juce::String& name, int lo, int hi, int def, std::f
     return s;
 }
 
-// What every body gets: the plugin's FL state and a way to change it
+// What every body gets: the plugin's FL state and a way to change it, and the running instrument (may be null)
 class Body : public juce::Component
 {
 public:
     using Edit = std::function<void (std::vector<std::uint8_t>&)>;
     std::function<void (Edit)> edit;
+    std::function<std::shared_ptr<Instrument>()> running;
+    // the running processor's monitor, kept alive by `keep` (null when nothing runs)
+    vfx::Monitor* monitor (std::shared_ptr<Instrument>& keep) const
+    {
+        keep = running ? running() : nullptr;
+        auto* p = keep != nullptr ? keep->noteProcessor() : nullptr;
+        return p != nullptr ? &p->monitor() : nullptr;
+    }
     virtual void refresh (const std::vector<std::uint8_t>& fl) = 0;
     virtual int preferredHeight() const { return 300; }
     virtual int preferredWidth() const { return 700; }
@@ -488,13 +496,19 @@ private:
 // ---------------------------------------------------------------------------------------------------------------
 // VFX Level Scaler: a tab per voice property, its curve's controls on the left, the curve on the right
 
-class LevelScalerBody final : public Body
+class LevelScalerBody final : public Body, private juce::Timer
 {
 public:
     using L = vfx::LevelScalerSettings;
 
+    ~LevelScalerBody() override { watch (false); }
+
     LevelScalerBody()
     {
+        // FL's "Event persistence" (editor only, not saved): how long the events played stay on the graph
+        persistence.caption = tr ("Persistence");
+        addAndMakeVisible (persistence);
+        startTimerHz (30);
         static const char* names[] = { TR_NOOP ("Velocity"), TR_NOOP ("Release"), TR_NOOP ("Fine pitch"), TR_NOOP ("Pan"), TR_NOOP ("Mod X"), TR_NOOP ("Mod Y") };
         for (int t = 0; t < L::tabCount; ++t)
         {
@@ -557,7 +571,10 @@ public:
         auto side = row2.reduced (2, 14);
         mode.setBounds (side.removeFromTop (26));
         left.removeFromTop (8);
-        reset.setBounds (left.removeFromTop (26).withWidth (100));
+        auto bottom = left.removeFromTop (92);
+        reset.setBounds (bottom.removeFromLeft (100).withSizeKeepingCentre (100, 26));
+        bottom.removeFromLeft (10);
+        persistence.setBounds (bottom.removeFromLeft (76));
         graph = area.reduced (10, 0).toFloat();
     }
 
@@ -623,6 +640,16 @@ public:
         }
         g.setColour (theme::colour::accent);
         g.strokePath (curve, juce::PathStrokeType (2.2f));
+        // the events played (FL's lollipops): a stem at the input level up (or down) to what went out, fading
+        const auto base = point (0.0, bipolar ? 0.0 : lo).y;
+        for (const auto& m : markers)
+        {
+            const auto top = point (m.in, lo + m.out * (hi - lo));
+            g.setColour (theme::colour::textPrimary.withAlpha (0.55f * m.alpha));
+            g.drawLine (top.x, base, top.x, top.y, 1.2f);
+            g.setColour (theme::colour::warning.withAlpha (m.alpha));
+            g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre (top));
+        }
         g.setColour (theme::colour::borderStrong);
         g.drawRoundedRectangle (graph, 4.0f, 1.0f);
         g.setColour (theme::colour::textSecondary);
@@ -632,6 +659,54 @@ public:
     }
 
 private:
+    struct Marker
+    {
+        float in = 0.0f, out = 0.0f, alpha = 0.0f;
+        bool rising = true;
+    };
+
+    void watch (bool on)
+    {
+        std::shared_ptr<Instrument> keep;
+        if (auto* m = monitor (keep))
+            m->watching = on;
+    }
+
+    // FL's fade per frame [DECOMP FUN_00712080]: new events come in by half the way each frame, then fall by
+    // 2^f − 1 of their level, f = (16384 − persistence) / 16384 (a quarter of it on the Release tab)
+    void timerCallback() override
+    {
+        std::shared_ptr<Instrument> keep;
+        auto* m = isShowing() ? monitor (keep) : nullptr;
+        if (m != nullptr)
+        {
+            m->watching = true;
+            vfx::Monitor::Item items[64];
+            for (int n; (n = m->pop (items, 64)) > 0;)
+                for (int k = 0; k < n; ++k)
+                    if (items[k].kind == settings.selectedTab && markers.size() < 256)
+                        markers.push_back ({ std::clamp (items[k].in, 0.0f, 1.0f), std::clamp (items[k].out, 0.0f, 1.0f), 0.0f, true });
+        }
+        if (markers.empty())
+            return;
+        const auto f = std::clamp ((16384.0 - persistenceValue) / 16384.0, 0.015, 0.984);
+        auto decay = (float) (std::pow (2.0, f) - 1.0);
+        if (settings.selectedTab == L::release)
+            decay *= 0.25f;
+        for (auto& k : markers)
+        {
+            if (k.rising)
+            {
+                k.alpha += (1.0f - k.alpha) * 0.5f;
+                k.rising = k.alpha < 0.97f;
+            }
+            else
+                k.alpha -= k.alpha * decay;
+        }
+        std::erase_if (markers, [] (const Marker& k) { return ! k.rising && k.alpha < 0.005f; });
+        repaint (graph.toNearestInt().expanded (6));
+    }
+
     void change (std::function<void (L&)> f)
     {
         if (edit)
@@ -666,6 +741,11 @@ private:
     juce::ComboBox mode;
     juce::TextButton reset;
     juce::Rectangle<float> graph;
+    std::vector<Marker> markers;
+    double persistenceValue = 12288.0;
+    Knob persistence { intSpec (tr ("Event persistence: how long the notes played stay on the graph"), 1, 16384, 12288,
+                                [] (double v) { return percent (v / 16384.0); }),
+                       [this] { return persistenceValue; }, [this] (double v) { persistenceValue = v; } };
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -915,13 +995,26 @@ juce::Colour zoneColour (int z)
     return juce::Colour::fromHSV (std::fmod ((float) z * 2.5f / 16.0f, 1.0f), 0.62f, 0.95f, 1.0f);
 }
 
-class KeyboardSplitterBody final : public Body
+class KeyboardSplitterBody final : public Body, private juce::Timer
 {
 public:
     using S = vfx::KeyboardSplitterSettings;
 
+    ~KeyboardSplitterBody() override { setMapping (false); }
+
     KeyboardSplitterBody()
     {
+        // FL's Manual mapping: press the button, then play the first key of each zone from low to high
+        manual.setButtonText (tr ("Manual mapping"));
+        manual.setClickingTogglesState (true);
+        manual.setColour (juce::TextButton::buttonOnColourId, theme::colour::accent);
+        ui::setHint (manual, tr ("Manual mapping: play the first key of zone 2, then of zone 3… from low to high; the notes are taken, "
+                                 "not played. Click again to end (the last zone runs to the top)"));
+        manual.onClick = [this] { manual.getToggleState() ? startMapping() : finishMapping(); };
+        addAndMakeVisible (manual);
+        mappingHint.setFont (theme::font (theme::type::small));
+        mappingHint.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        addAndMakeVisible (mappingHint);
         for (int z = 0; z < 16; ++z)
         {
             auto& b = zoneButtons[(std::size_t) z];
@@ -1008,12 +1101,17 @@ public:
         refreshControls();
     }
 
-    int preferredHeight() const override { return 400; }
+    int preferredHeight() const override { return 436; }
     int preferredWidth() const override { return 860; }
 
     void resized() override
     {
         auto area = getLocalBounds().reduced (12, 6);
+        auto bottom = area.removeFromBottom (32);
+        manual.setBounds (bottom.removeFromRight (150).reduced (0, 2));
+        bottom.removeFromRight (10);
+        mappingHint.setBounds (bottom);
+        area.removeFromBottom (6);
         auto top = area.removeFromTop (30);
         for (auto& b : zoneButtons)
             b.setBounds (top.removeFromLeft (30).reduced (1, 0));
@@ -1035,8 +1133,72 @@ public:
     }
 
 private:
+    void setMapping (bool on)
+    {
+        std::shared_ptr<Instrument> keep;
+        if (auto* m = monitor (keep))
+        {
+            m->mapping = on;
+            vfx::Monitor::Item drop[64];
+            if (on)
+                while (m->pop (drop, 64) > 0) {} // (what came before)
+        }
+    }
+
+    void startMapping()
+    {
+        vfx::beginManualMapping (mapping);
+        zone = 0;
+        setMapping (true);
+        if (settings.page != 0)
+            change ([] (S& st) { st.page = 0; });
+        startTimerHz (30);
+        refreshControls();
+    }
+
+    void finishMapping()
+    {
+        stopTimer();
+        setMapping (false);
+        if (mapping.on)
+        {
+            auto st = settings;
+            vfx::endManualMapping (st, mapping);
+            change ([st] (S& s) { s = st; });
+        }
+        manual.setToggleState (false, juce::dontSendNotification);
+        refreshControls();
+    }
+
+    // the keys played while mapping (the processor takes them and shows them here)
+    void timerCallback() override
+    {
+        std::shared_ptr<Instrument> keep;
+        auto* m = monitor (keep);
+        if (m == nullptr)
+            return;
+        m->mapping = true; // (a rebuilt processor: it maps too)
+        vfx::Monitor::Item items[64];
+        auto st = settings;
+        auto changed = false;
+        for (int n; (n = m->pop (items, 64)) > 0;)
+            for (int k = 0; k < n && mapping.on; ++k)
+                changed = vfx::manualMapKey (st, mapping, (int) std::lround (items[k].in)) || changed;
+        if (changed)
+        {
+            zone = std::clamp (mapping.on ? mapping.zone : 15, 0, 15);
+            change ([st] (S& s) { s = st; });
+        }
+        if (! mapping.on) // (the 16th zone started: done)
+            finishMapping();
+    }
+
     void refreshControls()
     {
+        if (mapping.on)
+            mappingHint.setText (tr ("Play the first key of zone {0} (from low to high)", { juce::String (mapping.zone + 2) }), juce::dontSendNotification);
+        else
+            mappingHint.setText ({}, juce::dontSendNotification);
         const auto& z = settings.zones[(std::size_t) zone];
         for (int k = 0; k < 16; ++k)
         {
@@ -1080,6 +1242,9 @@ private:
 
     S settings = vfx::defaultKeyboardSplitter();
     int zone = 0;
+    vfx::SplitterMapping mapping;
+    juce::TextButton manual;
+    juce::Label mappingHint;
     std::array<juce::TextButton, 16> zoneButtons;
     std::array<juce::TextButton, 2> pages;
     juce::TextEditor name;
@@ -1401,6 +1566,17 @@ public:
         combo (arpMode, tr ("Mode"), S::arpMode, { tr ("Off"), tr ("On"), tr ("Thru"), tr ("On from 2 keys, else off"), tr ("On from 2 keys, else thru"),
                                                     tr ("On from 3 keys, else off"), tr ("On from 3 keys, else thru") });
         combo (programMode, tr ("Input"), S::programMode, { tr ("The held keys"), tr ("The fixed key") });
+        // round 165c: FL's chains (sequences played one after the other) and incoming MIDI program changes
+        {
+            juce::StringArray chains { tr ("None") };
+            for (int c = 0; c < 16; ++c)
+                chains.add (tr ("Chain {0}", { juce::String (c + 1) }));
+            combo (chain, tr ("Chain"), S::currentChain, chains);
+            ui::setHint (chain, tr ("Chain: its sequences play one after the other, each for its length, then again"));
+        }
+        combo (programChange, tr ("Program change"), S::programChange, { tr ("Ignored"), tr ("Selects the sequence"), tr ("Passed on") });
+        ui::setHint (programChange, tr ("An incoming MIDI program change: ignored, selects the sequence (0 = the first), or goes on to the "
+                                        "instruments after it"));
         combo (order, tr ("Order"), S::order, { tr ("By pitch"), tr ("By pitch, descending"), tr ("As played"), tr ("As played, reversed"),
                                                  tr ("By velocity"), tr ("By velocity, descending"), tr ("Chord, normalized"), tr ("Chord, as played") });
         combo (missing, tr ("Missing keys"), S::missingKeys, { tr ("Not played"), tr ("Cyclic"), tr ("First key"), tr ("Last key"), tr ("Fixed key") });
@@ -1473,6 +1649,14 @@ public:
             laneButtons[(std::size_t) k].setToggleState (k == shown, juce::dontSendNotification);
         for (auto& [b, param] : toggles)
             b->setToggleState (settings.get (param) != 0, juce::dontSendNotification);
+        for (int c = 0; c < 16; ++c) // (the chains' names, those of FL's bank: "Armin van Buuren Communication"…)
+        {
+            const auto name = (std::size_t) c < settings.chains.size() ? juce::String (nameOf (settings.chains[(std::size_t) c].name)).trim() : juce::String();
+            const auto used = (std::size_t) c < settings.chains.size()
+                              && std::any_of (settings.chains[(std::size_t) c].slots.begin(), settings.chains[(std::size_t) c].slots.end(), [] (std::int8_t p) { return p >= 0; });
+            chain.changeItemText (c + 2, juce::String (c + 1).paddedLeft ('0', 2) + ". " + (name.isEmpty() ? tr ("Chain {0}", { juce::String (c + 1) }) : name)
+                                             + (used ? juce::String() : " (" + tr ("empty") + ")"));
+        }
         for (auto& [c, param] : combos)
             c->setSelectedItemIndex (settings.get (param) - S::minimum (param), juce::dontSendNotification);
         for (auto& b : boxes)
@@ -1547,7 +1731,7 @@ public:
                 y += 40;
             y += 4;
         };
-        section (0, { &arpMode, &programMode, &velocityMode });
+        section (0, { &arpMode, &programMode, &velocityMode, &chain, &programChange });
         section (1, { &order, &missing, &missingOctave, &quantize, smartBend.get(), fixedKey.get() });
         section (2, { steps.get(), &sync, gatePercent.get(), swing.get(), &restart, &forceMode, &forceKey, &forceScale });
         section (3, { transpose.get(), octaves.get(), randomVelocity.get(), randomGate.get(), randomStart.get(), outLow.get(), outHigh.get() });
@@ -1959,6 +2143,18 @@ private:
     std::array<juce::TextButton, layerCount> laneButtons;
     juce::ToggleButton pageLock, latch, polyOctave, polyKeys, gateLaneMode;
     juce::ComboBox arpMode, programMode, order, missing, missingOctave, quantize, sync, restart, velocityMode, forceKey, forceScale, forceMode;
+    juce::ComboBox chain, programChange;
+    static std::string nameOf (const std::array<std::uint8_t, 48>& bytes)
+    {
+        std::string s;
+        for (const auto b : bytes)
+        {
+            if (b == 0)
+                break;
+            s += (char) b; // (Latin-1: FL's names are ASCII)
+        }
+        return s;
+    }
     std::unique_ptr<Knob> steps, gatePercent, swing, fixedKey, smartBend, transpose, octaves, randomVelocity, randomGate, randomStart, outLow, outHigh;
     std::vector<std::pair<juce::ToggleButton*, int>> toggles;
     std::vector<std::pair<juce::ComboBox*, int>> combos;
@@ -2107,12 +2303,14 @@ juce::String description (vfx::Kind kind)
 class VfxEditor final : public juce::Component, private juce::ChangeListener
 {
 public:
-    VfxEditor (AudioEngine& e, std::function<ChannelDef* (Song&)> l, int c) : engine (e), locate (std::move (l)), channel (c)
+    VfxEditor (AudioEngine& e, std::function<ChannelDef* (Song&)> l, int c, std::function<std::shared_ptr<Instrument>()> r)
+        : engine (e), locate (std::move (l)), channel (c)
     {
         const auto s = state();
         kind = s ? s->kind : vfx::Kind::keyMapper;
         body = makeBody (kind);
         body->edit = [this] (Body::Edit change) { editState ([change] (vfx::State& st) { change (st.fl); }); };
+        body->running = std::move (r);
         addAndMakeVisible (*body);
 
         presetButton.onClick = [this] { showPresetMenu(); };
@@ -2338,9 +2536,10 @@ private:
 };
 } // namespace
 
-std::unique_ptr<juce::Component> makeVfxEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, int channel)
+std::unique_ptr<juce::Component> makeVfxEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, int channel,
+                                                std::function<std::shared_ptr<Instrument>()> running)
 {
-    return std::make_unique<VfxEditor> (engine, std::move (locate), channel);
+    return std::make_unique<VfxEditor> (engine, std::move (locate), channel, std::move (running));
 }
 
 std::unique_ptr<juce::Component> makeVfxEditor (AudioEngine& engine, int channel)
@@ -2350,6 +2549,6 @@ std::unique_ptr<juce::Component> makeVfxEditor (AudioEngine& engine, int channel
         [channel] (Song& song) -> ChannelDef* {
             return channel >= 0 && channel < (int) song.channels.size() ? &song.channels[(std::size_t) channel] : nullptr;
         },
-        channel);
+        channel, [&engine, channel] { return engine.getChannelInstrument (channel); });
 }
 } // namespace lynx

@@ -122,6 +122,19 @@ public:
     // vfx::Prop (0 velocity 0..1 — the voice's volume relative to its note-on velocity is value / velocity at
     // note-on —, 1 pitch in cents from the key, 2 pan −1..1, 3 Mod X, 4 Mod Y). Ignored if unsupported.
     virtual void voiceProperty (int /*key*/, int /*prop*/, float /*value*/) noexcept {}
+    // The same for a voice that arrived on MIDI port `port` (a Channel Rack VFX's output, round 165c): a Patcher passes
+    // it to what that port reaches; hosted plugins cannot take it (MIDI has no per-voice properties).
+    virtual void voicePropertyPort (int /*port*/, int /*key*/, int /*prop*/, float /*value*/, int /*midiChannel*/) noexcept {}
+    // What a generator Patcher's VFX nodes send to its "To LYNX" MIDI ports (round 165c): note ons / offs and voice
+    // properties, played on those ports at the next chunk's start. Audio thread.
+    struct PortEvent
+    {
+        int port = 0, key = 60, channel = 0;
+        int prop = -1;        // ≥ 0: a voice property (vfx::Prop) with `value`; −1: a note on (value = velocity > 0) or off
+        float value = 0.0f;
+        float pan = 0.0f, cents = 0.0f, modX = 0.5f, modY = 0.5f, release = 0.5f;
+    };
+    virtual int takePortEvents (PortEvent* /*out*/, int /*max*/) noexcept { return 0; }
 };
 
 // Audio of an already-decoded sample (loaded off the audio thread). Short samples
