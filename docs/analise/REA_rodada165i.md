@@ -74,7 +74,36 @@ Evidence markers: **[EXEC]** measured here, **[DECOMP]** Ghidra pseudocode of FL
 
 ## 2. Results — LYNX vs FL Studio 2026
 
-(to be filled)
+Same PC (12 cores, Windows 11), FL Studio 2026 and LYNX side by side, load average < 8 for every timed run.
+LYNX: `--opentime` under a fresh test profile (`LYNX_PROFILE_DIR`, seeded with the plugin list and audio device,
+`LYNX_TEST_MODE=1`), clean exit; "cold" = first open in that profile, "warm" = the same profile again (the disk
+caches filled). FL: `bench.ps1` (window title with the project name, then quiet), closed by PID. Medians.
+"main" = `2f520ca6` (this round's test profile only), "branch" = feature/perf165. Memory: LYNX reports the whole
+working set, FL the private working set (so the comparison is, if anything, unfair to LYNX).
+
+### 2.1 Project open (seconds until the project is loaded; working set)
+
+| Project | FL 2026 | LYNX main cold / warm | LYNX branch cold / warm | RAM FL / main / branch (warm) |
+|---|---|---|---|---|
+| Empty start (window) | 1.6–1.7 | 2.5 / 2.8 | 2.5 / 2.5 | 310 / 99 / 99 MB |
+| Thief | 7.2–7.4 | 7.2 / 6.2 | 5.7 / **3.8** | 819 / 837 / **629** MB |
+| SHINE | 7.0–10.5 | 3.7 / 3.2 | 3.4 / 3.1 | 810 / 198 / 197 MB |
+| Never Out | 9.6–9.8 | 4.6 / 4.4 | 4.4 / **3.6** | 930 / 461 / 462 MB |
+| Exoplanet | 7.6–8.5 | 3.5 / 3.4 | 3.5 / 3.4 | 905 / 334 / 333 MB |
+
+CPU time spent until loaded (Thief): main 10.2 s cold / 9.2 s warm → branch 9.2 / **4.0** s. load.log (Thief, warm):
+total 3 727 → 1 237 ms; rack_build 1 532 → 453 ms (rack_instruments 768 → 208 ms, rack_keyshift 139 ms in parallel,
+rack_stretch 654 → 0 ms); stretch_wall 1 624 → 168 ms (the copies read from the disk cache in 505 ms of thread time).
+
+Idle CPU after the open varies run to run with the third-party plugins in the project (LYNX 5–60 %, FL 29–111 %).
+
+### 2.2 Rendering (null tests)
+
+- Linux `renderwav`, sequential / layers / task graph: byte-identical (Thief `67a4184bf5ec…`, SHINE `e6be7b9a893b…`,
+  also after the seed change). CPU at load ~2: Thief layers 4.90 → graph 4.20 s, SHINE 12.31 → 11.05 s (wall
+  6.36 → 5.55 s).
+- Windows `--export` (test profile): see §2.3.
+
 
 ## 3. How FL does it (REA)
 
@@ -142,6 +171,20 @@ logs to `test-mode.log`) the unclean-session notice, crash-report retry, setup w
 the start-up plugin scan. `--opentime <project|-> <report> [idleS]` opens through the normal start-up, waits for the
 title, settles, measures idle CPU and RAM, writes the report and quits cleanly. Benchmarks no longer touch the real
 `%APPDATA%\LYNX` or leave dialogs on the desktop. Test `rea165i_test_profile_and_test_mode_parsing`.
+
+### 4.7 Faster rebuilds of keep-pitch samplers (`RackRenderer.cpp`), fixed stretch seed (`TimeStretch.cpp`)
+
+- The 8 pitch shifters of every keep-pitch sampler are made after the channel loop, all channels at once on up to 6
+  threads that take the building thread's float mode (`FloatMode` in Denormals.h). Thief: rack_instruments 768 →
+  208 ms + rack_keyshift 139 ms. `LYNX_PARALLEL_KEYSHIFT=0` keeps the old order; test
+  `perf165_parallel_key_shifters_render_the_same`.
+- Found by that test: the offline stretch seeded Signalsmith from `std::random_device`, and beyond 2× it randomises
+  each bin's time step, so the same sample stretched twice (two opens, two exports) came out different. Now a fixed
+  seed; test `perf165_long_stretches_repeat_exactly`. The stretch fingerprint now stretches 2.6× so the seed is part
+  of it.
+- The disk copy of a stretched sample is written by one background thread after the open, not during it (it cost
+  14.7 s of thread time for Thief's 229 MB on Windows, cold open 7 s slower than without the cache). load.log has
+  stretch_disk_read and stretch_compute; `LYNX_STRETCH_DISK=0` turns the disk copy off.
 
 ### 4.6 Tracing
 
