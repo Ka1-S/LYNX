@@ -50,7 +50,7 @@ TEST (ssl_e_channel_matched_voicing_round123)
     namespace r = mixsuite::ridge;
     int n = 0;
     auto s = vm123::wavesSlot ("SSLChannel", vm123::herSsl, n);
-    CHECK (n == 31 && s.kind == EffectKind::ridgeStrip);
+    CHECK (n == 32 && s.kind == EffectKind::ridgeStrip);
     CHECK (s.params[r::voicing] == 1.0f && s.params[r::filterSplit] == 1.0f && s.params[r::order] == 1.0f);
     CHECK (std::abs (r::hpfHz (s.params[r::hpf]) - 116.0) < 0.01 && std::abs (r::eQ (s.params[r::hmfQ]) - 1.5) < 1e-3);
     CHECK (std::abs (r::eCompThresholdDb (s.params[r::compThreshold]) + 1.3) < 1e-3 && std::abs (r::ratio (s.params[r::compRatio]) - 1.8) < 1e-3);

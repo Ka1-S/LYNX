@@ -48,6 +48,9 @@ struct Settings
     bool autoMakeup = true;       // the compressor's automatic make-up …
     double makeupOffsetDb = 0.0;  // … and its offset (−12 … +12 dB)
     double compMix = 1.0;         // the compressor's dry / wet mix 0 … 1
+    // round 165 (model 0): "EQ to Dyn S.C." — [EXEC] the filters (unless split) and the EQ leave the audio and feed only
+    // the dynamics' side chain; with the filter split on, the filters stay at the input of the audio path
+    bool eqToSidechain = false;
 };
 
 // Q of the mid bands as the console's dial shows it, for a 0..1 dial position (3.5 at 0 .. 0.1 at 1)
@@ -82,6 +85,9 @@ private:
     Settings designed {};
     bool designedOnce = false;
     Biquad hp1, hp2, lp, bands[4], vcaHp;
+    // round 165: the side chain's own copies of the filters / EQ (same coefficients, own state): [0] the gate's
+    // detector (it hears the input), [1] the compressor's (it hears the compressor's output: a feedback design)
+    struct ScChain { Biquad hp1, hp2, lp, bands[4]; } sc[2];
     bool hpOn = false, lpOn = false, bandOn[4] {};
     // dynamics state
     double env = 0.0, gr = 0.0, gr1 = 0.0, yl = 0.0, yr = 0.0;
