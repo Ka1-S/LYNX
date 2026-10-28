@@ -95,6 +95,10 @@ Gap #2 of docs/analise/REA_rodada165f.md. Clean-room: behaviour and names only.
   11–16 from other rounds, process niced): late p50 0.000 ms, p95 0.105 ms, p99 1.98 ms, mean 0.10 ms, max 11 ms
   (one outlier). (A first version slept up to 1 s when its queue emptied: 487 ms mean — found by this test, fixed.)
   FL's sync thread polls with `Sleep (1)`: about 1 ms of jitter by design.
+- Windows build (`--midisync-test` on this PC, 5 s at 120 BPM): dry run late p50 0.70 / p95 1.45 / p99 1.83 ms, max
+  1.9 ms; sending to real WinMM ports ("StudioRack", "SG Device I/O", Waves' virtual ports): p50 0.97 / p95 1.7 /
+  p99 2.0 ms, max 2.7–4.1 ms — the ~1 ms is Windows' sleep granularity (FL's sync thread has the same `Sleep (1)`
+  step). Audio-thread cost 0.6–0.7 µs per block (max 17 µs). Those Waves ports don't echo, so no hardware loopback here.
 - Audio-thread cost of the sync per block (one output sending MIDI clock): mean 1.15 µs, max 5 µs; nothing when no
   output has master sync (one relaxed atomic load).
 - [SHOT] /mnt/d/lynx-work/rea165-midisync/compare-midi-sync.png: FL 2026 Options › MIDI (left, shot from round 143)
@@ -112,10 +116,12 @@ MidiOutput and sends at the target time (sample clock → ms through a DLL); off
 
 ## Where I stopped
 - 21:25 — implementation, tests (build-local with FL Data: 0 failures), Linux GUI build + `--midisync-test` +
-  `--snapshot` done; origin/main merged; release-note bullets added to notes-0.1.20.md. Waiting for the Windows build
-  slot (winbuild lock queue), then land via land.sh.
+  `--snapshot` done; origin/main merged; release-note bullets added to notes-0.1.20.md. Windows build OK + Windows
+  `--midisync-test`; landing via land.sh.
 
 ## What's left (next version)
+- Windows: a high-resolution waitable timer (CREATE_WAITABLE_TIMER_HIGH_RESOLUTION) would take the sender from ~1 ms
+  to ~0.5 ms of lateness (a constant bias today; the offset setting can absorb it).
 - A real hardware / loopback-port test (none on this machine): send clock to a device and measure on its input;
   Windows MIDI Services loopback endpoints if installed later.
 - FL's toolbar MIDI sync LED and its global Options-menu action "Enable MIDI master sync" (a quick toggle of all
