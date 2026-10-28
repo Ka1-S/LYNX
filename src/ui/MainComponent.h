@@ -353,7 +353,7 @@ private:
     void refreshRackPatternSelector();
     // The current pattern's length in bars next to the swing knob (issue #12; drawn like the rack's insert number
     // box): drag up / down or the wheel changes it, double-click = automatic (from the notes), right-click = menu.
-    struct PatternLengthBox final : public juce::Component
+    struct PatternLengthBox final : public juce::Component, public juce::SettableTooltipClient
     {
         int bars = 1;         // the length shown (the effective one when automatic)
         bool automatic = true;
