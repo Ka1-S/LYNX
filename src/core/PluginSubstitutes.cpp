@@ -1387,7 +1387,9 @@ int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& s
     if (const auto m = wavesValue (rw, 14))
         slot.params[h::mode] = *m >= 0.5 ? 1.0f : 0.0f, ++n;
     if (const auto d = wavesValue (rw, 13))
-        slot.params[h::detector] = *d >= 1.5 ? 1.0f : 0.0f, ++n;
+        // round 165 [EXEC]: the 17.1 trial stores HighPass 1 / BandPass 0 (band-pass states were read as high-pass); 2 =
+        // band-pass as before
+        slot.params[h::detector] = (*d < 0.5 || *d >= 1.5) ? 1.0f : 0.0f, ++n;
     if (const auto l = wavesValue (rw, 10))
         slot.params[h::listen] = *l >= 0.5 ? 1.0f : 0.0f, ++n;
     return n;
