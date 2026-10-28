@@ -1497,6 +1497,8 @@ juce::String toJson (const Song& song)
         root->setProperty ("substitutesBypassed", true);
     if (song.cleanMixer)
         root->setProperty ("cleanMixer", true);
+    if (song.performanceMode)
+        root->setProperty ("performanceMode", true);
     if (! song.info.empty())
     {
         auto info = std::make_unique<juce::DynamicObject>();
@@ -1697,6 +1699,16 @@ juce::String toJson (const Song& song)
 
         if (! modes.isEmpty())
             root->setProperty ("playlistTrackModes", modes);
+
+        // Performance settings (round 165m): [index, press, motion, trigger sync, queue, tolerant, position sync] (FL's
+        // numbers) for the tracks off FL's defaults
+        juce::Array<juce::var> performance;
+        for (std::size_t i = 0; i < song.playlistTracks.size(); ++i)
+            if (const auto& p = song.playlistTracks[i].performance; ! p.isDefault())
+                performance.add (juce::Array<juce::var> { (int) i, (int) p.press, (int) p.motion, (int) p.triggerSync, p.queue ? 1 : 0,
+                                                          p.tolerant ? 1 : 0, (int) p.positionSync });
+        if (! performance.isEmpty())
+            root->setProperty ("playlistTrackPerformance", performance);
     }
 
     const auto anyMarkers = std::any_of (song.arrangements.begin(), song.arrangements.end(), [] (const Arrangement& a) { return ! a.markers.empty(); });
@@ -1787,6 +1799,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
     song.masterPitch = juce::jlimit (-1200.0f, 1200.0f, (float) (double) root.getProperty ("masterPitch", 0.0));
     song.substitutesBypassed = (bool) root.getProperty ("substitutesBypassed", false);
     song.cleanMixer = (bool) root.getProperty ("cleanMixer", false);
+    song.performanceMode = (bool) root.getProperty ("performanceMode", false);
     if (const auto info = root.getProperty ("info", {}); info.isObject())
     {
         auto get = [&info] (const char* key) { return info.getProperty (key, {}).toString().toStdString(); };
@@ -1967,6 +1980,22 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
                 song.playlistTracks[index].grouped = index > 0 && (int) t[1] != 0;
                 song.playlistTracks[index].collapsed = (int) t[2] != 0;
+            }
+
+    if (auto* performance = root["playlistTrackPerformance"].getArray())
+        for (const auto& t : *performance)
+            if (t.isArray() && t.size() >= 7 && (int) t[0] >= 0 && (int) t[0] < 500)
+            {
+                const auto index = (std::size_t) (int) t[0];
+                if (song.playlistTracks.size() <= index)
+                    song.playlistTracks.resize (index + 1);
+                auto& p = song.playlistTracks[index].performance;
+                p.press = (TrackPerformance::Press) juce::jlimit (0, 3, (int) t[1]);
+                p.motion = (TrackPerformance::Motion) juce::jlimit (0, 6, (int) t[2]);
+                p.triggerSync = (TrackPerformance::Sync) juce::jlimit (0, 6, (int) t[3]);
+                p.queue = (int) t[4] != 0;
+                p.tolerant = (int) t[5] != 0;
+                p.positionSync = (TrackPerformance::Sync) juce::jlimit (0, 6, (int) t[6]);
             }
 
     if (auto* modes = root["playlistTrackModes"].getArray())

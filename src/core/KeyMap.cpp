@@ -166,6 +166,11 @@ std::vector<Action> makeActions()
         { "playlist.quantizeStarts", TR_NOOP ("Quantize the clips' starts"), Context::playlist, { chord ('Q', ctrl) } },
         { "playlist.quantizeHalf", TR_NOOP ("Quantize the clips' starts 50% (halfway to the grid)"), Context::playlist, {} },
         { "playlist.follow", TR_NOOP ("Follow the playhead (auto scrolling) on/off"), Context::playlist, {} },
+        // FL's Performance mode (round 165m; Ctrl+P on FL's Playlist menu [DFM])
+        { "playlist.performanceMode", TR_NOOP ("Performance mode on/off (launch the clips before the Start marker)"), Context::playlist, { chord ('P', ctrl) } },
+        { "playlist.zoomPerformance", TR_NOOP ("Zoom on the performance clips"), Context::playlist, {} },
+        { "playlist.perfClipProgress", TR_NOOP ("Show the performance clips' progress"), Context::playlist, {} },
+        { "playlist.perfTrackProgress", TR_NOOP ("Show the performance tracks' progress"), Context::playlist, {} },
 
         // Browser (focused)
         { "browser.previous", TR_NOOP ("Previous file (preview)"), Context::browser, { chord (up) } },

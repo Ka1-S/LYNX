@@ -2,8 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <random>
+
+#include <juce_gui_extra/juce_gui_extra.h>
 
 #include "core/Vfx.h"
+#include "core/VfxScript.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
@@ -158,6 +162,8 @@ public:
     virtual void refresh (const std::vector<std::uint8_t>& fl) = 0;
     virtual int preferredHeight() const { return 300; }
     virtual int preferredWidth() const { return 700; }
+    // the state's tag (VFX Script: finds its running instance)
+    virtual void setTag (std::uint32_t) {}
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1971,90 +1977,793 @@ private:
 // ---------------------------------------------------------------------------------------------------------------
 // VFX Script: the script and the values of its controls, kept as FL saved them (LYNX does not run Python)
 
-class ScriptBody final : public Body
+// Python syntax colours for the script editor (keywords, strings, comments, numbers, builtins / decorators)
+class PythonTokeniser final : public juce::CodeTokeniser
+{
+public:
+    enum Token
+    {
+        plain,
+        keyword,
+        string,
+        comment,
+        number,
+        builtin,
+        punctuation
+    };
+
+    int readNextToken (juce::CodeDocument::Iterator& source) override
+    {
+        source.skipWhitespace();
+        const auto c = source.peekNextChar();
+        if (c == 0)
+            return plain;
+        if (c == '#')
+        {
+            source.skipToEndOfLine();
+            return comment;
+        }
+        if (c == '"' || c == '\'')
+        {
+            readString (source, c);
+            return string;
+        }
+        if (juce::CharacterFunctions::isDigit (c))
+        {
+            while (juce::CharacterFunctions::isLetterOrDigit (source.peekNextChar()) || source.peekNextChar() == '.' || source.peekNextChar() == '_')
+                source.skip();
+            return number;
+        }
+        if (c == '@')
+        {
+            source.skip();
+            while (juce::CharacterFunctions::isLetterOrDigit (source.peekNextChar()) || source.peekNextChar() == '_' || source.peekNextChar() == '.')
+                source.skip();
+            return builtin;
+        }
+        if (juce::CharacterFunctions::isLetter (c) || c == '_')
+        {
+            juce::String word;
+            while (juce::CharacterFunctions::isLetterOrDigit (source.peekNextChar()) || source.peekNextChar() == '_')
+                word += juce::String::charToString (source.nextChar());
+            // string prefixes: f"…", r'…', b"…"
+            if (word.length() <= 2 && word.containsOnly ("rRbBfFuU") && (source.peekNextChar() == '"' || source.peekNextChar() == '\''))
+            {
+                readString (source, source.peekNextChar());
+                return string;
+            }
+            static const juce::StringArray keywords { "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
+                                                      "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
+                                                      "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
+                                                      "return", "try", "while", "with", "yield", "match", "case" };
+            static const juce::StringArray builtins { "print", "len", "range", "int", "float", "str", "list", "dict", "tuple", "set",
+                                                      "abs", "min", "max", "round", "sum", "enumerate", "zip", "isinstance", "self",
+                                                      "super", "bool", "sorted", "reversed", "map", "filter", "any", "all", "type" };
+            if (keywords.contains (word))
+                return keyword;
+            if (builtins.contains (word))
+                return builtin;
+            return plain;
+        }
+        source.skip();
+        return punctuation;
+    }
+
+    juce::CodeEditorComponent::ColourScheme getDefaultColourScheme() override
+    {
+        juce::CodeEditorComponent::ColourScheme cs;
+        cs.set ("Plain", theme::colour::textPrimary);
+        cs.set ("Keyword", juce::Colour (0xffff7b72));
+        cs.set ("String", juce::Colour (0xffa5d6a7));
+        cs.set ("Comment", theme::colour::textDisabled.brighter (0.25f));
+        cs.set ("Number", juce::Colour (0xfff5b942));
+        cs.set ("Builtin", theme::colour::info);
+        cs.set ("Punctuation", theme::colour::textSecondary);
+        return cs;
+    }
+
+private:
+    static void readString (juce::CodeDocument::Iterator& source, juce::juce_wchar quote)
+    {
+        source.skip();
+        const auto triple = source.peekNextChar() == quote && [&] {
+            auto probe = source;
+            probe.skip();
+            return probe.peekNextChar() == quote;
+        }();
+        if (triple)
+        {
+            source.skip();
+            source.skip();
+            int run = 0;
+            while (! source.isEOF())
+            {
+                const auto ch = source.nextChar();
+                if (ch == '\\')
+                {
+                    source.skip();
+                    run = 0;
+                    continue;
+                }
+                run = ch == quote ? run + 1 : 0;
+                if (run == 3)
+                    return;
+            }
+            return;
+        }
+        if (source.peekNextChar() == quote) // ''
+        {
+            source.skip();
+            return;
+        }
+        while (! source.isEOF())
+        {
+            const auto ch = source.nextChar();
+            if (ch == '\\')
+                source.skip();
+            else if (ch == quote || ch == '\n' || ch == '\r')
+                return;
+        }
+    }
+};
+
+// The script's line of an error ("File "<script>", line 12" in Python's traceback); 0 = none
+int errorLine (const std::string& error)
+{
+    int line = 0;
+    for (std::size_t at = error.find ("<script>"); at != std::string::npos; at = error.find ("<script>", at + 1))
+    {
+        const auto l = error.find ("line ", at);
+        if (l != std::string::npos)
+            line = std::atoi (error.c_str() + l + 5);
+    }
+    return line;
+}
+
+// The error's last line (type: message)
+juce::String errorSummary (const std::string& error)
+{
+    auto lines = juce::StringArray::fromLines (juce::String::fromUTF8 (error.c_str()));
+    lines.removeEmptyStrings();
+    return lines.isEmpty() ? juce::String() : lines[lines.size() - 1].trim();
+}
+
+// VFX Script (round 165d): FL's tabs — User interface (the controls the script declares), Script (the code),
+// Log (print() and errors), API reference. LYNX runs the script with its built-in Python.
+class ScriptBody final : public Body, private juce::Timer, private juce::CodeDocument::Listener
 {
 public:
     ScriptBody()
     {
-        for (auto* e : { &source, &values })
+        const juce::StringArray names { tr ("User interface"), tr ("Script"), tr ("Log"), tr ("API reference") };
+        for (int i = 0; i < 4; ++i)
         {
-            e->setMultiLine (true, false);
-            e->setReturnKeyStartsNewLine (true);
-            e->setTabKeyUsedAsCharacter (true);
-            e->setScrollbarsShown (true);
-            e->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain));
-            addAndMakeVisible (e);
+            auto* b = tabs.add (new juce::TextButton (names[i]));
+            b->setClickingTogglesState (false);
+            b->setWantsKeyboardFocus (false);
+            b->onClick = [this, i] { showTab (i); };
+            addAndMakeVisible (b);
         }
-        values.setReadOnly (true);
-        source.onTextChange = [this] { save.setEnabled (source.getText().replace ("\r\n", "\n").toStdString() != loaded); };
-        save.setButtonText (tr ("Save the script"));
-        save.setEnabled (false);
-        save.onClick = [this] {
-            const auto text = source.getText().replace ("\r\n", "\n").toStdString();
-            if (edit)
-                edit ([text] (std::vector<std::uint8_t>& fl) {
-                    auto s = vfx::parseScript (fl).value_or (vfx::defaultScript());
-                    s.setSource (text);
-                    fl = vfx::writeScript (s);
-                });
+
+        // User interface
+        controlsView.setViewedComponent (&controls, false);
+        controlsView.setScrollBarsShown (true, false);
+        addChildComponent (controlsView);
+
+        // Script
+        editor = std::make_unique<juce::CodeEditorComponent> (document, &tokeniser);
+        editor->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain));
+        editor->setTabSize (4, true);
+        editor->setLineNumbersShown (true);
+        editor->setColour (juce::CodeEditorComponent::backgroundColourId, theme::colour::bg0);
+        editor->setColour (juce::CodeEditorComponent::lineNumberBackgroundId, theme::colour::bg1);
+        editor->setColour (juce::CodeEditorComponent::lineNumberTextId, theme::colour::textDisabled);
+        editor->setColour (juce::CodeEditorComponent::defaultTextColourId, theme::colour::textPrimary);
+        editor->setColour (juce::CodeEditorComponent::highlightColourId, theme::colour::accentMuted);
+        editor->setColour (juce::CaretComponent::caretColourId, theme::colour::textPrimary);
+        addChildComponent (*editor);
+        document.addListener (this);
+        apply.setButtonText (tr ("Apply (Ctrl+Enter)"));
+        apply.onClick = [this] { applySource(); };
+        ui::setHint (apply, tr ("Runs the edited script (and keeps it in the project). A script with an error is kept but not run."));
+        revert.setButtonText (tr ("Revert"));
+        revert.onClick = [this] { setEditorText (loaded); };
+        ui::setHint (revert, tr ("Goes back to the script that is running"));
+        restart.setButtonText (tr ("Restart"));
+        restart.onClick = [this] {
+            if (monitor != nullptr)
+                monitor->restart();
         };
-        ui::setHint (save, tr ("Keeps the edited script in the project (FL Studio runs it when the project opens there)"));
-        addAndMakeVisible (save);
+        ui::setHint (restart, tr ("Runs the script again from the start (its variables start over, the controls keep their values)"));
+        errorButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        errorButton.setColour (juce::TextButton::textColourOffId, theme::colour::record);
+        errorButton.setConnectedEdges (15);
+        errorButton.onClick = [this] { gotoErrorLine(); };
+        ui::setHint (errorButton, tr ("Click: go to the line of the error"));
+        position.setFont (theme::font (theme::type::caption));
+        position.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        position.setJustificationType (juce::Justification::centredRight);
+        for (juce::Component* c : { (juce::Component*) &apply, (juce::Component*) &revert, (juce::Component*) &restart, (juce::Component*) &errorButton,
+                                    (juce::Component*) &position })
+            addChildComponent (c);
+
+        // Log, API reference
+        for (auto* t : { &log, &reference })
+        {
+            t->setMultiLine (true, true);
+            t->setReadOnly (true);
+            t->setScrollbarsShown (true);
+            t->setCaretVisible (false);
+            t->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.5f, juce::Font::plain));
+            t->setColour (juce::TextEditor::backgroundColourId, theme::colour::bg0);
+            addChildComponent (t);
+        }
+        reference.setText (juce::String::fromUTF8 (vfx::script::apiReference()), false);
+        logHint.setText (tr ("Use print() in the script to write to this log"), juce::dontSendNotification);
+        logHint.setFont (theme::font (theme::type::caption));
+        logHint.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        addChildComponent (logHint);
+        clearLog.setButtonText (tr ("Clear"));
+        clearLog.onClick = [this] {
+            if (monitor != nullptr)
+                monitor->clearLog();
+            log.clear();
+        };
+        addChildComponent (clearLog);
+
+        showTab (0);
+        startTimerHz (15);
+    }
+
+    ~ScriptBody() override { document.removeListener (this); }
+
+    void setTag (std::uint32_t t) override
+    {
+        if (t == tag)
+            return;
+        tag = t;
+        monitor = nullptr;
+        seenLog = ~std::uint64_t {};
     }
 
     void refresh (const std::vector<std::uint8_t>& fl) override
     {
-        const auto s = vfx::parseScript (fl).value_or (vfx::defaultScript());
-        const auto text = s.source();
-        if (text != loaded) // (a pending edit stays while other things change)
+        settings = vfx::parseScript (fl).value_or (vfx::defaultScript());
+        const auto source = settings.source();
+        if (source != loaded)
         {
-            loaded = text;
-            source.setText (juce::String::fromUTF8 (text.c_str()), juce::dontSendNotification);
+            const auto pending = currentText() != loaded; // (an edit in progress stays)
+            loaded = source;
+            if (! pending)
+                setEditorText (loaded);
         }
-        save.setEnabled (source.getText().replace ("\r\n", "\n").toStdString() != loaded);
-        juce::String list;
-        for (const auto& [name, value] : s.parameters())
-            list << juce::String::fromUTF8 (name.c_str()) << " = " << juce::String::fromUTF8 (value.c_str()) << "\n";
-        if (s.hasSurface())
-            list << "\n" << tr ("(with an embedded Control Surface)");
-        values.setText (list.isEmpty() ? tr ("(no saved control values)") : list, juce::dontSendNotification);
+        const auto described = vfx::script::describe (settings);
+        auto full = std::make_shared<const vfx::script::Info> (vfx::script::withSurfaceControls (*described, settings));
+        const auto layoutChanged = info == nullptr || ! sameLayout (*info, *full);
+        info = full;
+        stateValues = vfx::script::valuesOf (*info, settings);
+        if (layoutChanged)
+            buildControls();
+        values = stateValues;
+        syncControls();
+        updateStatus();
+        updateButtons();
     }
 
-    int preferredWidth() const override { return 900; }
+    int preferredWidth() const override { return 760; }
     int preferredHeight() const override { return 520; }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (current == 1 && (key == juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0)
+                             || key == juce::KeyPress ('s', juce::ModifierKeys::commandModifier, 0)))
+        {
+            applySource();
+            return true;
+        }
+        return false;
+    }
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced (12, 6);
-        area.removeFromTop (40);
-        auto bottom = area.removeFromBottom (30);
-        save.setBounds (bottom.removeFromRight (160).withTrimmedTop (4));
-        auto right = area.removeFromRight (260);
-        right.removeFromTop (18);
-        values.setBounds (right);
-        area.removeFromRight (10);
-        area.removeFromTop (18);
-        source.setBounds (area);
+        auto area = getLocalBounds().reduced (10, 6);
+        auto tabRow = area.removeFromTop (26);
+        for (auto* b : tabs)
+        {
+            const auto w = juce::GlyphArrangement::getStringWidthInt (theme::font (theme::type::body), b->getButtonText()) + 26;
+            b->setBounds (tabRow.removeFromLeft (w));
+            tabRow.removeFromLeft (2);
+        }
+        area.removeFromTop (6);
+        controlsView.setBounds (area);
+        layoutControls();
+
+        auto script = area;
+        auto bar = script.removeFromBottom (30).withTrimmedTop (4);
+        apply.setBounds (bar.removeFromLeft (150));
+        bar.removeFromLeft (6);
+        revert.setBounds (bar.removeFromLeft (80));
+        bar.removeFromLeft (6);
+        restart.setBounds (bar.removeFromLeft (80));
+        position.setBounds (bar.removeFromRight (90));
+        bar.removeFromLeft (8);
+        errorButton.setBounds (bar);
+        editor->setBounds (script);
+
+        auto logArea = area;
+        auto logBar = logArea.removeFromBottom (30).withTrimmedTop (4);
+        clearLog.setBounds (logBar.removeFromRight (80));
+        logHint.setBounds (logBar);
+        log.setBounds (logArea);
+        reference.setBounds (area);
     }
 
     void paint (juce::Graphics& g) override
     {
-        auto area = getLocalBounds().reduced (12, 6);
-        g.setColour (theme::colour::warning);
-        g.setFont (theme::font (theme::type::body));
-        g.drawFittedText (tr ("LYNX keeps the script and its settings but does not run Python scripts yet: the notes pass through unchanged."),
-                          area.removeFromTop (36), juce::Justification::centredLeft, 2);
-        g.setFont (theme::font (theme::type::caption));
-        g.setColour (theme::colour::textSecondary);
-        const auto top = area.removeFromTop (18);
-        g.drawText (theme::caps (tr ("Script")), top, juce::Justification::centredLeft);
-        g.drawText (theme::caps (tr ("Control values")), top.withTrimmedLeft (top.getWidth() - 260), juce::Justification::centredLeft);
+        // the selected tab
+        if (auto* b = tabs[current])
+        {
+            g.setColour (theme::colour::accent);
+            g.fillRect (b->getBounds().removeFromBottom (2));
+        }
     }
 
 private:
-    juce::TextEditor source, values;
-    juce::TextButton save;
+    // --- the controls of the User interface tab --------------------------------------------------------------------
+    struct Row
+    {
+        int control = -1;              // index in info->controls; −1 = a group header
+        juce::String group;
+        std::unique_ptr<juce::Label> label;
+        std::unique_ptr<juce::Component> widget;
+    };
+
+    static bool sameLayout (const vfx::script::Info& a, const vfx::script::Info& b)
+    {
+        if (a.controls.size() != b.controls.size() || a.outputs != b.outputs || a.title != b.title || a.description != b.description || a.error != b.error)
+            return false;
+        for (std::size_t k = 0; k < a.controls.size(); ++k)
+        {
+            const auto& x = a.controls[k];
+            const auto& y = b.controls[k];
+            if (x.type != y.type || x.name != y.name || x.minimum != y.minimum || x.maximum != y.maximum || x.options != y.options || x.defaultValue != y.defaultValue)
+                return false;
+        }
+        return true;
+    }
+
+    class Controls final : public juce::Component
+    {
+    public:
+        std::function<void (juce::Graphics&)> painter;
+        void paint (juce::Graphics& g) override
+        {
+            if (painter)
+                painter (g);
+        }
+    };
+
+    void buildControls()
+    {
+        rows.clear();
+        controls.removeAllChildren();
+        if (info == nullptr)
+            return;
+        juce::String group = "\x01";
+        for (int k = 0; k < (int) info->controls.size(); ++k)
+        {
+            const auto& c = info->controls[(std::size_t) k];
+            const auto g = juce::String::fromUTF8 (c.group.c_str());
+            if (g != group && g.isNotEmpty())
+            {
+                Row header;
+                header.group = g;
+                rows.push_back (std::move (header));
+            }
+            group = g;
+            Row row;
+            row.control = k;
+            row.label = std::make_unique<juce::Label> (juce::String(), juce::String::fromUTF8 (c.label.c_str()));
+            row.label->setFont (theme::font (theme::type::small));
+            row.label->setJustificationType (juce::Justification::centredRight);
+            row.label->setColour (juce::Label::textColourId, theme::colour::textSecondary);
+            row.label->setMinimumHorizontalScale (0.7f);
+            controls.addAndMakeVisible (*row.label);
+            const auto hint = juce::String::fromUTF8 ((c.hint.empty() ? c.label : c.hint).c_str());
+            using T = vfx::script::Control::Type;
+            switch (c.type)
+            {
+                case T::checkbox:
+                {
+                    auto b = std::make_unique<juce::ToggleButton>();
+                    b->onClick = [this, k, raw = b.get()] { setValue (k, raw->getToggleState() ? 1.0 : 0.0, {}); };
+                    ui::setHint (*b, hint);
+                    row.widget = std::move (b);
+                    break;
+                }
+                case T::combo:
+                {
+                    auto box = std::make_unique<juce::ComboBox>();
+                    for (int o = 0; o < (int) c.options.size(); ++o)
+                        box->addItem (juce::String::fromUTF8 (c.options[(std::size_t) o].c_str()), o + 1);
+                    box->onChange = [this, k, raw = box.get()] {
+                        if (raw->getSelectedId() > 0)
+                            setValue (k, raw->getSelectedId() - 1, {});
+                    };
+                    ui::setHint (*box, hint);
+                    row.widget = std::move (box);
+                    break;
+                }
+                case T::text:
+                {
+                    auto t = std::make_unique<juce::TextEditor>();
+                    t->setFont (theme::font (theme::type::small));
+                    t->onReturnKey = [this, k, raw = t.get()] { setValue (k, 0.0, raw->getText().toStdString()); };
+                    t->onFocusLost = t->onReturnKey;
+                    ui::setHint (*t, hint);
+                    row.widget = std::move (t);
+                    break;
+                }
+                default:
+                {
+                    ui::ValueSpec spec;
+                    spec.name = juce::String::fromUTF8 (c.label.c_str());
+                    const auto lo = c.type == T::value || c.type == T::surface ? 0.0 : c.minimum;
+                    const auto hi = c.type == T::value || c.type == T::surface ? 1.0 : c.maximum;
+                    spec.minimum = std::min (lo, hi);
+                    spec.maximum = std::max (lo, hi) > spec.minimum ? std::max (lo, hi) : spec.minimum + 1.0;
+                    spec.defaultValue = c.clampValue (c.defaultValue);
+                    if (c.type == T::knobInt)
+                    {
+                        spec.interval = 1.0;
+                        spec.toText = [] (double v) { return juce::String ((int) std::lround (v)); };
+                    }
+                    else
+                        spec.toText = [] (double v) { return juce::String (v, std::abs (v) >= 100.0 ? 1 : 2); };
+                    auto knob = std::make_unique<Knob> (
+                        spec, [this, k] { return (std::size_t) k < values.numbers.size() ? values.numbers[(std::size_t) k] : 0.0; },
+                        [this, k] (double v) { setValue (k, v, {}); });
+                    ui::setHint (*knob, hint);
+                    row.widget = std::move (knob);
+                    break;
+                }
+            }
+            controls.addAndMakeVisible (*row.widget);
+            rows.push_back (std::move (row));
+        }
+        controls.painter = [this] (juce::Graphics& g) { paintControls (g); };
+        layoutControls();
+    }
+
+    static int rowHeight (const vfx::script::Control& c)
+    {
+        using T = vfx::script::Control::Type;
+        return c.type == T::knob || c.type == T::knobInt || c.type == T::value || c.type == T::surface ? 50 : 30;
+    }
+
+    void layoutControls()
+    {
+        const auto width = std::max (200, controlsView.getWidth() - controlsView.getScrollBarThickness());
+        // the title and the description
+        const auto text = headerText();
+        const auto descLines = text.isEmpty() ? 0 : juce::jlimit (1, 6, 1 + juce::GlyphArrangement::getStringWidthInt (theme::font (theme::type::body), text) / std::max (1, width - 20));
+        int y = 4 + descLines * 18 + (descLines > 0 ? 8 : 0);
+        statusArea = statusText.isNotEmpty() ? juce::Rectangle<int> (6, y, width - 12, 34) : juce::Rectangle<int>();
+        if (statusText.isNotEmpty())
+            y += 40;
+        headerHeight = y;
+        // two columns of label + control, a group header across both
+        const auto column = (width - 20) / 2;
+        int col = 0, lineHeight = 0;
+        groupHeaders.clear();
+        for (auto& r : rows)
+        {
+            if (r.control < 0)
+            {
+                if (col != 0)
+                {
+                    y += lineHeight;
+                    col = 0;
+                    lineHeight = 0;
+                }
+                y += 6;
+                groupHeaders.push_back ({ r.group, juce::Rectangle<int> (6, y, width - 12, 22) });
+                y += 28;
+                continue;
+            }
+            const auto& c = info->controls[(std::size_t) r.control];
+            const auto h = rowHeight (c);
+            auto cell = juce::Rectangle<int> (10 + col * column, y, column, h);
+            r.label->setBounds (cell.removeFromLeft (std::min (150, column / 2)).reduced (2, 0));
+            cell.removeFromLeft (8);
+            using T = vfx::script::Control::Type;
+            if (c.type == T::checkbox)
+                r.widget->setBounds (cell.removeFromLeft (28).withSizeKeepingCentre (26, 24));
+            else if (c.type == T::combo || c.type == T::text)
+            {
+                const auto w = std::max (40, std::min (190, cell.getWidth() - 6));
+                r.widget->setBounds (cell.removeFromLeft (w).withSizeKeepingCentre (w, 24));
+            }
+            else
+                r.widget->setBounds (cell.removeFromLeft (56));
+            lineHeight = std::max (lineHeight, h);
+            if (++col == 2)
+            {
+                y += lineHeight + 4;
+                col = 0;
+                lineHeight = 0;
+            }
+        }
+        if (col != 0)
+            y += lineHeight + 4;
+        outputsTop = y + 8;
+        if (info != nullptr && ! info->outputs.empty())
+            y = outputsTop + 26 + (int) info->outputs.size() * 18;
+        controls.setSize (width, std::max (y + 10, controlsView.getHeight()));
+        repaint();
+        controls.repaint();
+    }
+
+    juce::String headerText() const
+    {
+        if (info == nullptr)
+            return {};
+        auto title = juce::String::fromUTF8 (info->title.c_str()).trim();
+        auto desc = juce::String::fromUTF8 (info->description.c_str()).trim();
+        if (title.isNotEmpty() && desc.isNotEmpty())
+            return title + ": " + desc;
+        return title + desc;
+    }
+
+    void paintControls (juce::Graphics& g)
+    {
+        const auto width = controls.getWidth();
+        const auto text = headerText();
+        g.setColour (theme::colour::textPrimary);
+        g.setFont (theme::font (theme::type::body));
+        if (text.isNotEmpty())
+            g.drawFittedText (text, juce::Rectangle<int> (6, 4, width - 12, headerHeight - 8 - (statusText.isNotEmpty() ? 40 : 0)), juce::Justification::topLeft, 6, 1.0f);
+        else if (info != nullptr && info->compiled && info->controls.empty())
+        {
+            g.setColour (theme::colour::textSecondary);
+            g.drawText (tr ("This script has no controls."), juce::Rectangle<int> (6, 4, width - 12, 18), juce::Justification::centredLeft);
+        }
+        // a script that does not run: why
+        if (statusText.isNotEmpty())
+        {
+            g.setColour (theme::colour::record.withAlpha (0.12f));
+            g.fillRoundedRectangle (statusArea.toFloat(), 3.0f);
+            g.setColour (theme::colour::record);
+            g.setFont (theme::font (theme::type::small));
+            g.drawFittedText (statusText, statusArea.reduced (8, 2), juce::Justification::centredLeft, 2);
+        }
+        for (const auto& [name, r] : groupHeaders)
+        {
+            g.setColour (theme::colour::bg3);
+            g.fillRect (r);
+            g.setColour (theme::colour::textPrimary);
+            g.setFont (theme::font (theme::type::small, true));
+            g.drawText (name, r.reduced (8, 0), juce::Justification::centredLeft);
+        }
+        if (info != nullptr && ! info->outputs.empty())
+        {
+            g.setColour (theme::colour::textSecondary);
+            g.setFont (theme::font (theme::type::caption));
+            g.drawText (theme::caps (tr ("Output controllers")), juce::Rectangle<int> (6, outputsTop, width - 12, 18), juce::Justification::centredLeft);
+            for (std::size_t k = 0; k < info->outputs.size(); ++k)
+            {
+                const auto y = outputsTop + 22 + (int) k * 18;
+                g.setColour (theme::colour::textSecondary);
+                g.drawText (juce::String::fromUTF8 (info->outputs[k].c_str()), juce::Rectangle<int> (10, y, 150, 16), juce::Justification::centredLeft, true);
+                const auto bar = juce::Rectangle<float> (166.0f, (float) y + 4.0f, (float) std::max (40, width - 186), 8.0f);
+                g.setColour (theme::colour::bg0);
+                g.fillRoundedRectangle (bar, 3.0f);
+                const auto v = k < outputs.size() ? juce::jlimit (0.0f, 1.0f, outputs[k]) : (float) info->outputDefaults[k];
+                g.setColour (theme::colour::automation);
+                g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * v), 3.0f);
+            }
+        }
+    }
+
+    void syncControls()
+    {
+        using T = vfx::script::Control::Type;
+        for (auto& r : rows)
+        {
+            if (r.control < 0 || (std::size_t) r.control >= values.numbers.size())
+                continue;
+            const auto& c = info->controls[(std::size_t) r.control];
+            const auto v = values.numbers[(std::size_t) r.control];
+            if (c.type == T::checkbox)
+                static_cast<juce::ToggleButton*> (r.widget.get())->setToggleState (v >= 0.5, juce::dontSendNotification);
+            else if (c.type == T::combo)
+                static_cast<juce::ComboBox*> (r.widget.get())->setSelectedId ((int) std::lround (v) + 1, juce::dontSendNotification);
+            else if (c.type == T::text)
+            {
+                auto* t = static_cast<juce::TextEditor*> (r.widget.get());
+                if (! t->hasKeyboardFocus (true))
+                    t->setText (juce::String::fromUTF8 (values.texts[(std::size_t) r.control].c_str()), false);
+            }
+            else
+                r.widget->repaint();
+        }
+    }
+
+    // A control changed by the user: kept in the state ([Parameters]), which the running script takes at once
+    void setValue (int k, double value, const std::string& text)
+    {
+        if (info == nullptr || k < 0 || (std::size_t) k >= info->controls.size())
+            return;
+        const auto& c = info->controls[(std::size_t) k];
+        values.numbers[(std::size_t) k] = c.clampValue (value);
+        if (c.type == vfx::script::Control::Type::text)
+            values.texts[(std::size_t) k] = text;
+        syncControls();
+        if (edit)
+            edit ([full = info, v = values] (std::vector<std::uint8_t>& fl) {
+                auto s = vfx::parseScript (fl).value_or (vfx::defaultScript());
+                vfx::script::writeValues (s, *full, v);
+                fl = vfx::writeScript (s);
+            });
+    }
+
+    // --- the Script tab -------------------------------------------------------------------------------------------
+    std::string currentText() const { return document.getAllContent().replace ("\r\n", "\n").toStdString(); }
+
+    void setEditorText (const std::string& text)
+    {
+        document.replaceAllContent (juce::String::fromUTF8 (text.c_str()));
+        document.clearUndoHistory();
+        document.setSavePoint();
+        updateButtons();
+    }
+
+    void applySource()
+    {
+        const auto text = currentText();
+        if (text == loaded)
+        {
+            if (monitor != nullptr) // (the same script: Apply runs it again, like Restart)
+                monitor->restart();
+            return;
+        }
+        if (edit)
+            edit ([text] (std::vector<std::uint8_t>& fl) {
+                auto s = vfx::parseScript (fl).value_or (vfx::defaultScript());
+                s.setSource (text);
+                fl = vfx::writeScript (s);
+            });
+    }
+
+    void gotoErrorLine()
+    {
+        if (errorLineNumber <= 0)
+            return;
+        showTab (1);
+        juce::CodeDocument::Position pos (document, errorLineNumber - 1, 0);
+        editor->moveCaretTo (pos, false);
+        editor->moveCaretToEndOfLine (true);
+        editor->grabKeyboardFocus();
+    }
+
+    void codeDocumentTextInserted (const juce::String&, int) override { updateButtons(); }
+    void codeDocumentTextDeleted (int, int) override { updateButtons(); }
+
+    void updateButtons()
+    {
+        const auto changed = currentText() != loaded;
+        revert.setEnabled (changed);
+        apply.setButtonText (changed ? tr ("Apply (Ctrl+Enter)") : tr ("Run again"));
+    }
+
+    // --- status, log, live values -----------------------------------------------------------------------------------
+    void updateStatus()
+    {
+        std::string error = info != nullptr && ! info->compiled ? info->error : std::string();
+        if (error.empty() && monitor != nullptr)
+            error = monitor->status();
+        errorLineNumber = errorLine (error);
+        const auto summary = errorSummary (error);
+        const auto text = summary.isEmpty() ? juce::String()
+                          : errorLineNumber > 0 ? tr ("Line %1: ").replace ("%1", juce::String (errorLineNumber)) + summary
+                                                : summary;
+        if (text != statusText)
+        {
+            statusText = text;
+            errorButton.setButtonText (text);
+            errorButton.setVisible (current == 1 && text.isNotEmpty());
+            layoutControls();
+        }
+    }
+
+    void timerCallback() override
+    {
+        if (monitor == nullptr && tag != 0)
+            monitor = vfx::script::monitorOf (tag);
+        if (current == 1)
+        {
+            const auto caret = editor->getCaretPos();
+            position.setText (tr ("Line %1, col %2").replace ("%1", juce::String (caret.getLineNumber() + 1)).replace ("%2", juce::String (caret.getIndexInLine() + 1)),
+                              juce::dontSendNotification);
+        }
+        if (monitor == nullptr)
+            return;
+        if (const auto version = monitor->logVersion(); version != seenLog)
+        {
+            seenLog = version;
+            auto text = juce::String::fromUTF8 (monitor->log().c_str());
+            if (text != log.getText())
+            {
+                log.setText (text, false);
+                log.moveCaretToEnd();
+            }
+            updateStatus();
+        }
+        // the values the script sees (automation, setNormalizedValue) and its output controllers
+        auto live = monitor->liveValues();
+        if (! live.numbers.empty() && live.numbers.size() == values.numbers.size() && live != values)
+        {
+            values = live;
+            syncControls();
+        }
+        const auto outs = monitor->outputValues();
+        if (outs != outputs)
+        {
+            outputs = outs;
+            if (current == 0)
+                controls.repaint();
+        }
+    }
+
+    void showTab (int index)
+    {
+        current = index;
+        controlsView.setVisible (index == 0);
+        for (juce::Component* c : { (juce::Component*) editor.get(), (juce::Component*) &apply, (juce::Component*) &revert, (juce::Component*) &restart,
+                                    (juce::Component*) &position })
+            c->setVisible (index == 1);
+        errorButton.setVisible (index == 1 && statusText.isNotEmpty());
+        log.setVisible (index == 2);
+        logHint.setVisible (index == 2);
+        clearLog.setVisible (index == 2);
+        reference.setVisible (index == 3);
+        for (int i = 0; i < tabs.size(); ++i)
+            tabs[i]->setColour (juce::TextButton::textColourOffId, i == index ? theme::colour::textPrimary : theme::colour::textSecondary);
+        if (index == 1)
+            editor->grabKeyboardFocus();
+        repaint();
+    }
+
+    juce::OwnedArray<juce::TextButton> tabs;
+    int current = 0;
+
+    vfx::ScriptSettings settings;
+    std::shared_ptr<const vfx::script::Info> info;
+    vfx::script::Values stateValues, values;
+    std::vector<float> outputs;
+    std::uint32_t tag = 0;
+    std::shared_ptr<vfx::script::Monitor> monitor;
+    std::uint64_t seenLog = ~std::uint64_t {};
+
+    juce::Viewport controlsView;
+    Controls controls;
+    std::vector<Row> rows;
+    std::vector<std::pair<juce::String, juce::Rectangle<int>>> groupHeaders;
+    int headerHeight = 0, outputsTop = 0;
+    juce::String statusText;
+    juce::Rectangle<int> statusArea;
+    int errorLineNumber = 0;
+
+    PythonTokeniser tokeniser;
+    juce::CodeDocument document;
+    std::unique_ptr<juce::CodeEditorComponent> editor;
+    juce::TextButton apply, revert, restart, errorButton;
+    juce::Label position;
     std::string loaded;
+
+    juce::TextEditor log, reference;
+    juce::Label logHint;
+    juce::TextButton clearLog;
 };
 
 // A kind LYNX does not edit yet: says so (its notes pass through)
@@ -2111,6 +2820,8 @@ public:
     {
         const auto s = state();
         kind = s ? s->kind : vfx::Kind::keyMapper;
+        if (s && kind == vfx::Kind::script)
+            ensureUniqueTag (s->tag);
         body = makeBody (kind);
         body->edit = [this] (Body::Edit change) { editState ([change] (vfx::State& st) { change (st.fl); }); };
         addAndMakeVisible (*body);
@@ -2186,6 +2897,41 @@ public:
     }
 
 private:
+    // A VFX Script's editor finds its running instance by the state's tag: a new one when it has none yet or another
+    // VFX in the song has the same (a cloned channel)
+    static void countTags (const ChannelDef& c, std::uint32_t tag, int& n)
+    {
+        if (c.instrument == InstrumentKind::vfx)
+            if (const auto st = vfx::readState (c.pluginState); st && st->tag == tag)
+                ++n;
+        for (const auto& node : c.patcher.nodes)
+            countTags (node.channel, tag, n);
+    }
+
+    void ensureUniqueTag (std::uint32_t tag)
+    {
+        int n = 0;
+        if (tag != 0)
+            for (const auto& c : engine.getSong().channels)
+                countTags (c, tag, n);
+        if (tag != 0 && n <= 1)
+            return;
+        static std::mt19937 random { std::random_device {}() };
+        const auto fresh = (std::uint32_t) (random() | 1u);
+        engine.editSong (
+            [this, fresh] (Song& song) {
+                auto* c = locate (song);
+                if (c == nullptr || c->instrument != InstrumentKind::vfx)
+                    return;
+                if (auto st = vfx::readState (c->pluginState))
+                {
+                    st->tag = fresh;
+                    c->pluginState = vfx::writeState (*st);
+                }
+            },
+            false);
+    }
+
     std::optional<vfx::State> state() const
     {
         const auto* c = locate (const_cast<Song&> (engine.getSong()));
@@ -2317,6 +3063,7 @@ private:
         const auto s = state();
         if (! s)
             return;
+        body->setTag (s->tag);
         body->refresh (s->fl);
         port.setValue (s->port, juce::dontSendNotification);
         if (presetName.isEmpty())

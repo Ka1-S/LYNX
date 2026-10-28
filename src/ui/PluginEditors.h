@@ -23,6 +23,10 @@ void closeAll();
 
 // The editor alone at `scale` (1 = FL's size; for --snapshot / --plugui).
 std::unique_ptr<juce::Component> makeNativeEffectEditor (AudioEngine& engine, int track, int slot, float scale = 1.0f, int page = 0);
+// The same editor on an effect node inside a Patcher (round 165c: the Hardware Insert): `locate` finds the node's slot in
+// the song, `running` its running instance (live meters); `name` is shown where a mixer editor names its insert.
+std::unique_ptr<juce::Component> makeNodeEffectEditor (AudioEngine& engine, std::function<EffectSlot* (Song&)> locate,
+                                                       std::function<std::shared_ptr<Effect>()> running, const juce::String& name, float scale = 1.25f);
 // --plugui: live displays (LYNX Tune's pitch graph) draw a synthetic signal instead of waiting for audio
 void setNativeEditorDemo (bool on);
 } // namespace lynx

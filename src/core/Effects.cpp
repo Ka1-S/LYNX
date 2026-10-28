@@ -3006,6 +3006,13 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, 
         std::snprintf (text, sizeof text, "%+.1f dB", mixsuite::ridge::bandGainDb (v, context[(std::size_t) mixsuite::ridge::curve] > 0.5f));
         return text;
     }
+    if (kind == EffectKind::geminiDoubler && (param == voicetools::gemini::lowGain || param == voicetools::gemini::highGain)
+        && ! voicetools::gemini::measuredEq (context)) // round 165w: round 124's shelves read −30 … +12 dB
+    {
+        char text[32];
+        std::snprintf (text, sizeof text, "%+.1f dB", voicetools::gemini::shelfDb (v, false));
+        return text;
+    }
     if (kind == EffectKind::glowLeveler && mixsuite::glow::classic (context))
         return mixsuite::glow::classicParamText (param, v);
     if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))
@@ -3564,6 +3571,12 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 152: a Glow Leveler saved before the measured opto law keeps the round-123 Limit and no classic auto make-up
     if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::optoLaw)
         slot.params[(std::size_t) mixsuite::glow::optoLaw] = 0.0f;
+    // round 165w: a Gemini Doubler saved before the measured shelves keeps round 124's (−30 … +12 dB, first order)
+    if (slot.kind == EffectKind::geminiDoubler && savedCount <= (std::size_t) voicetools::gemini::eqLaw)
+        slot.params[(std::size_t) voicetools::gemini::eqLaw] = 0.0f;
+    // round 165w: … and before the measured release keeps round 123's
+    if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::releaseLaw)
+        slot.params[(std::size_t) mixsuite::glow::releaseLaw] = 0.0f;
     // round 152: a Compressor saved before the measured vintage curve keeps the round-150 curve
     if (slot.kind == EffectKind::compressor && savedCount <= 18 && slot.params.size() > 18)
         slot.params[18] = 0.0f;

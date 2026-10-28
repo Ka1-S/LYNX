@@ -9,6 +9,7 @@
 #include "core/FlSynths.h"
 #include "core/Song.h"
 #include "core/VfxDetail.h"
+#include "core/VfxScript.h"
 #include "flp/Flp.h"
 
 namespace lynx::vfx
@@ -871,6 +872,49 @@ std::vector<std::pair<std::string, std::string>> ScriptSettings::parameters() co
     return out;
 }
 
+void ScriptSettings::setParameters (const std::vector<std::pair<std::string, std::string>>& lines)
+{
+    // the text in blocks: what comes before the first section, then each "[Section]" with its lines
+    const auto bom = text.rfind ("\xEF\xBB\xBF", 0) == 0;
+    const auto body = bom ? text.substr (3) : text;
+    std::vector<std::pair<std::string, std::string>> blocks { { "", "" } }; // (section, its text with the header)
+    std::size_t at = 0;
+    while (at < body.size())
+    {
+        auto end = body.find ('\n', at);
+        end = end == std::string::npos ? body.size() : end + 1;
+        const auto raw = body.substr (at, end - at);
+        auto line = raw;
+        while (! line.empty() && (line.back() == '\n' || line.back() == '\r'))
+            line.pop_back();
+        if (line.size() >= 2 && line.front() == '[' && line.back() == ']')
+            blocks.push_back ({ line.substr (1, line.size() - 2), "" });
+        blocks.back().second += raw;
+        at = end;
+    }
+    if (! blocks.back().second.empty() && blocks.back().second.back() != '\n')
+        blocks.back().second += "\r\n";
+    std::string section = "[Parameters]\r\n";
+    for (const auto& [name, value] : lines)
+        section += name + "=" + value + "\r\n";
+    std::string out = bom ? "\xEF\xBB\xBF" : "";
+    bool placed = false;
+    for (const auto& [name, block] : blocks)
+    {
+        if (name == "Parameters")
+            continue;
+        if (name == "Surface" && ! placed)
+        {
+            out += section;
+            placed = true;
+        }
+        out += block;
+    }
+    if (! placed)
+        out += section;
+    text = out;
+}
+
 bool ScriptSettings::hasSurface() const { return text.find ("\r\n[Surface]") != std::string::npos || text.find ("\n[Surface]") != std::string::npos; }
 
 ScriptSettings defaultScript()
@@ -918,7 +962,7 @@ std::vector<std::uint8_t> defaultState (Kind kind)
 
 int outputCount (Kind kind) noexcept
 {
-    return kind == Kind::colorMapper || kind == Kind::keyboardSplitter ? 16 : 1;
+    return kind == Kind::colorMapper || kind == Kind::keyboardSplitter || kind == Kind::script ? 16 : 1;
 }
 
 int outputsShown (Kind kind) noexcept
@@ -932,6 +976,8 @@ std::string outputName (Kind kind, int output)
         return "Voice " + std::to_string (output + 1);
     if (kind == Kind::keyboardSplitter)
         return "Zone " + std::to_string (output + 1);
+    if (kind == Kind::script) // (FL's pin names)
+        return "Voice output " + std::to_string (output + 1);
     return "Voice output";
 }
 
@@ -942,12 +988,13 @@ std::optional<State> readState (const std::vector<std::uint8_t>& pluginState)
         return std::nullopt;
     const auto kind = r.u32();
     const auto port = r.i32();
-    r.u32(); // (reserved)
+    const auto tag = r.u32(); // (round 165d: a VFX Script's editor tag; 0 before)
     if (r.failed || kind >= (std::uint32_t) kindCount)
         return std::nullopt;
     State s;
     s.kind = (Kind) kind;
     s.port = std::clamp (port, 0, 255);
+    s.tag = tag;
     s.fl.assign (pluginState.begin() + (std::ptrdiff_t) r.pos, pluginState.end());
     return s;
 }
@@ -958,7 +1005,7 @@ std::vector<std::uint8_t> writeState (const State& state)
     put<std::uint32_t> (out, lynxMagic);
     put<std::uint32_t> (out, (std::uint32_t) state.kind);
     put<std::int32_t> (out, state.port);
-    put<std::uint32_t> (out, 0);
+    put<std::uint32_t> (out, state.tag);
     out.insert (out.end(), state.fl.begin(), state.fl.end());
     return out;
 }
@@ -1776,6 +1823,7 @@ std::unique_ptr<Processor> makeProcessor (Kind kind, const std::vector<std::uint
         case Kind::envelope:
             return std::make_unique<Envelope> (parseEnvelope (fl).value_or (defaultEnvelope()));
         case Kind::sequencer: return makeSequencer (fl);
+        case Kind::script: return script::makeProcessor (fl);
         default: break;
     }
     return std::make_unique<ThroughProcessor> (kind);

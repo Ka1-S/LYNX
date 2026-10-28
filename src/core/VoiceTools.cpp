@@ -411,7 +411,39 @@ double feedback (float v) noexcept { return clamp01 (v); }
 double detuneCents (float v) noexcept { return -100.0 + 200.0 * clamp01 (v); }
 double depthCents (float v) noexcept { return -200.0 + 400.0 * clamp01 (v); }
 double rateValue (float v) noexcept { return 0.1 * std::pow (4000.0, clamp01 (v)); }
-double shelfDb (float v) noexcept { return -30.0 + 42.0 * clamp01 (v); }
+double shelfDb (float v, bool measured) noexcept { return measured ? -88.0 + 100.0 * clamp01 (v) : -30.0 + 42.0 * clamp01 (v); }
+float shelfValue (double db, bool measured) noexcept
+{
+    return (float) std::clamp (measured ? (db + 88.0) / 100.0 : (db + 30.0) / 42.0, 0.0, 1.0);
+}
+bool measuredEq (const EffectParams& p) noexcept { return on (p[eqLaw]); }
+// round 165w [EXEC] (REA_rodada165w §3): the 17.1 trials' shelf is two identical first-order sections, each with half the
+// gain (dB) and its fixed corner at f0 · 1.557 (high shelf) or f0 / 1.5605 (low shelf); the other corner moves with the
+// gain, so below about −24 dB the shelf turns into a 12 dB / octave cut at that corner (the manual's "the floor drops to
+// make a cut filter"). Fitted on stepped tones at −88 … +12 dB, 101 / 281 / 1189 / 2448 Hz: within 0.04 dB rms.
+constexpr double shelfCorner = 1.557, lowShelfCorner = 1.5605; // high / low (fitted separately)
+double shelfResponseDb (double f, double f0, double db, bool high, bool measured) noexcept
+{
+    // the engine's response at 48 kHz (its bilinear filters: frequencies through the same pre-warp)
+    const auto warp = [] (double hz) { return std::tan (pi * std::min (hz, 0.49 * 48000.0) / 48000.0); };
+    const auto g = dbToGain (db);
+    const auto w = warp (f);
+    if (measured)
+    {
+        const auto a = std::sqrt (g), wp = warp (high ? f0 * shelfCorner : f0 / lowShelfCorner), wz = high ? wp / a : wp * a;
+        const auto x = (1.0 + (w / wz) * (w / wz)) / (1.0 + (w / wp) * (w / wp));
+        return 2.0 * (10.0 * std::log10 (x) + (high ? 0.0 : 20.0 * std::log10 (a)));
+    }
+    const auto r = std::max (g, 1.0 / g);
+    const auto lo = high ? f0 : f0 / r, up = high ? f0 * r : f0;
+    double fz, fp, k;
+    if (high)
+        fz = g >= 1.0 ? lo : up, fp = g >= 1.0 ? up : lo, k = 1.0;
+    else
+        fz = g >= 1.0 ? up : lo, fp = g >= 1.0 ? lo : up, k = g >= 1.0 ? r : 1.0 / r;
+    const auto wz = warp (fz), wp = warp (fp);
+    return 20.0 * std::log10 (k) + 10.0 * std::log10 ((1.0 + (w / wz) * (w / wz)) / (1.0 + (w / wp) * (w / wp)));
+}
 double freqHz (float v) noexcept { return 16.0 * std::pow (21357.0 / 16.0, clamp01 (v)); }
 float freqValue (double hz) noexcept { return (float) std::clamp (std::log (std::max (hz, 1.0) / 16.0) / std::log (21357.0 / 16.0), 0.0, 1.0); }
 int sourceOf (float v) noexcept { return std::clamp ((int) std::floor (clamp01 (v) * 3.0), 0, 2); }
@@ -668,16 +700,24 @@ private:
     bool lastReset = false;
     void design (const EffectParams& p) noexcept
     {
-        float key[5] { p[lowGain], p[lowFreq], p[highGain], p[highFreq], p[feedbackCut] };
-        if (designed && std::equal (key, key + 5, lastKey))
+        float key[6] { p[lowGain], p[lowFreq], p[highGain], p[highFreq], p[feedbackCut], p[eqLaw] };
+        if (designed && std::equal (key, key + 6, lastKey))
             return;
-        std::copy (key, key + 5, lastKey);
+        std::copy (key, key + 6, lastKey);
         designed = true;
+        if (measuredEq (p)) // round 165w: the measured law (two first-order sections)
+        {
+            measuredShelf (lowShelf, freqHz (p[lowFreq]), shelfDb (p[lowGain]), false);
+            measuredShelf (highShelf, freqHz (p[highFreq]), shelfDb (p[highGain]), true);
+        }
+        else
         // [EXEC] measured: first-order shelves; a high shelf of gain g at f0 has its corners at f0 and f0 · max (g, 1/g)
         // (-12 dB at 3538 Hz: -2.1 dB at 3.5 kHz, -6.8 at 8 kHz, -11.9 at 16 kHz; +6 dB at 1306 Hz: +2.6 at 1.5 kHz,
         // +4.5 at 3 kHz); the low shelf mirrors it (corners f0 / max (g, 1/g) and f0)
-        firstOrderShelf (lowShelf, freqHz (p[lowFreq]), shelfDb (p[lowGain]), false);
-        firstOrderShelf (highShelf, freqHz (p[highFreq]), shelfDb (p[highGain]), true);
+        {
+            firstOrderShelf (lowShelf, freqHz (p[lowFreq]), shelfDb (p[lowGain], false), false);
+            firstOrderShelf (highShelf, freqHz (p[highFreq]), shelfDb (p[highGain], false), true);
+        }
         // [EXEC] round 124: the feedback low cut is a first-order (bilinear) high-pass — 16 Hz: -3.0 dB / +45° at
         // 16 Hz, first sample 0.99895 of a repeat's impulse
         const auto k = std::tan (pi * std::min (freqHz (p[feedbackCut]), 0.45 * sr) / sr);
@@ -689,6 +729,23 @@ private:
             v.fbHp.a1 = (k - 1.0) / (k + 1.0);
             v.fbHp.a2 = 0.0;
         }
+    }
+
+    // round 165w: H(s) = [a (1 + s/wz) / (1 + s/wp)]² (low; a = √g, wz = wp · a) or [(1 + s/wz) / (1 + s/wp)]² (high;
+    // wz = wp / a), the fixed corner wp pre-warped, bilinear
+    void measuredShelf (Biquad& b, double f0, double db, bool high) const noexcept
+    {
+        const auto a = std::sqrt (dbToGain (db));
+        const auto fp = high ? f0 * shelfCorner : f0 / lowShelfCorner;
+        const auto wp = std::tan (pi * std::min (fp, 0.49 * sr) / sr), wz = high ? wp / a : wp * a, k = high ? 1.0 : a;
+        const auto n0 = k * (wz + 1.0) / wz, n1 = k * (wz - 1.0) / wz;
+        const auto d0 = (wp + 1.0) / wp, d1 = (wp - 1.0) / wp;
+        const auto c0 = n0 / d0, c1 = n1 / d0, p1 = d1 / d0;
+        b.b0 = c0 * c0;
+        b.b1 = 2.0 * c0 * c1;
+        b.b2 = c1 * c1;
+        b.a1 = 2.0 * p1;
+        b.a2 = p1 * p1;
     }
 
     // H(s) = k (1 + s/wz) / (1 + s/wp), bilinear with the corners pre-warped
@@ -733,7 +790,7 @@ private:
     std::array<Line, 2> direct;
     Biquad lowShelf, highShelf;
     bool designed = false;
-    float lastKey[5] {};
+    float lastKey[6] {};
 };
 } // namespace
 } // namespace gemini
@@ -753,8 +810,9 @@ const EffectInfo& geminiInfo()
                                    { { "Output", 1.0f }, { "Direct", 1.0f }, { "Direct gain", 1.0f }, { "Direct pan", 0.5f },
                                      // round 165 [EXEC]: the 17.1 trials' fresh instance — Align off, both shelves on (low 0 dB at
                                      // 101 Hz, high +4.1 dB at 1306 Hz); only new instances change (projects keep their values)
-                                     { "Align", 0.0f }, { "Low shelf", 1.0f }, { "Low gain", 30.0f / 42.0f },
-                                     { "Low freq", gemini::freqValue (101.0) }, { "High shelf", 1.0f }, { "High gain", 34.1f / 42.0f },
+                                     // round 165w: gains on the measured law (−88 … +12 dB): 0 dB = 0.88, +4.1 dB = 0.921
+                                     { "Align", 0.0f }, { "Low shelf", 1.0f }, { "Low gain", 0.88f },
+                                     { "Low freq", gemini::freqValue (101.0) }, { "High shelf", 1.0f }, { "High gain", 0.921f },
                                      { "High freq", gemini::freqValue (1306.0) }, { "Feedback cut", 0.0f }, { "Range", 0.0f },
                                      // voice 1 (left) and voice 2 (right): a classic double, 9.4 / 23.7 ms, ±6 cents, −6 dB
                                      { "V1 on", 1.0f }, { "V1 gain", 0.875f }, { "V1 pan", 0.0f }, { "V1 delay", 0.094f },
@@ -770,7 +828,9 @@ const EffectInfo& geminiInfo()
                                      { "V4 on", 0.0f }, { "V4 gain", 0.875f }, { "V4 pan", 1.0f }, { "V4 delay", 0.30f },
                                      { "V4 feedback", 0.0f }, { "V4 detune", 0.44f }, { "V4 depth", 0.5f }, { "V4 rate", 0.2776f },
                                      { "V4 octave", 0.0f }, { "V4 source", 0.1667f },
-                                     { "Mod reset", 0.0f } } };
+                                     { "Mod reset", 0.0f },
+                                     // round 165w: the measured shelves (a project saved before keeps round 124's: upgradeLoadedEffectParams)
+                                     { "EQ law", 1.0f } } };
     return info;
 }
 
@@ -831,6 +891,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case directGain: return fmt ("%.1f dB", gainDb (v));
             case directPan: return fmt ("%+.1f°", panDegrees (v));
             case lowGain: case highGain: return fmt ("%+.1f dB", shelfDb (v));
+            case eqLaw: return on (v) ? "measured" : "round 124";
             case lowFreq: case highFreq: case feedbackCut: return hzText (freqHz (v));
             case range: return on (v) ? "20 Hz" : "80 Hz";
             default: return on (v) ? "on" : "off";
