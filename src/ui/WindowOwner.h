@@ -13,6 +13,10 @@ void keepAboveMainWindow (juce::Component& window); // call after the window is 
 // process is kept above it (round 162d).
 void* mainWindowHandle();
 
+// Makes the main window the active one (round 165q): a closing secondary window that is active calls it first, so
+// the activation does not go to another program.
+void activateMainWindow();
+
 // True when `window` is currently owned by the main window (Windows; elsewhere: keepAboveMainWindow was called).
 bool isOwnedByMainWindow (juce::Component& window);
 // True when `window` is above the main window in the z-order (Windows; elsewhere: isOwnedByMainWindow).

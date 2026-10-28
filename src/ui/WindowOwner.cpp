@@ -39,6 +39,16 @@ void setMainWindowForOwnership (juce::Component* window)
     mainWindow() = window;
 }
 
+void activateMainWindow()
+{
+    auto* main = mainWindow().getComponent();
+    if (main == nullptr || ! main->isShowing())
+        return;
+    auto* top = main->getTopLevelComponent();
+    if (auto* peer = top->getPeer(); peer != nullptr && ! peer->isMinimised())
+        top->toFront (true);
+}
+
 double processCpuSeconds()
 {
    #if JUCE_WINDOWS
