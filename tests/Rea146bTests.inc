@@ -236,9 +236,9 @@ TEST (rea146b_flp_misc_records)
     FlpImportOptions options;
     options.roots.factoryData = (std::filesystem::path (realFlpDir) / "..").string();
     options.readFile = [] (const std::string& path) {
-        auto unix = path;
-        std::replace (unix.begin(), unix.end(), '\\', '/');
-        std::ifstream f (unix, std::ios::binary);
+        auto posix = path;
+        std::replace (posix.begin(), posix.end(), '\\', '/');
+        std::ifstream f (posix, std::ios::binary);
         return std::vector<std::uint8_t> ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
     };
     const auto song = importFlp (flp::parseProject (b), options);

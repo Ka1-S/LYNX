@@ -18,10 +18,13 @@ constexpr int audioClipKey (std::size_t playlistIndex) noexcept { return audioCl
 
 struct NoteEvent
 {
-    enum class Type : std::uint8_t { on, off, slide, choke, control }; // slide: glides the sounding notes to `key`; choke: cut group
+    enum class Type : std::uint8_t { on, off, slide, choke, control, voiceProp }; // slide: glides the sounding notes to `key`; choke: cut group
+    // voiceProp (round 165c): a VFX's voice property changing while its note sounds (on a port: `port`, `colour`),
+    // `key` the note's key, `prop` the vfx::Prop, `velocity` the value
     // control (live MIDI input only, round 162): `key` = CC number 0…127, controlPitchBend or controlPressure;
     // `velocity` = the value, 0..1 (the pitch wheel: -1..1, 0 = centre)
-    static constexpr int controlPitchBend = 128, controlPressure = 129;
+    // controlProgram (round 165c): a program change, `velocity` = program / 127
+    static constexpr int controlPitchBend = 128, controlPressure = 129, controlProgram = 130;
 
     int sampleOffset = 0;   // 0 .. numSamples-1 within the block
     Type type = Type::on;
@@ -40,6 +43,7 @@ struct NoteEvent
     // the note's level factor (a Layer's VOL and crossfade, round 164): the instrument scales the voice when it can,
     // else the velocity is scaled
     float gain = 1.0f;
+    std::uint8_t prop = 0;  // voiceProp: the vfx::Prop
     std::int8_t colour = 0; // the note's colour group 0…15 (FL's note colours: VFX Color Mapper, round 164b)
     // A VFX channel (round 164b): −1 = an ordinary note; −2 = one its processor takes (it goes nowhere else); N ≥ 0 =
     // what the processor sent on MIDI port N (only the routes on that port take it)

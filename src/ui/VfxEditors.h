@@ -14,6 +14,9 @@ namespace lynx
 {
 // `locate` finds the VFX's ChannelDef in a song (a Channel Rack channel, or a node inside a Patcher); `channel` = its
 // channel index, −1 inside a Patcher
-std::unique_ptr<juce::Component> makeVfxEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, int channel);
+// `running` (may be empty) finds the running instrument (its note processor shows the editor what it plays: the Level
+// Scaler's events, the Keyboard Splitter's Manual mapping)
+std::unique_ptr<juce::Component> makeVfxEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, int channel,
+                                                std::function<std::shared_ptr<Instrument>()> running = {});
 std::unique_ptr<juce::Component> makeVfxEditor (AudioEngine& engine, int channel);
 } // namespace lynx

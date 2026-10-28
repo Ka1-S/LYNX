@@ -1381,6 +1381,12 @@ juce::var mixerTrackToVar (const MixerTrack& t)
         o->setProperty ("monitor", (int) t.monitor);
     if (t.recordSafe)
         o->setProperty ("recordSafe", true);
+    if (t.latencyMs != 0.0f) // FL's manual track latency, ms (REA round 165f-mixer)
+        o->setProperty ("latencyMs", juce::roundToInt (t.latencyMs * 1000.0f) / 1000.0);
+    if (t.latencyBypass != LatencyBypass::never)
+        o->setProperty ("latencyBypass", t.latencyBypass == LatencyBypass::always ? "always" : "whenIdle");
+    if (! t.compensateMasterLatency)
+        o->setProperty ("compensateMaster", false);
     if (t.outputChannel != outputDefault) // hardware output target (REA round 156): -1 = none, else device channel
     {
         o->setProperty ("output", t.outputChannel);
@@ -1435,6 +1441,12 @@ MixerTrack mixerTrackFromVar (const juce::var& t)
     track.inputStereo = ! (bool) t.getProperty ("inputMono", false);
     track.monitor = (InputMonitor) juce::jlimit (0, 3, (int) t.getProperty ("monitor", (int) InputMonitor::automatic));
     track.recordSafe = (bool) t.getProperty ("recordSafe", false);
+    track.latencyMs = juce::jlimit (-maxTrackLatencyMs, maxTrackLatencyMs, (float) (double) t.getProperty ("latencyMs", 0.0));
+    if (const auto bypass = t["latencyBypass"].toString(); bypass == "always")
+        track.latencyBypass = LatencyBypass::always;
+    else if (bypass == "whenIdle")
+        track.latencyBypass = LatencyBypass::whenRecordingOrStopped;
+    track.compensateMasterLatency = (bool) t.getProperty ("compensateMaster", true);
     track.outputChannel = juce::jlimit (outputDefault, 255, (int) t.getProperty ("output", outputDefault));
     if (const auto mode = t["outputMode"].toString(); mode == "mono")
         track.outputMode = OutputMode::monoSum;

@@ -1916,7 +1916,13 @@ private:
         }
         if (node.generator && node.channel.instrument == InstrumentKind::vfx)
         {
-            openToolWindow (makeVfxEditor (engine, locate, -1), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            auto running = [&e = engine, t = target, n]() -> std::shared_ptr<Instrument> { // (round 165c: what it plays)
+                const auto keep = t.channel ? std::shared_ptr<void> (e.getChannelInstrument (t.index)) : std::shared_ptr<void> (e.getEffect (t.index, t.slot));
+                auto* g = t.channel ? patcher::graphOf (std::static_pointer_cast<Instrument> (keep).get())
+                                    : patcher::graphOf (std::static_pointer_cast<Effect> (keep).get());
+                return g != nullptr && n < g->nodeCount() ? g->instrumentAt (n) : nullptr;
+            };
+            openToolWindow (makeVfxEditor (engine, locate, -1, running), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         if (node.generator && node.channel.instrument == InstrumentKind::controller && parseKeyboardController (node.channel.controllerState)) // round 165c

@@ -1,3 +1,4 @@
+#include "ui/EditorTools.h"
 #include "core/FruityDance.h"
 #include "core/VideoPlayer.h"
 #include "ui/ColourPicker.h"
@@ -1262,7 +1263,7 @@ bool ChannelRackComponent::loadSampleIntoSelected (const juce::File& file)
     const auto row = engine.getSelectedChannel();
     const auto& song = engine.getSong();
 
-    if (row < 0 || row >= (int) song.channels.size() || ! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+    if (row < 0 || row >= (int) song.channels.size() || ! SampleLibrary::isSampleFile (file))
         return false;
 
     const auto kind = song.channels[(std::size_t) row].instrument;
@@ -2375,7 +2376,7 @@ void ChannelRackComponent::sliceChannel (int channel)
 bool ChannelRackComponent::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;sf2;sf3"))
+        if (SampleLibrary::isSampleFile (juce::File (f)) || juce::File (f).hasFileExtension ("sf2;sf3"))
             return true;
 
     return false;
@@ -2398,7 +2399,7 @@ void ChannelRackComponent::filesDropped (const juce::StringArray& files, int x, 
             target = -1;
             continue;
         }
-        if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+        if (! SampleLibrary::isSampleFile (file)) // (FL's WavPack pack samples too: round 165q)
             continue;
 
         assignSample (target, file);
@@ -2434,7 +2435,25 @@ void ChannelRackComponent::timerCallback()
         dirty (playheadStep);
         playheadStep = step;
         dirty (playheadStep);
+        followPlayhead();
     }
+}
+
+void ChannelRackComponent::followPlayhead()
+{
+    // Follow (issue #12): a pattern longer than the view pages along with the playing step, as the Playlist does
+    if (playheadStep < 0 || ! EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::channelRack))
+        return;
+    auto* viewport = findParentComponentOfClass<juce::Viewport>();
+    if (viewport == nullptr)
+        return;
+    const auto view = viewport->getViewArea();
+    const auto stepsLeft = view.getX() + gridLeft(); // (the controls column stays on the left of the view)
+    const auto x = gridLeft() + playheadStep * stepWidth;
+    if (x >= stepsLeft && x + stepWidth <= view.getRight())
+        return;
+    const auto maxX = juce::jmax (0, getWidth() - view.getWidth());
+    viewport->setViewPosition (juce::jlimit (0, maxX, x - gridLeft()), view.getY());
 }
 
 bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& details)

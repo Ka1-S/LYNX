@@ -7,6 +7,9 @@
 #include "platform/Paths.h"
 
 #include <cstdint>
+
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -38,6 +41,16 @@ void setMainWindowForOwnership (juce::Component* window)
     mainWindow() = window;
 }
 
+void activateMainWindow()
+{
+    auto* main = mainWindow().getComponent();
+    if (main == nullptr || ! main->isShowing())
+        return;
+    auto* top = main->getTopLevelComponent();
+    if (auto* peer = top->getPeer(); peer != nullptr && ! peer->isMinimised())
+        top->toFront (true);
+}
+
 double processCpuSeconds()
 {
    #if JUCE_WINDOWS
@@ -48,6 +61,78 @@ double processCpuSeconds()
    #else
     return (double) std::clock() / CLOCKS_PER_SEC;
    #endif
+}
+
+juce::TextEditor* firstTextField (juce::Component& dialog)
+{
+    juce::TextEditor* best = nullptr;
+    juce::Point<int> bestAt;
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+        for (auto* child : c.getChildren())
+        {
+            if (! child->isVisible() || ! child->isEnabled())
+                continue;
+            if (auto* editor = dynamic_cast<juce::TextEditor*> (child); editor != nullptr && ! editor->isReadOnly() && editor->getWantsKeyboardFocus())
+            {
+                const auto at = dialog.getLocalPoint (editor, juce::Point<int>());
+                if (best == nullptr || at.y < bestAt.y || (at.y == bestAt.y && at.x < bestAt.x))
+                {
+                    best = editor;
+                    bestAt = at;
+                }
+                continue;
+            }
+            walk (*child);
+        }
+    };
+    walk (dialog);
+    return best;
+}
+
+namespace
+{
+struct DialogTextFocus final : juce::FocusChangeListener
+{
+    void globalFocusChanged (juce::Component* focused) override
+    {
+        if (focused == nullptr)
+            return;
+        auto* dialog = dynamic_cast<juce::AlertWindow*> (focused->getTopLevelComponent());
+        if (dialog == nullptr || ! dialog->isShowing())
+            return;
+        auto& props = dialog->getProperties();
+        static const juce::Identifier done ("lynxTextFocused");
+        if (props.contains (done)) // only the dialog's first focus: Tab and clicks move it freely afterwards
+            return;
+        props.set (done, true);
+        if (dynamic_cast<juce::TextEditor*> (focused) != nullptr)
+            return;
+        if (auto* field = firstTextField (*dialog))
+            field->grabKeyboardFocus(); // (AlertWindow's fields select all their text when focused)
+    }
+};
+
+std::unique_ptr<DialogTextFocus>& dialogTextFocus()
+{
+    static std::unique_ptr<DialogTextFocus> listener;
+    return listener;
+}
+} // namespace
+
+void installDialogTextFocus()
+{
+    if (dialogTextFocus() != nullptr)
+        return;
+    dialogTextFocus() = std::make_unique<DialogTextFocus>();
+    juce::Desktop::getInstance().addFocusChangeListener (dialogTextFocus().get());
+}
+
+void removeDialogTextFocus()
+{
+    if (dialogTextFocus() == nullptr)
+        return;
+    juce::Desktop::getInstance().removeFocusChangeListener (dialogTextFocus().get());
+    dialogTextFocus() = nullptr;
 }
 
 juce::Image logoImage()
@@ -255,8 +340,138 @@ void applyRenderingChoice (juce::Component& window)
             applyToPeer (*peer, false);
 }
 
+namespace
+{
+struct SecondaryKeyForwarder final : juce::KeyListener
+{
+    std::function<bool (const juce::KeyPress&)> handler;
+
+    bool keyPressed (const juce::KeyPress& key, juce::Component* window) override
+    {
+        if (handler == nullptr || key == juce::KeyPress::escapeKey)
+            return false;
+        if (window != nullptr && (bool) window->getProperties().getWithDefault ("lynxOwnKeys", false))
+            return false;
+        return handler (key);
+    }
+};
+
+SecondaryKeyForwarder& keyForwarder()
+{
+    static SecondaryKeyForwarder forwarder;
+    return forwarder;
+}
+} // namespace
+
+#if JUCE_WINDOWS
+// A hosted plugin's own view (VST3 / VST2 / CLAP) gets the keys itself: with the focus in its native child window the
+// keys never reach JUCE, and with the focus on JUCE's wrapper the wrapper swallows them all. FL still runs its
+// shortcuts there (Space plays), so a thread keyboard hook hands such a key to the main window's global actions when
+// it is one, before the plugin sees it (round 165q / issue #12: Space did nothing over Pro-Q 4). Plain letters and
+// digits stay the plugin's (its own keys and text fields), and so does everything typed into a native Edit control.
+namespace
+{
+int juceKeyCodeOf (WPARAM vk)
+{
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9'))
+        return (int) vk;
+    if (vk >= VK_F1 && vk <= VK_F12)
+        return juce::KeyPress::F1Key + (int) (vk - VK_F1);
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9)
+        return juce::KeyPress::numberPad0 + (int) (vk - VK_NUMPAD0);
+    switch (vk)
+    {
+        case VK_SPACE: return juce::KeyPress::spaceKey;
+        case VK_RETURN: return juce::KeyPress::returnKey;
+        case VK_TAB: return juce::KeyPress::tabKey;
+        case VK_DELETE: return juce::KeyPress::deleteKey;
+        case VK_BACK: return juce::KeyPress::backspaceKey;
+        case VK_INSERT: return juce::KeyPress::insertKey;
+        case VK_UP: return juce::KeyPress::upKey;
+        case VK_DOWN: return juce::KeyPress::downKey;
+        case VK_LEFT: return juce::KeyPress::leftKey;
+        case VK_RIGHT: return juce::KeyPress::rightKey;
+        case VK_HOME: return juce::KeyPress::homeKey;
+        case VK_END: return juce::KeyPress::endKey;
+        case VK_PRIOR: return juce::KeyPress::pageUpKey;
+        case VK_NEXT: return juce::KeyPress::pageDownKey;
+        case VK_ADD: return juce::KeyPress::numberPadAdd;
+        case VK_SUBTRACT: return juce::KeyPress::numberPadSubtract;
+        default: return 0;
+    }
+}
+
+// The focus is in a hosted plugin's view inside one of LYNX's secondary windows (not the main window)
+bool focusIsInPluginView()
+{
+    const auto focus = GetFocus();
+    if (focus == nullptr)
+        return false;
+    const auto root = GetAncestor (focus, GA_ROOT);
+    auto* main = mainWindow().getComponent();
+    if (root == nullptr || (main != nullptr && main->getWindowHandle() == (void*) root))
+        return false;
+    juce::Component* window = nullptr;
+    for (int i = 0; i < juce::ComponentPeer::getNumPeers(); ++i)
+        if (auto* peer = juce::ComponentPeer::getPeer (i); peer != nullptr && peer->getNativeHandle() == (void*) root)
+            window = &peer->getComponent();
+    if (window == nullptr)
+        return false; // (not a LYNX window)
+    if (focus != root)
+    {
+        // a native child: the plugin's view, unless it is a native text field
+        wchar_t cls[64] = {};
+        GetClassNameW (focus, cls, 63);
+        const juce::String name (cls);
+        return ! name.containsIgnoreCase ("edit");
+    }
+    // JUCE's own focus: a hosted plugin's editor wrapper (it swallows every key)
+    auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    auto* editor = focused != nullptr ? (dynamic_cast<juce::AudioProcessorEditor*> (focused) != nullptr ? dynamic_cast<juce::AudioProcessorEditor*> (focused)
+                                                                                                      : focused->findParentComponentOfClass<juce::AudioProcessorEditor>())
+                                      : nullptr;
+    return editor != nullptr && dynamic_cast<juce::AudioPluginInstance*> (editor->getAudioProcessor()) != nullptr;
+}
+
+HHOOK pluginKeyHook = nullptr;
+
+LRESULT CALLBACK pluginKeyProc (int code, WPARAM vk, LPARAM info)
+{
+    const auto down = (info & (1u << 31)) == 0, repeat = (info & (1 << 30)) != 0;
+    if (code == HC_ACTION && down && ! repeat && keyForwarder().handler != nullptr && vk != VK_ESCAPE)
+        if (const auto keyCode = juceKeyCodeOf (vk); keyCode != 0)
+        {
+            int mods = 0;
+            if (GetKeyState (VK_CONTROL) & 0x8000) mods |= juce::ModifierKeys::ctrlModifier;
+            if (GetKeyState (VK_SHIFT) & 0x8000) mods |= juce::ModifierKeys::shiftModifier;
+            if (GetKeyState (VK_MENU) & 0x8000) mods |= juce::ModifierKeys::altModifier;
+            const auto plainCharacter = ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9'))
+                                        && (mods & (juce::ModifierKeys::ctrlModifier | juce::ModifierKeys::altModifier)) == 0;
+            if (! plainCharacter && focusIsInPluginView() && keyForwarder().handler (juce::KeyPress (keyCode, juce::ModifierKeys (mods), 0)))
+                return 1; // ran a LYNX action: the plugin doesn't get the key too
+        }
+    return CallNextHookEx (pluginKeyHook, code, vk, info);
+}
+} // namespace
+#endif
+
+void setSecondaryWindowKeyHandler (std::function<bool (const juce::KeyPress&)> handler)
+{
+    keyForwarder().handler = std::move (handler);
+   #if JUCE_WINDOWS
+    if (keyForwarder().handler != nullptr && pluginKeyHook == nullptr)
+        pluginKeyHook = SetWindowsHookExW (WH_KEYBOARD, pluginKeyProc, nullptr, GetCurrentThreadId());
+    else if (keyForwarder().handler == nullptr && pluginKeyHook != nullptr)
+    {
+        UnhookWindowsHookEx (pluginKeyHook);
+        pluginKeyHook = nullptr;
+    }
+   #endif
+}
+
 void keepAboveMainWindow (juce::Component& window)
 {
+    window.addKeyListener (&keyForwarder()); // (JUCE adds it once)
     applyRenderingChoice (window);
     auto& all = keepers();
     auto& keeper = all[&window];
