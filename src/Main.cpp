@@ -29,6 +29,8 @@
 #include "platform/FileTypes.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/VisualGl.h"
+#include "ui/DanceView.h"
 #include "ui/PluginPresetMenu.h"
 #include "ui/PluginWindow.h"
 #include "ui/ClipProperties.h"
@@ -848,6 +850,16 @@ public:
             return;
         }
 
+        if (args.contains ("--danceshot"))
+        {
+            // LYNX.exe --danceshot prefix: LYNX Dance (round 165e) — every move as a contact sheet, the channel's editor,
+            // and a demo project with two dance channels (for --snapshot)
+            const auto i = args.indexOf ("--danceshot");
+            runDanceShot (args[i + 1].unquoted());
+            quit();
+            return;
+        }
+
         if (args.contains ("--vfxshot"))
         {
             // LYNX.exe --vfxshot prefix: the VFX note effects' editors (round 164b), on channels and in a Patcher, as PNGs
@@ -1098,6 +1110,25 @@ public:
                     << lynx::tr ("The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU "
                                  "rendering back on in Options > General settings (after a driver update, for example).",
                                  { cause.driverModule });
+        }
+
+        // round 165e: the Visualizer's GPU view was drawing when the session ended (a driver crash, a hang, the machine
+        // going down): the Visualizer draws with the 2D renderer from now on (its GPU button turns it back on)
+        for (int i = uncleanSteps.size(); --i >= 0;)
+        {
+            if (uncleanSteps[i].contains (lynx::visualgl::stopNote))
+                break;
+            if (uncleanSteps[i].contains (lynx::visualgl::startNote))
+            {
+                if (lynx::visualgl::enabled())
+                {
+                    lynx::visualgl::setEnabled (false);
+                    message << "\n\n"
+                            << lynx::tr ("The Visualizer was drawing with the GPU (OpenGL) when it happened. It now draws without the GPU; its GPU "
+                                         "button turns it back on.");
+                }
+                break;
+            }
         }
 
         const auto session = lynx::crashreporter::parseSession (uncleanSessionText);
@@ -4834,6 +4865,59 @@ private:
             }
         }
         quit();
+    }
+
+    void runDanceShot (const juce::String& prefix)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        // the moves: one row each, eight moments of a cycle (both facings for Spinning; Pose ends the sheet)
+        {
+            constexpr int cell = 120, cols = 8;
+            juce::Image sheet (juce::Image::ARGB, 130 + cols * cell, lynx::dance::moveCount * cell + 10, true);
+            juce::Graphics g (sheet);
+            g.fillAll (lynx::theme::colour::bg0);
+            for (int m = 0; m < lynx::dance::moveCount; ++m)
+            {
+                g.setColour (lynx::theme::colour::textSecondary);
+                g.setFont (14.0f);
+                g.drawText (lynx::dance::moveName (m), 8, m * cell + 5, 118, cell, juce::Justification::centredLeft);
+                for (int k = 0; k < cols; ++k)
+                {
+                    const auto pose = lynx::dance::pose (m, k / (double) cols + (m == lynx::dance::freestyle ? k * 2 : 0), 1);
+                    lynx::dancer::draw (g, { 130.0f + (k + 0.5f) * cell, (float) (m + 1) * cell - 6.0f }, 92.0f, pose, false, juce::Colour (0xffff3048));
+                }
+            }
+            savePng (sheet, prefix + "-moves.png");
+        }
+        lynx::AudioEngine offline (false);
+        lynx::Song song;
+        song.mixer = lynx::Song::defaultMixer (2);
+        for (int d = 0; d < 2; ++d)
+        {
+            lynx::ChannelDef c;
+            c.name = d == 0 ? "Fruity Dance" : "Fruity Dance #2";
+            c.instrument = lynx::InstrumentKind::fruitydance;
+            lynx::dance::Settings s;
+            s.move = d == 0 ? lynx::dance::stepping : lynx::dance::waving;
+            s.x = d == 0 ? 520 : 760;
+            s.y = 560;
+            s.colour = d == 0 ? 0xffff3048 : 0xff30a8ff;
+            s.mirrored = d == 1;
+            c.pluginState = lynx::dance::toState (s);
+            song.channels.push_back (c);
+        }
+        song.patterns.emplace_back();
+        {
+            const juce::File demo (prefix + "-demo.lynx");
+            juce::String error;
+            lynx::ProjectFile::save (song, demo, error);
+        }
+        offline.setSong (std::move (song));
+        offline.dispatchPendingMessages();
+        if (auto editor = lynx::makeChannelSettingsPanel (offline, 0))
+            savePng (editor->createComponentSnapshot (editor->getLocalBounds()), prefix + "-editor.png");
+        if (auto frame = lynx::makeChannelFrame (offline, 1, 0))
+            savePng (frame->createComponentSnapshot (frame->getLocalBounds()), prefix + "-frame.png");
     }
 
     void runControllerShot (const juce::String& prefix)
