@@ -38,6 +38,9 @@ public:
 
     int workers() const noexcept { return (int) threads.size(); }
 
+    // a spin-wait pause (x86 PAUSE / ARM YIELD), for callers waiting on each other inside a parallelFor
+    static void relax() noexcept;
+
     // Calls fn(i) for i in [0, count), in parallel. Returns when all have finished.
     template <typename Fn>
     void parallelFor (int count, Fn& fn) noexcept

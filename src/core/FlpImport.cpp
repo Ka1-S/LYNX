@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/FlExtraFx.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "core/XyController.h"
@@ -203,6 +204,8 @@ const std::pair<const char*, EffectKind> flEffectTable[] = {
         { "Multiband Delay", EffectKind::delay },
         { "Emphasizer", EffectKind::emphasizer },
         { "Wave Candy", EffectKind::waveCandy },     { "ZGameEditor Visualizer", EffectKind::visualizer },
+        { "Fruity Mute 2", EffectKind::fruityMute2 }, { "Fruity Big Clock", EffectKind::bigClock }, // round 165g
+        { "Tuner", EffectKind::tuner },              { "Fruity HTML NoteBook", EffectKind::htmlNotebook },
 };
 } // namespace
 
@@ -1937,7 +1940,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
-                ++r.unsupported[c.pluginName]; // (Keyboard Controller only sends notes to other channels)
+            {
+                const auto note = flextra::inertPluginNote (c.pluginName); // round 165g: ReWired, Video Player, FL Studio Mobile
+                if (c.pluginName == "ReWired" || c.pluginName == "Fruity Video Player")
+                    def.muted = true; // no sound of their own in LYNX: the stand-in synth must not play their notes
+                ++r.unsupported[note.empty() ? c.pluginName : note]; // (Keyboard Controller only sends notes to other channels)
+            }
         }
 
         song.channels.push_back (std::move (def));
@@ -2620,6 +2628,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                                     "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
                     const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
 
+                    // FL plugins with nothing to reproduce here (vendor lighting, discontinued bridges): the note says why (round 165g)
+                    if (const auto note = flextra::inertPluginNote (slot.plugin); ! note.empty())
+                    {
+                        if (options.report != nullptr)
+                            ++options.report->droppedEffects[note];
+                        continue;
+                    }
                     if (options.report != nullptr && ! harmless)
                         ++options.report->droppedEffects[slot.plugin == "Fruity Wrapper" ? std::string ("Fruity Wrapper (plugin state not readable)")
                                                                                           : slot.plugin];
@@ -2866,6 +2881,23 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 valueMap = [flIndex] (float v) { const auto m = sf::automationFromFl (flIndex, v); return m ? m->second : 0.0f; };
             }
             else
+                target.kind = AutomationTargetKind::none;
+        }
+
+        // round 165: FL's Dashboard parameter p ≥ 1 = record p − 1 = LYNX's control p − 1 (its output); 0 is the patch
+        // selector (not a LYNX target). The Voltage Controller's 0…15 (offsets, scales) are LYNX's own numbers.
+        if (target.kind == AutomationTargetKind::channelParam && target.index >= 0 && target.index < (int) song.channels.size())
+        {
+            const auto& channel = song.channels[(std::size_t) target.index];
+            if (channel.instrument == InstrumentKind::dashboard)
+            {
+                const auto k = target.param - 1;
+                if (k >= 0 && k < (int) channel.patcher.surface.size())
+                    target.param = surface::firstOutput (channel.patcher.surface, k);
+                else
+                    target.kind = AutomationTargetKind::none;
+            }
+            else if (channel.instrument == InstrumentKind::voltage && (target.param < 0 || target.param >= voltage::paramCount))
                 target.kind = AutomationTargetKind::none;
         }
 

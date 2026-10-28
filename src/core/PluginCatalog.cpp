@@ -66,9 +66,9 @@ std::string effectCategory (const std::string& declared, const std::string& name
     for (const auto* text : { &declared, &name })
     {
         const auto& t = *text;
-        if (has (t, { "visualiz", "visualis", "video", "milkdrop", "projectm", "plugin dance" }) || hasToken (t, { "visual" }))
-            return visual;
-        if (has (t, { "analy", "meter", "scope", "spectrum", "loudness" }))
+        if (has (t, { "visualiz", "visualis", "video", "milkdrop", "projectm", "plugin dance", "big clock", "notebook" }) || hasToken (t, { "visual" }))
+            return visual; // (round 165g: FL's Big Clock and HTML NoteBook sit in FL's Visual group)
+        if (has (t, { "analy", "meter", "scope", "spectrum", "loudness", "tuner" }))
             return analyzer;
         if (has (t, { "reverb", "verb", "delay", "echo", "plate", "room", "hall", "spring" }))
             return delayReverb;
@@ -83,7 +83,7 @@ std::string effectCategory (const std::string& declared, const std::string& name
             return modulation;
         if (has (t, { "distort", "drive", "satur", "decapitator", "tube", "tape", "crush", "fuzz", "warm", "exciter", "fresh air" }) || hasToken (t, { "amp" }))
             return distortion;
-        if (has (t, { "tools", "utility", "gain", "trim", "mono", "routing", "restoration", "noise", "spatial" }))
+        if (has (t, { "tools", "utility", "gain", "trim", "mono", "routing", "restoration", "noise", "spatial", "mute" }))
             return utility;
     }
     return other;

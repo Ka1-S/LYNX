@@ -334,6 +334,8 @@ private:
     mutable std::mutex preloadLock;
     double preloadRate = 44100.0;
     bool emptyScanIsCurrent (const juce::String& file);
+    // a plugin described from this file: the same path, or a module inside this bundle folder (round 165i)
+    static bool sameModule (const juce::PluginDescription& d, const juce::String& file);
     bool fileStillThere (const juce::String& file); // cached until clearPreloaded (one check per file per open)
     std::map<juce::String, bool> existsCache;
     std::mutex existsLock;

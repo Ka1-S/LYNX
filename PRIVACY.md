@@ -16,6 +16,9 @@ user or the person installing or operating it.
   `%APPDATA%\LYNX` (language, plugin list, autosaves and similar preferences). Delete that folder to remove them.
   It also registers the `.lynx` file type for the current user (`HKEY_CURRENT_USER\Software\Classes`) so project
   files open in LYNX.
+  The Microsoft Store version keeps that folder in its own app-data folder instead
+  (`%LOCALAPPDATA%\Packages\<LYNX package>\LocalCache\Roaming\LYNX`, removed when the app is uninstalled) and
+  registers no file types itself (Windows does, from the package).
 - **Plugin sandbox.** When a plugin is run in its own process, LYNX talks to that process through a local
   inter-process channel on the same computer; nothing is sent over a network.
 - **Crash logs** are written to local files (`autosave\crash *.txt`, `hang *.txt`, `crash-history.log`).

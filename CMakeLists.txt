@@ -52,6 +52,7 @@ add_library(lynx_core STATIC
     src/core/ProjectSafety.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
+    src/core/MidiSync.cpp
     src/core/ThemePalette.cpp
     src/core/PluginLayout.cpp
     src/core/StateParams.cpp
@@ -89,6 +90,7 @@ add_library(lynx_core STATIC
     src/core/FreqShifterFl.cpp
     src/core/LowLifterFl.cpp
     src/core/VisualFx.cpp
+    src/core/FlExtraFx.cpp
     src/core/FruityDance.cpp
     src/core/Reeverb2.cpp
     src/core/LuxeVerb.cpp
@@ -148,6 +150,7 @@ add_library(lynx_core STATIC
     src/core/NativeEngines.cpp
     src/core/Layer.cpp
     src/core/XyController.cpp
+    src/core/FlCurve.cpp
     src/core/ControlSurface.cpp
     src/core/VoltageController.cpp
     src/core/FabFilterStates.cpp
@@ -196,7 +199,8 @@ target_sources(lynx_core PRIVATE
     src/core/PluginMonitor.cpp
     src/core/ProjectContents.cpp
     src/core/PlaylistOps.cpp
-    src/core/TempoDetect.cpp)
+    src/core/TempoDetect.cpp
+    src/core/ScoreLog.cpp)
 
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 target_sources(lynx_core PRIVATE
@@ -274,6 +278,7 @@ if(LYNX_BUILD_APP)
         src/platform/FileTypes.cpp
         src/platform/CrashGuard.cpp
         src/platform/Paths.cpp
+        src/platform/Package.cpp
         src/platform/NativeEmbed.cpp
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
@@ -295,6 +300,7 @@ if(LYNX_BUILD_APP)
         src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
         src/engine/AudioLogger.cpp
+        src/engine/MidiSyncIo.cpp
         src/engine/PreviewPlayer.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp
@@ -318,6 +324,7 @@ if(LYNX_BUILD_APP)
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
         src/ui/VisualEditors.cpp
+        src/ui/FlExtraEditors.cpp
         src/ui/VisualGl.cpp
         src/ui/DanceView.cpp
         src/ui/NewtoneEditor.cpp

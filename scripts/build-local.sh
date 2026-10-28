@@ -13,7 +13,7 @@ if [[ -z "${CXX:-}" ]]; then
 fi
 
 FLAGS="-std=c++20 -O2 -g -ffp-contract=off -Wall -Wextra -Wpedantic -Isrc -Ithird_party/wavpack/include -Ithird_party/vorbis/include -Ithird_party/lame/include -Ithird_party/sse2neon"
-CORE="src/flp/Flp.cpp src/core/Song.cpp src/core/MarkerPlan.cpp src/core/NoteEdit.cpp src/core/Recorder.cpp src/core/TakeRecording.cpp src/core/Pdc.cpp src/core/WorkerPool.cpp src/core/TimeStretch.cpp src/core/Arpeggiator.cpp src/core/SynthPresets.cpp src/core/Slicer.cpp src/core/Templates.cpp src/core/FlWrapper.cpp src/core/FlEffects.cpp src/core/Effector.cpp src/core/VintagePhaser.cpp src/core/EmphasizerFx.cpp src/core/FreqShifterFl.cpp src/core/LowLifterFl.cpp src/core/VisualFx.cpp src/core/FruityDance.cpp src/core/Reeverb2.cpp src/core/LuxeVerb.cpp src/core/IldspMath.cpp src/core/ConvolverFx.cpp src/core/EquoFx.cpp src/core/PitchShifterFl.cpp src/core/SimSynth.cpp src/core/Wasp.cpp src/core/Granulizer.cpp src/core/Drumaxx.cpp src/core/FruityFilters.cpp src/core/NewtoneFx.cpp src/core/VocalPitch.cpp src/core/LynxTune.cpp src/core/LynxVerbs.cpp src/core/MixSuite.cpp src/core/VoiceMatch.cpp src/core/EchoSuite.cpp src/core/LovePhilter.cpp src/core/DistructorFx.cpp src/core/MultibandDelayFx.cpp src/core/FrequencySplitter.cpp src/core/Slayer.cpp src/core/FlangusFastDist.cpp src/core/FruityPhaser.cpp src/core/FruityDelayBank.cpp src/core/FruityMultiband.cpp src/core/Vocodex.cpp src/core/FruityVocoder.cpp src/core/DelphiMath.cpp src/core/MaximusFx.cpp src/core/ParametricEqFl.cpp src/core/ParametricEqLinear.cpp src/core/FruityBasicFx.cpp src/core/TransistorBass.cpp src/core/GrossBeat.cpp src/core/StereoFx.cpp src/core/FruityDelay.cpp src/core/FruityShapers.cpp src/core/ChorusFx.cpp src/core/FruityDynamics.cpp src/core/FlSamplers.cpp src/core/FlSynths.cpp src/core/FlSytrus.cpp src/core/FlGenerators.cpp src/core/PhysicalModels.cpp src/core/DrumSynthLive.cpp src/core/SytrusEngine.cpp src/core/Harmless.cpp src/core/HarmlessFx.cpp src/core/Harmor.cpp src/core/Gms.cpp src/core/Morphine.cpp src/core/Ogun.cpp src/core/Toxic.cpp src/core/ToxicFx.cpp src/core/FruitKick.cpp src/core/BassDrum.cpp src/core/MiniSynth.cpp src/core/Dx10.cpp src/core/Kepler.cpp src/core/PoiZone.cpp src/core/FlPatcher.cpp src/core/Patcher.cpp src/core/Vfx.cpp src/core/VfxSequencer.cpp src/core/Inflate.cpp src/core/WavPack.cpp src/core/Scheduler.cpp src/core/Instruments.cpp src/core/RackRenderer.cpp src/core/LoadTrace.cpp src/core/ModuleWarmup.cpp src/core/FlpImport.cpp src/core/Effects.cpp src/core/EmberClassic.cpp src/core/RhythmPan.cpp src/core/VoxStrip.cpp"
+CORE="src/flp/Flp.cpp src/core/Song.cpp src/core/MarkerPlan.cpp src/core/NoteEdit.cpp src/core/Recorder.cpp src/core/TakeRecording.cpp src/core/Pdc.cpp src/core/WorkerPool.cpp src/core/TimeStretch.cpp src/core/Arpeggiator.cpp src/core/SynthPresets.cpp src/core/Slicer.cpp src/core/Templates.cpp src/core/FlWrapper.cpp src/core/FlEffects.cpp src/core/Effector.cpp src/core/VintagePhaser.cpp src/core/EmphasizerFx.cpp src/core/FreqShifterFl.cpp src/core/LowLifterFl.cpp src/core/VisualFx.cpp src/core/FlExtraFx.cpp src/core/FruityDance.cpp src/core/Reeverb2.cpp src/core/LuxeVerb.cpp src/core/IldspMath.cpp src/core/ConvolverFx.cpp src/core/EquoFx.cpp src/core/PitchShifterFl.cpp src/core/SimSynth.cpp src/core/Wasp.cpp src/core/Granulizer.cpp src/core/Drumaxx.cpp src/core/FruityFilters.cpp src/core/NewtoneFx.cpp src/core/VocalPitch.cpp src/core/LynxTune.cpp src/core/LynxVerbs.cpp src/core/MixSuite.cpp src/core/VoiceMatch.cpp src/core/EchoSuite.cpp src/core/LovePhilter.cpp src/core/DistructorFx.cpp src/core/MultibandDelayFx.cpp src/core/FrequencySplitter.cpp src/core/Slayer.cpp src/core/FlangusFastDist.cpp src/core/FruityPhaser.cpp src/core/FruityDelayBank.cpp src/core/FruityMultiband.cpp src/core/Vocodex.cpp src/core/FruityVocoder.cpp src/core/DelphiMath.cpp src/core/MaximusFx.cpp src/core/ParametricEqFl.cpp src/core/ParametricEqLinear.cpp src/core/FruityBasicFx.cpp src/core/TransistorBass.cpp src/core/GrossBeat.cpp src/core/StereoFx.cpp src/core/FruityDelay.cpp src/core/FruityShapers.cpp src/core/ChorusFx.cpp src/core/FruityDynamics.cpp src/core/FlSamplers.cpp src/core/FlSynths.cpp src/core/FlSytrus.cpp src/core/FlGenerators.cpp src/core/PhysicalModels.cpp src/core/DrumSynthLive.cpp src/core/SytrusEngine.cpp src/core/Harmless.cpp src/core/HarmlessFx.cpp src/core/Harmor.cpp src/core/Gms.cpp src/core/Morphine.cpp src/core/Ogun.cpp src/core/Toxic.cpp src/core/ToxicFx.cpp src/core/FruitKick.cpp src/core/BassDrum.cpp src/core/MiniSynth.cpp src/core/Dx10.cpp src/core/Kepler.cpp src/core/PoiZone.cpp src/core/FlPatcher.cpp src/core/Patcher.cpp src/core/Vfx.cpp src/core/VfxSequencer.cpp src/core/Inflate.cpp src/core/WavPack.cpp src/core/Scheduler.cpp src/core/Instruments.cpp src/core/RackRenderer.cpp src/core/LoadTrace.cpp src/core/ModuleWarmup.cpp src/core/FlpImport.cpp src/core/Effects.cpp src/core/EmberClassic.cpp src/core/RhythmPan.cpp src/core/VoxStrip.cpp"
 
 mkdir -p build-local build-local/wavpack
 # workflow shell (key map, workspace layout, rack operations)
@@ -35,7 +35,7 @@ CORE="$CORE src/core/ProjectSafety.cpp"
 # LYNX substitutes for missing third-party plugins (round 98)
 CORE="$CORE src/core/PluginSubstitutes.cpp"
 # settings pages, plugin manager and shortcut manager logic (round 82)
-CORE="$CORE src/core/Preferences.cpp"
+CORE="$CORE src/core/Preferences.cpp src/core/MidiSync.cpp"
 # user themes: the palette derived from an accent and a background (round 162d)
 CORE="$CORE src/core/ThemePalette.cpp"
 # layouts of the native plugin editors (round 93)
@@ -55,7 +55,7 @@ CORE="$CORE src/core/SoundFont.cpp src/core/SoundFontLoad.cpp src/core/SoundFont
 # Ogg Vorbis decoding as FL does (REA round 77)
 CORE="$CORE src/core/OggVorbis.cpp"
 # export options, MP3 encoding, plugin performance monitor, clip properties / arrangements (round 84)
-CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/Mp3Decoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp src/core/ProjectContents.cpp src/core/TempoDetect.cpp"
+CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/Mp3Decoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp src/core/ProjectContents.cpp src/core/TempoDetect.cpp src/core/ScoreLog.cpp"
 # LYNX's Facet EQ and Apex Limiter (round 99)
 CORE="$CORE src/core/FacetEq.cpp src/core/ApexLimiter.cpp"
 # LYNX's dynamics suite and FabFilter state translation (round 108)
@@ -68,7 +68,7 @@ CORE="$CORE src/core/VoiceShift.cpp"
 # FL engines usable in native projects (round 142, issue #5)
 CORE="$CORE src/core/NativeEngines.cpp"
 # FL's Layer channel and the round 164 controllers
-CORE="$CORE src/core/Layer.cpp src/core/XyController.cpp src/core/ControlSurface.cpp src/core/VoltageController.cpp"
+CORE="$CORE src/core/Layer.cpp src/core/XyController.cpp src/core/FlCurve.cpp src/core/ControlSurface.cpp src/core/VoltageController.cpp"
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 CORE="$CORE src/core/CrashReport.cpp"
 # WavPack decoder (C)
