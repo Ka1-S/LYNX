@@ -7,10 +7,13 @@ Data: `/mnt/d/lynx-work/flbeta165h` (`bat.sh` → `py/full.py`: all 325 installa
 rack off, the DLL's Mersenne-Twister state handed to LYNX; columns idx, null dB, STFT dB, name).
 
 ## Where I stopped
-- 2026-10-28 13:55 — worktree + battery set up; baseline `base0.tsv` on origin/main ea719caf: 262 null < −60 dB,
-  44 more with STFT < −40 dB, 19 audibly different. Next: part parameter 2 (note start delay).
+- 2026-10-28 15:10 — fixed: note start delay (§1), attack fade (§2), IPP Exp/Ln_32f_A11 at precision 0 (§3).
+  Battery `s1.tsv`: 297 null < −60, 21 STFT-only, 7 audible: Pomona, Dub steppy 1, Shield hit (overlapping release +
+  harmonizer, §4 in progress), Sunroom, Olbaid FX White Noise Caida / Plato Cerrado / FX Subida (precision-dependent,
+  not Exp/Ln). Next: those 7; then tests, build-local, land.
 
 ## Battery history
 | step | null < −60 | STFT < −40 only | audible (STFT ≥ −40) |
 |---|---|---|---|
 | base0 (origin/main ea719caf) | 262 | 44 | 19 |
+| s1 (§1–§3) | 297 | 21 | 7 |
