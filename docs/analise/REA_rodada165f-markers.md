@@ -107,6 +107,16 @@ wrap). No locks or allocations on the audio thread.
 - [HYP]: the MIDI note → marker mapping, "Change to marker loop" details, the Start-marker wrap without a Loop marker.
 - The audio-clip stream prefetcher may underrun once right after a marker jump far away (as after a ruler click).
 
+## 4. Checks [CODE]
+- Tests: build-local with FL's Data: 1760508 checks, 0 failures (`tests/Markers165Tests.inc`; the transport
+  simulation reproduces the beat orders read off FL's screen in §1.4).
+- Render vs FL: LYNX `--export` of the imported `m_mskip`, `m_mloop`, `m_mpause`, `m_start`, `m_combo` → beats 0-31 in
+  order at the same onsets (0.50 s apart) as FL's `/R /Ewav` renders of the same files (§1.3): export is linear in both.
+- Real time: `markerStep` with a full 64-jump table costs 41.5 ns per 512-sample block (g++ -O2, this machine),
+  0.0004 % of the 10.7 ms block at 48 kHz.
+- LYNX marker-menu screenshot next to FL's: not taken — the short GUI session was blocked by a crash-report dialog
+  and a third-party plug-in's activation window from the background plug-in scan; the menu's entries are checked by
+  the tests instead.
+
 ## Where I stopped
-- 17:15 — code complete; waiting for the build slot for build-local (FL Data) and the Windows build, then
-  screenshots, render comparison, landing.
+- Done and landed (see the commits on main); what is left is in §3.
