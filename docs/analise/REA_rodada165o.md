@@ -5,6 +5,9 @@ natural musician-facing translations, one glossary per language (docs/i18n/<lang
 coverage test, CJK/Cyrillic fonts on all 3 OS, no cut text, OS-language default, Settings › Language.
 
 ## Where I stopped
+- 2026-10-28 17:00 — merged origin/main (issue #12 etc.): 78 new strings translated into the 13 languages (two
+  translator agents, glossaries, check 0 problems), pending.keys empty; Linux textfit en/de/ru/pl/fr 0 after the
+  Event editor title fix (English pixel-identical). Landing via land.sh.
 - 2026-10-28 15:40 — VERIFIED, landing. Linux textfit after the fit fixes: en 0, de/ru/pl 0 (pt-BR only the
   pre-existing main items: export summary line, sample-pitch hint, "Ligado" 52 px, "1 compasso"); en/pt-BR shots
   pixel-identical to before except the fixed rows (Event editor tool row: baseline was 40 px short, English moves
