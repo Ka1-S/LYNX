@@ -561,7 +561,10 @@ void RackState::buildMixerGraph()
     for (int c = 0; c < (int) song.channels.size(); ++c)
     {
         const auto& ch = song.channels[(std::size_t) c];
-        (ch.instrument == InstrumentKind::plugin && ! ch.plugin.threaded ? audioThreadChannels : threadedChannels).push_back (c);
+        // (and a generator Patcher holding a Hardware Insert, round 165c: the device-output buses are not shared between threads)
+        const auto pinned = (ch.instrument == InstrumentKind::plugin && ! ch.plugin.threaded)
+                            || (ch.instrument == InstrumentKind::patcher && patcher::usesHardwareIo (ch.patcher));
+        (pinned ? audioThreadChannels : threadedChannels).push_back (c);
     }
     threadedLayers.assign (mixerLayers.size(), {});
     audioThreadLayers.assign (mixerLayers.size(), {});
@@ -571,7 +574,10 @@ void RackState::buildMixerGraph()
             const auto& effects = song.mixer[(std::size_t) t].effects;
             // (and the hardware inserts, round 164d: the device-output buses they write are not shared between threads)
             const auto pinned = ! song.mixer[(std::size_t) t].threaded || std::any_of (effects.begin(), effects.end(),
-                                             [] (const EffectSlot& e) { return (e.kind == EffectKind::plugin && ! e.plugin.threaded) || e.kind == EffectKind::hardwareInsert; });
+                                             [] (const EffectSlot& e) {
+                                                 return (e.kind == EffectKind::plugin && ! e.plugin.threaded) || e.kind == EffectKind::hardwareInsert
+                                                        || (e.kind == EffectKind::patcher && patcher::usesHardwareIo (e.patcher)); // (round 165c)
+                                             });
             (pinned ? audioThreadLayers : threadedLayers)[d].push_back (t);
         }
 
@@ -1488,6 +1494,8 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
     auto& instrument = *state.instruments[(std::size_t) i];
     instrument.beginChunk (n); // (extra outputs: a generator Patcher's, REA_rodada141)
+    if (c.instrument == InstrumentKind::patcher) // its Hardware Insert nodes: this chunk's device buses (round 165c)
+        instrument.setHardwareIo (liveInput, hwOut != nullptr && hwOut->active.load (std::memory_order_relaxed) ? hwOut : nullptr, liveInputOffset);
 
     // idle channel, no notes in this chunk and no PDC: nothing to do (neither clear nor sum into the mixer)
     const auto hasDelay = (std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr;
@@ -1802,6 +1810,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
             && slots[i].kind != EffectKind::newtime
             && slots[i].kind != EffectKind::hardwareInsert // (nor the hardware insert: outboard gear has its own tails and noise)
+            && ! (slots[i].kind == EffectKind::patcher && patcher::usesHardwareIo (slots[i].patcher)) // (nor a Patcher holding one, round 165c)
             // (nor a controller: its outputs move whatever the sound — a silent insert is their usual place; round 164)
             && slots[i].kind != EffectKind::formulaController
             && slots[i].kind != EffectKind::xyController && slots[i].kind != EffectKind::xyzController
@@ -1855,7 +1864,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                                &units->effectMaxNs[std::min (key, units->effectNs.size() - 1)]);
 
         // the hardware insert (round 164d): this piece's device input and output buses (none during an export)
-        if (slots[i].kind == EffectKind::hardwareInsert)
+        if (slots[i].kind == EffectKind::hardwareInsert || slots[i].kind == EffectKind::patcher) // (a Patcher hands them to its nodes, round 165c)
             effects[i]->setHardwareIo (liveInput, hwOut != nullptr && hwOut->active.load (std::memory_order_relaxed) ? hwOut : nullptr, liveInputOffset);
 
         // Fruity Send: what it sends goes to its own buffer, pulled by the destination insert (processed later)
@@ -2718,6 +2727,8 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         meters->accumulate (0, peakOf (left, numSamples), peakOf (right, numSamples));
         meters->capture.push (0, left, right, numSamples);
         meters->logTap.push (0, left, right, numSamples);
+        if (chunkPlaying)
+            meters->bounceTap.push (0, left, right, numSamples);
     }
 
     if (hwOut != nullptr && ! state.hwRoutes.empty() && hwOut->active.load (std::memory_order_relaxed))

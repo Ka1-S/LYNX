@@ -295,6 +295,24 @@ public:
     // The hardware inserts' channels (round 164d): opens their outputs and, when one returns from an input, the device
     // input. UI thread.
     void openHardwareInsertIo();
+    // Every hardware insert of the song (round 165c): a mixer slot's, or a node inside a Patcher (mixer-slot or generator
+    // Patcher; `nodes` = the node index at each Patcher level). UI thread.
+    struct HardwareInsertRef
+    {
+        bool channel = false; // a Channel Rack generator Patcher (index = channel), else a mixer slot (index = track)
+        int index = 0, slot = 0;
+        std::vector<int> nodes;
+        bool operator== (const HardwareInsertRef&) const = default;
+    };
+    std::vector<HardwareInsertRef> getHardwareInserts() const;
+    static EffectSlot* locateHardwareInsert (Song& song, const HardwareInsertRef& ref);
+    std::shared_ptr<Effect> runningHardwareInsert (const HardwareInsertRef& ref) const;
+    // The routed, active inserts whose round trip was measured for another device setup (device, rate or buffer size)
+    std::vector<HardwareInsertRef> staleHardwareInserts() const;
+    // Presses their Ping buttons (the clicks go out on their sends; the results are applied as they come back)
+    void pingHardwareInserts (const std::vector<HardwareInsertRef>& refs);
+    // After the device setup changed with stale inserts in the song: those inserts, once (the UI offers "Ping now")
+    std::vector<HardwareInsertRef> takeHardwareInsertNotice() { return std::exchange (hwNotice, {}); }
     // Input level of an insert's source since the last call (0..1, per side). UI thread.
     // (the Mixer's strips take it 30 times a second; other views peek at the last value taken)
     float takeInputPeak (int track, int side) noexcept
@@ -428,6 +446,21 @@ public:
     void keepRunningPlugins (PreparedFlp& prepared);
     bool finishFlpImport (PreparedFlp&& prepared, bool asEdit);
 
+    // --- real-time bounce (round 165c: Export › "Render through the hardware in real time") ---
+    // The song plays through the audio device from `startTick` (song mode; past its end and through the loop region,
+    // without starting over) while the Master's output is recorded: hardware inserts send to and return from their gear
+    // as they do while playing. Message thread; returns an error (empty: started).
+    juce::String startRealtimeBounce (double startTick);
+    // What the Master played since the last call, from the first sample the song played (one consumer thread).
+    int pullRealtimeBounce (std::vector<float>& left, std::vector<float>& right) { return meters.bounceTap.pull (left, right); }
+    bool isBouncing() const noexcept { return bouncing; }
+    // While bouncing: the transport still plays (false: the user stopped it), the delay compensation's total at the
+    // start, the device's dropouts and the frames the tap lost since the start.
+    bool bounceStillPlaying() const noexcept { return transport.playing.load(); }
+    int bounceLatency() const noexcept { return bounceStartLatency; }
+    int bounceDropouts() const;
+    // Stops playback and puts the transport back as it was (message thread).
+    void finishRealtimeBounce();
     // Renders without an audio device. Writes to `output` if not nullptr.
     // After `seconds`, continues for up to `tailSeconds` while there is still sound.
     // `progress(0..1)` returns false to cancel. Returns the peak (used by the self-test),
@@ -550,6 +583,18 @@ private:
     UiPulse uiPulse;
     int latencyRepublishes = 0;   // PDC re-plans because a unit's latency changed (diagnostics)
     juce::String lastLatencyChange;
+    // hardware inserts (round 165c): ping results applied to the slots (whether an editor is open or not), and the device
+    // setup they were measured for
+    void applyHardwareInsertPings();
+    std::map<const void*, int> hwPingSerials; // running insert -> the last ping result seen
+    std::string lastSetupKey;
+    std::vector<HardwareInsertRef> hwNotice;
+    int hwTicks = 0;
+    bool bouncing = false;
+    int bounceStartLatency = 0, bounceStartXruns = 0;
+    double bounceReturnTick = 0.0;
+    bool bounceRestoreMode = false;
+    bool checkHardwareInserts = false;
     std::uint64_t loggedOver = 0, loggedLate = 0;
     double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
@@ -698,8 +743,8 @@ private:
     void updateLinearSong() noexcept
     {
         const auto on = takeCount > 0 && linearRecording();
-        liveInput.linearSong.store (on);
-        liveInput.noLoopRegion.store (on && song.hasLoop());
+        liveInput.linearSong.store (on || bouncing);
+        liveInput.noLoopRegion.store ((on && song.hasLoop()) || bouncing);
     }
     takes::LatencyPing ping;                       // audio thread while running (UI starts it, reads the result)
     juce::int64 lostFrames = 0;

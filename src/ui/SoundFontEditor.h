@@ -8,6 +8,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,6 +18,8 @@
 namespace lynx
 {
 std::unique_ptr<juce::Component> makeSoundFontEditor (AudioEngine& engine, int channel);
+// The same editor on a LYNX Soundfont node inside a Patcher (round 165c), found through `locate`
+std::unique_ptr<juce::Component> makeSoundFontEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate);
 
 // The folders the preset search indexes: FL's SoundFont folders (when FL is installed), Documents, Music, Desktop,
 // Downloads, the Browser's own folders and the user's SoundFont folders (Settings: soundfont-folders.txt).
