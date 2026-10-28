@@ -14351,6 +14351,7 @@ TEST (granulizer_engine)
                    && goldenSampleClose (y[2 * (std::size_t) i + 1], r, granulizerTolerance()));
     };
     lynx::granulizer::RefOptions o1, o2, o3;
+    o1.points = o2.points = o3.points = 12; // the plugin's own default quality (these goldens predate FL's render value)
     o2.block = 333, o2.seed = 777;
     o3.block = 64, o3.seed = 5;
     // the plugin's defaults, two notes (one pitched by +23 cents and released: the processor's end fade)
@@ -16235,6 +16236,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "LinuxMouse165Tests.inc"
 #include "Fl165Tests.inc"
 #include "Perf165Tests.inc"
+#include "FlGran165Tests.inc"
 #include "Kepler165kTests.inc"
 #include "MixerLatency165Tests.inc"
 #include "Audit165Tests.inc"
