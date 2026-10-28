@@ -6,10 +6,12 @@ fitting scripts: job tmp `parity165w/` (`glow/gen.py`, `glow/gr.py`, `glow/glowf
 
 ## Where I stopped
 
-- 2026-10-28 ~05:00: §2 (Glow release) and §3 (Gemini shelves) measured, fitted, built, verified with `fxlynx` against
-  the trial renders; tests 0 failures; PARITY rows / scores and the 0.1.20 notes updated. Next: land; then (if time)
-  Hush ← Pro-DS.
-- Trials: the Waves 17.1 CLA-2A and Doubler4 still played on 10-28 ~03:40 (renders with signal, defaults as before).
+- 2026-10-28 05:05: §2 (Glow release), §3 (Gemini shelves) and §5 (Hush ← Pro-DS pans, state levels) measured,
+  fitted, built and verified with `fxlynx` against the trial renders; tests 0 failures; PARITY rows / scores and the
+  0.1.20 notes updated; landing queued (`coord/land-parity165w.out`).
+- Trials: Waves 17.1 CLA-2A and Doubler4 played on 10-28 ~03:40; FabFilter Pro-DS on 10-28 ~04:40.
+- Left: Glow's attack overshoot (first 10 ms of a burst) and Auto Makeup's reference point; Gemini's design items
+  (numeric boxes, source drop-downs); Hush's −∞ … +36 dB levels, 20 kHz high-pass, Stereo Link's mid-only half.
 
 ## 1. Method
 
