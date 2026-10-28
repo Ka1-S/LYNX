@@ -5573,6 +5573,9 @@ private:
             if (projectPath.isNotEmpty())
                 ui.openFile (juce::File (projectPath));
             offline.dispatchPendingMessages();
+            // LYNX_PERFSHOT_PREPARE=1: Tools › Macros › Prepare for performance mode first (16 one-bar columns)
+            if (juce::SystemStats::getEnvironmentVariable ("LYNX_PERFSHOT_PREPARE", {}) == "1")
+                offline.editSong ([] (lynx::Song& s) { lynx::perf::prepareForPerformance (s, 16, 4 * lynx::ppq); }, false);
             offline.editSong ([] (lynx::Song& s) { s.performanceMode = true; s.mode = lynx::PlayMode::song; }, false);
             offline.dispatchPendingMessages();
 
