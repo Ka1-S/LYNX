@@ -122,7 +122,10 @@ Before this round these five were approximations on other LYNX engines (no sampl
 inverted the wrong side, the Center passed the signal through, the EQs and the delay were LYNX's own designs).
 
 `tests/tests.cpp` `fl_legacy_fx_match_fl_engines`: DLL goldens (two rates each; FNV-1a of the float bits on x86, ten
-samples within the x87 tolerance elsewhere), the value texts and the Phase Inverter's side boundaries.
+samples within the x87 tolerance elsewhere) with 512-frame calls like the goldens, the value texts and the Phase Inverter's side
+boundaries. Other host block sizes: the Center, Bass Boost and 7 Band EQ round their state to double at the end of each
+call (as FL's DLLs do), so 1000-frame blocks differ from 512-frame ones by at most 3.5e-5 relative (Bass Boost, 20 Hz)
+[EXEC 2026-10-28]; the test checks ≤ 1e-4.
 
 ## 9. Fruity Transporter: the map (not rebuilt this round) **[DECOMP]**
 
@@ -143,6 +146,10 @@ stays deterministic and testable). Estimate: a full round on its own.
 - The Close generators (Sytrus, Harmless, Ogun, GMS, Morphine, Sakura, Drumpad): not touched this round.
 
 ## Where I stopped
+
+- 2026-10-28 (after the 2nd BSOD): merged origin/main (ProjectFile id list, build scripts, pt-BR); the first
+  build-local had 19 failures, all in `fl_legacy_fx_match_fl_engines`: the test fed 1000-frame blocks while the goldens
+  are 512-frame DLL calls (state rounded per call). Test now uses 512-frame blocks + a block-size check.
 
 - 16:40 start: worktree `lynx-wt-flexact165`, tools in `tmp/flexact165/` (bin = DLL copies, py, cpp, gh), data in
   `/mnt/d/lynx-work/flexact165`. States of the seven plug-ins extracted (`states/<tag>/`, `states/index.txt`).

@@ -16152,8 +16152,22 @@ TEST (fl_legacy_fx_match_fl_engines)
             s = s * 1664525u + 1013904223u;
             r[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
         }
-        for (int i = 0; i < 24000; i += 1000) // host blocks of 1000: the engines still run FL's 512-frame calls
-            fx->process (l.data() + i, r.data() + i, 1000, slot->params, 120.0);
+        // host blocks of 512 like the goldens' DLL calls (the Center / Bass Boost / 7 Band EQ round their state to double at
+        // the end of each call, as FL does, so other block sizes differ in the last bits; checked below)
+        const auto input = std::make_pair (l, r);
+        for (int i = 0; i < 24000; i += 512)
+            fx->process (l.data() + i, r.data() + i, std::min (512, 24000 - i), slot->params, 120.0);
+        {
+            auto other = lynx::makeEffect (slot->kind);
+            other->prepare ((double) c.rate);
+            auto l2 = input.first, r2 = input.second;
+            for (int i = 0; i < 24000; i += 1000)
+                other->process (l2.data() + i, r2.data() + i, 1000, slot->params, 120.0);
+            float worst = 0.0f;
+            for (std::size_t i = 0; i < 24000; ++i)
+                worst = std::max ({ worst, std::abs (l2[i] - l[i]) / std::max (1.0f, std::abs (l[i])), std::abs (r2[i] - r[i]) / std::max (1.0f, std::abs (r[i])) });
+            CHECK (worst <= 1.0e-4f); // (measured: ≤ 3.5e-5, the Bass Boost at 20 Hz)
+        }
         for (int k = 0; k < 5; ++k)
         {
             const auto i = (std::size_t) (1500 + 4500 * k);
