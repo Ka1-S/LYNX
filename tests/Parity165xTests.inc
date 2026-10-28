@@ -135,10 +135,12 @@ TEST (glow_auto_makeup_reference_round165x)
     int n = 0;
     std::string values;
     for (int i = 0; i < 208; ++i)
-        values += i == 38 ? "53.79 " : i == 74 ? "80 " : i == 204 ? "100 " : i == 140 ? "2 " : i == 207 ? "1 " : "0 ";
+        values += i == 38 ? "53.79 " : i == 74 ? "80 " : i == 153 ? "50 " : i == 204 ? "100 " : i == 140 ? "2 " : i == 207 ? "1 " : "0 ";
     const auto s = vm123::wavesSlot ("CLA-2A", values.c_str(), n);
     CHECK (s.kind == EffectKind::glowLeveler && s.params[g::autoMakeup] == 1.0f && std::abs (s.params[g::makeupRef] - 0.80f) < 1e-6);
     // the trial's level at −40 dBFS for that state: 8.34 (Compress 80, Gain 40) + 11.37
+    if (std::abs (probe (s.params) - (off + 11.37)) >= 0.15)
+        std::printf ("  glow translated auto makeup: %.2f dB (expected %.2f)\n", probe (s.params), off + 11.37);
     CHECK (std::abs (probe (s.params) - (off + 11.37)) < 0.15);
 }
 

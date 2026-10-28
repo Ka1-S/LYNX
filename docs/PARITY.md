@@ -34,7 +34,6 @@ before → after (blank = not touched in round 165). Lowest first.
 | Halo | ValhallaShimmer | 8 | 9 | 135 | |
 | Horizon | ValhallaFutureVerb | 8 | 9 | 135 | |
 | Orbit | ValhallaSpaceModulator | 8 | 9 | 135 | |
-| Hush De-esser | Pro-DS | 9 | 8 | 165w | 8 → 9 / 8 → 8 (in / out pan, state levels) |
 | Facet EQ | Pro-Q 4 | 9 | 8 | 152c | |
 | Crest Compressor | Pro-C 3 | 9 | 8 | 137 | |
 | Sentry Gate | Pro-G | 9 | 8 | 135 | |
@@ -42,6 +41,7 @@ before → after (blank = not touched in round 165). Lowest first.
 | Aether | Fresh Air | 9 | 8 | 128 | |
 | Glow Leveler | CLA-2A (Waves) | 9 | 8 | 165w | 9 → 9 / 8 → 8 (sound: the measured release) |
 | Hush De-esser | DeEsser (Waves) | 10 | 8 | 165 | 9 → 10 / 8 → 8 |
+| Hush De-esser | Pro-DS | 10 | 8 | 165x | 8 → 9 → 10 / 8 → 8 (165w: pans, state levels; 165x: ranges, link's upper half) |
 | Echoform | H-Delay (Waves) | 9 | 8 | 137 | |
 | Echoform | ValhallaDelay | 9 | 8 | 137 | |
 | Atrium | ValhallaRoom | 9 | 8 | 135 | |
@@ -437,21 +437,23 @@ output level and pan.
 |---|---|---|
 | Scrolling waveform with the removed part, threshold lines | ✅ | |
 | THRESHOLD and RANGE big knobs, listen (headphones) button | ✅ | |
-| Frequency slider with TWO handles (high-pass and low-pass of the detection band) | ✅ | round 128: left = where the band starts, right = where it ends (far right = off), 2–20 kHz |
+| Frequency slider with TWO handles (high-pass and low-pass of the detection band) | ✅ | round 128: left = where the band starts, right = where it ends (far right = off), 2–20 kHz; round 165x [EXEC]: the high-pass reaches 20 kHz too (the trial's 2000 · 10^v Hz; Hush's was 2 … 16 kHz), translated one to one |
 | Audition (hear the detection band) | ✅ | |
 | MODE: SINGLE VOCAL / ALLROUND | ✅ | round 128 (Allround: the sibilance must also stand out from the full-band level); LYNX's high-pass / band detection stays in the bottom bar |
 | WIDE BAND / SPLIT BAND | ✅ | |
 | SIDE CHAIN In / Ext | ✅ | round 128: Ext picks the source track (menu) |
-| STEREO LINK knob with MID switch | ✅ | round 128 |
+| STEREO LINK knob with MID switch | ✅ | round 128; round 165x [EXEC]: the knob's upper half (100 % + n % Mid-only / Side-only): appended **Link only** and **Link only side** (Mid only \| Side only), the trial's blend (k < 100 %: each side detects on (1 − k/2) own + (k/2) other; above: the mid / side detection and output blend); link matrices within 0.014 of the trial (mid and side modes); translated |
 | LOOKAHEAD knob 0–15 ms with power button | ✅ | round 128 (the look-ahead is the latency; the mixer re-plans its delay compensation) |
 | DISPLAY button (hide / show the waveform) | ✅ | round 128: the window shrinks without it |
 | Oversampling (bottom bar) | ✅ | round 135: Off / 2x / 4x / 8x for Hush's own voicing (the band and its gain at the high rate; the measured classic voicing has none) |
-| In / Out levels (bottom bar) | ⚠️ | round 128: In ±12 dB, Out ±12 dB; [EXEC] round 165w: the 17.1 trial's run −∞ … +36 dB (36 dB per unit above −18); a state's levels are now read right (stored as 2 v − 1; +7.2 dB was read as +0.2) and the input translated |
+| In / Out levels (bottom bar) | ✅ | round 128: In ±12 dB, Out ±12 dB; [EXEC] round 165w: the 17.1 trial's run −∞ … +36 dB (36 dB per unit above −18); a state's levels are now read right (stored as 2 v − 1; +7.2 dB was read as +0.2) and the input translated; round 165x [EXEC]: the trial's law (72 v − 36 dB above v = 0.2, 40 log10 v + 6.36 below, 0 = −∞) with **Range law** Extended (new instances; Old ranges for older projects), both levels translated one to one |
 | In / Out pan (bottom bar) | ✅ | round 165w [EXEC]: **In pan / Out pan** — the trial's balance law (the far channel × (1 − \|pan\|), the near one untouched; in before the detector, out after the output level), translated from Pro-DS states; oversampling translated too |
 | Release | — | Pro-DS has no release control; LYNX keeps RELEASE as an extra (bottom bar) |
 | Input meter with threshold arrow, reduction meter | ✅ | |
 
 **Round 165w** (REA_rodada165w §5): configuration 8 → **9**, design 8 → 8 — In pan / Out pan (measured balance), the Pro-DS state's levels read correctly, input level / pans / oversampling translated. Left: the −∞ … +36 dB level range, the high-pass up to 20 kHz (Hush: 16 kHz), Stereo Link above 100 % (the mid-only blend) not translated.
+
+**Round 165x** (REA_rodada165x §3): configuration 9 → **10**, design 8 → 8 — the measured ranges (levels −∞ … +36 dB, high-pass to 20 kHz) behind an appended **Range law** (Old ranges | Extended: older projects unchanged), Stereo Link's upper half (appended **Link only** / **Link only side**, the measured mid- and side-only blends, matrices within 0.014), all translated from Pro-DS states. Left (design): the link's upper half is a separate "Only" bar beside the knob, not the knob's own second half.
 
 ## Ember Saturator ← Saturn 2 (and Decapitator's role)
 

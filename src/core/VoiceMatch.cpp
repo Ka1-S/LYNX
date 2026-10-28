@@ -1077,23 +1077,25 @@ namespace
 // round 123's slow conductance kept ≈ 0.8 dB for many seconds. Each conductance releases as dC/dt = −a Cⁿ − b C.
 // round 165x: the fast cell's attack is part of the law — round 123's log-domain approach (tau / (1 + C)^beta), or the
 // measured one: a linear-domain approach (tau / (1 + C)^beta) whose rise is limited to rate · (1 + C)^rateBeta per ms,
-// and the light's drive capped at ctMax (so the steep Limit cell cannot slam the slow cell either)
+// and the fast cell's drive capped at ctMax; the slow cell takes its own cap (ctMaxSlow) through a low-pass (slowLpMs), so
+// Limit's steep cell still builds the deep slow reduction of round 152a's stairs without slamming the onset
 struct ReleaseLaw
 {
     double a, n, share, slowAttackMs, a2, n2, b, b2;
-    double attackTauMs = attackMs, attackPow = attackBeta, rate = 0.0, ratePow = 0.0, ctMax = 0.0; // rate 0: round 123's
+    double attackTauMs = attackMs, attackPow = attackBeta, rate = 0.0, ratePow = 0.0, ctMax = 0.0, ctMaxSlow = 0.0, slowLpMs = 0.0; // rate 0: round 123's
 };
 constexpr ReleaseLaw release123 { releaseA, releaseN, slowShare, attackSlowMs, releaseA2, releaseN2, 0.0, 0.0 };
 // fitted (glowfit, Nelder-Mead on 18 trajectories, 10 ms windows, the first 3 s of each recovery weighted ×10): rms 0.61 →
 // 0.24 dB overall, the recovery 0.03 … 0.15 dB rms (round 123: 0.08 … 0.84); held out, round 152's 0.5 s stairs (falling
 // half, Compress 46 / 62.6 / 80): 0.52 / 0.76 / 0.65 → 0.35 / 0.39 / 0.45 dB
 // round 165x [EXEC] (REA_rodada165x §1): the attack fitted (attfit, Nelder-Mead, 1 ms windows of the first 100 ms of
-// 30 onsets: 1 kHz bursts 0 / −6 / −12 / −24 dBFS and a −12 → 0 dBFS step, Compress and Limit at 46 / 62.6 / 80). The
+// 30 onsets: 1 kHz bursts 0 / −6 / −12 / −24 dBFS and a −12 → 0 dBFS step, Compress and Limit at 46 / 62.6 / 80, with
+// round 152a's Limit stairs kept in the cost). The
 // trial lets the transient through: its gain falls ≈ 2 dB per ms whatever the drive (−0.9 / −2.9 / −4.8 / −7.9 / −13 dB
 // at 0 / 1 / 2 / 4 / 10 ms in Limit 80); the round-123 attack clamped Limit within the first millisecond. First 50 ms
 // rms 4.15 → 1.29 dB (worst onset 27 → 4.6 dB)
 constexpr ReleaseLaw release165 { 3.77134, 1.8446, 0.626219, 4622.87, 8.63099, 3.36638, 4.51261, 0.337878,
-                                  64.33724, 1.807935, 0.1667857, 0.4369981, 127.272 };
+                                  66.76061, 1.484398, 0.2006814, 0.3369957, 45.57088, 721.7064, 48.29348 };
 } // namespace
 
 void Leveler::prepare (double sampleRate) noexcept
@@ -1104,7 +1106,7 @@ void Leveler::prepare (double sampleRate) noexcept
 
 void Leveler::reset() noexcept
 {
-    cf = cs = el = mem = 0.0;
+    cf = cs = el = mem = ctl = 0.0;
     for (int c = 0; c < 2; ++c)
     {
         yc[c] = fx1[c] = fy1[c] = xp[c] = 0.0;
@@ -1130,6 +1132,7 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
     const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb + (s.measured && s.autoMakeup ? autoMakeupDb (s.peakReduction) - autoMakeupDb (s.makeupRef) : 0.0));
     const auto& rl = s.measuredRelease ? release165 : release123;
     const double cA = 1.0 - std::exp (-dt * 1000.0 / rl.slowAttackMs), mUp = 1.0 - std::exp (-dt * 1000.0 / memUpMs), mDn = 1.0 - std::exp (-dt * 1000.0 / memDownMs);
+    const double slowLp = rl.slowLpMs > 0.0 ? 1.0 - std::exp (-dt * 1000.0 / rl.slowLpMs) : 1.0;
     const double K = 2.0 * sr;
     // the idle response measured at 48 kHz; other rates take its bilinear analog prototype (approximate)
     const double* tb = idleB;
@@ -1140,9 +1143,13 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
         const double e0 = sc.process ((float) (yc[0] + ff * xp[0]), 0), e1 = sc.process ((float) (yc[1] + ff * xp[1]), 1);
         el = std::max (std::abs (e0), std::abs (e1)); // the light follows the drive within the sample (fitted)
         double ct = (el > Yt ? std::pow ((el - Yt) / Y0, gam) : 0.0) * (1.0 + memGain * mem);
-        if (rl.ctMax > 0.0)
-            ct = std::min (ct, rl.ctMax);
-        const double ctf = (1.0 - rl.share) * ct, cts = rl.share * ct;
+        const double ctf = (1.0 - rl.share) * (rl.ctMax > 0.0 ? std::min (ct, rl.ctMax) : ct);
+        const double cts0 = rl.share * (rl.ctMaxSlow > 0.0 ? std::min (ct, rl.ctMaxSlow) : ct);
+        if (slowLp < 1.0)
+            ctl += slowLp * (cts0 - ctl);
+        else
+            ctl = cts0;
+        const double cts = ctl;
         if (ctf > cf && rl.rate > 0.0)
         {
             // round 165x: the measured attack (linear approach, rate-limited rise)
