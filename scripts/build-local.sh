@@ -35,7 +35,7 @@ CORE="$CORE src/core/ProjectSafety.cpp"
 # LYNX substitutes for missing third-party plugins (round 98)
 CORE="$CORE src/core/PluginSubstitutes.cpp"
 # settings pages, plugin manager and shortcut manager logic (round 82)
-CORE="$CORE src/core/Preferences.cpp"
+CORE="$CORE src/core/Preferences.cpp src/core/MidiSync.cpp"
 # user themes: the palette derived from an accent and a background (round 162d)
 CORE="$CORE src/core/ThemePalette.cpp"
 # layouts of the native plugin editors (round 93)

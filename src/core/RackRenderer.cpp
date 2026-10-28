@@ -2066,9 +2066,9 @@ void RackRenderer::process (const RackState* state,
     resumeAudio = playing && (! wasPlaying || jumped);
     wasPlaying = playing;
     // tempo automation: the tempo holds for the whole block (evaluated at its start)
-    bpm = state->song.bpm;
+    bpm = tempoOverride > 0.0 ? tempoOverride : state->song.bpm;
 
-    if (state->tempoAutomation >= 0 && state->song.mode == PlayMode::song && ! isSlotOverridden (state->tempoAutomation))
+    if (tempoOverride <= 0.0 && state->tempoAutomation >= 0 && state->song.mode == PlayMode::song && ! isSlotOverridden (state->tempoAutomation))
     {
         const auto length = (double) std::max<std::int64_t> (1, state->schedule.songLength);
         const auto& clips = state->automationClips[(std::size_t) state->tempoAutomation];
