@@ -2711,6 +2711,8 @@ struct Part
     double part30 = 0.0;                 // part +0x30: the part's pitch knob in cents (formant reference)
     int misc47 = 0;                      // part +0x238 (combo +0x47): auto gain measured after the image
     float xyzC = 0.0f;                   // X/Y/Z smoothing coefficient (plugin +0x1118)
+    float delaySmp = 0.0f;               // part +0x1a0: note start delay in samples (part parameter 2)
+    std::vector<float> fadeIn;           // part +0x660 segment 0: the record's attack fade (part misc +4), empty = off
     std::shared_ptr<const Image> img;    // image synthesis (null: no usable image)
     std::vector<std::string> fallbacks;
 
@@ -2822,6 +2824,31 @@ struct Part
         modx = f32 (g[0] * 0.001953125), mody = f32 (g[1] * 0.001953125), modz = f32 (g[2] * 0.001953125);
         // X/Y/Z smoothed per control block (FUN_008826b0), 100 ms; off when global misc +0x39 is 0
         xyzC = S.gmisc[0x39] != 0 ? (float) std::exp (-4.6051701859880918 / ((fs * 0.1) / B)) : 0.0f;
+        {
+            // note start delay [DECOMP FUN_00879540 parameter 2]: p < 0: (2^(−p/48) − 1)/255 s, p ≥ 0: p·0.3125/tempo
+            // (float tempo), in float, times the integer sample rate
+            const auto pd = p[2];
+            const auto sec = pd >= 0 ? (float) ((double) pd * 0.3125 / (double) (float) bpm)
+                                     : (float) ((std::exp ((double) pd * -0.020833333333333332 * ln2) - 1.0) * 0.00392156862745098);
+            delaySmp = sec * (float) (int) fs;
+        }
+        {
+            // attack fade [DECOMP FUN_008781f0 → FUN_00863450 / FUN_00862d70 type 3, segment 0]: part misc +4 = v
+            // gives (v·0.001)²·25 ms; table (cos((N − i)·π/(N + 1)) + 1)/2 in float, i = 0…N−1, multiplied into the
+            // record's mono output from its first sample (FUN_008635c0)
+            fadeIn.clear();
+            const auto v = pd.I (0x04);
+            if (v != 0)
+            {
+                const auto x = (double) ((float) v * 0.001f);
+                const auto ms = x * x * 25.0;
+                const auto N = std::max (1, (int) std::nearbyint (ms * 0.001 * (double) (int) fs));
+                const auto w = (float) (1.0 / (double) (N + 1) * 3.141592653589793);
+                fadeIn.resize ((std::size_t) N);
+                for (int i = 0; i < N; ++i)
+                    fadeIn[(std::size_t) i] = (float) (((double) (float) std::cos ((double) ((float) (N - i) * w)) + 1.0) * 0.5);
+            }
+        }
         misc47 = pd.I (0x47);
         {
             const auto x = f32 (std::abs (glideV) * milli);
@@ -3811,6 +3838,10 @@ struct Record
     bool knValid[2] { false, false }, lsValid[2] { false, false };
     int part = 0, ku = 0, n = 0, note = -1, cnt = 0, firstlen = -1, hbM = 0, pkC = 0, pkIc = 0, dpos = -1, pendOldn = -1;
     int oscTop = 0, oscAge = 0, gcnt = 0, e8 = 0;
+    int fadePos = 0;          // voice +0xec: samples of the attack fade done
+    bool firstRender = true;  // bank +0x78: the bank has not rendered yet
+    int delay = 0;            // voice +0x48: samples the record still waits before it sounds (note start delay)
+    bool delayChecked = false; // voice +0x4c went 1 → 2: the start delay was read at the first control block
     long long stamp = 0, t0 = 0, scount = 0;
     double uPan = 0, uPh = -1, uDet = 0, uGain = 1, uDk = 0;
     double fvol = 1, fpan = 0, fpitch = 0, vel = 1;
@@ -4533,6 +4564,7 @@ private:
             v.ipos.off = p.img->toff;
         v.imgEnd = false, v.v1b0 = 0.0;
         v.cnt = 0;
+        v.delay = 0, v.delayChecked = false, v.fadePos = 0, v.firstRender = true;
         v.firstlen = v.shared ? gv->cnt : -1;
         v.curValid = false;
         v.e8 = P->e8;
@@ -4620,7 +4652,8 @@ private:
         v.hzdirty = false;
     }
 
-    void control (Record& v) noexcept
+    // false: the first control block found a note start delay (the record waits, then this block runs again)
+    bool control (Record& v) noexcept
     {
         const auto& p = P->parts[(std::size_t) v.part];
         const auto fs = P->fs;
@@ -4662,6 +4695,18 @@ private:
             v.arts[(std::size_t) k].step (v.dtPrev, in);
             if (v.firstblk)
                 v.arts[(std::size_t) k].first();
+        }
+        if (v.firstblk && ! v.delayChecked)
+        {
+            // FUN_0088ab10 0x88b150: delay = articulator 42 × part +0x1a0 (float), rounded; any non-zero product
+            // restarts the block after the wait (voice +0x4c = 2), even when it rounds to no samples
+            v.delayChecked = true;
+            const auto d = (float) v.arts[42].out * p.delaySmp;
+            if (d != 0.0f)
+            {
+                v.delay = (int) std::nearbyint ((double) d);
+                return false;
+            }
         }
         if (v.firstblk)
         {
@@ -5020,6 +5065,7 @@ private:
         v.fxv = f32 (f32 (p.fx) * A[2]);
         v.artpan = A[0];
         v.firstblk = false;
+        return true;
     }
 
     // ---- image synthesis (REA_rodada75) ----
@@ -5863,6 +5909,15 @@ private:
     void renderBank (Record& v, int m, double* out) noexcept
     {
         const int n = v.n;
+        if (v.firstRender)
+        {
+            // FUN_00784840: with an attack fade (bank +0x4d = 0, set by TriggerVoice when the part's fade segment
+            // is on) the partials start at their targets instead of gliding up from silence
+            v.firstRender = false;
+            if (! P->parts[(std::size_t) v.part].fadeIn.empty())
+                for (int i = 0; i < n; ++i)
+                    v.a[(std::size_t) i] = v.T[(std::size_t) i];
+        }
         int top = n;
         while (top > 0 && v.a[(std::size_t) top - 1] == 0.0f && v.T[(std::size_t) top - 1] == 0.0f)
             --top;
@@ -5975,8 +6030,20 @@ private:
         {
             if (v.cnt <= 0)
             {
+                if (v.delay > 0)
+                {
+                    // note start delay (FUN_0088ab10 entry): the record is silent, only the vibrato and phaser
+                    // phases move on; its control-block grid starts after the delay
+                    const auto m = std::min (v.delay, n - t);
+                    v.delay -= m;
+                    v.vph = (double) ((float) v.vph + (float) p.vibRate * (float) m);
+                    v.phph = f32 (v.phph + p.phRate * m);
+                    t += m;
+                    continue;
+                }
                 v.vibph = v.vph;
-                control (v);
+                if (! control (v))
+                    continue; // the start delay was just read: wait, then the first control block runs again
                 v.cnt = P->B;
                 if (v.firstlen >= 0)
                 {
@@ -5988,6 +6055,13 @@ private:
             v.cnt -= m;
             auto* y = mono.data();
             renderBank (v, m, y);
+            if (v.fadePos < (int) p.fadeIn.size())
+            {
+                const auto k = std::min (m, (int) p.fadeIn.size() - v.fadePos);
+                for (int j = 0; j < k; ++j)
+                    y[j] = y[j] * (double) p.fadeIn[(std::size_t) (v.fadePos + j)];
+                v.fadePos += k;
+            }
             v.vph = (double) ((float) v.vph + (float) p.vibRate * (float) m);
             v.phph = f32 (v.phph + p.phRate * m);
             if (v.dpos >= 0)
