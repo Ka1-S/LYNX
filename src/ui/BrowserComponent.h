@@ -92,6 +92,8 @@ public:
     // The sample preview volume knob beside the search box (0..125%, engine.setPreviewVolume): follows the engine.
     void refreshPreviewVolume();
     void stopPreview(); // the Stop button beside it
+    // F2 on a Plugin database entry: rename it (FL's renamed plugins, issue #11); false when no plugin is selected
+    bool renameSelectedPlugin();
 
     // The search index (round 162): a background pass over every Browser folder (rebuild: from scratch), and its
     // state in words ("12,345 files in 678 folders, checked 14:03").
@@ -124,6 +126,7 @@ public:
     // --snapshot: the PROJECT tab with the patterns, generators and samples open, a sample selected
     void showProjectForSnapshot();
     void showPluginDatabaseForSnapshot();
+    void showPluginDatabase(); // FL's Shift+F8: the All tab with the Plugin database opened and scrolled into view
     // --snapshot (round 164): only `folder`, opened, listed under `filter` (folders with nothing to list left out)
     void showFilterForSnapshot (const juce::File& folder, browserview::ContentFilter filter);
     void resetViewForSnapshot(); // its Generators / Effects FL engines open (round 142)

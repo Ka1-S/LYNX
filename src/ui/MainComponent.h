@@ -402,7 +402,7 @@ private:
     juce::String idleHint() const;
 
     ChannelRackComponent rack;
-    juce::Viewport rackViewport;
+    ChannelRackViewport rackViewport { rack };
     PianoRollComponent pianoRoll;
     PlaylistComponent playlist;
     PatternPicker picker { engine, playlist };

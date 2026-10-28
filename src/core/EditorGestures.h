@@ -83,6 +83,7 @@ enum class Target
     fadeHandle,  // Playlist: fade handle of an audio clip
     autoPoint,   // Playlist: a point of an inline automation curve
     autoCurve,   // Playlist: on an automation curve (a click adds a point)
+    autoTension, // Playlist: the tension handle between two automation points (drag up / down bends)
     clipMenu     // Playlist: the menu button in a clip's title strip
 };
 
@@ -118,6 +119,7 @@ enum class Action
     fade,         // drags an audio fade
     movePoint,    // drags an automation point
     addPoint,     // adds an automation point on the curve
+    bendSegment,  // drags an automation segment's tension handle
     openMenu      // opens the clip menu
 };
 
@@ -157,6 +159,8 @@ inline Action leftAction (EditTool tool, Target target, Mods mods, bool playlist
     {
         if (target == Target::autoPoint && ! mods.shift)
             return Action::movePoint;
+        if (target == Target::autoTension && ! mods.shift)
+            return Action::bendSegment;
         if (target == Target::autoCurve && ! mods.shift)
             return Action::addPoint;
         if (target == Target::fadeHandle)
@@ -170,6 +174,7 @@ inline Action leftAction (EditTool tool, Target target, Mods mods, bool playlist
         case Target::item:
         case Target::autoPoint:
         case Target::autoCurve:
+        case Target::autoTension:
         case Target::fadeHandle: return mods.shift ? Action::copyMove : Action::move;
         case Target::rightEdge: return Action::resizeRight;
         case Target::leftEdge: return Action::resizeLeft;
@@ -222,6 +227,7 @@ inline Cursor cursorFor (Action action, EditTool tool)
         case Action::listen: return Cursor::listen;
         case Action::movePoint:
         case Action::addPoint:
+        case Action::bendSegment:
         case Action::openMenu: return Cursor::point;
         case Action::none: break;
     }
@@ -285,6 +291,15 @@ inline double lineValue (double x0, double v0, double x1, double v1, double x)
         return std::clamp (v1, 0.0, 1.0);
     const auto t = (x - x0) / (x1 - x0);
     return std::clamp (v0 + (v1 - v0) * t, 0.0, 1.0);
+}
+
+// FL's Piano roll keyboard: where a key is clicked sets the note's velocity, soft at the
+// key's base and full at its tip (`along` pixels from the base of a key `length` pixels long), 1/127 at least.
+inline float keyClickVelocity (double along, double length)
+{
+    if (length <= 0.0)
+        return 0.8f;
+    return (float) std::clamp ((along + 1.0) / length, 1.0 / 127.0, 1.0);
 }
 
 // Alt+wheel over a note: the property moves by 4/127 per notch (Ctrl+Alt: 1/127), clamped to 0..1.
