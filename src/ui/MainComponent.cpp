@@ -4,6 +4,7 @@
 #include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
+#include "core/Performance.h"
 
 #include "core/TransportEdit.h"
 #include "ui/CrashReporter.h"
@@ -518,6 +519,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     fittedChannelCount = (int) engine.getSong().channels.size();
     hintBar.setHint ({ idleHint(), {}, false, false });
     setWantsKeyboardFocus (true);
+    installDialogTextFocus(); // dialogs open with their text field focused (round 165q)
     setSize (1180, 642);
     startTimerHz (30);
     uiTraceMonitor.start ([this, last = std::make_shared<RtStats::Snapshot>()] {
@@ -564,6 +566,7 @@ MainComponent::~MainComponent()
     ui::onTweak = nullptr;
     onEditEventsInPianoRoll = nullptr;
     PluginWindows::onGesture = nullptr;
+    removeDialogTextFocus();
     engine.nameAutomation = nullptr;
     PluginWindows::closeAll(); // plugin UIs before the engine
     ParametricEqWindows::closeAll();
@@ -4469,6 +4472,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
             rack.selectUnused();
         });
         menu.addItem (tr ("Switch smart disable for all plugins"), [this] { switchSmartDisableForAll(); });
+        menu.addItem (tr ("Prepare for performance mode..."), [this] { prepareForPerformance(); });
         menu.addItem (tr ("Delete unused recordings and save project..."), [this] { deleteUnusedRecordingsAndSave(); });
         menu.addItem (tr ("Collect project samples into a folder..."), [this] { collectSamples(); });
         return menu;
@@ -5015,4 +5019,36 @@ void MainComponent::FilterBox::paint (juce::Graphics& g)
     g.drawText (text, getLocalBounds().withTrimmedLeft (7).withTrimmedRight (16), juce::Justification::centredLeft, true);
     icons::draw (g, Icon::chevronDown, area.removeFromRight (16.0f).reduced (3.0f).translated (-2.0f, 0.0f), colour::textSecondary);
 }
+// FL's Tools › Macros › Prepare for performance mode ([DECOMP] FUN_0122d010, its "Marker settings" dialog: marker count
+// 4 / 8 / 16 / 32 / 64, default 16; spacing 1…128 steps, default 16 = a bar): room for a launch grid before the song,
+// a marker per column, a Start marker, Performance mode on, the zone in view. FL warns it can't be undone; in LYNX it
+// is one undo step.
+void MainComponent::prepareForPerformance()
+{
+    auto* window = new juce::AlertWindow (tr ("Prepare for performance mode"),
+                                          tr ("Inserts empty columns before the song for the clips to launch, a marker on each, and a Start "
+                                              "marker where the song begins; Performance mode is turned on."),
+                                          juce::MessageBoxIconType::NoIcon);
+    window->addComboBox ("count", { "4", "8", "16", "32", "64" }, tr ("Marker count"));
+    window->addComboBox ("spacing", { tr ("1 step"), tr ("2 steps"), tr ("1 beat"), tr ("2 beats"), tr ("1 bar"), tr ("2 bars"), tr ("4 bars"), tr ("8 bars") },
+                         tr ("Spacing"));
+    if (auto* c = window->getComboBoxComponent ("count"))
+        c->setSelectedItemIndex (2, juce::dontSendNotification);
+    if (auto* c = window->getComboBoxComponent ("spacing"))
+        c->setSelectedItemIndex (4, juce::dontSendNotification);
+    window->addButton (tr ("Accept"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, window] (int result) {
+                                 if (result != 1)
+                                     return;
+                                 const auto count = 4 << juce::jlimit (0, 4, window->getComboBoxComponent ("count")->getSelectedItemIndex());
+                                 const auto steps = 1 << juce::jlimit (0, 7, window->getComboBoxComponent ("spacing")->getSelectedItemIndex());
+                                 engine.editSong ([count, steps] (Song& s) { perf::prepareForPerformance (s, count, (std::int64_t) steps * (ppq / 4)); });
+                                 showPanel (Panel::playlist);
+                                 playlist.runAction ("playlist.zoomPerformance");
+                             }),
+                             true);
+    keepAboveMainWindow (*window);
+}
+
 } // namespace lynx

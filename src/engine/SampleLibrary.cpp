@@ -11,6 +11,7 @@
 #include <set>
 
 #include "core/AudioEdit.h"
+#include "core/SampleFiles.h"
 #include "core/OggVorbis.h"
 #include "core/Mp3Decoder.h"
 #include "core/TimeStretch.h"
@@ -160,6 +161,11 @@ SampleLibrary::SampleLibrary()
 {
     registerAudioFormats (formats); // LYNX's MP3 reader first (round 157b), then JUCE's
     formats.registerFormat (new WavPackAudioFormat(), false); // .wv files from FL packs
+}
+
+bool SampleLibrary::isSampleFile (const juce::File& file)
+{
+    return isSampleExtension (file.getFileExtension().toStdString());
 }
 
 juce::String SampleLibrary::wildcard() const
