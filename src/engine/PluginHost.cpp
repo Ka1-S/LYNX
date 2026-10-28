@@ -697,6 +697,7 @@ PluginHost::PluginHost (bool keep)
         if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
             known.recreateFromXml (*xml);
         favouriteIds = prefs::parseFavourites (settingsFolder().getChildFile ("plugin-favourites.txt").loadFileAsString().toStdString());
+        userNames = prefs::parsePluginNames (settingsFolder().getChildFile ("plugin-names.txt").loadFileAsString().toStdString());
         // once: files marked as failed by scans before the class-count timeout (REA_rodada107 §2) get another try,
         // since a large bundle (Waves shell) was marked "hung" only for taking longer than 30 s
         const auto retried = settingsFolder().getChildFile ("scan-retry.txt");
@@ -1139,6 +1140,17 @@ void PluginHost::setFavourite (const std::string& id, bool favourite)
         favouriteIds.erase (id);
     if (persistent)
         settingsFolder().getChildFile ("plugin-favourites.txt").replaceWithText (juce::String (prefs::formatFavourites (favouriteIds)));
+}
+
+void PluginHost::setPluginName (const std::string& key, const std::string& name)
+{
+    auto clean = juce::String::fromUTF8 (name.c_str()).replaceCharacters ("\t\r\n", "   ").trim().toStdString();
+    if (clean.empty())
+        userNames.erase (key);
+    else
+        userNames[key] = clean;
+    if (persistent)
+        settingsFolder().getChildFile ("plugin-names.txt").replaceWithText (juce::String::fromUTF8 (prefs::formatPluginNames (userNames).c_str()));
 }
 
 void PluginHost::startBackgroundScan (const juce::FileSearchPath& paths)
