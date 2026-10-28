@@ -14,7 +14,8 @@ Pro). The parent takes Ridge Strip ← SSL E-Channel (Waves trial ends ~10-31).
   (165b's work: wip/parity165b 1d756d02, for r165j).
 - 19:52 Ridge verified on the trial (§1); commit 8802dc96. Next: build-local with FL Data + Windows build, --plugui
   shot, land; then the Waves trio (Glow / Hush DeEsser / Gemini) before the trial ends.
-- Queue after them: Waves trio (Glow ← CLA-2A, Hush ← DeEsser, Gemini ← Doubler) before the trial ends; Hush ← Pro-DS;
+- 01:40 (10-28) Ridge landed 120f74f1; Hush DeEsser (10/8) and Gemini defaults queued to land; 165a Ember 9/9 landing.
+- Queue after them: Glow ← CLA-2A release tail; Gemini shelf cut range; Hush ← Pro-DS;
   Valhalla Halo / Horizon / Orbit.
 
 ## Trial status (2026-10-27 15:30 + 16:02)
@@ -67,3 +68,16 @@ at six settings), states saved with `savecomponent` and translated by LYNX's sub
 - Result: the 24 stair settings 0.10 … 0.25 dB rms (max 0.65); 4.5 … 14 kHz 0.1 … 0.35 dB rms (0.9 at 12 kHz, dial
   8 kHz, HighPass); vocal take −16 … −37 dB null (−94 dB where nothing is reduced).
 - Scores: config 9 → 10, design 8 → 8.
+
+## 3. Gemini Doubler ← Waves Doubler2 / Doubler4 (17.1 trial, black-box)
+
+- A fresh Doubler instance on the trial (public VST3 params): Align 0, low shelf on 0 dB at 101 Hz, high shelf on
+  +4.1 dB at 1306 Hz. LYNX's new instances now start the same (src/core/VoiceTools.cpp `geminiInfo` defaults); test
+  `gemini_doubler_reference_defaults_round165`. VoiceToolsTests119's law test now switches the shelves off first.
+- PARITY rows: Align ✅, feedback HP range ✅, voice pans ✅, master range ✅; shelves ⚠️ (the trial's gain range
+  −88 … +12 dB — the deep-cut end — is not covered). Score unchanged: 9 / 8.
+
+## 4. Ember Saturator ← Decapitator (sub-round 165a)
+
+Punish law per style, style A's Punish curve, Auto link, one-screen Classic panel with VU: 8 → 9 / 7 → 9. Details in
+REA_rodada165ha.md. Left: Punish curves of styles E / N / T / P, style A drive ≥ 7.

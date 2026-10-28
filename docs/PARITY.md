@@ -29,7 +29,6 @@ before → after (blank = not touched in round 165). Lowest first.
 | LYNX engine | Original | Config | Design | Since | Round 165 |
 |---|---|---|---|---|---|
 | Ridge Strip | SSL E-Channel (Waves) | 9 | 8 | 165 | 8 → 9 / 7 → 8 |
-| Ember Saturator | Decapitator | 8 | 7 | 135 | |
 | LYNX Tune | Auto-Tune Pro | 8 | 7 | 135 | |
 | Ridge Strip (Vocal strip) | SSL Native Vocalstrip 2 | 9 | 7 | 145 | |
 | Hush De-esser | Pro-DS | 8 | 8 | 135 | |
@@ -43,12 +42,13 @@ before → after (blank = not touched in round 165). Lowest first.
 | Aether | Fresh Air | 9 | 8 | 128 | |
 | Glow Leveler | CLA-2A (Waves) | 9 | 8 | 152a | |
 | Hush De-esser | DeEsser (Waves) | 10 | 8 | 165 | 9 → 10 / 8 → 8 |
-| Gemini Doubler | Doubler2 / Doubler4 (Waves) | 9 | 8 | 137 | |
+| Gemini Doubler | Doubler2 / Doubler4 (Waves) | 9 | 8 | 165 | 9 → 9 / 8 → 8 (defaults) |
 | Echoform | H-Delay (Waves) | 9 | 8 | 137 | |
 | Echoform | ValhallaDelay | 9 | 8 | 137 | |
 | Atrium | ValhallaRoom | 9 | 8 | 135 | |
 | Auto-pan (stand-in) | PanMan | 9 | 8 | 152 | |
 | Foil Plate | Little Plate | 9 | 8 | 152 | |
+| Ember Saturator | Decapitator | 9 | 9 | 165a | 8 → 9 / 7 → 9 |
 | Apex Limiter | Pro-L 2 | 9 | 9 | 135 | |
 | Epoch Verb | ValhallaVintageVerb | 9 | 9 | 135 | |
 | Nebula | Valhalla Supermassive | 9 | 9 | 135 | |
