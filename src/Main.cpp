@@ -914,7 +914,6 @@ public:
             // the user's ffmpeg, as PNGs + report.txt (frames decoded, the sound track)
             const auto i = args.indexOf ("--videoshot");
             runVideoShot (args[i + 1].unquoted(), args[i + 2].unquoted());
-            quit();
             return;
         }
 
@@ -5173,7 +5172,38 @@ private:
     void runVideoShot (const juce::String& prefix, const juce::String& videoPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
-        lynx::AudioEngine offline (false);
+        // the message loop runs while the frames decode (modal loops are off): a timer takes one snapshot per step
+        struct VideoShot final : juce::Timer
+        {
+            lynx::AudioEngine offline { false };
+            std::unique_ptr<juce::Component> editor;
+            juce::String prefix, report;
+            int step = 0;
+            std::function<void()> done;
+            void moveTo (double seconds)
+            {
+                offline.getTransport().positionTicks.store (seconds * offline.getSong().bpm / 60.0 * lynx::ppq);
+            }
+            void timerCallback() override
+            {
+                static constexpr double times[] = { 0.0, 1.5, 3.25 };
+                if (step > 0 && editor != nullptr)
+                    savePng (editor->createComponentSnapshot (editor->getLocalBounds()), prefix + "-" + juce::String (step - 1) + ".png");
+                if (editor == nullptr || step >= (int) std::size (times))
+                {
+                    stopTimer();
+                    juce::File (prefix + "-report.txt").replaceWithText (report);
+                    if (done)
+                        done();
+                    return;
+                }
+                moveTo (times[step++]);
+            }
+        };
+        static std::unique_ptr<VideoShot> shot;
+        shot = std::make_unique<VideoShot>();
+        shot->prefix = prefix;
+        auto& offline = shot->offline;
         lynx::videoview::install (offline);
         lynx::Song song;
         song.mixer = lynx::Song::defaultMixer (2);
@@ -5188,29 +5218,14 @@ private:
         song.patterns.emplace_back();
         offline.setSong (std::move (song));
         offline.dispatchPendingMessages();
-        juce::String report;
+        auto& report = shot->report;
         report << "ffmpeg: " << lynx::findFfmpeg().getFullPathName() << "\n";
         report << lynx::videoview::report (vs.path).fromFirstOccurrenceOf ("Input #0", true, false).upToFirstOccurrenceOf ("At least", false, false) << "\n";
-        auto editor = lynx::makeChannelSettingsPanel (offline, 0);
-        if (editor == nullptr)
-            return;
-        juce::Component holder;
-        holder.setSize (editor->getWidth(), editor->getHeight());
-        holder.addAndMakeVisible (*editor);
-        auto pump = [] (int ms) {
-            const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) ms;
-            while (juce::Time::getMillisecondCounter() < end)
-                juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
-        };
-        const double times[] = { 0.0, 1.5, 3.25 };
-        int k = 0;
-        for (const auto t : times)
-        {
-            offline.getTransport().positionTicks.store (t * offline.getSong().bpm / 60.0 * lynx::ppq);
-            pump (1500);
-            savePng (editor->createComponentSnapshot (editor->getLocalBounds()), prefix + "-" + juce::String (k++) + ".png");
-        }
-        juce::File (prefix + "-report.txt").replaceWithText (report);
+        shot->editor = lynx::makeChannelSettingsPanel (offline, 0);
+        if (shot->editor != nullptr)
+            shot->editor->setVisible (true);
+        shot->done = [this] { juce::MessageManager::callAsync ([this] { shot.reset(); quit(); }); };
+        shot->startTimer (1500);
     }
 
     void runDanceShot (const juce::String& prefix)

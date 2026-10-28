@@ -4,6 +4,11 @@ Round r165g "flplugins165" (parent). Evidence markers: [MANUAL] FL's online manu
 installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a crafted project, [TEST], [SHOT], [HYP].
 
 ## Where I stopped
+- 2026-10-28 17:20: Kepler landed b06e2c59, Granulizer engine landed 471b4f23 (both out of beta). Video Player:
+  build-local 1 781 828 checks, 0 failures; Windows --videoshot with the user's ffmpeg 8.1 [SHOT]: frames at song
+  0 / 1.5 / 3.25 s (delay 0.5 s) = ffmpeg's own frames at video 0 (held before the delay) / 1.0 / 2.75 s; landing.
+  Harmor's presets run as sub-round flbeta165h. Left: Transmitter and Scratcher ports (§6), Kepler Exo, Newtime /
+  Newtone.
 - 2026-10-28 12:50 (resume after the 2nd BSOD): batch 2 for 0.1.20, one sub-round at a time. (1) Kepler
   (feature/flbeta165k, out of beta, verified in REA_rodada165g-flbeta165k.md) merged with main, build-local running;
   (2) Granulizer engine (feature/flgran165, out of beta, REA_rodada165g-flgran165.md) merged with main (pt-BR conflict:
@@ -83,8 +88,7 @@ of their own) are imported muted, with the note (Fruity Video Player: §7 since 
   a decompile of Transmitter.dll before LYNX can reproduce it; until then an imported Transmitter is reported as unsupported.
 - Fruity Scratcher [DATA presets]: state = version 1001000 + 14 floats + the sample path. engine_x64.dll is only the
   DVS timecode decoder; the scratch DSP is in the 4 MB Delphi DLL. An FL render exists (D:\lynx-work\flplugins165\r\m_ref.wav).
-- Fruity Video Player: a video window synced to the song; plan = decode with the user's ffmpeg (ui/VisualEditors.cpp
-  findFfmpeg) through a reading pipe, frames shown by song time. Not started.
+- Fruity Video Player: done in batch 2 (§7).
 
 ## 7. Fruity Video Player [DECOMP Fruity Video Player_x64.dll][DATA Default.fst]
 What FL's plugin is (DFM forms + handlers): a generator that shows a video and plays its sound track, slaved to the
@@ -114,3 +118,6 @@ display (H:M:S:Ms and 14 SMPTE rates, menu tags = the saved index), Send audio t
   delay). Clock [HYP, FL's exact rule not traced]: slaved and following the tempo, video time = the song's beats at the
   song tempo; with Ignore tempo changes, the song's real time. .flp import: the channel becomes a Video Player (no
   longer a muted stand-in). Patcher: Add plugin › Visual.
+- Verified [TEST] video165_* (FL's Default.fst bytes round-trip, SMPTE drop frame, clock, the instrument's track at
+  the delay / volume / mute); [SHOT] `LYNX.exe --videoshot prefix clip.mp4` on Windows with ffmpeg 8.1 (fresh
+  profile): the editor's frames equal ffmpeg's frames at the same video times.
