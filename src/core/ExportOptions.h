@@ -157,6 +157,9 @@ bool hasSelection (const Song& song) noexcept;
 
 // Inserts that get sound: a channel goes to them or another insert sends to them (Master excluded).
 std::vector<int> stemTracks (const Song& song);
+// FL's Mixer › Disk recording › "Render armed / selected tracks to wave file(s)" (REA round 165f-mixer): the inserts
+// of `only` (each once, in mixer order, the Master excluded) whether or not they get sound; empty = stemTracks (song).
+std::vector<int> stemTracks (const Song& song, const std::vector<int>& only);
 
 // Channels that play something in the range: notes in a pattern placed in the Playlist (or the current pattern in
 // pattern range), or an audio clip.
