@@ -7,10 +7,10 @@ hosted in our own `tools/fxmeasure` (public VST3 parameters, saved states, rende
 
 ## Where I stopped
 
-2026-10-28 12:25 (resumed after the 2nd BSOD, 09:14): all four items are coded (commits 4b1b4948 + checkpoint
-f5fd3e39, the attack's slow-cell cap / low-pass refit). Now: rebuild fxlynx + tests, re-run `glow/cmpatt.sh` and the
-tests, check the first-10-ms overshoot, then merge origin/main (23 behind), build-local with FL Data, Windows build,
---plugui shots of Glow / Hush / Ember, land.
+2026-10-28 13:30: everything coded and measured; origin/main merged; the attack refit (slow-cell smoothing in Limit
+only) passes every Glow test; Hush's 0 … 200 % link knob and Glow's saved VU display added. Running: build-local with
+FL Data and the Windows build (build-win-parity165x); then `--plugui` shots of Glow / Hush / Ember, PARITY.md, notes,
+land.
 
 ## 1. Glow Leveler ← CLA-2A: the attack
 
@@ -39,13 +39,16 @@ to 0.01 dB). One slow-cell law could not hold both: the smoothed drive that buil
 0 dBFS, PR 62.6) also deepened Compress 46's recovery after a 2 s burst by 0.7 dB. The trial does both, so the smoothing
 applies in Limit only; the slow drive is capped at 250 in both modes.
 
-| First 50 ms, 1 ms windows (rms / worst onset dB) | Round 123's attack | Measured (165x) |
-|---|---|---|
-| All 30 onsets + stairs + recoveries (mean rms) | 2.36 | 0.91 |
-| Limit 80, 0 dBFS | 6.76 / 14.8 | 1.94 / 2.4 |
-| Limit 62.6, 0 dBFS | 5.84 / 12.7 | 1.40 / 2.1 |
-| Compress 80, 0 dBFS | 3.60 / 7.9 | 1.27 / 1.3 |
-| Compress 46, 0 dBFS | 0.25 / 0.5 | 0.49 / 1.1 |
+LYNX itself (`glow/cmpatt.sh`, `fxlynx` against the trial's renders, 30 onsets, 1 ms windows):
+
+| Opto release / attack | first 50 ms rms | first 100 ms rms | worst window |
+|---|---|---|---|
+| Old (round 123, older projects) | 5.86 dB | 4.47 dB | 26.7 dB |
+| Measured (round 165x, new instances and translated states) | 1.21 dB | 1.09 dB | 3.3 dB |
+
+Test points held at the same time (`glow/evtest.py`): Compress 46 recovery after 2 s at 0 dBFS −6.48 / −2.54 / −1.61 dB
+at 0.1 / 0.5 / 1 s (trial −6.20 / −2.18 / −1.29); Limit 62.6 stairs −12.7 / −18.8 dB at −6 / 0 dBFS (trial −13.7 / −19.6);
+Limit 80 −21.7 / −21.9 (trial −21.5 / −22.4).
 
 Compress 46 (the factory setting) was already right with round 123's attack and is now within 1.1 dB; every Limit
 and every loud Compress onset is much closer. The trial's first millisecond still reduces ≈ 0.8 dB more than LYNX's
