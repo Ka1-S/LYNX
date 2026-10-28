@@ -138,7 +138,7 @@ TEST (glow_cla2a_defaults_limit_automakeup_analog_round152a)
     using namespace lynx;
     namespace g = mixsuite::glow;
     const auto& info = effectInfo (EffectKind::glowLeveler);
-    CHECK (info.params.size() == (std::size_t) g::count && g::count == 10);
+    CHECK (info.params.size() == (std::size_t) g::count && g::analog == 9); // round 165w: + Opto release
     // a new instance starts as the reference does: Opto classic, Gain 40, Peak reduction 46, Hi Freq 50, the measured law
     const auto fresh = makeEffectSlot (EffectKind::glowLeveler);
     CHECK (fresh.params[g::voicing] == 1.0f && std::abs (fresh.params[g::gain] - 0.40f) < 1e-6f && std::abs (fresh.params[g::peakReduction] - 0.46f) < 1e-6f);

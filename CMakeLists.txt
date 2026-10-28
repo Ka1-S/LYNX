@@ -28,6 +28,8 @@ add_library(lynx_core STATIC
     src/flp/Flp.cpp
     src/core/Song.cpp
     src/core/Scheduler.cpp
+    src/core/Performance.cpp
+    src/core/Patcherize.cpp
     src/core/Instruments.cpp
     src/core/RackRenderer.cpp
     src/core/LoadTrace.cpp
@@ -204,6 +206,20 @@ target_sources(lynx_core PRIVATE
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 target_sources(lynx_core PRIVATE
     src/core/CrashReport.cpp)
+
+# the embedded Python (pocketpy) and FL's VFX Script (round 165d)
+target_sources(lynx_core PRIVATE
+    src/core/Python.cpp
+    src/core/VfxScript.cpp)
+
+# pocketpy 2.2 (MIT; third_party/pocketpy, LYNX's changes marked "LYNX"): a small embeddable Python 3 interpreter,
+# sandboxed (no os module / files) and interruptible (the watchdog)
+add_library(pocketpy STATIC third_party/pocketpy/pocketpy.c)
+target_include_directories(pocketpy PUBLIC third_party/pocketpy)
+target_compile_definitions(pocketpy PUBLIC PK_ENABLE_OS=0 PK_ENABLE_WATCHDOG=1)
+set_target_properties(pocketpy PROPERTIES C_STANDARD 11)
+target_compile_options(pocketpy PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-w>)
+target_link_libraries(lynx_core PUBLIC pocketpy)
 
 # LAME's libmp3lame (LGPL; third_party/lame, encoder only, configured by third_party/lame/src/config.h)
 file(GLOB LAME_SOURCES third_party/lame/src/*.c)

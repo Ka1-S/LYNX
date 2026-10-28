@@ -93,7 +93,8 @@ struct PlaybackLoop
     double start = 0.0, end = 0.0;
     bool active() const noexcept { return end > start; }
 };
-PlaybackLoop playbackLoop (bool songMode, double loopStart, double loopEnd, double songLength) noexcept;
+// (songStart > 0: Performance mode, the song loops back to its Start marker)
+PlaybackLoop playbackLoop (bool songMode, double loopStart, double loopEnd, double songLength, double songStart = 0.0) noexcept;
 
 // The position hosted plugins see (their play head): within the pattern in Pattern mode, within the song in Song
 // mode, so plugins synced to the host follow the loop like in FL instead of counting on forever.
@@ -126,5 +127,8 @@ void scheduleSong (const Song& song,
                    bool resume = false,
                    const ScheduleIndex* index = nullptr,
                    bool wrap = true) noexcept;
+// One clip played once where it is (no song loop), its events in the block (not sorted): Performance mode's passes.
+void scheduleSingleClip (const Song& song, const Clip& clip, std::size_t clipIndex, double startTick, int numSamples, double tps,
+                         EventBuffer& out, const ScheduleIndex* index = nullptr) noexcept;
 // (wrap = false: the song plays once and is silent past its end — audio recording without a loop region, round 163)
 } // namespace lynx

@@ -772,6 +772,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
     Song song;
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
+    song.performanceMode = project.performanceMode; // (round 165m)
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
     song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
     song.channelGroups = project.filterGroups;
@@ -3393,7 +3394,16 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 const auto sized = std::abs (t.heightScale - 1.0f) > 0.01f;
 
-                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized || t.mode != 0))
+                TrackPerformance performance;
+                performance.motion = (TrackPerformance::Motion) std::clamp (t.motion, 0, 6);
+                performance.press = (TrackPerformance::Press) std::clamp (t.press, 0, 3);
+                performance.triggerSync = (TrackPerformance::Sync) std::clamp (t.triggerSync, 0, 6);
+                performance.queue = t.queue;
+                performance.tolerant = t.tolerant;
+                performance.positionSync = (TrackPerformance::Sync) std::clamp (t.positionSync, 0, 6);
+
+                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized || t.mode != 0
+                                                       || ! performance.isDefault()))
                 {
                     if ((int) song.playlistTracks.size() <= t.index)
                         song.playlistTracks.resize ((std::size_t) t.index + 1);
@@ -3404,6 +3414,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     if (sized)
                         track.height = polish::clampTrackHeight ((int) std::lround (polish::defaultTrackHeight * t.heightScale));
                     track.grouped = t.index > 0 && t.grouped;
+                    track.performance = performance; // Performance mode's track settings (round 165m)
                     track.collapsed = ! t.expanded;
                     // track modes (REA round 146a): an audio track's mixer track, an instrument track's channel
                     const auto mixerOk = t.mixerTrack > 0 && t.mixerTrack < (int) song.mixer.size();

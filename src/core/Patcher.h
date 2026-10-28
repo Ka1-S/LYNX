@@ -116,6 +116,7 @@ public:
     void pitchBend (float semitones) noexcept;
     void controlChange (int cc, float value) noexcept;
     void allNotesOff() noexcept;
+    void cut() noexcept; // (a cut group's cut: the instruments stop, the VFX nodes keep their voices)
     void slideTo (int key, float cents, float samples) noexcept;
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept;
     // the next note's other properties, for the VFX nodes (round 164b)
@@ -126,6 +127,15 @@ public:
     bool instrumentsIdle() const noexcept;
 
     int latencySamples() const noexcept { return latency; }
+    // The device's input and output buses for the hardware insert nodes (round 165c; null: offline / no device), and
+    // where the next process() call's first sample sits in the callback piece. Audio thread, before process().
+    void setHardwareIo (const LiveInput* in, HardwareOutput* out, int offset) noexcept
+    {
+        hwIn = in;
+        hwOut = out;
+        hwOffset = offset;
+    }
+    bool hasHardwareNodes() const noexcept { return hardwareNodes; }
     // The Patcher's published parameter k (automation, FL's record 1100) set to v (0..1). Audio thread.
     void setPublished (int k, float v) noexcept;
     float controlOutput (int output) const noexcept;
@@ -163,7 +173,16 @@ private:
     {
         int node = 0, midiChannel = -1; // −1 = the incoming channel (a MIDI Out node on the way sets its own)
         bool vfx = false;               // a VFX node: the voice goes into its processor
+        bool layer = false;             // a Layer node (round 165c): the note plays the nodes on its Children pin
     };
+    // A Layer node (round 165c, FL's Layer inside a Patcher): the generator nodes cabled to its Children pin are its
+    // children, in node order; Random / Sequential / Crossfade and its level, pan and pitch as a Layer channel's.
+    struct LayerNode;
+    std::vector<std::unique_ptr<LayerNode>> layers; // [node] (null: not a Layer)
+    // Calls f (target, gain, pan, cents, viaLayer) for each target a note reaches, a Layer's picked children in its place.
+    // `type`: 1 note on, 0 note off, 2 anything else (every child).
+    template <typename F>
+    void forLayeredTargets (const std::vector<MidiTarget>& targets, int type, int key, F&& f) noexcept;
     // what a node's MIDI output pin `pin` (or a "From LYNX" pin) reaches, through MIDI Out nodes
     std::vector<MidiTarget> midiTargetsOf (const PatcherDoc& doc, int from, int pin) const;
     std::vector<std::vector<MidiTarget>> pinTargets; // ["From LYNX" pin: 0 Notes, 1 + port] the instruments it reaches
@@ -214,7 +233,19 @@ private:
     std::atomic<Values*> retired { nullptr };
     int latency = 0;
     double rate = 44100.0;
+    const LiveInput* hwIn = nullptr;
+    HardwareOutput* hwOut = nullptr;
+    int hwOffset = 0, pieceOffset = 0; // (pieceOffset: the current piece's first sample in the callback piece)
+    bool hardwareNodes = false;
 };
+
+// A Layer node's children (round 165c): the generator nodes its Children pin reaches (through MIDI Out nodes), Layers
+// left out, in node order — the order its Crossfade and Sequential go through.
+std::vector<int> layerChildren (const PatcherDoc& doc, int node);
+
+// Whether a Patcher holds a Hardware Insert (round 165c), also inside nested Patchers: its insert / channel then runs on
+// the audio thread and hands the graph the device's buses.
+bool usesHardwareIo (const PatcherDoc& doc) noexcept;
 
 // A mixer slot of kind `patcher`
 std::unique_ptr<Effect> makeEffect (const EffectSlot& slot, double sampleRate, const Factories& factories, const Effect* previous = nullptr);

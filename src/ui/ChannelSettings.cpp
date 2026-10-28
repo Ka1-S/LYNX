@@ -420,103 +420,6 @@ private:
     LfoEditor lfos;
 };
 
-// "Controller" channel (FL's Envelope Controller): shows the 8 articulators (envelope, base, mode and
-// key range) and which automations each output drives. Read-only.
-class ControllerPanel final : public juce::Component
-{
-public:
-    ControllerPanel (AudioEngine& e, int c)
-        : engine (e),
-          channel (c)
-    {
-        setSize (720, 470);
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (theme::colour::bg2);
-        const auto& song = engine.getSong();
-        if (channel >= (int) song.channels.size())
-            return;
-        const auto parsed = parseEnvelopeController (song.channels[(std::size_t) channel].controllerState);
-        g.setColour (theme::colour::textPrimary);
-        g.setFont (theme::font (theme::type::title));
-        g.drawText (tr ("Envelope controller: each note on this channel triggers the envelopes; output k drives the linked targets"),
-                    10, 6, getWidth() - 20, 20, juce::Justification::centredLeft);
-        if (! parsed)
-            return;
-
-        for (int k = 0; k < 8; ++k)
-        {
-            const auto& a = (*parsed)[(std::size_t) k];
-            const auto area = juce::Rectangle<float> (10.0f + (float) (k % 4) * 177.0f, 34.0f + (float) (k / 4) * 215.0f, 170.0f, 205.0f);
-            g.setColour (theme::colour::bg3);
-            g.fillRoundedRectangle (area, theme::radius::lg);
-
-            // targets of this output
-            juce::StringArray targets;
-            for (const auto& automation : song.automations)
-                if (automation.source.channel == channel && automation.source.output == k)
-                    targets.add (juce::String::fromUTF8 (automation.name.c_str()));
-
-            g.setColour (targets.isEmpty() ? theme::colour::textSecondary : theme::colour::accent);
-            g.setFont (theme::font (theme::type::body, true));
-            g.drawText (tr ("Output {0}", { juce::String (k) }) + (targets.isEmpty() ? juce::String() : tr (" (in use)")), area.withHeight (20.0f).reduced (6.0f, 0.0f),
-                        juce::Justification::centredLeft);
-
-            const auto graph = area.withTrimmedTop (22.0f).withHeight (110.0f).reduced (6.0f, 2.0f);
-            g.setColour (theme::colour::bg0);
-            g.fillRect (graph);
-            if (a.envOn && a.count > 0)
-            {
-                const auto total = std::max (0.001f, a.time[(std::size_t) a.count - 1]);
-                juce::Path path;
-                for (int i = 0; i < a.count; ++i)
-                {
-                    const auto x = graph.getX() + graph.getWidth() * a.time[(std::size_t) i] / total;
-                    const auto y = graph.getBottom() - graph.getHeight() * a.level[(std::size_t) i];
-                    if (i == 0)
-                        path.startNewSubPath (x, y);
-                    else
-                        path.lineTo (x, y);
-                }
-                g.setColour (theme::colour::info);
-                g.strokePath (path, juce::PathStrokeType (2.0f));
-                if (a.sustain >= 0)
-                {
-                    g.setColour (theme::colour::textDisabled);
-                    g.drawVerticalLine ((int) (graph.getX() + graph.getWidth() * a.time[(std::size_t) a.sustain] / total), graph.getY(), graph.getBottom());
-                }
-            }
-            else
-            {
-                g.setColour (theme::colour::textDisabled);
-                g.drawText (tr ("envelope off"), graph, juce::Justification::centred);
-            }
-
-            g.setColour (theme::colour::textSecondary);
-            g.setFont (theme::font (theme::type::caption));
-            auto line = graph.getBottom() + 4.0f;
-            auto text = [&] (const juce::String& t) {
-                g.drawText (t, (int) area.getX() + 6, (int) line, (int) area.getWidth() - 12, 14, juce::Justification::centredLeft, true);
-                line += 14.0f;
-            };
-            text (tr ("base {0}, env {1}", { juce::String::formatted ("%.2f", a.base), juce::String::formatted ("%+.2f", a.envLevel) }) + (a.bipolar ? tr (", bipolar") : tr (", unipolar")));
-            if (a.envOn && a.count > 0)
-                text (tr ("length {0} ", { juce::String::formatted ("%.2f", a.time[(std::size_t) a.count - 1]) }) + (a.tempo ? tr ("beats") : "s")
-                      + (a.sustain >= 0 ? tr (", with sustain") : tr (", no sustain")));
-            if (a.lowKey > 0 || a.highKey < 127)
-                text (tr ("keys {0} to {1}", { juce::String (a.lowKey), juce::String (std::min (a.highKey, 127)) }));
-            for (const auto& t : targets)
-                text (utf8 ("-> ") + t);
-        }
-    }
-
-private:
-    AudioEngine& engine;
-    int channel;
-};
-
 // Physical-model channels (Sakura, Drumpad; REA_rodada28): knobs for the main raw FL parameters (0..1)
 class ModelPanel final : public juce::Component
 {
@@ -1118,6 +1021,28 @@ public:
         const auto rows = ((int) knobs.size() + 6) / 7; // the grid of resized()
         setSize (720, std::max (dx10 || threeOsc ? 500 : 384, 46 + rows * 110 + 8 + (granulizerModes ? 64 : 0)));
 
+        // a Granulizer node inside a Patcher (round 165c): no channel to drop a sample on, so its own Sample button
+        if (granulizer && ref.index < 0)
+        {
+            sampleButton.setButtonText (tr ("Sample..."));
+            const auto path = juce::String::fromUTF8 (def.samplePath.c_str());
+            ui::setHint (sampleButton, path.isEmpty() ? tr ("Choose the sample the Granulizer plays") : path);
+            sampleButton.onClick = [this] {
+                chooser = std::make_unique<juce::FileChooser> (tr ("Sample"), juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                      [safe = juce::Component::SafePointer<ModelPanel> (this)] (const juce::FileChooser& fc) {
+                                          if (safe == nullptr || fc.getResult() == juce::File())
+                                              return;
+                                          const auto file = fc.getResult();
+                                          safe->ref.edit (safe->engine, [path = file.getFullPathName().toStdString()] (ChannelDef& d) { d.samplePath = path; });
+                                          ui::setHint (safe->sampleButton, file.getFullPathName());
+                                          safe->repaint();
+                                      });
+            };
+            addAndMakeVisible (sampleButton);
+            resized(); // (setSize above laid the page out before the button existed)
+        }
+
         // FL's arrangement of the plugin's page (core/PluginLayout.cpp): the knobs at FL's places, faders and
         // switches drawn by the panel
         layout = plugui::instrumentLayout (def.instrument);
@@ -1514,6 +1439,8 @@ public:
 
     void resized() override
     {
+        if (sampleButton.isVisible())
+            sampleButton.setBounds (getWidth() - 128, 4, 120, 24);
         if (layout != nullptr)
         {
             resizeLayout();
@@ -1621,6 +1548,8 @@ private:
     std::vector<std::unique_ptr<juce::Slider>> knobs;
     const plugui::Layout* layout = nullptr;
     const plugui::LayoutItem* xyItem = nullptr; // the pad being dragged
+    juce::TextButton sampleButton; // (a Granulizer node: round 165c)
+    std::unique_ptr<juce::FileChooser> chooser;
 };
 
 class SettingsPanel final : public juce::Component,
@@ -3563,7 +3492,7 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
     {
         if (parseKeyboardController (engine.getSong().channels[(std::size_t) channel].controllerState))
-            return std::make_unique<ControllerPanel> (engine, channel);
+            return makeKeyboardControllerEditor (engine, channel); // round 165c (it showed the Envelope Controller's read-only page)
         return makeEnvelopeControllerEditor (engine, channel);
     }
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::midiOut)

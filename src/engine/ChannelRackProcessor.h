@@ -46,6 +46,7 @@ public:
     void setLiveInput (LiveInput* input) noexcept { renderer.setLiveInput (input); }
     // Hardware output buses of the inserts (REA round 156).
     void setHardwareOutput (HardwareOutput* out) noexcept { renderer.setHardwareOutput (out); }
+    void setPerformance (perf::Live* live) noexcept { renderer.setPerformance (live); }
     // The renderer (its per-unit CPU profile, REA round 87).
     RackRenderer& getRenderer() noexcept { return renderer; }
     // Per instrument / effect processing time (Plugin performance monitor).
