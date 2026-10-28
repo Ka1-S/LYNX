@@ -4,11 +4,16 @@ Round r165g "flplugins165" (parent). Evidence markers: [MANUAL] FL's online manu
 installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a crafted project, [TEST], [SHOT], [HYP].
 
 ## Where I stopped
-- 2026-10-27 resume after the BSOD: Ghidra projects of every missing plugin's DLL are on D:\lynx-work\flplugins165\ghidra
-  (BigClock, Mute2, Scratcher(+engine), Tuner(+engine), Transmitter, VideoPlayer, HtmlNoteBook). Sub-rounds relaunched:
-  flbeta165p (Granulizer, Newtime, Newtone), flbeta165s (Harmor); flbeta165k (Kepler) waits for a free slot.
-- Batch 1 written (Mute 2, Big Clock, Tuner, HTML NoteBook, inert imports): building + tests, FL GUI shots, then land.
-  Next: Scratcher, Transmitter (34 presets, state v3 = ~44 controls 0…10000), Video Player.
+- 2026-10-28 12:50 (resume after the 2nd BSOD): batch 2 for 0.1.20, one sub-round at a time. (1) Kepler
+  (feature/flbeta165k, out of beta, verified in REA_rodada165g-flbeta165k.md) merged with main, build-local running;
+  (2) Granulizer engine (feature/flgran165, out of beta, REA_rodada165g-flgran165.md) merged with main (pt-BR conflict:
+  both kept), build-local queued; (5) Fruity Video Player written in feature/flvideo165 (section 7): core + editor +
+  import + tests, not built yet. Next: land Kepler and Granulizer, build/test/shot the Video Player, then Harmor's
+  presets, Transmitter / Scratcher.
+- Earlier: Ghidra projects of every missing plugin's DLL are on D:\lynx-work\flplugins165\ghidra (BigClock, Mute2,
+  Scratcher(+engine), Tuner(+engine), Transmitter, VideoPlayer, HtmlNoteBook). Batch 1 landed 0162e93a (Mute 2, Big
+  Clock, Tuner, HTML NoteBook, inert imports); Harmor engine 1e2ecf26 and Granulizer's auto slicer ea87cd3c landed
+  (still beta).
 
 ## Plugins (FL 2026, Plugins\Fruity)
 | FL plugin | kind | LYNX | evidence |
@@ -19,7 +24,7 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
 | Fruity HTML NoteBook | effect (no sound) | §4 | [MANUAL] |
 | Fruity Scratcher | effect (turntable) | (todo) | [MANUAL] |
 | Transmitter | effect (transient / sustain split) | (todo) | [MANUAL], presets |
-| Fruity Video Player | generator | (todo) | [MANUAL] |
+| Fruity Video Player | generator | §7 (video via the user's ffmpeg, sound track, FL's state) | [DECOMP] |
 | FL Studio Mobile / Mobile Rack FX | generator / effect | import note (§5) | |
 | Razer Chroma, ReWired | | inert on import, with a note | |
 
@@ -58,8 +63,8 @@ styles skipped) and opens web addresses and external links in the user's browser
 
 ## 5. Inert plugins
 Razer Chroma (vendor lighting) and FL Studio Mobile Rack FX are left out of the mixer with a note in the import report;
-FL Studio Mobile channels keep LYNX's synth substitute with a note saying why; ReWired and Fruity Video Player channels
-(no sound of their own) are imported muted, with the note.
+FL Studio Mobile channels keep LYNX's synth substitute with a note saying why; ReWired channels (no sound
+of their own) are imported muted, with the note (Fruity Video Player: §7 since batch 2).
 
 ## 6. Left for a next round (groundwork)
 - Transmitter [DATA 34 presets, tmp scratch tr.py]: state = i32 version 3 + 47 ints. Ints 1–33 are controls 0…10000
@@ -71,3 +76,32 @@ FL Studio Mobile channels keep LYNX's synth substitute with a note saying why; R
   DVS timecode decoder; the scratch DSP is in the 4 MB Delphi DLL. An FL render exists (D:\lynx-work\flplugins165\r\m_ref.wav).
 - Fruity Video Player: a video window synced to the song; plan = decode with the user's ffmpeg (ui/VisualEditors.cpp
   findFfmpeg) through a reading pipe, frames shown by song time. Not started.
+
+## 7. Fruity Video Player [DECOMP Fruity Video Player_x64.dll][DATA Default.fst]
+What FL's plugin is (DFM forms + handlers): a generator that shows a video and plays its sound track, slaved to the
+song position by default. Controls: the video position slider (left/right keys = previous / next frame), Load, the
+options menu, Start / End time labels (click = go to, right click = set), Mute and the Volume wheel (0…127, default
+100), set start / end from the current position, Loop, Play / pause, Stop, "Slave playback to host", the current time
+(right click = type it). Options menu: Enable audio, Dock control panel, Ignore tempo changes, Keep aspect ratio, Time
+display (H:M:S:Ms and 14 SMPTE rates, menu tags = the saved index), Send audio to playlist, Delay playback (Set… /
+"Delay playback until that time"). The video window can be detached, full screen, stay on top.
+- State (SaveRestoreState 0x72d9b0, VMT slot 3 of the class CreatePlugInstance 0x72c8a0 builds): int version 3;
+  int flags — bit 0 Loop (+0x14c, LoopBtnClick 0x7298f0), bit 1 Keep aspect ratio (+0x204, mnuKeepAspectRatioClick
+  0x727d90), bits 2–3 the player's own transport (+0x14d), bit 4 Enable audio (+0x14e, mnuEnableAudioClick 0x727d30;
+  bits 4|5 when read), bit 6 Ignore tempo changes (+0x209, 0x727dc0), bit 7 Slave playback to host (+0x20a,
+  SyncBtnClick 0x729360; on for states before version 3), bit 8 Dock control panel (form +0x77a, 0x727cd0); int time
+  display (+0x1cc; 0 H:M:S:Ms, 1 23.976, 2 24, 3 25, 4 29.97 drop, 5 30, 6 Auto, 7 29.97, 8 48, 9 50, 10 59.94 drop,
+  11 59.94, 12 60, 13 72, 14 120 — the doubles at 0x72c4c0…); int count 3 + the parameters Volume, Mute, Play
+  (+0x1f8); the path (FUN_0071b530: a byte length, 0xFF + int when ≥ 255, UTF-16; through the host's path converter,
+  host calls 0x1c / 0xe); two ints (+0x124 / +0x128, the window size); with a path the start and end times (int64,
+  100 ns: 10⁷ per second at 0x72c4c0). Default.fst: flags 0x92, Volume 100, size 375 × 0. The delay (form +0x770) is
+  not in FL's state.
+- The time display (0x72bb50): "H:MM:SS:mmm", or the SMPTE frame count at the mode's rate.
+- LYNX (core/VideoPlayer, ui/VideoPlayerView): FL's state as is (+ "LYNXvp1" and the delay after FL's fields, where
+  FL's reader stops); the instrument plays the sound track (decoded once by the user's ffmpeg to 48 kHz stereo, in the
+  background; while exporting, before the render) at the video's time; the editor shows the frames ffmpeg decodes at
+  the shown size (one process per stretch of playback, one frame when stopped), FL's controls and menu, a detached
+  window (double-click: full screen), file drop, "Send audio to playlist" (the track as a WAV audio clip at the
+  delay). Clock [HYP, FL's exact rule not traced]: slaved and following the tempo, video time = the song's beats at the
+  song tempo; with Ignore tempo changes, the song's real time. .flp import: the channel becomes a Video Player (no
+  longer a muted stand-in). Patcher: Add plugin › Visual.
