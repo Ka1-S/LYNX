@@ -1077,25 +1077,28 @@ namespace
 // round 123's slow conductance kept ≈ 0.8 dB for many seconds. Each conductance releases as dC/dt = −a Cⁿ − b C.
 // round 165x: the fast cell's attack is part of the law — round 123's log-domain approach (tau / (1 + C)^beta), or the
 // measured one: a linear-domain approach (tau / (1 + C)^beta) whose rise is limited to rate · (1 + C)^rateBeta per ms,
-// and the fast cell's drive capped at ctMax; the slow cell takes its own cap (ctMaxSlow) through a low-pass (slowLpMs), so
+// and the fast cell's drive capped at ctMax; the slow cell takes its own cap (ctMaxSlow), in Limit through a low-pass (slowLpMs), so
 // Limit's steep cell still builds the deep slow reduction of round 152a's stairs without slamming the onset
 struct ReleaseLaw
 {
     double a, n, share, slowAttackMs, a2, n2, b, b2;
     double attackTauMs = attackMs, attackPow = attackBeta, rate = 0.0, ratePow = 0.0, ctMax = 0.0, ctMaxSlow = 0.0, slowLpMs = 0.0; // rate 0: round 123's
+    bool linearAttack = false;
 };
 constexpr ReleaseLaw release123 { releaseA, releaseN, slowShare, attackSlowMs, releaseA2, releaseN2, 0.0, 0.0 };
 // fitted (glowfit, Nelder-Mead on 18 trajectories, 10 ms windows, the first 3 s of each recovery weighted ×10): rms 0.61 →
 // 0.24 dB overall, the recovery 0.03 … 0.15 dB rms (round 123: 0.08 … 0.84); held out, round 152's 0.5 s stairs (falling
 // half, Compress 46 / 62.6 / 80): 0.52 / 0.76 / 0.65 → 0.35 / 0.39 / 0.45 dB
 // round 165x [EXEC] (REA_rodada165x §1): the attack fitted (attfit, Nelder-Mead, 1 ms windows of the first 100 ms of
-// 30 onsets: 1 kHz bursts 0 / −6 / −12 / −24 dBFS and a −12 → 0 dBFS step, Compress and Limit at 46 / 62.6 / 80, with
-// round 152a's Limit stairs kept in the cost). The
-// trial lets the transient through: its gain falls ≈ 2 dB per ms whatever the drive (−0.9 / −2.9 / −4.8 / −7.9 / −13 dB
-// at 0 / 1 / 2 / 4 / 10 ms in Limit 80); the round-123 attack clamped Limit within the first millisecond. First 50 ms
-// rms 4.15 → 1.29 dB (worst onset 27 → 4.6 dB)
+// 30 onsets: 1 kHz bursts 0 / −6 / −12 / −24 dBFS and a −12 → 0 dBFS step, Compress and Limit at 46 / 62.6 / 80), then
+// checked against round 165w's recoveries and round 152a's Limit stairs. The trial lets the transient through: its gain
+// falls ≈ 2 dB per ms whatever the drive (−0.9 / −2.9 / −4.8 / −7.9 / −13 dB at 0 / 1 / 2 / 4 / 10 ms in Limit 80); the
+// round-123 attack clamped Limit within the first millisecond. The slow cell's drive is capped (ctMaxSlow); in Limit it
+// is also smoothed (slowLpMs: the steep cell's rectified drive, averaged, builds the stairs' deep slow reduction —
+// in Compress the smoothing would deepen the recovery after loud bursts). First 50 ms of the 30 onsets: rms
+// 2.36 → 0.91 dB overall (Limit 80 at 0 dBFS: 14.8 → 2.2 dB)
 constexpr ReleaseLaw release165 { 3.77134, 1.8446, 0.626219, 4622.87, 8.63099, 3.36638, 4.51261, 0.337878,
-                                  66.76061, 1.484398, 0.2006814, 0.3369957, 45.57088, 721.7064, 48.29348 };
+                                  66.76061, 1.484398, 0.2006814, 0.3369957, 45.57088, 250.0, 48.29348, true };
 } // namespace
 
 void Leveler::prepare (double sampleRate) noexcept
@@ -1132,7 +1135,7 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
     const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb + (s.measured && s.autoMakeup ? autoMakeupDb (s.peakReduction) - autoMakeupDb (s.makeupRef) : 0.0));
     const auto& rl = s.measuredRelease ? release165 : release123;
     const double cA = 1.0 - std::exp (-dt * 1000.0 / rl.slowAttackMs), mUp = 1.0 - std::exp (-dt * 1000.0 / memUpMs), mDn = 1.0 - std::exp (-dt * 1000.0 / memDownMs);
-    const double slowLp = rl.slowLpMs > 0.0 ? 1.0 - std::exp (-dt * 1000.0 / rl.slowLpMs) : 1.0;
+    const double slowLp = rl.slowLpMs > 0.0 && ml ? 1.0 - std::exp (-dt * 1000.0 / rl.slowLpMs) : 1.0; // (Limit only)
     const double K = 2.0 * sr;
     // the idle response measured at 48 kHz; other rates take its bilinear analog prototype (approximate)
     const double* tb = idleB;
@@ -1152,8 +1155,16 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
         const double cts = ctl;
         if (ctf > cf && rl.rate > 0.0)
         {
-            // round 165x: the measured attack (linear approach, rate-limited rise)
-            const double up = cf + (ctf - cf) * (1.0 - std::exp (-dt * 1000.0 * std::pow (1.0 + cf, rl.attackPow) / rl.attackTauMs));
+            // round 165x: the measured attack (round 123's log-domain approach, or a linear one; the rise rate-limited)
+            double up;
+            if (rl.linearAttack)
+                up = cf + (ctf - cf) * (1.0 - std::exp (-dt * 1000.0 * std::pow (1.0 + cf, rl.attackPow) / rl.attackTauMs));
+            else
+            {
+                double cd = std::log1p (cf);
+                cd += (std::log1p (ctf) - cd) * (1.0 - std::exp (-dt * 1000.0 * std::pow (1.0 + cf, rl.attackPow) / rl.attackTauMs));
+                up = std::expm1 (cd);
+            }
             cf = std::min (up, cf + rl.rate * dt * 1000.0 * std::pow (1.0 + cf, rl.ratePow));
         }
         else if (ctf > cf)

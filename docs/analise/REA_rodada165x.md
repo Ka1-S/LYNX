@@ -33,7 +33,23 @@ rate · (1 + C)^rateBeta per ms, and its drive is capped (ctMax). The slow cell 
 low-pass (slowLpMs). Without that, the fast cell's cap also starved the slow cell and broke round 152a's Limit stairs
 (Limit 62.6 at −6 / 0 dBFS: −11.9 / −16.5 dB against the trial's −13.7 / −19.6).
 
-@@ATTACK@@
+After the 2nd BSOD the fit was re-checked against every earlier measurement (`glow/evtest.py`: the test points of round
+165w's recoveries, round 152a's Limit stairs and the onsets above, on `attfit` dumps; attfit reproduces LYNX's numbers
+to 0.01 dB). One slow-cell law could not hold both: the smoothed drive that builds Limit's deep stairs (−19.6 dB at
+0 dBFS, PR 62.6) also deepened Compress 46's recovery after a 2 s burst by 0.7 dB. The trial does both, so the smoothing
+applies in Limit only; the slow drive is capped at 250 in both modes.
+
+| First 50 ms, 1 ms windows (rms / worst onset dB) | Round 123's attack | Measured (165x) |
+|---|---|---|
+| All 30 onsets + stairs + recoveries (mean rms) | 2.36 | 0.91 |
+| Limit 80, 0 dBFS | 6.76 / 14.8 | 1.94 / 2.4 |
+| Limit 62.6, 0 dBFS | 5.84 / 12.7 | 1.40 / 2.1 |
+| Compress 80, 0 dBFS | 3.60 / 7.9 | 1.27 / 1.3 |
+| Compress 46, 0 dBFS | 0.25 / 0.5 | 0.49 / 1.1 |
+
+Compress 46 (the factory setting) was already right with round 123's attack and is now within 1.1 dB; every Limit
+and every loud Compress onset is much closer. The trial's first millisecond still reduces ≈ 0.8 dB more than LYNX's
+(−0.9 against −0.0 in Limit 80): no rate law fitted both that and the 2 dB per ms that follows.
 
 ## 2. Glow Leveler ← CLA-2A: Auto Makeup's reference
 
@@ -68,7 +84,10 @@ LYNX: appended **Range law** (Old ranges | Extended; new instances Extended, old
 **Link only side** (Mid only | Side only). Extended: levels −∞ … +36 dB, high-pass to 20 kHz, the link's
 above-100 % half; the classic voicing keeps the old law. The Pro-DS translator reads all of them from the state.
 
-@@PDS@@
+Link matrices (`pds/lk.py`: a tone in one channel, the gain on both, mid and side modes at 0 / 50 / 100 / 125 / 150 /
+200 %): LYNX within 0.014 of the trial. The editor's STEREO LINK knob now runs 0 … 200 % as the trial's does: one knob
+over Stereo link (first half) and Link only (second half), its value "100 %, 40 % mid only"; the Mid | Side switch
+under it picks the upper half's signal (the Old ranges keep round 128's MID button).
 
 ## 4. maxEffectParams 160 → 192
 
@@ -79,6 +98,12 @@ the preset text format.
 ## 5. Ember Classic footer hint
 
 The Classic panel's footer now shows its own hint (the five Classic styles), with pt-BR text.
+
+## 5b. Glow's VU display is saved
+
+[EXEC] `glow/m4.txt`: the trial's VU DISPLAY knob is stored in its state (RealWorld 17: 0 In, 1 GR, 2 Out). LYNX kept
+the selector in the editor only; it is now an appended parameter **VU display** (0 gain reduction — the default, as
+before —, 0.5 input, 1 output), saved with the project and translated from CLA-2A states.
 
 ## 6. Tests
 
