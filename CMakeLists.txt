@@ -89,6 +89,7 @@ add_library(lynx_core STATIC
     src/core/FreqShifterFl.cpp
     src/core/LowLifterFl.cpp
     src/core/VisualFx.cpp
+    src/core/FlExtraFx.cpp
     src/core/FruityDance.cpp
     src/core/Reeverb2.cpp
     src/core/LuxeVerb.cpp
@@ -322,6 +323,7 @@ if(LYNX_BUILD_APP)
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
         src/ui/VisualEditors.cpp
+        src/ui/FlExtraEditors.cpp
         src/ui/VisualGl.cpp
         src/ui/DanceView.cpp
         src/ui/NewtoneEditor.cpp

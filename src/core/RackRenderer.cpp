@@ -1807,7 +1807,8 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             && slots[i].kind != EffectKind::xyController && slots[i].kind != EffectKind::xyzController
             && slots[i].kind != EffectKind::controlSurface
             // round 164c: a visual plugin keeps recording silence (its display falls, the video export stays in time)
-            && slots[i].kind != EffectKind::waveCandy && slots[i].kind != EffectKind::visualizer)
+            && slots[i].kind != EffectKind::waveCandy && slots[i].kind != EffectKind::visualizer
+            && slots[i].kind != EffectKind::tuner) // (round 165g: the tuner's display follows the signal into silence)
         {
             auto& sd = smartDisable[key];
 
