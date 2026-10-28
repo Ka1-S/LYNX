@@ -132,15 +132,79 @@ void expandPattern (Pattern& pattern, int beatsPerBar)
     if (! pattern.loopOn)
         return;
     const auto patternLength = pattern.effectiveLength (beatsPerBar);
-    std::vector<int> channels;
+    // one pass: each channel's last tick, then its loop length (O(notes), not O(channels × notes); the engine
+    // snapshot runs this on every edit)
+    int maxChannel = -1;
     for (const auto& n : pattern.notes)
-        if (std::find (channels.begin(), channels.end(), n.channel) == channels.end())
-            channels.push_back (n.channel);
-    std::vector<std::pair<int, std::int64_t>> lengths;
-    for (auto c : channels)
-        lengths.emplace_back (c, loopLength (pattern, c, effectiveSetting (pattern, c), patternLength, beatsPerBar));
-    for (const auto& [c, length] : lengths)
-        expandChannel (pattern, c, length, patternLength);
+        maxChannel = std::max (maxChannel, n.channel);
+    if (maxChannel < 0)
+    {
+        pattern.loopOn = false;
+        return;
+    }
+    std::vector<std::int64_t> last ((std::size_t) maxChannel + 1, -1);
+    std::vector<char> present ((std::size_t) maxChannel + 1, 0), notStep ((std::size_t) maxChannel + 1, 0);
+    for (const auto& n : pattern.notes)
+    {
+        if (n.channel < 0)
+            continue;
+        present[(std::size_t) n.channel] = 1;
+        if (n.start % ticksPerStep != 0 || n.length > ticksPerStep || n.key != 60 || n.slide || n.porta) // as isStepChannel
+            notStep[(std::size_t) n.channel] = 1;
+        if (! n.muted)
+            last[(std::size_t) n.channel] = std::max (last[(std::size_t) n.channel], n.start + std::max<std::int64_t> (n.length - 1, 0));
+    }
+    std::vector<std::int64_t> length ((std::size_t) maxChannel + 1, 0);
+    bool any = false;
+    for (int c = 0; c <= maxChannel; ++c)
+    {
+        if (! present[(std::size_t) c])
+            continue;
+        const auto* entry = findEntry (pattern, c);
+        const auto setting = entry != nullptr ? entry->setting
+                           : pattern.loopMode == RackLoopMode::all || (pattern.loopMode == RackLoopMode::steps && ! notStep[(std::size_t) c])
+                               ? (int) ChannelLoop::nextBar
+                               : (int) ChannelLoop::dontLoop; // = effectiveSetting
+        std::int64_t l = 0;
+        if (setting != ChannelLoop::dontLoop && patternLength > 0)
+        {
+            l = setting > 0 ? (std::int64_t) setting * ticksPerStep : boundaryAfter (last[(std::size_t) c], setting, beatsPerBar);
+            l = std::min (l, patternLength);
+            if (l <= 0)
+                l = patternLength;
+        }
+        if (l > 0 && l < patternLength)
+        {
+            length[(std::size_t) c] = l;
+            any = true;
+        }
+    }
+    if (any)
+    {
+        std::vector<Note> out;
+        out.reserve (pattern.notes.size() * 2);
+        for (const auto& n : pattern.notes)
+        {
+            const auto l = n.channel >= 0 ? length[(std::size_t) n.channel] : 0;
+            if (l <= 0)
+            {
+                out.push_back (n);
+                continue;
+            }
+            if (n.start >= l) // FL plays only the notes before the loop point (FUN_01064140)
+                continue;
+            for (std::int64_t offset = 0; n.start + offset < patternLength; offset += l)
+            {
+                auto copy = n;
+                copy.start += offset;
+                if (offset > 0)
+                    copy.length = std::min (copy.length, patternLength - copy.start);
+                out.push_back (copy);
+            }
+        }
+        pattern.notes = std::move (out);
+        pattern.sortNotes();
+    }
     if (pattern.lengthTicks <= 0)
         pattern.lengthTicks = patternLength; // the repeats never make an automatic length longer
     pattern.loopOn = false;
