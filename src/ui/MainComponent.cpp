@@ -2106,14 +2106,14 @@ void MainComponent::dumpScoreLog (int minutes)
         return;
     }
 
-    auto options = juce::MessageBoxOptions()
+    auto box = juce::MessageBoxOptions()
                        .withIconType (juce::MessageBoxIconType::QuestionIcon)
                        .withTitle (tr ("Score logger"))
                        .withMessage (tr ("The current pattern isn't empty. Do you want the score log to be merged, or to replace the current content?"))
                        .withButton (tr ("Merge"))
                        .withButton (tr ("Replace"))
                        .withButton (tr ("Cancel"));
-    juce::AlertWindow::showAsync (options, [apply, notes] (int result) mutable {
+    juce::AlertWindow::showAsync (box, [apply, notes] (int result) mutable {
         if (result == 1 || result == 2)
             apply (std::move (notes), result == 2);
     });
