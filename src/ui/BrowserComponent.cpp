@@ -1,4 +1,5 @@
 #include "ui/PluginPresetMenu.h"
+#include "ui/QuickPick.h"
 #include "ui/BrowserComponent.h"
 #include "ui/UiTrace.h"
 
@@ -327,6 +328,8 @@ public:
         // kind == plugin: what it adds (one of them), also when it is dragged (round 162)
         std::function<std::optional<ChannelDef>()> generator;
         std::function<std::optional<EffectSlot>()> effect;
+        std::string pluginKey;  // kind == plugin: what a user name is stored under (ui/QuickPick.h, issue #11)
+        juce::String original;  // kind == plugin: the name before the user renamed it
     };
 
     // tree mode: the given top-level nodes
@@ -407,74 +410,36 @@ public:
                     safe->onAddEffect (std::move (*fx));
             };
         };
-        const auto bpm = browser.engine.getSong().bpm;
-        const auto& fl = flStudioAccess();
-        auto types = browser.engine.getPluginHost().getKnownPlugins().getTypes();
-        std::sort (types.begin(), types.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });
+        // the entries (ui/QuickPick.h), each under the name the user gave it (issue #11: FL's renamed plugins, "1_EQ"),
+        // sorted by that name in each folder
+        auto& engine = browser.engine;
+        auto named = [&engine] (const std::string& key, const juce::String& label) { return quickpick::shownName (engine, key, label); };
+        auto byLabel = [] (Node& folderNode) {
+            std::stable_sort (folderNode.children.begin(), folderNode.children.end(),
+                              [] (const auto& a, const auto& b) { return a->label.compareNatural (b->label) < 0; });
+        };
 
         // Generators
         {
             auto gens = folder (root.get(), tr ("Generators"), Icon::keyboard);
             auto lynxGens = folder (gens.get(), "LYNX", Icon::folder);
-            const std::pair<InstrumentKind, const char*> builtIn[] = { { InstrumentKind::synth, TR_NOOP ("Synth") }, { InstrumentKind::kick, TR_NOOP ("Kick") },
-                                                                       { InstrumentKind::snare, TR_NOOP ("Snare") }, { InstrumentKind::hat, TR_NOOP ("Hat") },
-                                                                       { InstrumentKind::clap, TR_NOOP ("Clap") } };
-            for (const auto& [kind, name] : builtIn)
-                generatorEntry (*lynxGens, tr (name), tr ("built-in"), Icon::keyboard, [kind = kind, english = std::string (name)] {
-                    ChannelDef c;
-                    c.name = english;
-                    c.instrument = kind;
-                    return std::optional<ChannelDef> (c);
-                });
-            // FL's Layer and Dashboard (round 164)
-            generatorEntry (*lynxGens, tr ("Layer"), tr ("built-in"), Icon::keyboard, [] {
-                ChannelDef c;
-                c.name = "Layer";
-                c.instrument = InstrumentKind::layer;
-                return std::optional<ChannelDef> (c);
-            });
-            generatorEntry (*lynxGens, "Dashboard", tr ("built-in"), Icon::keyboard, [] {
-                ChannelDef c;
-                c.name = "Dashboard";
-                c.instrument = InstrumentKind::dashboard;
-                c.patcher.surface = surface::starterControls();
-                return std::optional<ChannelDef> (c);
-            });
-            generatorEntry (*lynxGens, "Voltage Controller", tr ("built-in"), Icon::keyboard, [] {
-                ChannelDef c;
-                c.name = "Voltage Controller";
-                c.instrument = InstrumentKind::voltage;
-                c.pluginState = voltage::write (voltage::Settings {});
-                return std::optional<ChannelDef> (c);
-            });
             auto flGens = folder (gens.get(), tr ("FL engines"), Icon::folder);
-            for (const auto& e : natives::instrumentEngines())
-                if (natives::available (e, fl))
-                    generatorEntry (*flGens, flEngineName (e), tr ("built-in FL engine"), Icon::keyboard,
-                                    [kind = e.kind] { return std::optional<ChannelDef> (natives::makeChannel (kind, flStudioAccess())); });
             // FL's VFX note processors (round 164b): channels with no sound, they play other channels / Patcher nodes
             auto vfxGens = folder (gens.get(), tr ("VFX (note effects)"), Icon::folder);
-            for (const auto kind : vfx::allKinds)
-                generatorEntry (*vfxGens, vfx::flName (kind), tr ("built-in"), Icon::keyboard, [kind] {
-                    ChannelDef c;
-                    vfx::makeChannel (c, kind);
-                    return std::optional<ChannelDef> (c);
-                });
             auto installed = folder (gens.get(), tr ("Installed"), Icon::folder);
-            for (const auto& t : types)
-                if (t.isInstrument)
-                    generatorEntry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
-                                    [id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
-                                        ChannelDef c;
-                                        c.name = name;
-                                        c.instrument = InstrumentKind::plugin;
-                                        c.plugin.id = id;
-                                        c.plugin.name = name;
-                                        return std::optional<ChannelDef> (c);
-                                    });
+            Node* folders[] = { lynxGens.get(), flGens.get(), vfxGens.get(), installed.get() };
+            for (auto& e : quickpick::generatorEntries (engine))
+            {
+                generatorEntry (*folders[juce::jlimit (0, 3, e.folder)], named (e.key, e.label), e.detail, e.folder == 3 ? Icon::plugin : Icon::keyboard, e.make);
+                folders[juce::jlimit (0, 3, e.folder)]->children.back()->pluginKey = e.key;
+                folders[juce::jlimit (0, 3, e.folder)]->children.back()->original = e.label;
+            }
             for (auto* f : { &lynxGens, &flGens, &vfxGens, &installed })
                 if (! (*f)->children.empty())
+                {
+                    byLabel (**f);
                     gens->children.push_back (std::move (*f));
+                }
             root->children.push_back (std::move (gens));
         }
         // Effects
@@ -482,27 +447,21 @@ public:
             auto fxs = folder (root.get(), tr ("Effects"), Icon::mixer);
             auto lynxFx = folder (fxs.get(), "LYNX", Icon::folder);
             auto flFx = folder (fxs.get(), tr ("FL engines"), Icon::folder);
-            for (const auto kind : addableEffects())
-                if (addableEffectAvailable (kind))
-                {
-                    const auto flEngine = natives::effectEngine (kind) != nullptr;
-                    effectEntry (flEngine ? *flFx : *lynxFx, addableEffectName (kind), flEngine ? tr ("built-in FL engine") : tr ("built-in"), Icon::mixer,
-                                 [kind, bpm] { return std::optional<EffectSlot> (newAddableEffect (kind, bpm)); });
-                }
             auto installed = folder (fxs.get(), tr ("Installed"), Icon::folder);
-            for (const auto& t : types)
-                if (! t.isInstrument)
-                    effectEntry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
-                                 [id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
-                                     EffectSlot fx;
-                                     fx.kind = EffectKind::plugin;
-                                     fx.plugin.id = id;
-                                     fx.plugin.name = name;
-                                     return std::optional<EffectSlot> (fx);
-                                 });
+            Node* folders[] = { lynxFx.get(), flFx.get(), installed.get(), installed.get() };
+            for (auto& e : quickpick::effectEntries (engine))
+            {
+                auto* target = folders[juce::jlimit (0, 3, e.folder)];
+                effectEntry (*target, named (e.key, e.label), e.detail, e.folder == 3 ? Icon::plugin : Icon::mixer, e.make);
+                target->children.back()->pluginKey = e.key;
+                target->children.back()->original = e.label;
+            }
             for (auto* f : { &lynxFx, &flFx, &installed })
                 if (! (*f)->children.empty())
+                {
+                    byLabel (**f);
                     fxs->children.push_back (std::move (*f));
+                }
             root->children.push_back (std::move (fxs));
         }
         // (the counts, dimmed after each folder)
@@ -1095,6 +1054,15 @@ public:
         return -1;
     }
 
+    // the first row labelled `label`, or -1
+    int rowLabelled (const juce::String& label) const
+    {
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(std::size_t) i]->label == label)
+                return i;
+        return -1;
+    }
+
     // for snapshots: opens these project sections; returns the first row of a sample item
     int openProjectSections (std::initializer_list<Category> open)
     {
@@ -1447,6 +1415,28 @@ private:
         return h;
     }
 
+public:
+    void renamePlugin (const std::string& key, const juce::String& original)
+    {
+        auto safe = juce::Component::SafePointer<FileTree> (this);
+        quickpick::rename (browser.engine, key, original, [safe] {
+            if (safe != nullptr)
+                safe->browser.rebuildTree();
+        });
+    }
+
+    bool renameSelectedPlugin()
+    {
+        if (! juce::isPositiveAndBelow (selected, (int) rows.size()))
+            return false;
+        const auto& n = *rows[(std::size_t) selected];
+        if (n.kind != Kind::plugin || n.pluginKey.empty())
+            return false;
+        renamePlugin (n.pluginKey, n.original);
+        return true;
+    }
+
+private:
     void showMenu (Node& n)
     {
         auto& engine = browser.engine;
@@ -1473,6 +1463,21 @@ private:
                 if (act)
                     act();
             });
+            if (! n.pluginKey.empty()) // FL's renamed plugins (issue #11): "1_EQ" is then picked by typing 1 on an empty slot
+            {
+                menu.addSeparator();
+                menu.addItem (tr ("Rename...") + "\tF2", [safe, key = n.pluginKey, original = n.original] {
+                    if (safe != nullptr)
+                        safe->renamePlugin (key, original);
+                });
+                menu.addItem (tr ("Original name"), n.label != n.original, false, [safe, key = n.pluginKey] {
+                    if (safe != nullptr)
+                    {
+                        safe->browser.engine.getPluginHost().setPluginName (key, {});
+                        safe->browser.rebuildTree();
+                    }
+                });
+            }
             menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
             return;
         }
@@ -3090,6 +3095,21 @@ void BrowserComponent::showPluginDatabaseForSnapshot()
     rebuildTree();
 }
 
+void BrowserComponent::showPluginDatabase()
+{
+    const auto db = tr ("Plugin database");
+    openPluginFolders.insert (db);
+    openPluginFolders.insert (db + "/" + tr ("Generators"));
+    openPluginFolders.insert (db + "/" + tr ("Effects"));
+    setTab (allTab);
+    rebuildTree();
+    if (const auto row = tree->rowLabelled (db); row >= 0)
+    {
+        tree->select (row, false);
+        tree->grabKeyboardFocus();
+    }
+}
+
 void BrowserComponent::showProjectForSnapshot()
 {
     setTab (projectTab);
@@ -3300,6 +3320,11 @@ juce::String BrowserComponent::searchIndexStatus() const
     else if (st.checkedAt > 0)
         text << " (" << tr ("checked at {0}", { juce::Time (st.checkedAt).formatted ("%H:%M") }) << ")";
     return text;
+}
+
+bool BrowserComponent::renameSelectedPlugin()
+{
+    return activeList().renameSelectedPlugin();
 }
 
 void BrowserComponent::stopPreview()

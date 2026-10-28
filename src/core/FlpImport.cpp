@@ -1484,7 +1484,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 if (harmorStateUsable (c.pluginState))
                 {
                     def.instrument = InstrumentKind::harmor;
-                    def.pluginState = c.pluginState;
+                    // an old (version 11…15) state is stored in the current layout, as FL re-saves it (REA_rodada165g-flbeta165s §1)
+                    def.pluginState = harmorUpgradeState (c.pluginState).value_or (c.pluginState);
                     adoptedFromPlugin = true;
                     // rack compressor: Harmor's own preset System\Compression\<n>.fst from the user's installation
                     // (REA_rodada38); its Maximus state goes into modelParams (size, bytes…)

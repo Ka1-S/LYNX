@@ -399,7 +399,32 @@ int PlaylistComponent::heightOf (int track) const
     if (noteedit::isFoldedAway (engine.getSong(), track))
         return foldedHeight;
     const auto h = track >= 0 && track < (int) tracks.size() ? tracks[(std::size_t) track].height : 0;
-    return h > 0 ? polish::clampTrackHeight (h) : trackHeight;
+    return scaledHeight (h > 0 ? polish::clampTrackHeight (h) : trackHeight);
+}
+
+juce::Rectangle<int> PlaylistComponent::trackZoomHandle() const
+{
+    // the corner above the vertical scroll bar, beside the overview and the ruler (where FL keeps it)
+    return { getWidth() - scrollBarSize, toolbarHeight, scrollBarSize, headerHeight - toolbarHeight };
+}
+
+void PlaylistComponent::setTrackZoom (double zoom, int anchorY)
+{
+    zoom = juce::jlimit (0.5, 4.0, zoom);
+    if (std::abs (zoom - trackZoom) < 1.0e-4)
+        return;
+
+    // the track under `anchorY` stays where it is
+    anchorY = juce::jlimit (headerHeight, juce::jmax (headerHeight, gridArea().getBottom() - 1), anchorY);
+    const auto track = yToTrack (anchorY);
+    const auto within = heightOf (track) > 0 ? (double) (anchorY - trackToY (track)) / heightOf (track) : 0.0;
+    trackZoom = zoom;
+    refreshTrackLayout();
+    const auto top = trackToY (track) + scrollY - headerHeight; // the track's top in the content
+    scrollY = juce::jmax (0, top + (int) std::lround (within * heightOf (track)) - (anchorY - headerHeight));
+    updateScrollBars();
+    repaint();
+    ui::postHint ({ tr ("Track height (vertical zoom)"), juce::String (juce::roundToInt (trackZoom * 100.0)) + "%", false, false });
 }
 
 void PlaylistComponent::refreshTrackLayout()
@@ -413,16 +438,16 @@ void PlaylistComponent::refreshTrackLayout()
 
 int PlaylistComponent::tracksHeight() const
 {
-    return trackTops.empty() ? numTracks() * trackHeight : trackTops.back();
+    return trackTops.empty() ? numTracks() * defaultRowHeight() : trackTops.back();
 }
 
 int PlaylistComponent::trackToY (int track) const
 {
     // past the cached rows (the list grew during a drag): default heights
     const auto last = (int) trackTops.size() - 1;
-    const auto top = trackTops.empty() ? track * trackHeight
+    const auto top = trackTops.empty() ? track * defaultRowHeight()
                      : track <= last   ? trackTops[(std::size_t) juce::jmax (0, track)]
-                                       : trackTops.back() + (track - last) * trackHeight;
+                                       : trackTops.back() + (track - last) * defaultRowHeight();
     return headerHeight + top - scrollY;
 }
 
@@ -431,7 +456,7 @@ int PlaylistComponent::yToTrack (int y) const
     const auto offset = y - headerHeight + scrollY;
 
     if (trackTops.size() < 2)
-        return juce::jlimit (0, numTracks() - 1, offset / trackHeight);
+        return juce::jlimit (0, numTracks() - 1, offset / defaultRowHeight());
 
     const auto it = std::upper_bound (trackTops.begin(), trackTops.end(), offset);
     const auto index = (int) (it - trackTops.begin()) - 1;
@@ -1063,6 +1088,19 @@ void PlaylistComponent::paint (juce::Graphics& g)
     g.fillRect (0, toolbarHeight - 1, getWidth(), 1);
     g.fillRect (0, headerHeight - 1, headerWidth, 1);
     g.fillRect (headerWidth - 1, toolbarHeight, 1, getHeight() - toolbarHeight);
+
+    // the vertical zoom handle above the scroll bar (FL's track height control): a grip of three lines
+    {
+        const auto r = trackZoomHandle().toFloat().reduced (1.0f, 2.0f);
+        const auto active = trackZoomHover || drag == Drag::trackZoom;
+        theme::fillRoundRect (g, r, theme::radius::sm, active ? colour::bg4 : colour::bg2);
+        g.setColour (active ? colour::accent : (std::abs (trackZoom - 1.0) > 1.0e-3 ? colour::textSecondary : colour::textDisabled));
+        const auto cx = r.getCentreX(), cy = r.getCentreY();
+        for (int i = -1; i <= 1; ++i)
+            g.fillRect (juce::Rectangle<float> (cx - 3.0f, cy + (float) i * 4.0f - 0.5f, 6.0f, 1.2f));
+        g.drawLine (cx, r.getY() + 2.0f, cx, cy - 6.0f, 1.0f);
+        g.drawLine (cx, cy + 6.0f, cx, r.getBottom() - 2.0f, 1.0f);
+    }
     uitrace::flushParts ("Playlist", trace.elapsedMs());
 }
 
@@ -1627,7 +1665,7 @@ void PlaylistComponent::setViewForSnapshot (double pixelsPerBar, int firstBar, i
     const auto bar = (double) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
     pixelsPerTick = pixelsPerBar / bar;
     scrollTicks = firstBar * bar;
-    scrollY = juce::jmax (0, firstTrack) * trackHeight;
+    scrollY = juce::jmax (0, firstTrack) * defaultRowHeight();
     updateScrollBars();
     repaint();
 }
@@ -1662,6 +1700,15 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         panStartTicks = scrollTicks;
         panStartY = scrollY;
         setMouseCursor (editorCursor (gesture::Cursor::pan));
+        return;
+    }
+
+    // the vertical zoom handle: drag up = taller tracks
+    if (trackZoomHandle().contains (e.getPosition()) && e.mods.isLeftButtonDown())
+    {
+        drag = Drag::trackZoom;
+        trackZoomStart = trackZoom;
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
         return;
     }
 
@@ -1852,15 +1899,28 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
-        // double right-click on a clip: the first click deleted it; bring it back muted (or unmuted)
-        if (e.getNumberOfClicks() >= 2 && lastClipEraseTime != 0 && lastClipErasePos.getDistanceFrom (e.getPosition()) < 6
-            && juce::Time::getMillisecondCounter() - lastClipEraseTime < 1000)
+        // FL: a double right-click is the Mute tool while the button stays down: on a clip the first click deleted
+        // it, so it comes back and toggles; dragging on mutes / unmutes every clip crossed (issue #11)
+        const auto now = juce::Time::getMillisecondCounter();
+        const auto doubleRight = lastRightClickTime != 0 && now - lastRightClickTime < 500 && lastRightClickPos.getDistanceFrom (e.getPosition()) < 6;
+        lastRightClickTime = doubleRight ? 0 : now;
+        lastRightClickPos = e.getPosition();
+        if (doubleRight)
         {
+            if (lastClipEraseTime != 0 && lastClipErasePos.getDistanceFrom (e.getPosition()) < 6 && now - lastClipEraseTime < 1000)
+                engine.undo(); // the clip the first click deleted
             lastClipEraseTime = 0;
-            engine.undo();
+            drag = Drag::muting;
+            touchedClips.clear();
+            muteTargetPending = true;
             bool r = false, l = false;
             if (const auto clip = clipAt (e.x, e.y, r, l); clip >= 0)
-                engine.editSong ([clip] (Song& s) { s.playlist[(std::size_t) clip].muted = ! s.playlist[(std::size_t) clip].muted; });
+            {
+                muteTarget = ! engine.getSong().playlist[(std::size_t) clip].muted;
+                muteTargetPending = false;
+                touchedClips.push_back (clip);
+                engine.editSong ([clip, m = muteTarget] (Song& s) { s.playlist[(std::size_t) clip].muted = m; });
+            }
             return;
         }
 
@@ -1935,6 +1995,7 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
             drag = Drag::muting;
             touchedClips.clear();
             muteTarget = true;
+            muteTargetPending = false;
             if (hit >= 0)
             {
                 muteTarget = ! engine.getSong().playlist[(std::size_t) hit].muted;
@@ -2131,9 +2192,16 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
 void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 {
+    if (drag == Drag::trackZoom)
+    {
+        setTrackZoom (trackZoomStart * std::pow (2.0, -e.getDistanceFromDragStartY() / 80.0), headerHeight);
+        return;
+    }
+
     if (drag == Drag::trackResize)
     {
-        const auto height = polish::clampTrackHeight (resizeStartHeight + e.getDistanceFromDragStartY());
+        // the size shown, kept at 100% zoom (the vertical zoom scales every track)
+        const auto height = polish::clampTrackHeight ((int) std::lround ((resizeStartHeight + e.getDistanceFromDragStartY()) / trackZoom));
         std::vector<int> tracks;
         if (resizeAll)
             for (int t = 0; t < numTracks(); ++t)
@@ -2141,10 +2209,10 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
         else
             tracks.push_back (resizeTrack);
 
-        if (heightOf (resizeTrack) != height)
+        if (heightOf (resizeTrack) != scaledHeight (height))
             setTrackHeights (tracks, height);
 
-        ui::postHint ({ resizeAll ? tr ("Resizing every track") : tr ("Resizing the track"), juce::String (height) + " px", false, false });
+        ui::postHint ({ resizeAll ? tr ("Resizing every track") : tr ("Resizing the track"), juce::String (scaledHeight (height)) + " px", false, false });
         return;
     }
 
@@ -2163,6 +2231,7 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
     {
         case Drag::none:
         case Drag::trackResize:
+        case Drag::trackZoom:
         case Drag::preview:
             return;
 
@@ -2337,6 +2406,11 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 
             if (hit >= 0 && std::find (touchedClips.begin(), touchedClips.end(), hit) == touchedClips.end())
             {
+                if (muteTargetPending) // started on empty space: the first clip crossed decides
+                {
+                    muteTarget = ! engine.getSong().playlist[(std::size_t) hit].muted;
+                    muteTargetPending = false;
+                }
                 touchedClips.push_back (hit);
                 engine.editSong ([hit, m = muteTarget] (Song& s) { s.playlist[(std::size_t) hit].muted = m; });
             }
@@ -2529,6 +2603,7 @@ void PlaylistComponent::postDragHint()
         case Drag::pan:
         case Drag::zoomRange:
         case Drag::trackResize:
+        case Drag::trackZoom:
         case Drag::preview:
         case Drag::none: return;
     }
@@ -2812,7 +2887,7 @@ juce::PopupMenu PlaylistComponent::buildTrackMenu (int track)
         for (int percent : { 33, 50, 100, 150, 200 })
         {
             const auto h = polish::clampTrackHeight ((int) std::lround (trackHeight * percent / 100.0));
-            size.addItem (juce::String (percent) + "%", true, current == h, [this, track, h] { setTrackHeights ({ track }, h); });
+            size.addItem (juce::String (percent) + "%", true, current == scaledHeight (h), [this, track, h] { setTrackHeights ({ track }, h); });
             all.addItem (juce::String (percent) + "%", [this, count, h] {
                 std::vector<int> tracks;
                 for (int t = 0; t < count; ++t)
@@ -3972,6 +4047,12 @@ void PlaylistComponent::updateHover (juce::Point<int> p, juce::ModifierKeys mods
         hover = h;
     }
 
+    if (const auto onZoom = trackZoomHandle().contains (p); onZoom != trackZoomHover)
+    {
+        trackZoomHover = onZoom;
+        repaint (trackZoomHandle());
+    }
+
     if (drag == Drag::none)
         updateCursor (mods);
 }
@@ -3981,7 +4062,7 @@ void PlaylistComponent::updateCursor (juce::ModifierKeys mods)
     const auto p = lastMouse;
     auto cursor = gesture::Cursor::normal;
 
-    if (hover.header && hover.divider >= 0)
+    if ((hover.header && hover.divider >= 0) || trackZoomHandle().contains (p))
     {
         setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
         return;
@@ -4011,6 +4092,13 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
                    ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) t].name.c_str())
                    : tr ("Track {0}", { juce::String (t + 1) });
     };
+
+    if (trackZoomHandle().contains (p))
+    {
+        hint.text = tr ("Track height (vertical zoom): [LMB] drag up / down  [Alt][Wheel] over the Playlist  [2xLMB] 100%");
+        hint.value = juce::String (juce::roundToInt (trackZoom * 100.0)) + "%";
+        return hint;
+    }
 
     if (h.header && h.divider >= 0)
     {
@@ -4076,6 +4164,12 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
 void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    if (trackZoomHandle().contains (e.getPosition())) // the vertical zoom handle: back to 100%
+    {
+        setTrackZoom (1.0, headerHeight);
+        return;
+    }
+
     // double-click a track divider: back to the default height
     if (const auto divider = dividerAt (e.getPosition()); divider >= 0)
     {
@@ -4306,6 +4400,13 @@ void PlaylistComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::M
         return;
     }
 
+    if (alt && ! shift) // Alt+wheel (and Ctrl+Alt+wheel, as in the Piano Roll) zooms vertically: the track heights, around the mouse
+    {
+        gliding = false;
+        setTrackZoom (trackZoom * gesture::wheelZoomFactor (wheel.deltaY, wheel.isSmooth), e.y);
+        return;
+    }
+
     if (ctrl)
     {
         gliding = false;
@@ -4324,7 +4425,7 @@ void PlaylistComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::M
         glideBy (gesture::wheelScrollPixels (wheel.deltaY, wheel.isSmooth, 120.0) / pixelsPerTick, 0.0);
     else
         glideBy (gesture::wheelScrollPixels (wheel.deltaX, wheel.isSmooth, 80.0) / pixelsPerTick,
-                 gesture::wheelScrollPixels (wheel.deltaY, wheel.isSmooth, 2.0 * trackHeight));
+                 gesture::wheelScrollPixels (wheel.deltaY, wheel.isSmooth, 2.0 * defaultRowHeight()));
 }
 
 void PlaylistComponent::scrollBarMoved (juce::ScrollBar* bar, double start)
