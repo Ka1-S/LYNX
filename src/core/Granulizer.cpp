@@ -7,6 +7,7 @@
 #include <cstring>
 #include <memory>
 
+#include "core/FlAutoSlicer.h"
 #include "core/FlVoiceProcessor.h"
 
 // Port of our round-67 reference model (r67/py/granmodel.py, REA_rodada67). The model emulates the DLL's float32
@@ -29,6 +30,9 @@ constexpr int stateSize = 4 + 48 + 12 + snapshotSize; // version 7: 428 bytes
 constexpr int maxVoices = 64;   // voice records per instance (FL: unlimited; the oldest is cut beyond this)
 constexpr int maxGrains = 48;   // grains per voice (the knobs' ranges allow about 20 at once)
 constexpr int defaultPoints = 12; // the library's default quality (0x79cda0 = 4 → 0x79c294[3]): "24-point sinc"
+// what FL's host sets with ProcessMode (Dispatcher 1, bits 8…23 → FUN_0060b020) when it renders: 16 points per side
+// ("32-point sinc") [EXEC FL: the DLL matches FL's renders of a 48 kHz sample only with 16, −76.6 dB; 12: −40.6 dB]
+constexpr int flPoints = 16;
 constexpr int maxPoints = 0x200;
 
 using flvp::bitsOf;
@@ -91,6 +95,10 @@ bool parse (const std::vector<std::uint8_t>& d, Params& out, std::vector<std::ui
         if (snapshot != nullptr && d.size() >= o + snapshotSize)
             snapshot->assign (d.begin() + (std::ptrdiff_t) o, d.begin() + (std::ptrdiff_t) (o + snapshotSize));
     }
+    // the editor's key-mode combo (0x758050, run on every state load): "slices" keys without a slice mode turn on auto
+    // slicing [DECOMP + EXEC: such a state plays the auto slices]
+    if (p.keyMode == 3 && p.sliceMode == 0)
+        p.sliceMode = 2;
     out = p;
     return true;
 }
@@ -270,12 +278,13 @@ struct Reader
     const Sample* s = nullptr;
     bool loop = false;
     std::int64_t a = 0, b = 0, la = 0, lb = 0, c0 = 0, c8 = 0, d0 = 0, d8 = 0;
-    int pts = defaultPoints, loops = 0;
+    int pts = defaultPoints, quality = defaultPoints, loops = 0;
     double pos = 0.0, speed = 1.0, wa = 0.0, wc = 0.0, cb = 0.0, cc = 0.0;
     bool copy = false;
 
-    void init (const Sample& smp, bool looped) noexcept
+    void init (const Sample& smp, bool looped, int points) noexcept
     {
+        quality = std::clamp (points, 1, maxPoints);
         s = &smp;
         loop = looped;
         const auto L = (std::int64_t) smp.n - 1;
@@ -287,8 +296,8 @@ struct Reader
         }
         else
             la = a, lb = b;
-        pts = defaultPoints, loops = 0;
-        setPoints (defaultPoints);
+        pts = quality, loops = 0;
+        setPoints (quality);
         pos = (double) a, speed = 1.0;
         cb = 3.141592653589793, cc = -2.0;
         bounds();
@@ -323,7 +332,7 @@ struct Reader
         else
             cb = 3.141592653589793 / sp, cc = std::cos (cb) * 2.0;
         auto p = (int) ((rnd (sp) + 3) & ~(std::int64_t) 3);
-        p = std::min (std::max (p, defaultPoints), maxPoints);
+        p = std::min (std::max (p, quality), maxPoints);
         if (p != pts)
         {
             setPoints (p);
@@ -471,7 +480,7 @@ struct Grain
 struct Voice
 {
     std::array<Grain, maxGrains> grains;
-    int nGrains = 0, count = 0, next = 0, elapsed = 0, key = 60;
+    int nGrains = 0, count = 0, next = 0, elapsed = 0, key = 60, slice = -1;
     float pos = 0, phase = 0, pofs = 0, ipitch = 0;
     bool done = false, looped = false, ended = false;
     float fpitch = 0, fpitchBase = 0, fvol = 1, fpan = 0;
@@ -529,12 +538,19 @@ public:
     // FUN_0060dbf0: ms → samples (double), stored as float
     float samplesMs (int ms) const noexcept { return (float) ((double) ms * (double) fs * (double) 0.001f); }
 
-    // FUN_00752290 (+ the laws of parameters 4, 5, 10)
+    // tempo sync (FUN_007524e0 → FUN_00752490): the state's sync byte is 1 and the host sent a beat count (Dispatcher
+    // 0x13: the channel's stretch time, else the sample's ACID beats, REA_rodada165g-flgran165 §2)
+    bool syncOn() const noexcept { return P.sync == 1 && beats > 0.0f && beatLen > 0; }
+
+    // FUN_00752290 (+ the laws of parameters 4, 5, 10); the beat length of FUN_00752520 first
     void update() noexcept
     {
         const auto& p = P.P;
+        const auto tempoF = (float) tempo;
+        beatLen = tempoF > 0.0f ? (int) rnd ((double) (((beats * 60.0f) * (float) fs) / tempoF)) : 0;
         A = samplesMs (msLaw (p[0]));
         H = samplesMs (msLaw (p[1]));
+        th = samplesMs (msLaw (p[11]));
         AH = A + H;
         auto gs = (AH * (float) pctLaw (p[2])) * 0.00390625f;
         if (5.0f > gs)
@@ -542,7 +558,16 @@ public:
         gsp = gs;
         loopFlag = p[8] > 0;
         ratio = smp.rate * (1.0 / (double) fs);
-        wsp = (float) ((double) (AH * (float) pctLaw (p[3])) * ratio * (double) 0.00390625f);
+        if (! syncOn())
+            wsp = (float) ((double) (AH * (float) pctLaw (p[3])) * ratio * (double) 0.00390625f);
+        else
+        {
+            // one pass over the sample per beat count: the wave spacing follows the grain spacing, the voice loops
+            wsp = (gsp * (float) ((std::int64_t) smp.le + 1)) / (float) beatLen;
+            loopFlag = true;
+        }
+        invAH = 1.0f / AH;
+        k18c = AH / (wsp <= 1.0f ? 1.0f : wsp);
         depth = (float) p[4] * 0.00390625f;
         rate5 = (float) (3.141592653589793 / (double) (0xcc - p[5]));
         start = smp.n > 0 ? (int) (((std::int64_t) p[10] * (std::int64_t) smp.le) / 0x1000) : 0;
@@ -584,12 +609,12 @@ public:
             ++slot;
         used[(std::size_t) slot] = true;
         auto& v = voices[(std::size_t) slot];
-        v.nGrains = 0, v.count = 0, v.next = 0, v.elapsed = 0, v.key = key;
+        v.nGrains = 0, v.count = 0, v.next = 0, v.elapsed = 0, v.key = key, v.slice = -1;
         v.pos = (float) start, v.phase = 0.0f, v.pofs = 0.0f, v.ipitch = initPitch;
         v.done = v.looped = v.ended = false;
         v.fpitch = v.fpitchBase = finalPitch, v.fvol = finalVol, v.fpan = finalPan;
         v.serial = ++serials;
-        if (P.keyMode >= 1) // key mapping (C5 = the start; the slice mode 3 needs slices: not modelled)
+        if (P.keyMode >= 1) // key mapping: C5 = the start, each key a step (mode 1: 1/24 of the sample, 2: a 16th, 3: a slice)
         {
             auto k = (int) rnd ((double) (v.ipitch * 0.01f)) - 60;
             v.pofs = (float) (k * -100);
@@ -598,7 +623,14 @@ public:
             if (P.keyMode == 1)
                 d = (double) (smp.le * k) / 24.0;
             else if (P.keyMode == 2)
-                d = (((double) k / 4.0) * 60.0 * smp.rate) / (double) (float) tempo; // (P+0x1a0: the tempo as a float)
+            {
+                if (beats <= 0.0f)
+                    d = (((double) k / 4.0) * 60.0 * smp.rate) / (double) (float) tempo; // (P+0x1a0: the tempo as a float)
+                else
+                    d = ((double) smp.le * ((double) k / 4.0)) / (double) beats; // the sample spans `beats` beats
+            }
+            else if (P.keyMode == 3 && nSl > 0)
+                d = (double) sl[(std::size_t) (k % nSl)];
             const auto p = rnd ((double) v.pos + d);
             v.pos = (float) (p % ((std::int64_t) smp.le + 1));
         }
@@ -623,7 +655,7 @@ public:
             return;
         auto& g = v.grains[(std::size_t) v.nGrains++];
         ++v.count;
-        g.r.init (smp, loopFlag && smp.ls >= 0);
+        g.r.init (smp, loopFlag && smp.ls >= 0, points);
         const auto p = (double) ipos;
         auto d = (double) g.r.a;
         if ((double) g.r.a <= p)
@@ -647,6 +679,41 @@ public:
             g.L = r, g.R = l;
     }
 
+    // Voice_Render's slice branch (0x75400e…0x754214): the grains line up with the slice starts. Where the voice will be
+    // after the attack (at the grain's speed), the next slice start ahead: a new slice holds its grain for the
+    // transient hold (cut so the grain ends at the slice), later grains of the same slice share out the distance left
+    // over their hold; `f14` scales the grain and wave spacing by the grain's length over A + H.
+    void sliceHold (Voice& v, float& hold, float& f14) noexcept
+    {
+        const auto cents = v.fpitch + v.pofs;
+        auto t = cents == 0.0f ? v.pos + A
+                               : (float) ((double) v.pos + (double) A * std::exp ((double) cents * (std::log (2.0) / 12.0 / 100.0)));
+        const auto at = (std::int64_t) (std::int32_t) rnd ((double) t - 0.5);
+        for (int i = 0; i < nSl; ++i)
+        {
+            if (sl[(std::size_t) i] < at)
+                continue;
+            auto d = (float) sl[(std::size_t) i] - t;
+            if (i == v.slice)
+            {
+                auto n = rnd ((double) (d / wsp));
+                const auto ni = n < 1 ? 1 : (int) n;
+                d = ((d - (float) ni * wsp) * k18c) / (float) ni;
+                hold = 0.0f < H + d ? H + d : 0.0f;
+            }
+            else
+            {
+                v.slice = i;
+                d = d * k18c;
+                hold = th;
+                if (d < A + th)
+                    hold = 0.0f < d - A ? d - A : 0.0f;
+            }
+            break;
+        }
+        f14 = (A + hold) * invAH;
+    }
+
     // FUN_00753ea0 (Voice_Render): grains into x (interleaved, cleared); true when the voice is finished
     bool voiceRender (Voice& v, float* x, int n) noexcept
     {
@@ -659,7 +726,7 @@ public:
             v.elapsed += n;
             while (v.next < v.elapsed)
             {
-                const auto f14 = 1.0f;
+                auto f14 = 1.0f, hold = H;
                 auto ip = (int) rnd ((double) v.pos);
                 if (! (p[6] < 1 || p[9] != 0 || (std::uint32_t) p[6] <= 0xffu - random (0x100)))
                 {
@@ -667,7 +734,9 @@ public:
                     while (smp.le < ip)
                         ip -= loopLen;
                 }
-                startGrain (v, ip, v.next - old, (int) rnd ((double) A), (int) rnd ((double) H));
+                else if (nSl > 0 && wsp > 0.0f)
+                    sliceHold (v, hold, f14);
+                startGrain (v, ip, v.next - old, (int) rnd ((double) A), (int) rnd ((double) hold));
                 if (v.next == 0 && v.pos == 0.0f && v.nGrains > 0)
                 {
                     auto& g = v.grains[0];
@@ -829,7 +898,12 @@ public:
     flvp::Settings S;
     std::array<std::uint8_t, snapshotSize> snap = flvp::defaultSnapshot();
     int fs = 44100, maxPoly = 0, start = 0, loopLen = 1;
-    float A = 0, H = 0, AH = 0, gsp = 5, wsp = 0, depth = 0, rate5 = 0;
+    float A = 0, H = 0, AH = 0, gsp = 5, wsp = 0, depth = 0, rate5 = 0, th = 0, invAH = 1, k18c = 1;
+    float beats = 0;  // the host's beat count (P+0x19c)
+    int beatLen = 0;  // samples of `beats` beats at the tempo (P+0x198)
+    const std::int64_t* sl = nullptr; // slice starts (the slicer object's list, ascending), owned by the caller
+    int nSl = 0;
+    int points = flPoints; // the sample reader's interpolation points per side
     double ratio = 1.0, tempo = 140.0;
     bool loopFlag = false, listed = false, tickPending = false;
     std::uint32_t seed = 0;
@@ -882,6 +956,30 @@ std::vector<std::uint8_t> granulizerNormalisedState (const std::vector<std::uint
     return out;
 }
 
+std::optional<int> granulizerMode (const std::vector<std::uint8_t>& state, int which)
+{
+    Params p;
+    if (! parseNormalised (state, p))
+        return std::nullopt;
+    switch (which)
+    {
+        case 0: return p.sliceMode;
+        case 1: return p.keyMode;
+        case 2: return p.sync == 1 ? 1 : 0;
+        default: return std::nullopt;
+    }
+}
+
+bool granulizerSetMode (std::vector<std::uint8_t>& state, int which, int value)
+{
+    Params p;
+    if (which < 0 || which > 2 || ! parseNormalised (state, p))
+        return false;
+    const int offset[] = { 52, 56, 60 }, high[] = { 2, 3, 1 };
+    putI32 (state.data() + offset[which], std::clamp (value, 0, high[which]));
+    return true;
+}
+
 int granulizerParamCount() noexcept { return paramCount; }
 
 std::pair<int, int> granulizerParamRange (int index) noexcept
@@ -917,7 +1015,18 @@ struct Setup
     std::array<std::uint8_t, snapshotSize> snap = flvp::defaultSnapshot();
     int ppq = 96;
     double tempo = 140.0;
+    float beats = 0.0f;
 };
+
+// What FL hands the plugin as the sample's beat count (Dispatcher 0x13): the WAV's ACID beats, else the channel's
+// time-stretch TIME in beats — without the MUL factor (the importer keeps TIME/192 for this engine) [FL render g11, g12,
+// g16: REA_rodada165g-flgran165 §3]
+float hostBeats (const ChannelDef& channel, const SampleData* sample) noexcept
+{
+    if (sample != nullptr && sample->acidBeats > 0.0f)
+        return sample->acidBeats;
+    return std::max (channel.sampler.stretchBeats, 0.0f);
+}
 
 class GranulizerInstrument final : public Instrument
 {
@@ -938,6 +1047,7 @@ public:
     void prepare (double sr) noexcept override
     {
         rate = sr;
+        engine.points = offlineRendering() ? flPoints : defaultPoints; // FL: 32-point sinc when it renders, 24 live
         take();
         engine.tempo = current.tempo;
         engine.init (current.P, sr, current.snap.data(), current.ppq, current.tempo);
@@ -953,16 +1063,18 @@ public:
         maxPoly.store (channel.synth.mono ? 1 : 0);
         const auto ppq = channel.modelParams.empty() ? 96 : std::clamp ((int) channel.modelParams[0], 1, 1 << 16);
         const auto tempo = bpm > 0.0 ? bpm : 140.0;
-        if (channel.pluginState == state && ppq == lastPpq && tempo == lastTempo)
+        const auto beats = hostBeats (channel, sample.get());
+        if (channel.pluginState == state && ppq == lastPpq && tempo == lastTempo && beats == lastBeats)
             return;
         Params p;
         if (! parseNormalised (channel.pluginState, p))
             return;
+        prepareSlices (p.sliceMode);
         auto s = std::make_unique<Setup>();
         s->P = p;
         std::memcpy (s->snap.data(), channel.pluginState.data() + 64, snapshotSize);
-        s->ppq = ppq, s->tempo = tempo;
-        state = channel.pluginState, lastPpq = ppq, lastTempo = tempo;
+        s->ppq = ppq, s->tempo = tempo, s->beats = beats;
+        state = channel.pluginState, lastPpq = ppq, lastTempo = tempo, lastBeats = beats;
         delete incoming.exchange (s.release());
     }
 
@@ -1050,6 +1162,33 @@ public:
     }
 
 private:
+    // The slice list of a slice mode (FUN_007548c0), built once per instrument before a Setup that uses it is published
+    // (the audio thread only reads it): 1 = the WAV's cue points / regions, 2 = FL's auto slicing
+    void prepareSlices (int mode)
+    {
+        if (sample == nullptr || sample->frames() == 0)
+            return;
+        if (mode == 1 && ! slicesReady[0])
+        {
+            slices[0] = sample->markerStarts;
+            slicesReady[0] = true;
+        }
+        else if (mode == 2 && ! slicesReady[1])
+        {
+            const auto* l = sample->leftData();
+            const auto* r = sample->rightData();
+            slices[1] = flslice::autoSlice (l, r == l ? nullptr : r, (std::int64_t) sample->frames(), sample->sampleRate);
+            slicesReady[1] = true;
+        }
+    }
+
+    void useSlices (int mode) noexcept
+    {
+        const auto* list = mode == 1 ? &slices[0] : mode == 2 ? &slices[1] : nullptr;
+        engine.sl = list != nullptr && ! list->empty() ? list->data() : nullptr;
+        engine.nSl = engine.sl != nullptr ? (int) std::min<std::size_t> (list->size(), 0x7fffffff) : 0;
+    }
+
     void renderImpl (float* left, float* right, int n) noexcept
     {
         const auto perSample = current.tempo * (double) current.ppq / (60.0 * rate);
@@ -1083,6 +1222,8 @@ private:
             current = *s;
             engine.P = current.P;
             engine.tempo = current.tempo;
+            engine.beats = current.beats;
+            useSlices (current.P.sliceMode);
             std::memcpy (engine.snap.data(), current.snap.data(), snapshotSize);
             engine.timing (current.ppq, current.tempo);
             engine.update();
@@ -1101,6 +1242,9 @@ private:
     std::vector<std::uint8_t> state;
     int lastPpq = -1;
     double lastTempo = -1.0;
+    float lastBeats = -1.0f;
+    std::array<std::vector<std::int64_t>, 2> slices; // written once each (configure), then read by the audio thread
+    std::array<bool, 2> slicesReady { false, false };
     std::array<float, blockSize> bufL {}, bufR {};
     std::array<float, maxVoices> volFactor {}, notePan {};
     double rate = 44100.0, channelVol = 1.0, channelPan = 0.0, tickPhase = 0.0, lastTicks = -1.0;
@@ -1124,6 +1268,13 @@ std::vector<float> renderReference (const std::vector<std::uint8_t>& state, cons
     auto engine = std::make_unique<Engine>();
     engine->smp = sampleOf (&sample);
     engine->tempo = opt.tempo;
+    engine->beats = opt.beats;
+    engine->points = opt.points;
+    if (P.sliceMode > 0 && ! opt.slices.empty())
+    {
+        engine->sl = opt.slices.data();
+        engine->nSl = (int) opt.slices.size();
+    }
     engine->init (P, sampleRate, state.data() + 64, opt.ppq, opt.tempo);
     engine->maxPoly = opt.maxPoly;
     engine->seed = opt.seed;

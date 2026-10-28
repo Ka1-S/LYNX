@@ -1,6 +1,8 @@
 #include "core/Pdc.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace lynx
 {
@@ -16,7 +18,14 @@ bool PdcPlan::any() const noexcept
     return false;
 }
 
-PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, const std::vector<std::vector<int>>& slotLatency)
+int manualLatencySamples (const MixerTrack& track, double sampleRate) noexcept
+{
+    const auto ms = std::clamp (track.latencyMs, -maxTrackLatencyMs, maxTrackLatencyMs);
+    return ms == 0.0f || ! (sampleRate > 0.0) ? 0 : (int) std::lround ((double) ms * sampleRate * 0.001);
+}
+
+PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, const std::vector<std::vector<int>>& slotLatency,
+                    double sampleRate)
 {
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
     PdcPlan plan;
@@ -66,9 +75,11 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
     // inserts in order: when T is processed, all its sources already have been
     const auto order = song.mixerOrder();
 
+    auto manual = [&] (int t) { return t < (int) song.mixer.size() ? manualLatencySamples (song.mixer[(std::size_t) t], sampleRate) : 0; };
+
     for (auto t : order)
     {
-        plan.outLat[(std::size_t) t] = plan.inAlign[(std::size_t) t] + effectsLatency (t);
+        plan.outLat[(std::size_t) t] = plan.inAlign[(std::size_t) t] + effectsLatency (t) + manual (t);
         const auto& track = song.mixer[(std::size_t) t];
 
         if (track.toMaster)
@@ -83,8 +94,8 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
             plan.inAlign[(std::size_t) target] = std::max (plan.inAlign[(std::size_t) target], tapLatency (t, slot));
     }
 
-    plan.outLat[0] = plan.inAlign[0] + effectsLatency (0);
-    plan.total = plan.outLat[0];
+    plan.outLat[0] = plan.inAlign[0] + effectsLatency (0) + manual (0);
+    plan.total = std::max (0, plan.outLat[0]);
 
     // per-edge delays (what's missing to reach the destination's alignment)
     for (std::size_t c = 0; c < song.channels.size(); ++c)
@@ -96,13 +107,15 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
         auto& delays = plan.sendDelay[(std::size_t) t];
         const auto taps = fruitySendsOf (song, t);
         delays.assign (1 + track.sends.size() + taps.size(), 0);
-        delays[0] = track.toMaster ? plan.inAlign[0] - plan.outLat[(std::size_t) t] : 0;
+        // bypassed "Always": its routes are not delayed (FL's Fruity Send slots still are)
+        const auto bypassed = track.latencyBypass == LatencyBypass::always;
+        delays[0] = track.toMaster && ! bypassed ? std::max (0, plan.inAlign[0] - plan.outLat[(std::size_t) t]) : 0;
 
         for (std::size_t i = 0; i < track.sends.size(); ++i)
         {
             const auto target = track.sends[i].target;
 
-            if (target > 0 && target < tracks)
+            if (target > 0 && target < tracks && ! bypassed)
                 delays[1 + i] = std::max (0, plan.inAlign[(std::size_t) target] - plan.outLat[(std::size_t) t]);
         }
 
@@ -141,6 +154,15 @@ void DelayLine::process (float* l, float* r, int n) noexcept
     }
 
     quiet = 0;
+}
+
+void DelayLine::clear() noexcept
+{
+    if (quiet >= delay)
+        return;
+    std::memset (left.data(), 0, sizeof (float) * (std::size_t) delay);
+    std::memset (right.data(), 0, sizeof (float) * (std::size_t) delay);
+    quiet = delay;
 }
 
 void DelayLine::mixInto (const float* sl, const float* sr, float level, float* dl, float* dr, int n) noexcept

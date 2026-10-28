@@ -4,6 +4,7 @@
 #include "ui/TextCache.h"
 #include "ui/PlaylistComponent.h"
 
+#include "core/KeyMap.h"
 #include "core/Performance.h"
 #include "core/Templates.h"
 
@@ -1049,7 +1050,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
             g.setColour (plate);
             g.fillRoundedRectangle (plateArea, radius::sm);
 
-            if (t == currentTrack) // the selected track (FL marks it next to the LED)
+            if (isTrackSelected (t)) // the selected tracks (FL marks them next to the LED)
             {
                 g.setColour (colour::accent);
                 g.fillRoundedRectangle (plateArea.withWidth (3.0f).reduced (0.0f, 3.0f), 1.5f);
@@ -1806,6 +1807,25 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
             });
         else if (! noteedit::isFoldedAway (engine.getSong(), track))
         {
+            // Ctrl+click adds / removes a track, Shift+click selects the tracks from the last clicked one (round 165m:
+            // FL's track menu settings, e.g. Performance settings, apply to every selected track)
+            if (e.mods.isCtrlDown())
+            {
+                if (selectedTracks.empty() && currentTrack >= 0)
+                    selectedTracks.push_back (currentTrack);
+                if (const auto it = std::find (selectedTracks.begin(), selectedTracks.end(), track); it != selectedTracks.end())
+                    selectedTracks.erase (it);
+                else
+                    selectedTracks.push_back (track);
+            }
+            else if (e.mods.isShiftDown() && currentTrack >= 0)
+            {
+                selectedTracks.clear();
+                for (int t = juce::jmin (currentTrack, track); t <= juce::jmax (currentTrack, track); ++t)
+                    selectedTracks.push_back (t);
+            }
+            else
+                selectedTracks = { track };
             currentTrack = track;
             repaint (0, headerHeight, headerWidth, getHeight() - headerHeight);
         }
@@ -2871,6 +2891,23 @@ juce::Rectangle<int> PlaylistComponent::trackArrow (int track) const
     return { led.getX() - 15, led.getY() - 1, 13, led.getHeight() + 2 };
 }
 
+bool PlaylistComponent::isTrackSelected (int track) const
+{
+    return track == currentTrack || std::find (selectedTracks.begin(), selectedTracks.end(), track) != selectedTracks.end();
+}
+
+std::vector<int> PlaylistComponent::tracksForMenu (int track) const
+{
+    // the menu's track and, when it is one of them, the other selected tracks
+    if (! isTrackSelected (track) || selectedTracks.size() < 2)
+        return { track };
+    auto out = selectedTracks;
+    if (std::find (out.begin(), out.end(), track) == out.end())
+        out.push_back (track);
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
 void PlaylistComponent::editTrack (int track, std::function<void (PlaylistTrack&)> change)
 {
     if (track < 0)
@@ -2971,8 +3008,16 @@ juce::PopupMenu PlaylistComponent::buildTrackMenu (int track)
         using P = TrackPerformance;
         const auto p = info.performance;
         juce::PopupMenu perfMenu;
-        auto set = [this, track] (std::function<void (TrackPerformance&)> change) {
-            editTrack (track, [change] (PlaylistTrack& t) { change (t.performance); });
+        // FL's handler (0x1212fe0 → FUN_012ead80) sets the item on every selected track, in one undo step
+        auto set = [this, tracks = tracksForMenu (track)] (std::function<void (TrackPerformance&)> change) {
+            engine.editSong ([tracks, change] (Song& s) {
+                for (const auto t : tracks)
+                {
+                    if ((int) s.playlistTracks.size() <= t)
+                        s.playlistTracks.resize ((std::size_t) t + 1);
+                    change (s.playlistTracks[(std::size_t) t].performance);
+                }
+            });
         };
         perfMenu.addSectionHeader (tr ("Press"));
         for (auto [value, text] : { std::pair { P::Press::retrigger, TR_NOOP ("Retrigger") }, { P::Press::holdStop, TR_NOOP ("Hold & stop") },
@@ -4028,7 +4073,7 @@ bool PlaylistComponent::handleKey (const juce::KeyPress& key)
     const auto mods = key.getModifiers();
     const auto cmd = mods.isCommandDown();
     const auto code = key.getKeyCode();
-    const auto letter = (int) juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code);
+    const auto letter = keys::letterOfKeyCode (code); // (0 for F-keys, numpad, arrows: issue #12)
 
     if (code == juce::KeyPress::backspaceKey)
     {
@@ -4098,16 +4143,24 @@ bool PlaylistComponent::handleKey (const juce::KeyPress& key)
         return true;
     }
 
-    // single letters: only while the typing piano is off (otherwise they play notes)
-    if (! cmd && ! mods.isAltDown() && ! mods.isShiftDown() && ! EditorGlobals::get().typingPiano)
-        for (const auto& t : editTools())
-            if (letter == t.key && t.tool != EditTool::drumPaint)
-            {
-                tools.setTool (t.tool);
-                return true;
-            }
-
+    // (the tool letters are key map actions now: runKeyAction, issue #12)
     return false;
+}
+
+bool PlaylistComponent::runKeyAction (const std::string& id)
+{
+    for (const auto& t : editTools())
+        if (t.tool != EditTool::drumPaint && id == "playlist.tool." + std::string (editToolId (t.tool)))
+        {
+            tools.setTool (t.tool);
+            return true;
+        }
+    return false;
+}
+
+void PlaylistComponent::refreshToolKeys (const std::function<juce::String (const std::string&)>& keyOf)
+{
+    tools.refreshKeys ([&keyOf] (EditTool t) { return keyOf ("playlist.tool." + std::string (editToolId (t))); });
 }
 
 void PlaylistComponent::mouseMove (const juce::MouseEvent& e)
@@ -4270,7 +4323,7 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
     {
         hint.text = h.led     ? tr ("Track: [LMB] mute / unmute  [Ctrl][LMB] or [RMB] solo")
                     : h.arrow ? tr ("Track group: [LMB] collapse / expand the grouped tracks")
-                              : tr ("Track: [LMB] select  [RMB] menu  [2xLMB] open the clip source  [Shift][Wheel] move up / down");
+                              : tr ("Track: [LMB] select  [Ctrl][LMB] add / remove  [Shift][LMB] range  [RMB] menu  [2xLMB] open the clip source  [Shift][Wheel] move up / down");
         hint.value = trackName (h.track);
         if (const auto mode = trackmodes::describe (song, h.track); ! mode.empty()) // FL's "(Instrument track)" / "(Audio track, ...)"
             hint.value += " " + (mode.rfind ("(Audio", 0) == 0 ? tr ("(Audio track, linked to mixer track {0})", { juce::String (song.playlistTracks[(std::size_t) h.track].mixerTrack) })
@@ -4397,7 +4450,7 @@ void PlaylistComponent::openClipSource (int hit, bool other)
 bool PlaylistComponent::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+        if (SampleLibrary::isSampleFile (juce::File (f)))
             return true;
 
     return false;
@@ -4409,7 +4462,7 @@ namespace
 // file plays it instead of a new one. False when the file can't be read.
 bool addAudioClip (AudioEngine& engine, const juce::File& file, std::int64_t start, int track, bool reuse)
 {
-    if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;wv"))
+    if (! SampleLibrary::isSampleFile (file))
         return false;
 
     const auto data = engine.getSampleLibrary().load (file.getFullPathName());
@@ -4728,18 +4781,17 @@ void PlaylistComponent::paintPerformance (juce::Graphics& g, juce::Rectangle<int
             mark.addTriangle (mx, my - 4.0f, mx, my + 4.0f, mx + 6.0f, my);
             g.setColour (colour::ledOn);
             g.fillPath (mark);
-            g.setColour (colour::textPrimary.withAlpha (0.10f));
-            g.fillRoundedRectangle (r, radius::sm);
             g.setColour (colour::ledOn);
             g.drawRoundedRectangle (r.reduced (1.0f), radius::sm, 2.0f);
             if (showClipProgress)
             {
+                // as in FL, the part already played is lighter, up to a thin playhead line
                 const auto p = juce::jlimit (0.0f, 1.0f, view.progress.load (std::memory_order_relaxed));
-                const auto bar = r.reduced (3.0f, 0.0f).removeFromBottom (4.0f).translated (0.0f, -3.0f);
-                g.setColour (colour::bg0.withAlpha (0.6f));
-                g.fillRoundedRectangle (bar, 1.5f);
-                g.setColour (colour::ledOn);
-                g.fillRoundedRectangle (bar.withWidth (juce::jmax (2.0f, bar.getWidth() * p)), 1.5f);
+                const auto played = r.reduced (1.0f).withWidth (juce::jmax (0.0f, (r.getWidth() - 2.0f) * p));
+                g.setColour (colour::textPrimary.withAlpha (0.16f));
+                g.fillRect (played);
+                g.setColour (colour::ledOn.withAlpha (0.85f));
+                g.fillRect (played.withX (played.getRight() - 1.0f).withWidth (1.5f));
             }
         }
         if (pending)

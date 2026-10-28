@@ -84,7 +84,9 @@ enum class InstrumentKind : std::uint8_t
     dashboard,  // FL's Dashboard (REA_rodada164a, core/ControlSurface.h): no sound; a panel of controls in patcher.surface
     voltage,    // FL's Voltage Controller (REA_rodada164a, core/VoltageController.h): its notes as control voltages; FL's
                 // state in pluginState
-    vfx         // FL's VFX note processors (round 164b, core/Vfx.h): kind, output port and FL's state in pluginState; no sound
+    vfx,        // FL's VFX note processors (round 164b, core/Vfx.h): kind, output port and FL's state in pluginState; no sound
+    videoplayer // FL's Fruity Video Player (round 165g, core/VideoPlayer.h): FL's state (with the video's path) in
+                // pluginState; plays the video's sound in sync with the song, the video is shown by its editor
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -798,6 +800,16 @@ enum class InputMonitor : std::uint8_t
 
 enum class MixerDock : std::uint8_t { left, middle, right };
 
+// FL's mixer track latency menu "Bypass track latency compensation" (REA round 165f-mixer; .flp event 0x31): a bypassed
+// track's outputs get no PDC delay (its own latency still makes the other paths wait), so a live input monitored
+// through it is not delayed to line up with slow plugins elsewhere (FL 24.2's per-track low-latency monitoring).
+enum class LatencyBypass : std::uint8_t
+{
+    never,
+    always,
+    whenRecordingOrStopped // FL's "When recording or not playing"
+};
+
 // How an insert's stereo output reaches its hardware output target (LYNX extra, REA round 156): a stereo pair of
 // device channels, or one channel alone fed with the sum (L+R)/2, the left side only or the right side only.
 enum class OutputMode : std::uint8_t
@@ -853,7 +865,17 @@ struct MixerTrack
     // FL's "Layout › Dock to" (.flp insert flags bits 6-7 = dock 0 left / 1 middle / 2 right): the strip is shown in the
     // left block, the middle or the right block of the mixer
     MixerDock dock = MixerDock::middle;
+    // FL's track latency menu (REA round 165f-mixer, .flp 0xEC float at +0): a manual latency in ms (−5000..5000) added
+    // to the track's output latency in the PDC plan, as if its effects had it: positive = the other paths wait for this
+    // one (it plays earlier), negative = this track is delayed
+    float latencyMs = 0.0f;
+    LatencyBypass latencyBypass = LatencyBypass::never;
+    // "Compensate for master latency" (.flp 0xEC flag 0x4000 = off): with a hardware output target, that output is
+    // delayed to line up with the Master's (PDC total)
+    bool compensateMasterLatency = true;
 };
+
+constexpr float maxTrackLatencyMs = 5000.0f; // FL's clamp (FUN_012a7230)
 
 struct Note
 {

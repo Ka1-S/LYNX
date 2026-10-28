@@ -210,9 +210,11 @@ std::vector<std::vector<LocalPoint>> forwardRuns (const std::vector<LocalPoint>&
 bool sameValue (float a, float b) noexcept { return std::abs (a - b) < 1.0e-6f; }
 } // namespace
 
-std::int64_t songTickForRecorded (const Song& song, double tick)
+std::int64_t songTickForRecorded (const Song& song, double tick, bool linear)
 {
     auto t = (std::int64_t) std::floor (std::max (0.0, tick));
+    if (linear && ! song.hasLoop())
+        return t;
     if (song.hasLoop())
     {
         if (t >= song.loopEnd)
@@ -237,17 +239,39 @@ void thinAutomation (std::vector<AutomationPoint>& points, std::int64_t from, st
     }
 }
 
-void commitAutomationPoints (Song& song, AutomationWrite& w, std::vector<RecordedValue> points, std::int64_t grid)
+void growTakeClip (Song& song, const AutomationWrite& w, std::int64_t tick, bool finished)
+{
+    if (! w.createdByTake || w.automation < 0)
+        return;
+    for (auto& c : song.playlist)
+        if (c.kind == ClipKind::automation && c.automation == w.automation)
+        {
+            if (tick <= c.start)
+                return;
+            auto end = std::max (c.end(), tick);
+            if (finished)
+            {
+                const auto bar = song.barAt (std::max<std::int64_t> (c.start, end - 1));
+                end = std::max (end, bar.tick + std::max<std::int64_t> (1, bar.length));
+            }
+            c.length = end - c.start;
+            return;
+        }
+}
+
+void commitAutomationPoints (Song& song, AutomationWrite& w, std::vector<RecordedValue> points, std::int64_t grid, bool linear)
 {
     std::vector<LocalPoint> ticks;
     for (const auto& p : points)
-        ticks.push_back ({ nearestOnGrid (songTickForRecorded (song, p.tick), grid), std::clamp (p.value, 0.0f, 1.0f) });
+        ticks.push_back ({ nearestOnGrid (songTickForRecorded (song, p.tick, linear), grid), std::clamp (p.value, 0.0f, 1.0f) });
 
     for (const auto& run : forwardRuns (ticks))
     {
         const auto t0 = run.front().tick, t1 = run.back().tick;
         auto covers = [&] (const Clip& c, bool own) {
-            return c.kind == ClipKind::automation && c.start <= t0 && (own ? t0 <= c.end() : t0 < c.end());
+            // (the take's own clip covers everything after its start: it grows with the take, even over a pause of
+            // the gesture — issue #12, a new clip began after every pause)
+            return c.kind == ClipKind::automation && c.start <= t0 && (own || t0 < c.end());
         };
 
         // the clip to write into: the one this take writes, else a clip of the parameter playing there, else a new one
