@@ -1010,8 +1010,8 @@ void ChannelRackComponent::toggleEditor (int channel, bool keepOthers)
             PatcherWindows::openChannel (engine, channel);
         return;
     }
-    if (kind != InstrumentKind::plugin && ! hasChannelSettings (kind))
-        return; // built-in drums and audio clips have no editor window: the click only selects
+    // built-in drums and audio clips have no instrument page: as in FL, the click opens their channel window anyway
+    // (header + Misc tab — levels, polyphony, cut groups, arpeggiator), as the hint says; it only selected (round 165q)
 
     if (isEditorOpen (channel))
     {

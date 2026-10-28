@@ -324,6 +324,7 @@ public:
             engine.previewSample (nullptr);
         if (recState != RecState::idle)
             engine.getMeters().capture.setSource (AudioCapture::off);
+        releaseInput();
     }
 
     // --- opening ---------------------------------------------------------------------------------------------
@@ -1674,11 +1675,14 @@ private:
         if (recordSource == AudioCapture::input)
         {
             if (! engine.hasAudioInput())
+            {
                 if (const auto result = engine.openAudioInput(); result.issue != AudioEngine::InputIssue::none)
                 {
                     setStatus (result.detail.isNotEmpty() ? result.detail : tr ("No active audio input (Settings > Audio)"), true);
                     return;
                 }
+                openedInput = true; // closed again when the recording stops (round 165q)
+            }
             device = engine.getDeviceManager().getCurrentAudioDevice();
             if (device == nullptr || device->getActiveInputChannels().countNumberOfSetBits() == 0)
             {
@@ -1775,12 +1779,23 @@ private:
         repaint();
     }
 
+    // the input this editor opened for its recording: closed again (FL does not keep the microphone open; Windows
+    // showed its microphone-in-use icon until LYNX quit — round 165q)
+    void releaseInput()
+    {
+        if (! openedInput)
+            return;
+        openedInput = false;
+        engine.releaseAudioInputIfUnused();
+    }
+
     void stopRecording()
     {
         if (recState == RecState::idle)
             return;
         drainRecording();
         engine.getMeters().capture.setSource (AudioCapture::off);
+        releaseInput();
         const auto got = ! recL.empty();
         const auto dropped = engine.getMeters().capture.droppedFrames();
         recState = RecState::idle;
@@ -2238,6 +2253,7 @@ private:
     double playStartedMs = 0.0;
 
     RecState recState = RecState::idle;
+    bool openedInput = false; // startRecording opened the device input itself (released when it stops)
     RecordMode recordMode = RecordMode::now;
     int recordSource = AudioCapture::input;
     std::vector<float> recL, recR;

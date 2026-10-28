@@ -288,6 +288,12 @@ public:
     // Settings, else the default), all of its channels. UI thread.
     RecordingNotice openAudioInput (const juce::String& deviceName = {});
     bool hasAudioInput() const;
+    // Closes the device input again when nothing needs it (no insert takes an input, no armed recording, no hardware
+    // insert returning from it): a capture the Audio editor opened for one recording no longer keeps the input — and
+    // Windows' microphone-in-use icon — on until LYNX quits, as in FL (round 165q). The input device's name is kept
+    // for the next openAudioInput(). UI thread.
+    void releaseAudioInputIfUnused();
+    bool audioInputNeeded() const;
     // Sets an insert's input source (undoable; -1 = none) and opens the device input when needed.
     void setInsertInput (int track, int channel, bool stereo);
     void setInsertMonitor (int track, InputMonitor mode);
@@ -671,6 +677,7 @@ private:
     std::atomic<bool> waitingForInput { false };
     void startOnInput() noexcept; // MIDI or UI thread: the first note while waiting starts playback
     std::vector<int> armedInserts;
+    juce::String releasedInputDevice; // the input device releaseAudioInputIfUnused closed (reopened by name)
     double lastPlayingTick = 0.0;
     std::atomic<int> inputScale { 0 }, inputScaleRoot { 0 };
     std::atomic<int> liveChannel { 0 };              // selected channel, read by the MIDI thread
