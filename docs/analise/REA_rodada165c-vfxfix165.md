@@ -13,3 +13,8 @@ Evidence markers: [DECOMP addr], [DATA], [FL render], [EXEC FL], [TEST], [SHOT],
   setParameter + held-voice re-evaluation, Envelope loop time) merged with origin/main (c18471e2). Not built yet.
 - Prior REA data on /mnt/d/lynx-work/vfxfix165: dec/ (Ghidra decompiles of the Sequencer), fl/ (FL renders of the
   Envelope default vs "Pumping" preset, env_*.wav), tools/ (mkvfx.py builds FL Patcher test projects with a VFX node).
+- 07:00: checkpoint builds (Linux, build-linux/), tests/Vfx165cTests.inc added: Level Scaler held voices, Envelope
+  loop (custom + FL's Pumping.fst), Keyboard Splitter zone-1 fallback + Manual mapping core — all green.
+  Renamed plugins: Quick-add palette + mixer slot label use the Plugin database names (not built yet in the app).
+  Next: Sequencer chains / program change / Smart bend cut (dec/ seq1 a190 seq4 decompiles), editors (Level Scaler
+  Event persistence, Splitter Manual mapping button), voice props outside a Patcher, VFX → "To LYNX" ports.

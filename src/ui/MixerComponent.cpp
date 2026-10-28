@@ -2968,9 +2968,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
             // a LYNX substitute shows the plugin it stands in for, with a "LYNX" badge
             const auto substitute = slot.isSubstitute();
-            auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
-                        : substitute                    ? juce::String::fromUTF8 (substituteOriginalName (slot).c_str())
-                                                        : juce::String::fromUTF8 (projectcontents::effectSlotName (slot).c_str());
+            auto name = quickpick::slotName (engine, slot); // (a plugin renamed in the Plugin database: its new name, round 165c)
             if (slot.sidechain > 0 && slot.sidechain < (int) engine.getSong().mixer.size())
                 name << juce::String::fromUTF8 (" \xe2\x86\x90 ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
             auto text = textArea;
@@ -3040,7 +3038,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         drawButton (button, tr ("Open plugin interface"), Icon::plugin);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        textcache::drawText (g, juce::String::fromUTF8 (slot.plugin.name.c_str()), button.translated (0, 34), juce::Justification::centred);
+        textcache::drawText (g, quickpick::slotName (engine, slot), button.translated (0, 34), juce::Justification::centred);
         return;
     }
 

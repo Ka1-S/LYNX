@@ -481,6 +481,64 @@ double splitterGain (double m) noexcept
     return m >= 1.0 ? 1.0 : (std::pow (11.0, m) - 1.0) / 10.0;
 }
 
+// FL's Manual mapping (spec-keyboardsplitter §5.1 [DECOMP]): the current zone's keyboard map becomes a plateau from
+// `last` up to the key below x; a key at x > 1 (the end) runs it to the top
+namespace
+{
+void mapPlateau (KeyboardSplitterSettings::Zone& zone, double last, double x)
+{
+    constexpr auto step = 1.0 / 132.0;
+    auto point = [] (double px, double py) {
+        MapCurve::Point p;
+        p.x = px;
+        p.y = py;
+        return p;
+    };
+    auto& m = zone.keyboard;
+    const auto footer = m.footer;
+    m = {};
+    m.footer = footer;
+    if (last < 0.0)
+        m.points.push_back (point (0.0, 1.0));
+    else
+    {
+        m.points.push_back (point (std::max (0.0, last - step), 0.0));
+        m.points.push_back (point (last, 1.0));
+    }
+    m.points.push_back (point (std::max (m.points.back().x, std::min (x - step, 1.0)), 1.0));
+    if (x <= 1.0)
+        m.points.push_back (point (x, 0.0));
+}
+} // namespace
+
+void beginManualMapping (SplitterMapping& m) noexcept
+{
+    m.zone = 0;
+    m.last = -1.0;
+    m.on = true;
+}
+
+bool manualMapKey (KeyboardSplitterSettings& s, SplitterMapping& m, int key)
+{
+    const auto x = std::clamp (key, 0, 131) / 132.0;
+    if (! m.on || m.zone < 0 || m.zone >= 16 || x <= m.last || x <= 0.0)
+        return false;
+    mapPlateau (s.zones[(std::size_t) m.zone], m.last, x);
+    m.last = x;
+    ++m.zone;
+    if (m.zone >= 15) // (the 16th zone: nothing can follow it, it runs to the top — FL pops the button up there [HYP])
+        endManualMapping (s, m);
+    return true;
+}
+
+void endManualMapping (KeyboardSplitterSettings& s, SplitterMapping& m)
+{
+    if (m.zone >= 0 && m.zone < 16)
+        mapPlateau (s.zones[(std::size_t) m.zone], m.last, 2.0);
+    m.on = false;
+    m.zone = -1;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // VFX Envelope (REA_rodada164b §Envelope)
 
@@ -1518,6 +1576,11 @@ public:
             }
             if (e.type != Event::Type::on)
                 continue;
+            if (live.mapping.load (std::memory_order_relaxed)) // (Manual mapping: the editor takes the note)
+            {
+                live.push ({ 0, (float) e.voice.key, (float) e.voice.velocity });
+                continue;
+            }
             const auto x = ((double) e.voice.key + e.voice.cents / 100.0) / 132.0;
             const auto velocity = std::min (1.0, (double) e.voice.velocity);
             std::array<double, 16> w {};
@@ -1547,8 +1610,9 @@ public:
                         acc += w[(std::size_t) z];
                         w[(std::size_t) z] = 0.0;
                     }
-                if (chosen >= 0) // (FL then falls back on zone 1; LYNX plays no random zone)
-                    w[(std::size_t) chosen] = 1.0;
+                // the winner plays at full level; when no random zone has the key, FL's pick stays on zone 1, which
+                // then plays (if it is active) whatever its own map says (round 165c, spec-keyboardsplitter §3.1 [DECOMP])
+                w[(std::size_t) std::max (chosen, 0)] = s.zones[0].active() || chosen > 0 ? 1.0 : 0.0;
             }
             const auto volumeIn = velocityToVolume (velocity);
             for (int z = 0; z < 16; ++z)

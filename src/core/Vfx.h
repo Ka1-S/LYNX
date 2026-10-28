@@ -211,6 +211,19 @@ std::optional<KeyboardSplitterSettings> parseKeyboardSplitter (const std::vector
 std::vector<std::uint8_t> writeKeyboardSplitter (const KeyboardSplitterSettings& s);
 // FL's map level → volume gain: (11^m − 1) / 10; volume ↔ velocity: vol = (11^(1.28 v) − 1) / 10
 double splitterGain (double mapLevel) noexcept;
+// FL's "Manual mapping" (round 165c): while the button is down the played notes are taken (not played) and each one
+// ends the current zone and starts the next: zone 1 = keys 0 … first − 1, zone 2 = first … second − 1, … The last
+// zone mapped runs to the top of the keyboard when the mapping ends. Keys must rise (a lower or equal one is ignored).
+struct SplitterMapping
+{
+    int zone = 0;       // the zone the next key ends
+    double last = -1.0; // where the current zone starts (x = key / 132; < 0: the bottom)
+    bool on = false;
+};
+void beginManualMapping (SplitterMapping& m) noexcept;
+// a key played while mapping; false if ignored. `m.on` turns off when the 16th zone starts (it then runs to the top)
+bool manualMapKey (KeyboardSplitterSettings& s, SplitterMapping& m, int key);
+void endManualMapping (KeyboardSplitterSettings& s, SplitterMapping& m);
 
 // VFX Envelope: 16 articulators, each for one note colour and key range, with five targets (velocity, pitch, pan,
 // Mod X, Mod Y), each an envelope and an LFO as in FL's Envelope Controller

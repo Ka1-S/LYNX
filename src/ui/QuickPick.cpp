@@ -5,6 +5,7 @@
 #include "core/ControlSurface.h"
 #include "core/NativeEngines.h"
 #include "core/Preferences.h"
+#include "core/ProjectContents.h"
 #include "core/VoltageController.h"
 #include "core/Vfx.h"
 #include "engine/PluginHost.h"
@@ -120,6 +121,16 @@ juce::String shownName (AudioEngine& engine, const std::string& key, const juce:
     if (const auto it = names.find (key); it != names.end())
         return juce::String::fromUTF8 (it->second.c_str());
     return original;
+}
+
+juce::String slotName (AudioEngine& engine, const EffectSlot& slot)
+{
+    const auto original = juce::String::fromUTF8 (projectcontents::effectSlotName (slot).c_str());
+    if (slot.kind == EffectKind::plugin)
+        return slot.plugin.id.empty() ? original : shownName (engine, slot.plugin.id, original);
+    if (slot.isSubstitute() || original != juce::String (effectInfo (slot.kind).name)) // (a stand-in shows what it stands for)
+        return original;
+    return shownName (engine, std::string ("lynx:fx:") + effectInfo (slot.kind).name, original);
 }
 
 void rename (AudioEngine& engine, const std::string& key, const juce::String& original, std::function<void()> done)
