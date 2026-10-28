@@ -7,9 +7,9 @@ Data: `/mnt/d/lynx-work/flbeta165h` (`bat.sh` → `py/full.py`: all 325 installa
 rack off, the DLL's Mersenne-Twister state handed to LYNX; columns idx, null dB, STFT dB, name).
 
 ## Where I stopped
-- 2026-10-28 15:40 — landed: note start delay (§1), attack fade (§2), IPP Exp/Ln_32f_A11 at precision 0 (§3) with
-  tests (`tests/HarmorBeta165hTests.inc`). Battery `s2.tsv`: 298 null < −60, 19 STFT-only, 8 audible. Harmor stays
-  "(beta)": what is left is in §4.
+- 2026-10-28 15:40 — landed: note start delay (§1), attack fade (§2), IPP Exp/Ln_32f_A11 at precision 0 (§3),
+  velocity → volume-envelope speed (§5), with tests (`tests/HarmorBeta165hTests.inc`). Battery `s3.tsv`: 298 null
+  < −60, 21 STFT-only, 6 audible. Harmor stays "(beta)": what is left is in §4.
 
 ## Battery history
 | step | null < −60 | STFT < −40 only | audible (STFT ≥ −40) |
@@ -17,6 +17,7 @@ rack off, the DLL's Mersenne-Twister state handed to LYNX; columns idx, null dB,
 | base0 (origin/main ea719caf) | 262 | 44 | 19 |
 | s1 (§1–§3) | 297 | 21 | 7 |
 | s2 (§1–§3 + harmonic-randomness Exp A11) | 298 | 19 | 8 |
+| s3 (+ §5) | 298 | 21 | 6 |
 
 Runs vary a little: presets that draw from the random sources the battery cannot hand over (IPP's own uniform seeds
 in some paths) land anywhere between −50 and −80 dB from run to run (Blue screen −49…−78, The ball −62…−82, Shorty
@@ -74,7 +75,7 @@ Church bell −26.1/−46.2 → −83.1/−85.8; Pixel to freq −34.5/−44.6 �
   thingy. Tests: `harmor165h_ipp_a11_models_match_the_dll`, `harmor165h_precision_average_changes_the_sound_slightly`.
 
 ## §4 What is left (Harmor stays beta)
-Audible (STFT ≥ −40 dB) after s2, with what is known:
+Audible (STFT ≥ −40 dB) after s3, with what is known:
 - **X Olbaid FX White Noise Caida / Plato Cerrado / FX Subida** (−32 / −38 / −37 dB). Very quiet presets (rms −57
   dBFS): the error is −94 dBFS absolute. All three match at precision 1 (−99…−103 dB); at precision 0 FL's own output
   differs from its precision-1 output by the same −37 dB, and LYNX's precision-0 output equals FL's precision 1. The
@@ -91,5 +92,14 @@ Audible (STFT ≥ −40 dB) after s2, with what is known:
 - **Pomona** (−2 dB): several causes; the best single-parameter reset (part 1 misc +0x34 = 4) only reaches −8 dB.
 - **Dub steppy 1** (−13 dB): diverges from the first sample; best single reset (global 0 = 256) −16 dB.
 - **Sunroom** (−25 dB; old v12 state): best single reset (part 1 parameter 11 = 1000) −30 dB; no single cause.
-- **Old vox** (−40 dB STFT, borderline since base0).
+- FX Subida sits at the STFT border (−38…−40 dB from run to run), same cause as the two Olbaid presets above.
+
+## §5 Part parameter 15: velocity → volume-envelope speed
+[DECOMP TriggerVoice FUN_00883cd0 at 0x884957]
+- When part parameter 15 is on and the volume envelope (articulator 1) is used, the new voice's envelope time scale
+  (state +0x50, the one the global attack/decay scale multiplies) is multiplied by 2 − 2·min(velocity, 1) and the
+  scales are applied again (FUN_007a2c80 / FUN_007a2d60): velocity 0.5 plays the envelope as drawn, full velocity
+  plays it instantly. LYNX did not read parameter 15 at all.
+- Found by the per-parameter reset sweep (`py/sweep2.py 120`: resetting part 0 parameter 15 alone gave −85 dB).
+- Old vox −39.7 → −86.6 dB. Test: `harmor165h_velocity_speeds_up_the_volume_envelope`.
 

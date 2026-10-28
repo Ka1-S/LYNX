@@ -118,3 +118,24 @@ TEST (harmor165h_attack_fade)
     const auto a = harmor165hRms (faded, 3000, 5000), b = harmor165hRms (plain, 3000, 5000);
     CHECK (b > 0.0 && std::abs (20.0 * std::log10 (a / b)) < 0.5);
 }
+
+TEST (harmor165h_velocity_speeds_up_the_volume_envelope)
+{
+    // §5: part parameter 15 scales the volume envelope's time by 2 − 2·velocity at the note's start (FL: Old vox)
+    auto st = harmorTestState (false);
+    const auto at = lynx::harmorParamOffset (st, 0, 15);
+    CHECK (at > 0);
+    auto render = [&] (std::int32_t p15, double vel) {
+        auto s = st;
+        std::memcpy (s.data() + at, &p15, 4);
+        const auto y = lynx::harmor::renderReference (s, { { 0, 60, vel, 1.0, 0.0, -1 } }, 44100.0, 8192);
+        std::vector<float> m (8192);
+        for (std::size_t k = 0; k < m.size(); ++k)
+            m[k] = y[2 * k];
+        return m;
+    };
+    CHECK (render (1, 0.5) == render (0, 0.5)); // velocity 0.5: scale 1
+    const auto fast = render (1, 0.8), plain = render (0, 0.8);
+    CHECK (fast != plain);
+    CHECK (harmor165hRms (fast, 0, 200) > 1.3 * harmor165hRms (plain, 0, 200)); // the attack is 2.5× shorter
+}

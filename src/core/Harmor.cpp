@@ -4580,6 +4580,14 @@ private:
             const EnvState* share = (gv != nullptr && art.envGlobal) ? &gv->arts[(std::size_t) k].es : nullptr;
             v.arts[(std::size_t) k].start (art, rand, uin, share, run[(std::size_t) pk].gl[(std::size_t) k]);
         }
+        if (p.p[15] != 0 && p.arts[1].hasEnv)
+        {
+            // part parameter 15 [DECOMP TriggerVoice FUN_00883cd0]: the velocity speeds the volume envelope up —
+            // its time scale (state +0x50) × (2 − 2·min(velocity, 1)), then the scales are applied again
+            const auto f = (double) (2.0f - (float) std::min (v.vel, 1.0) * 2.0f);
+            const double g[4] { f, 1.0, 0.0, 1.0 };
+            p.arts[1].env.globalScales (v.arts[1].es, g);
+        }
         v.shared = gv != nullptr && p.anyEnvGlobal;
         v.released = false;
         v.knValid[0] = v.knValid[1] = false, v.lsValid[0] = v.lsValid[1] = false;
