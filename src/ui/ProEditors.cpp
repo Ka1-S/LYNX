@@ -602,7 +602,8 @@ private:
     ui::ValueSpec linkSpec() const
     {
         auto spec = ui::percentSpec (tr ("Stereo link"), 0.5);
-        spec.text = [] (double u) { return u <= 0.5 ? juce::String (juce::roundToInt (200.0 * u)) + " %" : "100 %, " + juce::String (juce::roundToInt (200.0 * u - 100.0)) + " %"; };
+        spec.toText = [] (double u) { return u <= 0.5 ? juce::String (juce::roundToInt (200.0 * u)) + " %" : juce::String (juce::roundToInt (200.0 * u)) + " % (100 % + " + juce::String (juce::roundToInt (200.0 * u - 100.0)) + " %)"; };
+        spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
         return spec;
     }
     float lpPos() const { return v (P ("Low-pass freq.")) >= 0.999f ? 1.0f : freqPos (mixsuite::hush::lowPassHz (v (P ("Low-pass freq.")))); }

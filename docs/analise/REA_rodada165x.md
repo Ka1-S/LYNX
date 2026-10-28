@@ -7,7 +7,7 @@ hosted in our own `tools/fxmeasure` (public VST3 parameters, saved states, rende
 
 ## Where I stopped
 
-2026-10-28 13:30: everything coded and measured; origin/main merged; the attack refit (slow-cell smoothing in Limit
+2026-10-28 18:40: verified (build-local 0 failures, Windows build, --plugui shots D:\lynx-work\parity165x\plugui); landing.
 only) passes every Glow test; Hush's 0 … 200 % link knob and Glow's saved VU display added. Running: build-local with
 FL Data and the Windows build (build-win-parity165x); then `--plugui` shots of Glow / Hush / Ember, PARITY.md, notes,
 land.
