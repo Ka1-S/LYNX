@@ -224,7 +224,7 @@ std::uint64_t stretchFingerprint (StretchMethod method)
             test.left.push_back ((float) (0.5 * std::sin (2.0 * 3.14159265358979 * 220.0 * t)) + 0.1f * n + (i % 1500 == 0 ? 0.8f : 0.0f));
             test.right.push_back ((float) (0.4 * std::sin (2.0 * 3.14159265358979 * 331.0 * t)) - 0.1f * n);
         }
-        const auto out = timeStretch (test, 1.37, (StretchMethod) m);
+        const auto out = timeStretch (test, 2.6, (StretchMethod) m); // (beyond 2x: the seeded randomised steps count too)
         auto h = fnv (out->left.data(), out->left.size() * sizeof (float));
         prints[m] = fnv (out->right.data(), out->right.size() * sizeof (float), h);
     });
