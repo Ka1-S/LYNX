@@ -113,6 +113,10 @@ the audio device opens in ~1.4 s before the window.
 | SHINE | 19.9 s / 91 s | 19.7 s / 92 s | **17.3 s / 82 s** | identical in all 12 runs (main = branch) |
 | Never Out | 21.8 s / 87 s | 25.3 s / 89 s | **19.5 s / 74 s** | main: 4 different; branch: one |
 
+  FL 2026 for the same files (`FL64 /R /Ewav`, start-up + open + render, one run each, FL's default render
+  settings, which may be heavier than LYNX's export defaults): Thief 91.5 s / 296 s CPU, SHINE 26.4 s / 73 s,
+  Never Out 57.2 s / 228 s.
+
   The task graph renders ~12–21 % faster with ~10–15 % less CPU, and its files are identical to the layers'. The
   main build's Thief / Never Out exports differed on every run: the random-seeded stretch (§4.7).
 
