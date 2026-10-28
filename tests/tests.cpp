@@ -136,6 +136,7 @@
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
 #include "core/KeyMap.h"
+#include "core/SortOnce.h"
 #include "core/RackOps.h"
 #include "core/ValueMath.h"
 #include "core/Workspace.h"
