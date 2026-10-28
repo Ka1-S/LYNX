@@ -7,6 +7,9 @@ works (real windows, mouse and keyboard), with a fresh `LYNX_PROFILE_DIR` + `LYN
 (shots in /mnt/d/lynx-work/audit165/, not in git).
 
 ## Where I stopped
+- 2026-10-28 16:10: LANDED on main as 5255a0ab (build-local 1781929 checks, 0 failures; Windows build; selftest
+  OK). Round done. Handed over: F1 and F9 (shortcuts: F-keys/numpad in Playlist/Piano Roll, global keys from tool and
+  plugin windows) to r165p; r165p's Audio editor drop list should use SampleLibrary::isSampleFile.
 - 2026-10-28 15:20: 1st landing failed in build-local (the test used SampleLibrary, which the JUCE-free test binary
   does not link) → list moved to core/SampleFiles.h; re-landing queued behind flbeta165k (landit.sh, land3.log).
 - 2026-10-28 13:45: sessions 6-8 done; F10 (plugin window close → activation) and F11 (.wv drops) fixed and verified
