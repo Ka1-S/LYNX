@@ -28,6 +28,15 @@ Evidence markers: **[DOC]** Microsoft Learn (MSIX docs), **[CODE]** LYNX source,
 - Still waiting (20:20): Release run 40592904988 queued (Actions backlog, ~2 runners for the whole repo); local
   Windows build queued behind 4 others on the winbuild lock. Next: local --packageinfo check with
   LYNX_SIMULATE_PACKAGE_FAMILY, CI evidence, land.
+- 21:10 coordinator: listings in 13 more languages → store/listings/*.md (15 files + es-mx reuse) written (3 translator
+  sub-agents, checked: structure, limits, no vendor names in search terms, UI-language notice), scripts/
+  store-listing-csv.py fills Partner Center's exported CSV (tested with a synthetic export: 16 language columns,
+  screenshots/logos copied, CJK lines joined without spaces). Partner Center accepts listing languages the package
+  doesn't declare ("Manage additional languages") → manifest Resources unchanged (en-us, pt-br).
+- 21:08 Windows compile check (zig, fast lane) of every changed C++ file: no errors, no warnings. Full local Windows
+  build dropped (winbuild queue > 2 h); land.sh builds it. MSIX workflow steps set continue-on-error until a CI run has
+  proven them (Actions backlog: Release run 40592904988 still queued at 21:10).
+- 21:12 merged origin/main, landing via land.sh.
 
 ## 1. Facts that shaped the design
 
