@@ -7,6 +7,9 @@ works (real windows, mouse and keyboard), with a fresh `LYNX_PROFILE_DIR` + `LYN
 (shots in /mnt/d/lynx-work/audit165/, not in git).
 
 ## Where I stopped
+- 2026-10-28 12:25: resumed after the 2nd BSOD (09:14). Removed the 0-byte / last-minute objects in
+  build-win-audit165/app, Windows build of the branch re-queued (winbuild.sh, JOBS=3). Next: session 5 = verify
+  F2/F4/F6 + Ctrl+A/H/Z with real scan codes + Theme steps for r165p; then land; then the remaining #9/#11/#8 claims.
 - 2026-10-28 09:30: session 4 done (Sampler, export, Piano Roll, abuse). F4 + F6 committed (d3eae9c9). Next: verify
   F2/F4/F6 on the branch's Windows build + --windowtest, then land.
 - 2026-10-28 09:10: sessions 1-3 done; F2 fix committed (05ab9e97), F4 cosmetic fix in progress; Windows build of
