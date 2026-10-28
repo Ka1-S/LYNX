@@ -276,6 +276,7 @@ private:
     void showMetronomeMenu();
     // the metronome volume knob in a callout under the metronome button
     void showMetronomeVolume();
+    void dumpScoreLog (int minutes); // Tools › Score logger (REA round 165f)
     // View > Audio editor: the selected channel's sample when it is a Sampler with one, else an empty editor
     void openAudioEditorForSelection();
     void connectBrowser (BrowserComponent& b); // the main Browser and the Sample browser window (round 163)
@@ -401,7 +402,7 @@ private:
     juce::String idleHint() const;
 
     ChannelRackComponent rack;
-    juce::Viewport rackViewport;
+    ChannelRackViewport rackViewport { rack };
     PianoRollComponent pianoRoll;
     PlaylistComponent playlist;
     PatternPicker picker { engine, playlist };
@@ -409,6 +410,7 @@ private:
     MixerComponent mixer;
     BrowserComponent browser;
     Workspace workspace; // after the panels' contents: it is destroyed first
+    std::unique_ptr<juce::Component> danceStage; // the dance channels' dancers over the workspace (ui/DanceView.h, round 165e)
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;

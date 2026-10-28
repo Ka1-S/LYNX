@@ -42,7 +42,8 @@ private:
     bool dragging = false;
 };
 
-// The time display: bar : beat : step, or minutes : seconds : hundredths (a click switches).
+// The time display: bar : beat : step, minutes : seconds : hundredths or SMPTE time code (a click switches; the
+// right-click menu picks the mode and the SMPTE frame rate, as FL's time display menu).
 class TimeDisplay final : public juce::Component,
                           public ui::HintSource
 {
@@ -56,13 +57,22 @@ public:
     void paint (juce::Graphics& g) override;
     void mouseUp (const juce::MouseEvent& e) override;
     ui::Hint hintAt (juce::Point<int> position) override;
-    bool showsTime() const noexcept { return clockMode; }
+    bool showsTime() const noexcept { return mode != Mode::bars; }
+
+    enum class Mode
+    {
+        bars,
+        clock,
+        smpte
+    };
 
 private:
     juce::String text() const;
+    void showMenu();
     AudioEngine& engine;
     juce::String shown;
-    bool clockMode = false;
+    Mode mode = Mode::bars;
+    int smpteRate = 5; // timecode::rates index (30 fps)
 };
 
 // Master volume (the Master insert's fader) or master pitch (cents, Song::masterPitch): a small knob with

@@ -1,3 +1,4 @@
+#include "platform/Paths.h"
 #include "engine/AudioLogger.h"
 
 namespace lynx
@@ -11,7 +12,7 @@ AudioLogger::~AudioLogger()
 
 juce::File AudioLogger::defaultFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX").getChildFile ("Audio logger");
+    return lynx::platform::documentsFolder().getChildFile ("LYNX").getChildFile ("Audio logger");
 }
 
 bool AudioLogger::start (const juce::File& folder, double sampleRate)

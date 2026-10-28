@@ -3,6 +3,7 @@
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 #include "core/HardwareInsert.h"
 #include "core/EchoSuite.h"
 #include "core/LynxTune.h"
@@ -27,8 +28,12 @@
 #include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
+#include "platform/Package.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
+#include "ui/VisualGl.h"
+#include "ui/DanceView.h"
 #include "ui/PluginPresetMenu.h"
 #include "ui/PluginWindow.h"
 #include "ui/ClipProperties.h"
@@ -48,6 +53,7 @@
 #include "core/RackOps.h"
 #include "core/Layer.h"
 #include "core/XyController.h"
+#include "core/FlCurve.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "ui/Controllers164.h"
@@ -80,6 +86,7 @@
 #include "ui/ThemeSettings.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
+#include "ui/Toolbar.h"
 #include "ui/ToolWindow.h"
 #include "platform/CrashGuard.h"
 #include "ui/CrashReporter.h"
@@ -119,6 +126,7 @@ struct StartupTrace
     }
 };
 StartupTrace startupTrace;
+void startupMarkHook (const char* step) { startupTrace.mark (step); }
 
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
 void onCrash (void* exceptionPointers)
@@ -367,6 +375,15 @@ public:
             lynx::crashguard::exitNow (0);
         }
 
+        if (args.contains ("--packageinfo"))
+        {
+            // round 165n: the Microsoft Store (MSIX) build's identity and folders (platform/Package.h); the release
+            // workflow runs it inside the installed test package
+            juce::File (args[args.indexOf ("--packageinfo") + 1].unquoted()).replaceWithText (lynx::platform::packageReport());
+            quit();
+            return;
+        }
+
         if (args.contains ("--paths"))
         {
             // diagnostics: folders LYNX searches
@@ -438,6 +455,17 @@ public:
             return;
         }
 
+        if (args.contains ("--midisync-test"))
+        {
+            // LYNX --midisync-test report.txt ["output device"] ["input device"] (round 165f): MIDI clock timing
+            const auto i = args.indexOf ("--midisync-test");
+            const auto out = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].unquoted() : juce::String();
+            const auto in = args.size() > i + 3 && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
+            juce::File (args[i + 1].unquoted()).replaceWithText (lynx::MidiSyncIo::selfTest (out, in));
+            quit();
+            return;
+        }
+
         if (args.contains ("--devices") || args.contains ("--dispositivos")) // --dispositivos: legacy alias
         {
             // diagnostics: driver types and output devices JUCE offers (without opening any)
@@ -459,6 +487,10 @@ public:
                 for (const auto& name : type->getDeviceNames (true))
                     report << "  input=" << name << "\n";
             }
+            for (const auto& d : juce::MidiInput::getAvailableDevices())
+                report << "midi-in=" << d.name << "\n";
+            for (const auto& d : juce::MidiOutput::getAvailableDevices())
+                report << "midi-out=" << d.name << "\n";
 
             const auto flag = args.contains ("--devices") ? args.indexOf ("--devices") : args.indexOf ("--dispositivos");
             juce::File (args[flag + 1].unquoted()).replaceWithText (report);
@@ -742,6 +774,18 @@ public:
             return;
         }
 
+        if (args.contains ("--flextrashot"))
+        {
+            // LYNX.exe --flextrashot <folder>: pictures of the editors of round 165g (Big Clock, Tuner, HTML NoteBook, Mute 2)
+            const auto i = args.indexOf ("--flextrashot");
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            lynx::AudioEngine shotEngine (false);
+            const auto ok = lynx::runFlExtraShots (shotEngine, juce::File (args[i + 1].unquoted()));
+            setApplicationReturnValue (ok ? 0 : 1);
+            quit();
+            return;
+        }
+
         if (args.contains ("--visualtest"))
         {
             // LYNX.exe --visualtest <folder> [project.flp]: the visual plugins (round 164c) — the audio path's CPU, every
@@ -846,6 +890,16 @@ public:
             return;
         }
 
+        if (args.contains ("--danceshot"))
+        {
+            // LYNX.exe --danceshot prefix: LYNX Dance (round 165e) — every move as a contact sheet, the channel's editor,
+            // and a demo project with two dance channels (for --snapshot)
+            const auto i = args.indexOf ("--danceshot");
+            runDanceShot (args[i + 1].unquoted());
+            quit();
+            return;
+        }
+
         if (args.contains ("--vfxshot"))
         {
             // LYNX.exe --vfxshot prefix: the VFX note effects' editors (round 164b), on channels and in a Patcher, as PNGs
@@ -941,6 +995,8 @@ public:
         startHangWatch();
 
         startupTrace.mark ("initialise (normal start)");
+        if (startupTrace.on)
+            lynx::startupMark = startupMarkHook;
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         lynx::themeui::loadSaved(); // the user's theme (Options › Theme, round 162d)
         startupOptions = lynx::StartupOptions::load();
@@ -949,6 +1005,18 @@ public:
         // Double-clicking a .lynx/.flp opens LYNX with the file as an argument.
         if (args.size() > 0 && juce::File::isAbsolutePath (args[0].unquoted()))
             fileToOpen = juce::File (args[0].unquoted());
+        // LYNX --opentime project.(flp|lynx)|- report.txt [idle seconds] (round 165i): the normal start-up (splash, audio
+        // device, window) opens the project, waits until it is loaded and LYNX has gone quiet, measures the idle CPU and
+        // memory, writes the times and quits normally (a benchmark that killed LYNX left "closed unexpectedly" behind)
+        if (args.contains ("--opentime"))
+        {
+            const auto i = args.indexOf ("--opentime");
+            const auto project = args[i + 1].unquoted();
+            fileToOpen = project != "-" && juce::File::isAbsolutePath (project) ? juce::File (project) : juce::File();
+            openTimeReport = juce::File (args[i + 2].unquoted());
+            if (args.size() > i + 3 && ! args[i + 3].startsWith ("--"))
+                openTimeIdleSeconds = juce::jlimit (1, 120, args[i + 3].getIntValue());
+        }
 
         if (! startupOptions.splash)
         {
@@ -959,6 +1027,7 @@ public:
             startupTrace.mark ("window revealed");
             openStartupFile();
             startupTrace.mark ("startup file opened");
+            startOpenTimeProbe();
             juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
             return;
         }
@@ -966,7 +1035,9 @@ public:
         // the splash first, so it is on screen while the audio device opens; the main window is built
         // once the pepper has landed (the scene is still for a moment then) and shown when the splash ends
         splash = std::make_unique<lynx::SplashScreen>();
+        startupTrace.mark ("splash made");
         splash->showOnDesktop();
+        startupTrace.mark ("splash on the desktop");
 
         juce::Timer::callAfterDelay (40, [this] {
             startEngine();
@@ -998,9 +1069,12 @@ public:
                     showUncleanNotice();
                     openStartupFile();
                     startupTrace.mark ("startup file opened");
+                    startOpenTimeProbe();
                     juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
                     // first run: language, audio, plugin folders (FL Studio's included) and a background scan
-                    if (! lynx::setupWizardDone())
+                    if (! lynx::setupWizardDone() && lynx::platform::testMode())
+                        lynx::platform::testModeLog ("setup wizard");
+                    else if (! lynx::setupWizardDone())
                         mainWindow->showSetupWizard();
                 });
             });
@@ -1047,6 +1121,12 @@ public:
     // Settings › General › "Crash reports" says (round 159), ask whether to send a report, send it unasked, or not
     void showUncleanNotice()
     {
+        if (lynx::platform::testMode()) // LYNX_TEST_MODE: no prompt, no report sent (written to test-mode.log)
+        {
+            if (uncleanLastStep.isNotEmpty())
+                lynx::platform::testModeLog ("\"closed unexpectedly\" notice (last step: " + uncleanLastStep + ")");
+            return;
+        }
         if (uncleanLastStep.isEmpty())
         {
             lynx::crashreporter::retryPending(); // (reports an earlier run could not send: once more)
@@ -1070,6 +1150,25 @@ public:
                     << lynx::tr ("The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU "
                                  "rendering back on in Options > General settings (after a driver update, for example).",
                                  { cause.driverModule });
+        }
+
+        // round 165e: the Visualizer's GPU view was drawing when the session ended (a driver crash, a hang, the machine
+        // going down): the Visualizer draws with the 2D renderer from now on (its GPU button turns it back on)
+        for (int i = uncleanSteps.size(); --i >= 0;)
+        {
+            if (uncleanSteps[i].contains (lynx::visualgl::stopNote))
+                break;
+            if (uncleanSteps[i].contains (lynx::visualgl::startNote))
+            {
+                if (lynx::visualgl::enabled())
+                {
+                    lynx::visualgl::setEnabled (false);
+                    message << "\n\n"
+                            << lynx::tr ("The Visualizer was drawing with the GPU (OpenGL) when it happened. It now draws without the GPU; its GPU "
+                                         "button turns it back on.");
+                }
+                break;
+            }
         }
 
         const auto session = lynx::crashreporter::parseSession (uncleanSessionText);
@@ -1109,6 +1208,105 @@ public:
             return;
         }
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"), message);
+    }
+
+    // --opentime: after the start-up file was handed to the window
+    void startOpenTimeProbe()
+    {
+        if (openTimeReport == juce::File())
+            return;
+
+        struct Probe final : juce::Timer
+        {
+            LynxApplication& app;
+            juce::File report, project;
+            int idleSeconds;
+            int phase = 0; // 0 loading, 1 settling, 2 idle measurement
+            double revealedS = 0.0, loadedS = -1.0, settledS = -1.0, cpuAtLoaded = 0.0;
+            double lastCpu = 0.0, lastT = 0.0, quietSince = -1.0, idleCpu0 = 0.0, idleT0 = 0.0;
+
+            Probe (LynxApplication& a, juce::File r, juce::File p, int idle)
+                : app (a), report (std::move (r)), project (std::move (p)), idleSeconds (idle)
+            {
+                revealedS = startupTrace.seconds();
+                startTimer (250);
+            }
+
+            bool loaded() const
+            {
+                if (project == juce::File())
+                    return true;
+                return app.mainWindow != nullptr
+                    && app.mainWindow->getName().containsIgnoreCase (project.getFileNameWithoutExtension());
+            }
+
+            void finish (const juce::String& result)
+            {
+                stopTimer();
+                const auto now = startupTrace.seconds();
+                const auto cpu = lynx::processCpuSeconds();
+                juce::String text;
+                text << "project=" << (project == juce::File() ? juce::String ("-") : project.getFullPathName()) << "\n"
+                     << "window_s=" << juce::String (revealedS, 3) << "\n"
+                     << "loaded_s=" << juce::String (loadedS, 3) << "\n"
+                     << "settled_s=" << juce::String (settledS, 3) << "\n"
+                     << "cpu_at_loaded_s=" << juce::String (cpuAtLoaded, 3) << "\n"
+                     << "idle_s=" << juce::String (now - idleT0, 2) << "\n"
+                     << "idle_cpu_pct=" << juce::String (phase == 2 && now > idleT0 ? 100.0 * (cpu - idleCpu0) / (now - idleT0) : -1.0, 1) << "\n"
+                     << "working_set_mb=" << juce::String ((double) lynx::toolbar::PerformanceMeter::processMemoryBytes() / 1048576.0, 0) << "\n"
+                     << "cpu_total_s=" << juce::String (cpu, 3) << "\n"
+                     << "result=" << result << "\n";
+                report.replaceWithText (text);
+                app.setApplicationReturnValue (result == "OK" ? 0 : 1);
+                app.quit();
+            }
+
+            void timerCallback() override
+            {
+                const auto now = startupTrace.seconds();
+                const auto cpu = lynx::processCpuSeconds();
+                if (phase == 0)
+                {
+                    if (loaded())
+                    {
+                        loadedS = now;
+                        cpuAtLoaded = cpu;
+                        phase = 1;
+                        lastCpu = cpu;
+                        lastT = now;
+                    }
+                    else if (now - revealedS > 240.0)
+                        finish ("TIMEOUT loading");
+                    return;
+                }
+                if (phase == 1)
+                {
+                    // quiet = under 10 % of one core for 1.5 s (the harness's rule), at most 30 s after loading
+                    const auto use = now > lastT ? 100.0 * (cpu - lastCpu) / (now - lastT) : 0.0;
+                    lastCpu = cpu;
+                    lastT = now;
+                    if (use < 10.0)
+                    {
+                        if (quietSince < 0.0)
+                            quietSince = now - 0.25;
+                        if (now - quietSince >= 1.5)
+                            settledS = quietSince;
+                    }
+                    else
+                        quietSince = -1.0;
+                    if (settledS >= 0.0 || now - loadedS > 30.0)
+                    {
+                        phase = 2;
+                        idleCpu0 = cpu;
+                        idleT0 = now;
+                    }
+                    return;
+                }
+                if (now - idleT0 >= (double) idleSeconds)
+                    finish ("OK");
+            }
+        };
+        perf = std::make_unique<Probe> (*this, openTimeReport, fileToOpen, openTimeIdleSeconds);
     }
 
     void openStartupFile()
@@ -3264,7 +3462,7 @@ private:
             int frame = -1;
             std::vector<double> times, rendered; // whole frames (event + paint + blit, when this timer paints) / the window's paints
             double setupMs = 0.0, wallStart = 0.0;
-            std::clock_t cpuStart = 0;
+            double cpuStart = 0.0; // process CPU seconds (std::clock is wall time on Windows)
 
             UiPerf (LynxApplication& a, juce::File r) : app (a), report (std::move (r)) {}
 
@@ -3297,7 +3495,7 @@ private:
                     times.clear();
                     rendered.clear();
                     wallStart = juce::Time::getMillisecondCounterHiRes();
-                    cpuStart = std::clock();
+                    cpuStart = lynx::processCpuSeconds();
                     frame = 0;
                     return;
                 }
@@ -3310,7 +3508,7 @@ private:
                     return;
 
                 const auto wall = juce::Time::getMillisecondCounterHiRes() - wallStart;
-                const auto cpu = 1000.0 * (double) (std::clock() - cpuStart) / CLOCKS_PER_SEC;
+                const auto cpu = 1000.0 * (lynx::processCpuSeconds() - cpuStart);
                 text << s.name << ": show " << juce::String (setupMs, 1) << " ms\n"
                      << "    painted frames: " << stats (rendered) << "\n"
                      << "    timed here (event + paint + blit): " << stats (times)
@@ -4319,6 +4517,7 @@ private:
                 kinds.push_back (own);
             kinds.push_back (lynx::EffectKind::apexLimiter); // round 114: display-first editor
             kinds.push_back (lynx::EffectKind::ridgeStrip); // round 145: the second pass shows the Vocal strip voicing
+            kinds.push_back (lynx::EffectKind::ridgeStrip); // round 165: the third pass shows the E console voicing
             kinds.push_back (lynx::EffectKind::compressor); // round 152: the RComp role's panel (vintage voicing, RComp ranges)
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
@@ -4375,6 +4574,14 @@ private:
                                                         { "Process order", 0.4783f }, { "De-esser", 1.0f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
                     name = "Ridge Strip (Vocal strip)";
+                }
+                else if (kind == lynx::EffectKind::ridgeStrip && ridgePasses == 3) // round 165: the E console, EQ to the side chain
+                {
+                    for (const auto& [param, value] : { std::pair<const char*, float> { "Voicing", 1.0f }, { "HPF", 0.3f }, { "HF gain", 0.8f },
+                                                        { "HF bell", 1.0f }, { "Ratio", 0.5f }, { "Comp. threshold", 0.4f }, { "EQ to SC", 1.0f },
+                                                        { "Filter split", 1.0f }, { "Expander", 1.0f } })
+                        fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                    name = "Ridge Strip (E console)";
                 }
                 else if (kind == lynx::EffectKind::ridgeStrip) // a vocal setting, so the graphs show something
                     for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },
@@ -4523,6 +4730,33 @@ private:
                     editor->paintEntireComponent (g, false);
                 }
                 const auto file = out.getChildFile ("Auto-pan-tweak.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
+            }
+
+            // round 165: Ember's Classic voicing (the Decapitator role) in its one-screen panel
+            {
+                namespace em = lynx::mixsuite::ember;
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::ember);
+                fx.params[em::voicing] = 1.0f;
+                fx.params[em::classicDrive] = 0.35f;
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Ember Saturator-classic.png");
                 file.deleteFile();
                 juce::PNGImageFormat png;
                 if (auto stream = file.createOutputStream())
@@ -4709,6 +4943,59 @@ private:
         quit();
     }
 
+    void runDanceShot (const juce::String& prefix)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        // the moves: one row each, eight moments of a cycle (both facings for Spinning; Pose ends the sheet)
+        {
+            constexpr int cell = 120, cols = 8;
+            juce::Image sheet (juce::Image::ARGB, 130 + cols * cell, lynx::dance::moveCount * cell + 10, true);
+            juce::Graphics g (sheet);
+            g.fillAll (lynx::theme::colour::bg0);
+            for (int m = 0; m < lynx::dance::moveCount; ++m)
+            {
+                g.setColour (lynx::theme::colour::textSecondary);
+                g.setFont (14.0f);
+                g.drawText (lynx::dance::moveName (m), 8, m * cell + 5, 118, cell, juce::Justification::centredLeft);
+                for (int k = 0; k < cols; ++k)
+                {
+                    const auto pose = lynx::dance::pose (m, k / (double) cols + (m == lynx::dance::freestyle ? k * 2 : 0), 1);
+                    lynx::dancer::draw (g, { 130.0f + (k + 0.5f) * cell, (float) (m + 1) * cell - 6.0f }, 92.0f, pose, false, juce::Colour (0xffff3048));
+                }
+            }
+            savePng (sheet, prefix + "-moves.png");
+        }
+        lynx::AudioEngine offline (false);
+        lynx::Song song;
+        song.mixer = lynx::Song::defaultMixer (2);
+        for (int d = 0; d < 2; ++d)
+        {
+            lynx::ChannelDef c;
+            c.name = d == 0 ? "Fruity Dance" : "Fruity Dance #2";
+            c.instrument = lynx::InstrumentKind::fruitydance;
+            lynx::dance::Settings s;
+            s.move = d == 0 ? lynx::dance::stepping : lynx::dance::waving;
+            s.x = d == 0 ? 520 : 760;
+            s.y = 560;
+            s.colour = d == 0 ? 0xffff3048 : 0xff30a8ff;
+            s.mirrored = d == 1;
+            c.pluginState = lynx::dance::toState (s);
+            song.channels.push_back (c);
+        }
+        song.patterns.emplace_back();
+        {
+            const juce::File demo (prefix + "-demo.lynx");
+            juce::String error;
+            lynx::ProjectFile::save (song, demo, error);
+        }
+        offline.setSong (std::move (song));
+        offline.dispatchPendingMessages();
+        if (auto editor = lynx::makeChannelSettingsPanel (offline, 0))
+            savePng (editor->createComponentSnapshot (editor->getLocalBounds()), prefix + "-editor.png");
+        if (auto frame = lynx::makeChannelFrame (offline, 1, 0))
+            savePng (frame->createComponentSnapshot (frame->getLocalBounds()), prefix + "-frame.png");
+    }
+
     void runControllerShot (const juce::String& prefix)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -4733,6 +5020,12 @@ private:
             song.mixer[1].effects.push_back (xyFx);
             auto xyzFx = lynx::makeEffectSlot (lynx::EffectKind::xyzController);
             xyzFx.params[(std::size_t) lynx::xy::level (2)] = 0.8f;
+            song.mixer[1].effects.push_back (xyzFx);
+            // round 165: an X-Y-Z whose X curve is FL's "Stairs" (tension +40 %) and Y a bent single curve
+            xyzFx.params[(std::size_t) lynx::xy::curveMode (0)] = lynx::xy::curveModeValue (lynx::flcurve::stairs);
+            xyzFx.params[(std::size_t) lynx::xy::tension (0)] = 0.7f;
+            xyzFx.params[(std::size_t) lynx::xy::level (0)] = 0.62f;
+            xyzFx.params[(std::size_t) lynx::xy::tension (1)] = 0.825f;
             song.mixer[1].effects.push_back (xyzFx);
             auto panel = lynx::makeEffectSlot (lynx::EffectKind::controlSurface);
             lynx::SurfaceControl c;
@@ -4834,7 +5127,8 @@ private:
             const lynx::AutomationTarget target { lynx::AutomationTargetKind::effectParam, 1, 1, 0 };
             shoot (lynx::makeXyControllerEditor (offline, slotOf (1), nullptr, target), "-xy-controller.png");
             shoot (lynx::makeXyControllerEditor (offline, slotOf (2), nullptr, target), "-xyz-controller.png");
-            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (3), target), "-control-surface.png");
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (3), nullptr, target), "-xyz-controller-stairs.png");
+            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (4), target), "-control-surface.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
         }
@@ -4852,9 +5146,25 @@ private:
                 offline.editSong ([&] (lynx::Song& s) {
                     s.channels[6].name = file.getFileNameWithoutExtension().toStdString();
                     s.channels[6].patcher.surface = dash->controls;
+                    s.channels[6].pluginState = preset.channels[0].pluginState; // (its MIDI port, channel, program)
                 });
                 offline.dispatchPendingMessages();
-                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + file.getFileNameWithoutExtension().replaceCharacter (' ', '-') + ".png");
+                const auto name = file.getFileNameWithoutExtension().replaceCharacter (' ', '-');
+                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + name + ".png");
+                // edit mode (round 165): each control's output number and the MIDI it sends ("1 CC74")
+                if (auto panel = lynx::makeChannelSettingsPanel (offline, 6))
+                {
+                    std::function<void (juce::Component&)> pressEdit = [&] (juce::Component& c) {
+                        for (auto* child : c.getChildren())
+                        {
+                            if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText() == lynx::tr ("Edit"))
+                                b->setToggleState (true, juce::sendNotificationSync);
+                            pressEdit (*child);
+                        }
+                    };
+                    pressEdit (*panel);
+                    shoot (std::move (panel), "-dashboard-fl-" + name + "-edit.png");
+                }
             }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
@@ -6445,6 +6755,8 @@ private:
     double splashDuration = lynx::SplashScreen::minimumDuration; // seconds of its clock (round 121: from the process start)
     lynx::StartupOptions startupOptions;
     juce::File fileToOpen;
+    juce::File openTimeReport; // --opentime
+    int openTimeIdleSeconds = 10;
 };
 
 START_JUCE_APPLICATION (LynxApplication)

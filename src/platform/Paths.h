@@ -13,6 +13,15 @@ namespace lynx::platform
 //   Linux    $XDG_CONFIG_HOME/LYNX (default ~/.config/LYNX)
 juce::File settingsFolder();
 
+// LYNX_PROFILE_DIR (core/TestProfile.h): the folder that replaces every user-data location, or an empty File.
+juce::File profileOverride();
+// LYNX_TEST_MODE: no prompts (they are logged to test-mode.log in the settings folder instead).
+bool testMode();
+void testModeLog (const juce::String& what);
+
+// The user's Documents folder for what LYNX writes there (Documents/LYNX/...): <profile>/Documents under a test profile.
+juce::File documentsFolder();
+
 // A file or sub-folder inside the settings folder, e.g. settingsFile ("autosave").
 juce::File settingsFile (const juce::String& relativePath);
 

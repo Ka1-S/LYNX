@@ -174,7 +174,7 @@ public:
         name.onTextChange = [this] { updatePath(); };
         label (folderLabel, tr ("Folder"));
         folder = juce::File::isAbsolutePath (remembered.folder) ? juce::File (remembered.folder)
-                                                                 : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX Projects");
+                                                                 : lynx::platform::documentsFolder().getChildFile ("LYNX Projects");
         if (! persistent)
             folderText = remembered.folder;
         folderValue.setFont (theme::font (theme::type::body));
@@ -421,7 +421,7 @@ private:
 
 juce::File userTemplatesFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Templates");
+    return lynx::platform::documentsFolder().getChildFile ("LYNX/Templates");
 }
 
 bool newProjectDialogEnabled()

@@ -6,6 +6,7 @@
 
 #include "core/Effects.h"
 #include "core/ControlSurface.h"
+#include "core/VoltageController.h"
 #include "core/XyController.h"
 #include "core/MidiControls.h"
 #include "core/FlSynths.h"
@@ -37,6 +38,15 @@ juce::AudioPluginInstance* pluginFor (AudioEngine& engine, const AutomationTarge
             return &p->getInstance();
 
     return nullptr;
+}
+
+// "Main L offset", "Out 3 R scale" (the Voltage Controller's own parameters, round 165)
+juce::String voltageParamLabel (int param)
+{
+    static const char* outputs[] = { TR_NOOP ("Main L"), TR_NOOP ("Main R"), TR_NOOP ("Out 2 L"), TR_NOOP ("Out 2 R"),
+                                     TR_NOOP ("Out 3 L"), TR_NOOP ("Out 3 R"), TR_NOOP ("Out 4 L"), TR_NOOP ("Out 4 R") };
+    const auto output = tr (outputs[param % voltage::outputs]);
+    return param < voltage::outputs ? tr ("{0} offset", { output }) : tr ("{0} scale", { output });
 }
 
 // The CC / aftertouch / pitch bend value the plugin was last sent (or the controller's rest value).
@@ -144,6 +154,14 @@ public:
         g.setColour (colour::automation);
         g.strokePath (curve, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
+        // round 165: FL's tension handles, hollow, in the middle of each segment
+        for (int i = 0; i + 1 < (int) points.size(); ++i)
+            if (const auto h = handlePosition (i); h.x >= 0.0f)
+            {
+                g.setColour (i == hoverHandle || i == tensionPoint ? colour::textPrimary : colour::automation);
+                g.drawEllipse (h.x - 4.5f, h.y - 4.5f, 9.0f, 9.0f, 1.5f);
+            }
+
         for (std::size_t i = 0; i < points.size(); ++i)
         {
             const auto p = pointPosition (points[i]);
@@ -177,10 +195,12 @@ public:
     void mouseMove (const juce::MouseEvent& e) override
     {
         const auto hit = pointAt (e.position);
+        const auto handle = hit < 0 ? handleAt (e.position) : -1;
 
-        if (hit != hoverPoint)
+        if (hit != hoverPoint || handle != hoverHandle)
         {
             hoverPoint = hit;
+            hoverHandle = handle;
             repaint();
         }
 
@@ -198,7 +218,7 @@ public:
         using C = gesture::Cursor;
         const auto inPlot = plotArea().contains (getMouseXYRelative());
 
-        if (inPlot && mods.isAltDown())
+        if (inPlot && hoverPoint < 0 && (mods.isAltDown() || hoverHandle >= 0))
             setMouseCursor (juce::MouseCursor::UpDownResizeCursor); // drag up / down bends the segment
         else
             setMouseCursor (editorCursor (! inPlot ? C::normal : hoverPoint >= 0 ? C::move : C::draw));
@@ -215,12 +235,14 @@ public:
         const auto point = pointAt (position.toFloat());
         hint.hasMenu = true;
 
-        if (juce::ModifierKeys::currentModifiers.isAltDown())
+        if (point >= 0)
+            hint.text = tr ("Point: [LMB] drag moves, then [Shift] keeps time, [Ctrl] keeps value  [Alt] no snap  [RMB] menu");
+        else if (handleAt (position.toFloat()) >= 0)
+            hint.text = tr ("Tension: [LMB] drag up / down bends the segment ([Ctrl] fine)  [RMB] straight");
+        else if (juce::ModifierKeys::currentModifiers.isAltDown())
             hint.text = tr ("[Alt][LMB] drag up / down bends this segment");
-        else if (point >= 0)
-            hint.text = tr ("Point: [LMB] drag moves, then [Shift] keeps time, [Ctrl] keeps value  [RMB] menu");
         else
-            hint.text = tr ("[LMB] new point  [Shift][RMB] point on the curve  [Alt][LMB] bend  [Ctrl][Wheel] zoom  [MMB] scroll");
+            hint.text = tr ("[LMB] or [RMB] new point (hold and drag)  [Shift][RMB] point on the curve  [Alt][LMB] bend  [Ctrl][Wheel] zoom  [MMB] scroll");
 
         if (a != nullptr)
             hint.value = valueText (point >= 0 ? a->points[(std::size_t) point].value : yToValue (position.y));
@@ -246,24 +268,43 @@ public:
             return;
         }
 
+        const auto handle = hit < 0 ? handleAt (e.position) : -1;
+
         if (e.mods.isPopupMenu())
         {
-            if (e.mods.isShiftDown() && hit < 0) // a point on the curve, keeping its level
+            if (hit >= 0)
             {
-                AutomationPoint p;
-                p.tick = snap (xToTick (e.x), true);
-                p.value = a->valueAt ((double) p.tick);
-                edit ([p] (Automation& x) {
-                    x.points.push_back (p);
-                    std::stable_sort (x.points.begin(), x.points.end(), [] (auto& l, auto& r) { return l.tick < r.tick; });
+                showPointMenu (hit);
+                return;
+            }
+            if (handle >= 0) // FL: right-click on the tension handle = straight segment
+            {
+                edit ([handle] (Automation& x) {
+                    if (handle < (int) x.points.size())
+                        x.points[(std::size_t) handle].tension = 0.0f;
                 });
                 return;
             }
+            // FL: right-click adds a point there, dragged while the button is held (Shift: on the curve, keeping its
+            // level); the whole-curve commands are in the point menu
+            AutomationPoint p;
+            p.tick = snap (xToTick (e.x), ! e.mods.isAltDown());
+            p.value = e.mods.isShiftDown() ? a->valueAt ((double) p.tick) : yToValue (e.y);
+            addAndDrag (p);
+            return;
+        }
 
-            if (hit >= 0)
-                showPointMenu (hit);
-            else
-                showCurveMenu();
+        if (hit >= 0 && e.mods.isAltDown()) // FL: Alt + drag moves the point without snap
+        {
+            dragPoint = hit;
+            return;
+        }
+
+        if (handle >= 0) // the tension handle: up / down bends the segment
+        {
+            tensionPoint = handle;
+            tensionStart = a->points[(std::size_t) handle].tension;
+            tensionSign = a->points[(std::size_t) handle + 1].value >= a->points[(std::size_t) handle].value ? -1.0f : 1.0f;
             return;
         }
 
@@ -278,7 +319,10 @@ public:
                     tensionPoint = i;
 
             if (tensionPoint >= 0)
+            {
                 tensionStart = a->points[(std::size_t) tensionPoint].tension;
+                tensionSign = a->points[(std::size_t) tensionPoint + 1].value >= a->points[(std::size_t) tensionPoint].value ? -1.0f : 1.0f;
+            }
             return;
         }
 
@@ -291,6 +335,11 @@ public:
         AutomationPoint p;
         p.tick = snap (xToTick (e.x), ! e.mods.isShiftDown());
         p.value = yToValue (e.y);
+        addAndDrag (p);
+    }
+
+    void addAndDrag (const AutomationPoint& p)
+    {
         edit ([p] (Automation& x) {
             x.points.push_back (p);
             std::stable_sort (x.points.begin(), x.points.end(), [] (auto& l, auto& r) { return l.tick < r.tick; });
@@ -317,7 +366,8 @@ public:
 
         if (tensionPoint >= 0 && tensionPoint < (int) a->points.size())
         {
-            const auto tension = juce::jlimit (-1.0f, 1.0f, tensionStart + (float) e.getDistanceFromDragStartY() / 100.0f);
+            const auto up = -(float) e.getDistanceFromDragStartY() / (e.mods.isCtrlDown() ? 400.0f : 100.0f);
+            const auto tension = juce::jlimit (-1.0f, 1.0f, tensionStart + tensionSign * up); // the segment follows the mouse
             edit ([i = tensionPoint, tension] (Automation& x) { x.points[(std::size_t) i].tension = tension; });
             return;
         }
@@ -327,7 +377,7 @@ public:
 
         // the point can't pass its neighbours (order doesn't change while dragging)
         const auto& points = a->points;
-        auto tick = snap (xToTick (e.x), ! e.mods.isShiftDown());
+        auto tick = snap (xToTick (e.x), ! e.mods.isShiftDown() && ! e.mods.isAltDown());
         const auto lo = dragPoint > 0 ? points[(std::size_t) dragPoint - 1].tick : 0;
         const auto hi = dragPoint + 1 < (int) points.size() ? points[(std::size_t) dragPoint + 1].tick : std::numeric_limits<std::int64_t>::max();
         tick = juce::jlimit (lo, hi, tick);
@@ -371,13 +421,11 @@ public:
 
 private:
     juce::ModifierKeys downMods;
-    static inline float copiedValue = -1.0f;
 
     juce::String valueText (float v) const
     {
         const auto* a = current();
-        return a != nullptr && a->target.kind == AutomationTargetKind::tempo ? juce::String (tempoFromValue (v), 2) + " BPM"
-                                                                             : juce::String (v * 100.0f, 1) + "%";
+        return a != nullptr ? automationPointValueText (a->target, v) : juce::String();
     }
 
     void showPointMenu (int point)
@@ -387,9 +435,9 @@ private:
         juce::PopupMenu menu;
         menu.addSectionHeader (valueText (value));
         menu.addItem (tr ("Type value..."), [this, point] { typeValue (point); });
-        menu.addItem (tr ("Copy value"), [value] { copiedValue = value; });
-        menu.addItem (tr ("Paste value"), copiedValue >= 0.0f, false, [this, point] {
-            edit ([point, v = copiedValue] (Automation& x) {
+        menu.addItem (tr ("Copy value"), [value] { copiedAutomationValue() = value; });
+        menu.addItem (tr ("Paste value"), copiedAutomationValue() >= 0.0f, false, [this, point] {
+            edit ([point, v = copiedAutomationValue()] (Automation& x) {
                 if (point < (int) x.points.size())
                     x.points[(std::size_t) point].value = v;
             });
@@ -407,32 +455,14 @@ private:
                     x.points.erase (x.points.begin() + point);
             });
         });
+        menu.addSeparator();
+        menu.addSubMenu (tr ("Whole curve"), curveMenu());
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
-    void typeValue (int point)
-    {
-        const auto* a = current();
-        const auto tempo = a->target.kind == AutomationTargetKind::tempo;
-        const auto value = a->points[(std::size_t) point].value;
-        auto* window = new juce::AlertWindow (tr ("Point value"), tempo ? tr ("BPM") : tr ("Percent (0 to 100)"), juce::MessageBoxIconType::NoIcon);
-        window->addTextEditor ("value", tempo ? juce::String (tempoFromValue (value), 2) : juce::String (value * 100.0f, 1));
-        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, point, tempo, window] (int result) {
-                                     if (result != 1)
-                                         return;
-                                     const auto typed = window->getTextEditorContents ("value").retainCharacters ("0123456789.,-").replaceCharacter (',', '.').getDoubleValue();
-                                     const auto v = juce::jlimit (0.0f, 1.0f, tempo ? valueFromTempo (typed) : (float) typed / 100.0f);
-                                     edit ([point, v] (Automation& x) {
-                                         if (point < (int) x.points.size())
-                                             x.points[(std::size_t) point].value = v;
-                                     });
-                                 }),
-                                 true);
-    }
+    void typeValue (int point) { typeAutomationPointValue (engine, automation, point); }
 
-    void showCurveMenu()
+    juce::PopupMenu curveMenu()
     {
         juce::PopupMenu menu;
         menu.addItem (tr ("Scale the values into a range..."), [this] { rerange(); });
@@ -448,7 +478,7 @@ private:
                     p.tension = 0.0f;
             });
         });
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        return menu;
     }
 
     void rerange()
@@ -503,6 +533,30 @@ private:
     }
 
     juce::Point<float> pointPosition (const AutomationPoint& p) const { return { (float) tickToX ((double) p.tick), valueToY (p.value) }; }
+
+    // round 165: the tension handle in the middle of segment i → i+1 (x < 0: too narrow to show one)
+    juce::Point<float> handlePosition (int i) const
+    {
+        const auto* a = current();
+        if (a == nullptr || i < 0 || i + 1 >= (int) a->points.size())
+            return { -1.0f, -1.0f };
+        const auto p0 = pointPosition (a->points[(std::size_t) i]), p1 = pointPosition (a->points[(std::size_t) i + 1]);
+        if (p1.x - p0.x < 20.0f)
+            return { -1.0f, -1.0f };
+        const auto mid = 0.5 * (double) (a->points[(std::size_t) i].tick + a->points[(std::size_t) i + 1].tick);
+        return { 0.5f * (p0.x + p1.x), valueToY (a->valueAt (mid)) };
+    }
+
+    int handleAt (juce::Point<float> pos) const
+    {
+        const auto* a = current();
+        if (a == nullptr)
+            return -1;
+        for (int i = 0; i + 1 < (int) a->points.size(); ++i)
+            if (const auto h = handlePosition (i); h.x >= 0.0f && h.getDistanceFrom (pos) < 7.0f)
+                return i;
+        return -1;
+    }
 
     int pointAt (juce::Point<float> pos) const
     {
@@ -561,10 +615,10 @@ private:
     int automation;
     double pixelsPerTick = 120.0 / (4 * ppq);
     double scroll = 0.0;
-    int dragPoint = -1, hoverPoint = -1, tensionPoint = -1;
+    int dragPoint = -1, hoverPoint = -1, tensionPoint = -1, hoverHandle = -1;
     bool panning = false;
     double panStart = 0.0;
-    float tensionStart = 0.0f;
+    float tensionStart = 0.0f, tensionSign = 1.0f;
     double playhead = -1.0;
 };
 
@@ -604,6 +658,43 @@ void AutomationWindow::closeButtonPressed()
 }
 } // namespace
 
+juce::String automationPointValueText (const AutomationTarget& target, float v)
+{
+    return target.kind == AutomationTargetKind::tempo ? juce::String (tempoFromValue (v), 2) + " BPM" : juce::String (v * 100.0f, 1) + "%";
+}
+
+float& copiedAutomationValue()
+{
+    static float value = -1.0f;
+    return value;
+}
+
+void typeAutomationPointValue (AudioEngine& engine, int automation, int point)
+{
+    const auto& song = engine.getSong();
+    if (automation < 0 || automation >= (int) song.automations.size() || point < 0 || point >= (int) song.automations[(std::size_t) automation].points.size())
+        return;
+    const auto& a = song.automations[(std::size_t) automation];
+    const auto tempo = a.target.kind == AutomationTargetKind::tempo;
+    const auto value = a.points[(std::size_t) point].value;
+    auto* window = new juce::AlertWindow (tr ("Point value"), tempo ? tr ("BPM") : tr ("Percent (0 to 100)"), juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("value", tempo ? juce::String (tempoFromValue (value), 2) : juce::String (value * 100.0f, 1));
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([&engine, automation, point, tempo, window] (int result) {
+                                 if (result != 1)
+                                     return;
+                                 const auto typed = window->getTextEditorContents ("value").retainCharacters ("0123456789.,-").replaceCharacter (',', '.').getDoubleValue();
+                                 const auto v = juce::jlimit (0.0f, 1.0f, tempo ? valueFromTempo (typed) : (float) typed / 100.0f);
+                                 engine.editSong ([automation, point, v] (Song& s) {
+                                     if (automation < (int) s.automations.size() && point < (int) s.automations[(std::size_t) automation].points.size())
+                                         s.automations[(std::size_t) automation].points[(std::size_t) point].value = v;
+                                 });
+                             }),
+                             true);
+}
+
+
 juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarget& t)
 {
     const auto& song = engine.getSong();
@@ -633,6 +724,12 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
                      && song.channels[(std::size_t) t.index].instrument == InstrumentKind::controller
                      && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
                 param = t.param == envelopeControllerModXParam ? tr ("Mod X") : tr ("Mod Y"); // (round 164f)
+            else if (t.kind == AutomationTargetKind::channelParam && t.index >= 0 && t.index < (int) song.channels.size()
+                     && song.channels[(std::size_t) t.index].instrument == InstrumentKind::dashboard) // (round 165)
+                param = nameOf (surface::outputName (song.channels[(std::size_t) t.index].patcher.surface, t.param));
+            else if (t.kind == AutomationTargetKind::channelParam && t.index >= 0 && t.index < (int) song.channels.size()
+                     && song.channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0 && t.param < voltage::paramCount)
+                param = voltageParamLabel (t.param);
             else if (t.kind == AutomationTargetKind::effectParam && t.index < (int) song.mixer.size()
                      && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size())
             {

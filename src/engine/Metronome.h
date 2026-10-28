@@ -39,9 +39,13 @@ private:
     const Transport& transport;
     double currentSampleRate = 44100.0;
     std::int64_t lastBeat = -1;
-    double clickPhase = 0.0;
-    double clickPhaseDelta = 0.0;
-    int clickSamplesLeft = 0;
+    double clickPhase = 0.0, clickPhase2 = 0.0;
+    double clickPhaseDelta = 0.0, clickPhaseDelta2 = 0.0;
+    int clickSamplesLeft = 0, clickLength = 1, clickSound = 0;
+    float clickAccent = 1.0f;
+    std::uint32_t noiseState = 0x9e3779b9u;
+    float hp1 = 0.0f, hp2 = 0.0f, lastNoise = 0.0f, lastHp = 0.0f;
+    float voiceSample() noexcept;
 
     // local copy of the Transport's time-signature table (start, bar length in ticks)
     std::array<std::pair<std::int64_t, std::int64_t>, Transport::maxSignatures> signatures {};

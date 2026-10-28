@@ -1,4 +1,5 @@
 #include "ui/PianoRollComponent.h"
+#include "core/NoteNames.h"
 
 #include "core/TransportEdit.h"
 #include "ui/UiTrace.h"
@@ -30,8 +31,7 @@ bool isBlackKey (int key)
 // FL-style name: key 60 = C5.
 juce::String keyName (int key)
 {
-    static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    return juce::String (names[key % 12]) + juce::String (key / 12);
+    return juce::String (notenames::keyName (key)); // Settings › General › Note names (round 165f)
 }
 
 const Pattern& currentPattern (const Song& s)
@@ -175,7 +175,6 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     chordBox.setTooltip (tr ("Clicking creates this chord (the clicked note is the root)"));
 
     // scale: root x type
-    static const char* noteNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     for (int s = 0; s < (int) scales().size(); ++s)
     {
         if (s == 0)
@@ -185,7 +184,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
         }
 
         for (int root = 0; root < 12; ++root)
-            scaleBox.addItem (tr ("{0} {1}", { juce::String (noteNames[root]), tr (scales()[(std::size_t) s].name) }), s * 100 + root + 1);
+            scaleBox.addItem (tr ("{0} {1}", { juce::String (notenames::pitchName (root)), tr (scales()[(std::size_t) s].name) }), s * 100 + root + 1);
     }
     scaleBox.setSelectedId (1, juce::dontSendNotification);
     scaleSnapButton.setEnabled (false); // until a scale is chosen
@@ -1120,6 +1119,12 @@ int PianoRollComponent::ghostAt (int x, int y) const
     return -1;
 }
 
+float PianoRollComponent::keyVelocityAt (int x, int key) const
+{
+    // FL: a click near the left of a key plays it softly, at its right end at full velocity (black keys are shorter)
+    return gesture::keyClickVelocity ((double) x, (double) (isBlackKey (key) ? keyboardWidth * 3 / 5 : keyboardWidth - 1));
+}
+
 void PianoRollComponent::previewOn (int key, float velocity)
 {
     // one preview note at a time; it remembers its channel, so a channel switch meanwhile can't strand it
@@ -1322,7 +1327,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         if (e.mods.isLeftButtonDown())
         {
             drag = Drag::keyboard;
-            previewOn (yToKey (e.y), 0.8f);
+            previewOn (yToKey (e.y), keyVelocityAt (e.x, yToKey (e.y)));
         }
         return;
     }
@@ -1669,7 +1674,7 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
         {
             const auto key = yToKey (e.y);
             if (key != previewKey)
-                previewOn (key, 0.8f);
+                previewOn (key, keyVelocityAt (e.x, key));
             return;
         }
 
@@ -2033,8 +2038,11 @@ void PianoRollComponent::postDragHint (const juce::MouseEvent& e)
             break;
         }
         case Drag::keyZoom: hint.text = tr ("Key height"); hint.value = juce::String (rowHeight) + " px"; break;
-        case Drag::pan:
         case Drag::keyboard:
+            hint.text = tr ("Hearing the key: further right on a key = louder");
+            hint.value = keyName (previewKey) + "  " + tr ("vel {0}", { juce::String (juce::roundToInt (keyVelocityAt (e.x, previewKey) * 127.0f)) });
+            break;
+        case Drag::pan:
         case Drag::seek: hint.text = tr ("Position  [Alt] no snap"); break;
         case Drag::listen:
         case Drag::zoomRange:
@@ -2245,8 +2253,8 @@ ui::Hint PianoRollComponent::hintAt (juce::Point<int> p)
 
     if (p.x < keyboardWidth && p.y >= headerHeight && p.y < gridArea().getBottom())
     {
-        hint.text = tr ("Keyboard: [LMB] hear the key  [Ctrl][LMB] select its notes  [MMB] drag: taller / shorter keys");
-        hint.value = keyName (h.key);
+        hint.text = tr ("Keyboard: [LMB] hear the key (further right = louder)  [Ctrl][LMB] select its notes  [MMB] drag: taller / shorter keys");
+        hint.value = keyName (h.key) + "  " + tr ("vel {0}", { juce::String (juce::roundToInt (keyVelocityAt (p.x, h.key) * 127.0f)) });
         return hint;
     }
 
@@ -2908,8 +2916,18 @@ void PianoRollComponent::updateChordReadout()
             if (i >= 0 && i < (int) notes.size())
                 keys.push_back (notes[(std::size_t) i].key);
     }
-    const auto chord = prtools::detectChord (keys);
-    const auto text = chord ? juce::String (chord->name) : juce::String();
+    const auto chord = prtools::detectChord (keys, notenames::flats());
+    juce::String text;
+    if (chord)
+    {
+        // the root and the bass in the chosen note names (Settings › General, round 165f): "Do m7/Mib"
+        auto name = juce::String (chord->name);
+        auto quality = name.fromFirstOccurrenceOf (juce::String (chord->name).substring (0, name.length() > 1 && (name[1] == '#' || name[1] == 'b') ? 2 : 1),
+                                                   false, false).upToFirstOccurrenceOf ("/", false, false);
+        text = juce::String (notenames::pitchName (chord->root)) + quality;
+        if (name.contains ("/"))
+            text << "/" << notenames::pitchName (chord->bass);
+    }
     if (chordLabel.getText() != text)
         chordLabel.setText (text, juce::dontSendNotification);
 }

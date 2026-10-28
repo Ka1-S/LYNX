@@ -18,8 +18,10 @@
 #include "core/Recorder.h"
 #include "core/TakeRecording.h"
 #include "core/WorkerPool.h"
+#include "engine/MidiSyncIo.h"
 #include "core/RackRenderer.h"
 #include "core/RtStats.h"
+#include "core/ScoreLog.h"
 #include "core/FlpImport.h"
 #include "core/History.h"
 #include "core/NativeEngines.h"
@@ -45,6 +47,9 @@ class AudioLogger;
 FlPathRoots findFlStudioRoots();
 // The user's FL installation as the native FL engines read it (round 142): its folders and this PC's file system
 const natives::FlAccess& flStudioAccess(); // (found once per session)
+
+// Start-up trace hook (round 165i): Main's LYNX_TRACE_STARTUP log receives the engine's own steps (null: off)
+inline void (*startupMark) (const char* step) = nullptr;
 
 class AudioEngine final : private juce::AudioIODeviceCallback,
                           private juce::MidiInputCallback,
@@ -171,6 +176,12 @@ public:
     // The keys held right now on MIDI inputs and the typing piano (as played, before the scale snap), ascending; for
     // the Piano Roll's chord readout (any thread).
     std::vector<int> heldInputKeys() const;
+
+    // FL's score logger (REA round 165f): every note played on a MIDI input or the typing keyboard, recording or
+    // not, for Tools › Dump score log to selected pattern. Any thread (a short spin lock; never the audio thread).
+    std::vector<scorelog::Entry> scoreLogSnapshot() const;
+    bool scoreLogEmpty() const;
+    void clearScoreLog();
 
     // Scale snap for played notes (MIDI input and the PC keyboard): scale index into notetools::scales()
     // (0 = off) and its root (0..11). Any thread.
@@ -338,6 +349,8 @@ public:
     const prefs::MidiPrefs& getMidiPrefs() const noexcept { return midiPrefs; }
     // Applies them (and saves them in %APPDATA%\LYNX\midi-settings.txt when `save`).
     void setMidiPrefs (const prefs::MidiPrefs& prefs, bool save = true);
+    // master sync out / external clock in / all notes off (round 165f)
+    MidiSyncIo& getMidiSync() noexcept { return midiSync; }
 
     // How many undo steps are kept (Settings › General).
     void setUndoLevels (int levels);
@@ -550,6 +563,7 @@ private:
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorPlayer player;
     Transport transport;
+    MidiSyncIo midiSync; // (before the MIDI callbacks and the audio callback use it)
     SampleLibrary samples;
     LiveEventQueue liveEvents;   // UI -> audio
     LiveEventQueue midiEvents;   // MIDI thread -> audio
@@ -615,6 +629,9 @@ private:
     prefs::MidiPrefs midiPrefs;                      // UI thread
     juce::SpinLock midiPrefsLock;                    // guards midiPrefsShared (UI writes, MIDI thread reads)
     prefs::MidiPrefs midiPrefsShared;
+    void logPlayedNote (int channel, int key, float velocity, bool on);
+    mutable juce::SpinLock scoreLogLock;             // MIDI thread and UI thread write, the UI reads
+    scorelog::Log scoreLog;
     std::map<std::tuple<int, int, int, int, int, int>, prefs::PickupState> pickups; // (cc, channel, target) -> takeover
     struct DeviceStateSaver;
     std::unique_ptr<DeviceStateSaver> deviceStateSaver;

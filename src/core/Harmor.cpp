@@ -318,7 +318,131 @@ bool readArt (Reader& r, ArtData& a)
     return r.ok;
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Old states (version 11…15, the factory presets of Harmor's first releases, Default.fst included) as the DLL's loader
+// brings them into the current layout (REA_rodada165g-flbeta165s §1, [DECOMP FUN_0086ed30] + [EXEC] DLL re-saves): a part
+// stores 385 integers — the articulator-33 smoothing (index 376) is missing, so a 0 is inserted there; version 11 also
+// stores the 43 smoothing times (343…385) on an older scale, converted as round(log2(1 + (41^(v/1000) − 1)·37.5·0.0511)·
+// 1000/9); articulator 33 is not stored and gets its defaults. The global block's text becomes an empty string plus
+// the option byte 1 (what the DLL writes for these states). Bytes = the DLL's own re-save of the 88 old factory
+// presets, except shaping-curve point positions the DLL renormalises at load (sub-ulp of the curve length).
+
+std::optional<std::vector<std::uint8_t>> upgradeOldState (const std::vector<std::uint8_t>& d)
+{
+    if (d.size() < 8)
+        return std::nullopt;
+    std::uint32_t v = 0, mask = 0;
+    std::memcpy (&v, d.data(), 4);
+    std::memcpy (&mask, d.data() + 4, 4);
+    if (v > 0xffff)
+        v >>= 16;
+    if (v < 11 || v >= 16 || (mask & 3u) == 0 || (mask & 4u) == 0)
+        return std::nullopt;
+    std::vector<std::uint8_t> out;
+    auto put = [&out] (std::int32_t x) {
+        std::uint8_t b[4];
+        std::memcpy (b, &x, 4);
+        out.insert (out.end(), b, b + 4);
+    };
+    auto putD = [&out] (double x) {
+        std::uint8_t b[8];
+        std::memcpy (b, &x, 8);
+        out.insert (out.end(), b, b + 8);
+    };
+    put (0x130003);
+    put ((std::int32_t) mask);
+    std::size_t o = 8;
+    for (int part = 0; part < 2; ++part)
+    {
+        if (((mask >> part) & 1u) == 0)
+            continue;
+        if (o + 4 > d.size())
+            return std::nullopt;
+        std::uint32_t sz = 0;
+        std::memcpy (&sz, d.data() + o, 4);
+        const auto end = o + 4 + (std::size_t) sz;
+        if (end > d.size() || sz < 4 * 385 + 0x30 + 0x4b)
+            return std::nullopt;
+        std::vector<std::int32_t> p (385);
+        std::memcpy (p.data(), d.data() + o + 4, 4 * 385);
+        p.insert (p.begin() + 376, 0);
+        if (v < 12)
+            for (std::size_t i = 343; i < 386; ++i)
+            {
+                const auto x = (double) (float) ((float) p[i] * 0.001f);
+                const auto t = std::exp (x * std::log (41.0));
+                const auto y = std::log ((double) (float) (t - 1.0) * 37.5 * 0.0511 + 1.0);
+                p[i] = (std::int32_t) std::nearbyint (y * (1.0 / std::log (2.0)) * 111.11111111111111);
+            }
+        const auto sizeAt = out.size();
+        put (0);
+        for (const auto x : p)
+            put (x);
+        Reader r { d.data(), end, o + 4 + 4 * 385 };
+        r.i += 0x30 + 0x4b;
+        out.insert (out.end(), d.begin() + (std::ptrdiff_t) (o + 4 + 4 * 385), d.begin() + (std::ptrdiff_t) r.i);
+        for (int k = 0; k < 43; ++k)
+        {
+            if (k == 33)
+            {
+                // the defaults of an articulator: off, amounts 1, envelope at 0.5, LFO at 0.75, flat maps at 0.5
+                auto curve = [&] (int kind, std::initializer_list<std::pair<double, double>> pts, std::array<std::int32_t, 5> hdr) {
+                    put (kind);
+                    put (3);
+                    put ((std::int32_t) pts.size());
+                    for (const auto& [x, y] : pts)
+                    {
+                        putD (x);
+                        putD (y);
+                        put (0);
+                        put (0);
+                    }
+                    for (const auto h : hdr)
+                        put (h);
+                };
+                put (3);
+                put (0);
+                put (0x3f800000);
+                put (0x3f800000);
+                curve (1, { { 0.0, 0.5 } }, { 0, 0, -1, -1, -1 });
+                for (const auto a : { 128, 128, 0, 128 })
+                    put (a);
+                curve (2, { { 0.0, 0.75 } }, { 0, 0, -1, -1, -1 });
+                for (const auto a : { 40898, 0, 0, 0, 0 })
+                    put (a);
+                for (int m = 0; m < 9; ++m)
+                    curve (3, { { 0.0, 0.5 }, { 1.0, 0.5 } }, { 0, -1, -1, -1, -1 });
+                continue;
+            }
+            const auto from = r.i;
+            ArtData a;
+            if (! readArt (r, a))
+                return std::nullopt;
+            out.insert (out.end(), d.begin() + (std::ptrdiff_t) from, d.begin() + (std::ptrdiff_t) r.i);
+        }
+        out.insert (out.end(), d.begin() + (std::ptrdiff_t) r.i, d.begin() + (std::ptrdiff_t) end);
+        const auto blockSize = (std::int32_t) (out.size() - sizeAt - 4);
+        std::memcpy (out.data() + sizeAt, &blockSize, 4);
+        o = end;
+    }
+    if (o + 0xd4 + 0x18 + 0x3d > d.size())
+        return std::nullopt;
+    out.insert (out.end(), d.begin() + (std::ptrdiff_t) o, d.begin() + (std::ptrdiff_t) (o + 0xd4 + 0x18 + 0x3d));
+    out.push_back (0); // the preset text (empty)
+    out.push_back (1); // option byte
+    return out;
+}
+
+std::optional<StateData> parseCurrent (const std::vector<std::uint8_t>& d);
+
 std::optional<StateData> parseState (const std::vector<std::uint8_t>& d)
+{
+    if (auto up = upgradeOldState (d))
+        return parseCurrent (*up);
+    return parseCurrent (d);
+}
+
+std::optional<StateData> parseCurrent (const std::vector<std::uint8_t>& d)
 {
     if (d.size() < 8)
         return std::nullopt;
@@ -1454,6 +1578,86 @@ std::optional<Table> shapeTable (int code, const Curve* curve)
         }
         T = Table (std::move (t), 0.5 * 4095, 1, 1);
     }
+    // the filter shapes 8, 10…13, 15, 16 (REA_rodada165g-flbeta165s §4, [DECOMP FUN_00874ed0] + DLL constants)
+    else if (code == 8 || code == 10)
+    {
+        const int N = code == 8 ? 682 : 1365;
+        auto t = mk (N, s);
+        for (int i = 0; i < N; ++i)
+        {
+            const auto c = std::cos ((1.0 - i * s * 0.5) * pi);
+            if (code == 8)
+                t[(std::size_t) i] = (float) (1.0 - (c + 1.0));
+            else
+            {
+                const auto u = 1.0 - (1.0 - (c + 1.0));
+                t[(std::size_t) i] = (float) (dbOf2 (u) * (1.0 - p16 (u)));
+            }
+        }
+        T = Table (std::move (t), 0, 1, 0);
+    }
+    else if (code == 11)
+    {
+        auto t = mk (1024, s);
+        for (int i = 0; i < 1024; ++i)
+        {
+            const auto a = 1.0 - (std::cos ((1.0 - i * s) * 9.42477796076938) + 1.0) * 0.5;
+            t[(std::size_t) i] = (float) (a * (1.0 - (std::cos ((1.0 - i * s) * pi) + 1.0) * 0.5));
+        }
+        T = Table (std::move (t), 0, 1, 0);
+    }
+    else if (code == 12)
+    {
+        const int N = 4096, half = N / 2;
+        auto t = mk (N, s);
+        for (int i = 0; i < N; ++i)
+            if (i < half)
+            {
+                const auto v = 1.0 - (std::cos ((1.0 - i * s) * twoPi) + 1.0) * 0.25;
+                t[(std::size_t) i] = (float) (v * v);
+            }
+            else
+            {
+                const auto x = (double) (i - half) * s * 2.0;
+                t[(std::size_t) i] = (float) (dbOf2 (x) * (1.0 - p16 (x)));
+            }
+        T = Table (std::move (t), 0.5 * (N - 1), 1, 0);
+    }
+    else if (code == 13)
+    {
+        auto t = mk (1024, s);
+        for (int i = 0; i < 1024; ++i)
+        {
+            const auto c = std::cos ((1.0 - i * s) * pi);
+            const auto a = (float) ((1.0 - (c + 1.0) * 0.5) * 18.0 + -18.0);
+            t[(std::size_t) i] = (float) std::exp ((double) (a * (float) ln10over20));
+        }
+        T = Table (std::move (t), 0, 1, 0);
+    }
+    else if (code == 15)
+    {
+        auto t = mk (4096, s);
+        for (int i = 0; i < 4096; ++i)
+        {
+            const auto a = (std::cos ((1.0 - i * s) * 37.69911184307752) + 1.0) * 0.5;
+            const auto b = 1.0 - (std::cos ((1.0 - i * s) * twoPi) + 1.0) * 0.5;
+            t[(std::size_t) i] = (float) (a * a * b * b + b * 0.125);
+        }
+        T = Table (std::move (t), 0.5 * 4095, 1, 1);
+    }
+    else if (code == 16)
+    {
+        const int N = 2048, M = N / 3;
+        std::vector<float> t ((std::size_t) N, 1.0f);
+        s = 0.5 / M;
+        for (int i = 0; i < M; ++i)
+        {
+            auto v = 1.0 - (std::cos ((1.0 - i * s) * twoPi) + 1.0) * 0.5;
+            v = v * v;
+            t[(std::size_t) i] = t[(std::size_t) (N - 1 - i)] = (float) v;
+        }
+        T = Table (std::move (t), 0.5 * (N - 1), 1, 1);
+    }
     else if (code == 100 || code == 108)
     {
         auto t = mk (1024, s);
@@ -1896,7 +2100,9 @@ ImageData parseImage (const std::vector<std::uint8_t>& t)
         im.why = "resynthesis-mode image (not modelled: the part plays its timbres)";
         return im;
     }
-    if (! r.ok || im.cols <= 0 || im.rows <= 0 || im.rows > 4096 || (long long) im.cols * im.rows > 64LL * 1024 * 1024)
+    if (r.ok && (im.cols == 0 || im.rows == 0))
+        return im; // (an empty image object: every part without an image stores one)
+    if (! r.ok || im.cols < 0 || im.rows < 0 || im.rows > 4096 || (long long) im.cols * im.rows > 64LL * 1024 * 1024)
     {
         im.why = "image data unreadable";
         return im;
@@ -2934,7 +3140,7 @@ struct Part
         }
         if (blend > 5)
             fallbacks.push_back ("timbre blend mode " + std::to_string (blend) + " (played as mode 0)");
-        if (pd.tail > 1024)
+        if (pd.tail >= 4 + 0x2c) // (any image object: Labyrinth's 16 × 12 one is 829 bytes)
             buildImage (pd);
     }
 
@@ -3299,7 +3505,7 @@ struct Patch
 {
     double fs = 44100.0, bpm = 120.0, fclamp = 0.0, coef = 0.0, masterTarget = 1.0;
     int B = 88, prec = 0, monoMode = 0, vrmode = 0, maxrk = 0, e8 = 0;
-    bool legato = false, porta = false;
+    bool legato = false, porta = false, portaVel = false; // portaVel: global 6, the glide time follows the velocity
     bool arpAny = false, arpDesc = false; // some envelope has arpeggio markers; chord order (global 16: descending)
     double legLim = 2147483647.0;
     float kfade = 0.0f;
@@ -3384,6 +3590,7 @@ std::shared_ptr<Patch> buildPatch (const StateData& S, double fs, double bpm, co
     P->kfade = (float) (1.0 / (P->e8 + 1));
     P->legato = S.g[4] > 0;
     P->porta = S.g[5] > 0;
+    P->portaVel = S.g[6] >= 1;
     P->monoMode = S.GI (8);
     P->vrmode = S.GI (12);
     P->legLim = S.g[3] > 0 ? (double) S.g[3] : 2147483647.0;
@@ -4339,6 +4546,13 @@ private:
     void glideTo (Record& v, const Levels& L, bool porta) noexcept
     {
         const auto& p = P->parts[(std::size_t) v.part];
+        // the note's glide factor ([DECOMP FUN_00883ae0, note set-up], REA_rodada165g-flbeta165s §2): 1, or (1 − 0.85·velocity)² in
+        // float when global 6 is on (a harder note glides faster)
+        if (P->portaVel && v.note >= 0 && v.note < maxNotes)
+        {
+            const auto x = (float) (1.0 - (double) (float) notes[(std::size_t) v.note].vel * 0.85);
+            v.vfac = x * x;
+        }
         auto lc = f32 (p.portaT * v.vfac);
         bool toX = false;
         if (lc > 0.0)
@@ -6152,9 +6366,23 @@ std::vector<std::string> harmorFallbacks (const std::vector<std::uint8_t>& state
     return buildPatch (*S, 44100.0, 120.0)->fallbacks;
 }
 
+std::optional<std::vector<std::uint8_t>> harmorUpgradeState (const std::vector<std::uint8_t>& state)
+{
+    try
+    {
+        auto up = upgradeOldState (state);
+        if (up && parseCurrent (*up))
+            return up;
+    }
+    catch (...)
+    {
+    }
+    return std::nullopt;
+}
+
 int harmorParamOffset (const std::vector<std::uint8_t>& state, int part, int index)
 {
-    const auto S = parseState (state);
+    const auto S = parseCurrent (state); // (offsets into this very state: an old layout has to be upgraded first)
     if (! S)
         return -1;
     if (part < 0)
