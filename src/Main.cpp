@@ -1,4 +1,5 @@
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "engine/FileSort.h"
 #include "platform/Paths.h"
 
 #include "core/LoadTrace.h"
@@ -833,7 +834,7 @@ public:
             for (const auto* pattern : { "crash *.txt", "hang *.txt" })
             {
                 auto files = lynx::platform::settingsFile ("autosave").findChildFiles (juce::File::findFiles, false, pattern);
-                std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+                lynx::filesort::byTime (files, lynx::filesort::By::modificationTime, true);
                 if (! files.isEmpty())
                     (juce::String (pattern).startsWith ("crash") ? session.crashFile : session.hangFile) = files[0];
             }
@@ -1377,7 +1378,7 @@ private:
         folder.createDirectory();
         // keep the newest hang files only
         auto old = folder.findChildFiles (juce::File::findFiles, false, "hang *.txt");
-        std::sort (old.begin(), old.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+        lynx::filesort::byTime (old, lynx::filesort::By::modificationTime, true);
         for (int i = 20; i < old.size(); ++i)
             old.getReference (i).deleteFile();
         lynx::crashguard::startHangWatch (folder.getFullPathName().replaceCharacter ('\\', '/').toStdString());

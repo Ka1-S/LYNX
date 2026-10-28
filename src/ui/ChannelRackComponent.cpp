@@ -1,3 +1,4 @@
+#include "ui/EditorTools.h"
 #include "core/FruityDance.h"
 #include "ui/ColourPicker.h"
 #include "ui/PatcherEditor.h"
@@ -2423,7 +2424,25 @@ void ChannelRackComponent::timerCallback()
         dirty (playheadStep);
         playheadStep = step;
         dirty (playheadStep);
+        followPlayhead();
     }
+}
+
+void ChannelRackComponent::followPlayhead()
+{
+    // Follow (issue #12): a pattern longer than the view pages along with the playing step, as the Playlist does
+    if (playheadStep < 0 || ! EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::channelRack))
+        return;
+    auto* viewport = findParentComponentOfClass<juce::Viewport>();
+    if (viewport == nullptr)
+        return;
+    const auto view = viewport->getViewArea();
+    const auto stepsLeft = view.getX() + gridLeft(); // (the controls column stays on the left of the view)
+    const auto x = gridLeft() + playheadStep * stepWidth;
+    if (x >= stepsLeft && x + stepWidth <= view.getRight())
+        return;
+    const auto maxX = juce::jmax (0, getWidth() - view.getWidth());
+    viewport->setViewPosition (juce::jlimit (0, maxX, x - gridLeft()), view.getY());
 }
 
 bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& details)

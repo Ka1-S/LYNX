@@ -44,8 +44,8 @@ keys::Chord chordFromKeyPress (const juce::KeyPress& key)
             return c;
         }
 
-    if (code > ' ' && code < 0x7f)
-        c.key = (int) juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code);
+    if (const auto letter = keys::letterOfKeyCode (code))
+        c.key = letter;
 
     return c;
 }
@@ -433,6 +433,7 @@ private:
         if (others.empty())
         {
             assignPending (false);
+            explainShadowed (chord, a->id);
             return;
         }
         juce::StringArray names;
@@ -443,6 +444,23 @@ private:
                          juce::dontSendNotification);
         assign.setVisible (true);
         cancel.setVisible (true);
+    }
+
+    // the same key on an action of another place (a panel's tool vs a global action): say which one runs there
+    void explainShadowed (const keys::Chord& chord, const std::string& id)
+    {
+        juce::StringArray names;
+        for (const auto& other : map.shadowedBy (chord, id))
+            if (const auto* o = keys::findAction (other))
+            {
+                // the key the user just chose wins over a default key of the other action; two keys of his own: the panel's
+                const auto otherIsDefault = std::find (o->defaults.begin(), o->defaults.end(), chord) != o->defaults.end();
+                if (otherIsDefault)
+                    names.add ("\"" + tr (o->description) + "\" (" + contextName (o->context) + ")");
+            }
+        if (! names.isEmpty())
+            message.setText (tr ("{0} was also {1}: your key wins there now.", { chordText (chord), names.joinIntoString (", ") }),
+                             juce::dontSendNotification);
     }
 
     void assignPending (bool takeFromOthers)
