@@ -115,5 +115,5 @@ art (procedural dancer, moves picked by notes), FL's Fruity Dance channels impor
 
 - ZGE's own scripts and shaders are not run (by design): imported scenes are look-alikes, not copies.
 - The dancer's position is not undoable (FL's is not either); no picture-file dancers (FL's version 2 "picture
-  path") — the path is read and kept, LYNX always draws its lynx.
-- The GPU path is not measured on macOS hardware (CI builds it; OpenGL 3.2 core there).
+  path") — LYNX always draws its lynx.
+- The GPU path is not measured on macOS hardware (CI builds it; JUCE's default context, legacy OpenGL 2.1 on macOS).
