@@ -1636,7 +1636,8 @@ Layout ridgeStrip()
     }
     v.push_back (section (4, 520, 276, 192, TR_NOOP ("Equalizer")));
     v.push_back (display (10, 540, 264, 118, "ridgeeq"));
-    v.push_back (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f));
+    // round 165: the Brown / Black curves are Ridge's own engine's (the E console voicing has the console's one curve)
+    v.push_back (when (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f), "Voicing", 0.0f, 0.5f));
     // round 148: the 4K voicing (the console measured on the SSL 4K E trial) — its three EQ colours, the mic pre and
     // its gain, the make-up offset; the rest of the panel drives it with the console's own scales
     v.push_back (when (tabs (10, 664, 150, 20, "EQ colour", TR_NOOP ("Brown|Black|Orange")), "4K voicing", 0.5f, 1.0f));
