@@ -4,6 +4,7 @@
 #include "core/LoadTrace.h"
 #include "core/Patcherize.h"
 #include "core/Performance.h"
+#include "core/VideoPlayer.h"
 #include "core/Effects.h"
 #include "core/MixSuite.h"
 #include "core/HardwareInsert.h"
@@ -31,6 +32,7 @@
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
 #include "platform/Package.h"
+#include "ui/VideoPlayerView.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
 #include "ui/FlExtraEditors.h"
@@ -906,6 +908,16 @@ public:
             return;
         }
 
+        if (args.contains ("--videoshot") && args.indexOf ("--videoshot") + 2 < args.size())
+        {
+            // LYNX.exe --videoshot prefix video: the Video Player's editor (round 165g) at a few song positions, with
+            // the user's ffmpeg, as PNGs + report.txt (frames decoded, the sound track)
+            const auto i = args.indexOf ("--videoshot");
+            runVideoShot (args[i + 1].unquoted(), args[i + 2].unquoted());
+            quit();
+            return;
+        }
+
         if (args.contains ("--vfxshot"))
         {
             // LYNX.exe --vfxshot prefix: the VFX note effects' editors (round 164b), on channels and in a Patcher, as PNGs
@@ -1102,6 +1114,7 @@ public:
     {
         startupTrace.mark ("before the audio engine");
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         startupTrace.mark ("audio engine + device");
         crashEngine = engine.get();
         lynx::crashreporter::watchAudioDevice (engine->getDeviceManager()); // (the session file names the device: crash reports)
@@ -3438,6 +3451,7 @@ private:
     {
         startupOptions = lynx::StartupOptions::load();
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         crashEngine = engine.get();
         createMainWindow();
         mainWindow->reveal();
@@ -3612,6 +3626,7 @@ private:
     {
         startupOptions = lynx::StartupOptions::load();
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         crashEngine = engine.get();
         // the user's saved device stays as it was: this run's choices are undone before quitting
         savedDeviceState = engine->getDeviceManager().createStateXml();
@@ -3735,6 +3750,7 @@ private:
                         const juce::String& inputName, int mode, int pdcSamples, int bufferSize)
     {
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         savedDeviceState = engine->getDeviceManager().createStateXml();
         auto text = std::make_shared<juce::String>();
         auto step = [report, text] (const juce::String& line) { *text << line << "\n"; report.replaceWithText (*text); };
@@ -3956,6 +3972,7 @@ private:
                           const juce::String& inputName, int bufferSize, bool inPatcher = false, juce::File bounceFile = {})
     {
         engine = std::make_unique<lynx::AudioEngine>();
+        lynx::videoview::install (*engine); // (Fruity Video Player channels: their sound tracks)
         savedDeviceState = engine->getDeviceManager().createStateXml();
         auto text = std::make_shared<juce::String>();
         auto step = [report, text] (const juce::String& line) { *text << line << "\n"; report.replaceWithText (*text); };
@@ -5151,6 +5168,49 @@ private:
             }
         }
         quit();
+    }
+
+    void runVideoShot (const juce::String& prefix, const juce::String& videoPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        lynx::videoview::install (offline);
+        lynx::Song song;
+        song.mixer = lynx::Song::defaultMixer (2);
+        lynx::ChannelDef c;
+        c.name = "Fruity Video Player";
+        c.instrument = lynx::InstrumentKind::videoplayer;
+        lynx::video::Settings vs;
+        vs.path = juce::File (videoPath).getFullPathName().toStdString();
+        vs.delay = lynx::video::unitsPerSecond / 2; // the video starts at 0.5 s
+        c.pluginState = lynx::video::write (vs);
+        song.channels.push_back (c);
+        song.patterns.emplace_back();
+        offline.setSong (std::move (song));
+        offline.dispatchPendingMessages();
+        juce::String report;
+        report << "ffmpeg: " << lynx::findFfmpeg().getFullPathName() << "\n";
+        report << lynx::videoview::report (vs.path).fromFirstOccurrenceOf ("Input #0", true, false).upToFirstOccurrenceOf ("At least", false, false) << "\n";
+        auto editor = lynx::makeChannelSettingsPanel (offline, 0);
+        if (editor == nullptr)
+            return;
+        juce::Component holder;
+        holder.setSize (editor->getWidth(), editor->getHeight());
+        holder.addAndMakeVisible (*editor);
+        auto pump = [] (int ms) {
+            const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) ms;
+            while (juce::Time::getMillisecondCounter() < end)
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+        };
+        const double times[] = { 0.0, 1.5, 3.25 };
+        int k = 0;
+        for (const auto t : times)
+        {
+            offline.getTransport().positionTicks.store (t * offline.getSong().bpm / 60.0 * lynx::ppq);
+            pump (1500);
+            savePng (editor->createComponentSnapshot (editor->getLocalBounds()), prefix + "-" + juce::String (k++) + ".png");
+        }
+        juce::File (prefix + "-report.txt").replaceWithText (report);
     }
 
     void runDanceShot (const juce::String& prefix)

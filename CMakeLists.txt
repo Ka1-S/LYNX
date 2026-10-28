@@ -92,6 +92,7 @@ add_library(lynx_core STATIC
     src/core/LowLifterFl.cpp
     src/core/VisualFx.cpp
     src/core/FlExtraFx.cpp
+    src/core/VideoPlayer.cpp
     src/core/FruityDance.cpp
     src/core/Reeverb2.cpp
     src/core/LuxeVerb.cpp
@@ -342,6 +343,7 @@ if(LYNX_BUILD_APP)
         src/ui/FlExtraEditors.cpp
         src/ui/VisualGl.cpp
         src/ui/DanceView.cpp
+        src/ui/VideoPlayerView.cpp
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
         src/ui/LayerEditor.cpp

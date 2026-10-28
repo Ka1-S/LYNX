@@ -1,7 +1,9 @@
+#include "ui/VideoPlayerView.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
 #include "ui/FlExtraEditors.h"
 #include "core/ControlSurface.h"
+#include "core/VideoPlayer.h"
 #include "core/VoltageController.h"
 #include "ui/VoltageEditor.h"
 #include "core/XyController.h"
@@ -1292,6 +1294,7 @@ public:
         builtIn ("MIDI", InstrumentKind::midiOut, "MIDI Out", [] (ChannelDef& c) { midictl::writeMidiOut (c.pluginState, midictl::MidiOutSettings {}); });
         builtIn ("Misc", InstrumentKind::layer, tr ("Layer")); // round 165c: plays the generators on its Children pin
         builtIn ("Misc", InstrumentKind::soundfont, "LYNX Soundfont", [] (ChannelDef& c) { c = sf::makeChannel(); });
+        builtIn ("Visual", InstrumentKind::videoplayer, "Fruity Video Player", [] (ChannelDef& c) { c.pluginState = video::write (video::Settings {}); });
         builtIn ("Patcher", InstrumentKind::patcher, "Patcher");
         builtIn ("Synth classic", InstrumentKind::synth, tr ("Synth"));
         generators[tr ("Sampler")].push_back ({ tr ("Sampler (choose file)..."), true, [this, at] { chooseSampleNode (at); } });
@@ -1376,7 +1379,7 @@ public:
                 }
             }
         };
-        side (tr ("Generators"), true, generators, { "Controller", "Drum", "MIDI", "Misc", "Patcher", "Sampler", "Synth classic", "Synth special" },
+        side (tr ("Generators"), true, generators, { "Controller", "Drum", "MIDI", "Misc", "Patcher", "Sampler", "Synth classic", "Synth special", "Visual" },
               pluginInstruments);
         add.addColumnBreak();
         rows = 0.0f;
@@ -1899,6 +1902,11 @@ private:
         if (node.generator && node.channel.instrument == InstrumentKind::voltage) // round 164
         {
             openToolWindow (makeVoltageControllerEditor (engine, locate), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            return;
+        }
+        if (node.generator && node.channel.instrument == InstrumentKind::videoplayer) // round 165g
+        {
+            openToolWindow (makeVideoPlayerEditor (engine, locate, -1), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         if (node.generator && node.channel.instrument == InstrumentKind::midiOut)

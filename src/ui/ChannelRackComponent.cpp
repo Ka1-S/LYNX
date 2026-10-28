@@ -1,4 +1,5 @@
 #include "core/FruityDance.h"
+#include "core/VideoPlayer.h"
 #include "ui/ColourPicker.h"
 #include "ui/PatcherEditor.h"
 #include "ui/UiTrace.h"
@@ -89,6 +90,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::dashboard: return "Dashboard";
         case InstrumentKind::voltage: return "Voltage Controller";
         case InstrumentKind::vfx: return "VFX";
+        case InstrumentKind::videoplayer: return "Fruity Video Player";
     }
     return "?";
 }
@@ -2173,6 +2175,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         c.name = "Fruity Dance";
         c.instrument = InstrumentKind::fruitydance;
         c.pluginState = dance::toState (dance::Settings {});
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Fruity Video Player (round 165g): a video in sync with the song, decoded by the user's ffmpeg
+    menu.addItem ("Fruity Video Player", [this, add] {
+        ChannelDef c;
+        c.name = "Fruity Video Player";
+        c.instrument = InstrumentKind::videoplayer;
+        c.pluginState = video::write (video::Settings {});
         const auto added = add (c);
         openChannelSettings (engine, added);
     });

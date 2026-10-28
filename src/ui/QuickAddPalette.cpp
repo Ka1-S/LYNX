@@ -1,5 +1,6 @@
 #include "ui/QuickAddPalette.h"
 #include "core/ControlSurface.h"
+#include "core/VideoPlayer.h"
 #include "core/VoltageController.h"
 
 #include "core/Effects.h"
@@ -150,6 +151,13 @@ public:
                                         c.name = "Voltage Controller";
                                         c.instrument = InstrumentKind::voltage;
                                         c.pluginState = voltage::write (voltage::Settings {});
+                                        targets.addInstrument (c);
+                                    } });
+        instruments.all.push_back ({ "Fruity Video Player", tr ("built-in"), [this] {
+                                        ChannelDef c;
+                                        c.name = "Fruity Video Player";
+                                        c.instrument = InstrumentKind::videoplayer;
+                                        c.pluginState = video::write (video::Settings {});
                                         targets.addInstrument (c);
                                     } });
 
