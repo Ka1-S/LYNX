@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace lynx
@@ -55,6 +56,13 @@ float scaleOf (const Settings& s, int output) noexcept;
 float applyRange (int range, float v) noexcept;
 // Pitch source for a note (key + cents): 0 at C5 (key 60); 1 V / octave = 1/120 per semitone.
 float pitchValue (const Settings& s, double key) noexcept;
+
+// Its own parameters as automation / link targets (round 165; FL's parameter numbers, which .flp links use): 0…7 the
+// outputs' offsets, 8…15 their scales; value 0..1 = FL's 0…65536.
+constexpr int paramCount = 16;
+std::string paramName (int param);      // "Main L offset", "Out 3 R scale"
+float paramValue (const Settings& s, int param) noexcept;
+void setParamValue (Settings& s, int param, float value) noexcept;
 
 const char* sourceName (Source source) noexcept;
 const char* outputName (int output) noexcept; // "Main L", "Out 2 R"…

@@ -28,6 +28,8 @@ add_library(lynx_core STATIC
     src/flp/Flp.cpp
     src/core/Song.cpp
     src/core/Scheduler.cpp
+    src/core/Performance.cpp
+    src/core/Patcherize.cpp
     src/core/Instruments.cpp
     src/core/RackRenderer.cpp
     src/core/LoadTrace.cpp
@@ -51,6 +53,7 @@ add_library(lynx_core STATIC
     src/core/ProjectSafety.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
+    src/core/MidiSync.cpp
     src/core/ThemePalette.cpp
     src/core/PluginLayout.cpp
     src/core/StateParams.cpp
@@ -88,6 +91,8 @@ add_library(lynx_core STATIC
     src/core/FreqShifterFl.cpp
     src/core/LowLifterFl.cpp
     src/core/VisualFx.cpp
+    src/core/FlExtraFx.cpp
+    src/core/FruityDance.cpp
     src/core/Reeverb2.cpp
     src/core/LuxeVerb.cpp
     src/core/IldspMath.cpp
@@ -146,6 +151,7 @@ add_library(lynx_core STATIC
     src/core/NativeEngines.cpp
     src/core/Layer.cpp
     src/core/XyController.cpp
+    src/core/FlCurve.cpp
     src/core/ControlSurface.cpp
     src/core/VoltageController.cpp
     src/core/FabFilterStates.cpp
@@ -175,6 +181,7 @@ target_sources(lynx_core PRIVATE
     src/core/EventEdit.cpp
     src/core/AudioEdit.cpp
     src/core/AudioEditTools.cpp
+    src/core/FlAutoSlicer.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp
@@ -194,11 +201,26 @@ target_sources(lynx_core PRIVATE
     src/core/PluginMonitor.cpp
     src/core/ProjectContents.cpp
     src/core/PlaylistOps.cpp
-    src/core/TempoDetect.cpp)
+    src/core/TempoDetect.cpp
+    src/core/ScoreLog.cpp)
 
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 target_sources(lynx_core PRIVATE
     src/core/CrashReport.cpp)
+
+# the embedded Python (pocketpy) and FL's VFX Script (round 165d)
+target_sources(lynx_core PRIVATE
+    src/core/Python.cpp
+    src/core/VfxScript.cpp)
+
+# pocketpy 2.2 (MIT; third_party/pocketpy, LYNX's changes marked "LYNX"): a small embeddable Python 3 interpreter,
+# sandboxed (no os module / files) and interruptible (the watchdog)
+add_library(pocketpy STATIC third_party/pocketpy/pocketpy.c)
+target_include_directories(pocketpy PUBLIC third_party/pocketpy)
+target_compile_definitions(pocketpy PUBLIC PK_ENABLE_OS=0 PK_ENABLE_WATCHDOG=1)
+set_target_properties(pocketpy PROPERTIES C_STANDARD 11)
+target_compile_options(pocketpy PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-w>)
+target_link_libraries(lynx_core PUBLIC pocketpy)
 
 # LAME's libmp3lame (LGPL; third_party/lame, encoder only, configured by third_party/lame/src/config.h)
 file(GLOB LAME_SOURCES third_party/lame/src/*.c)
@@ -272,6 +294,7 @@ if(LYNX_BUILD_APP)
         src/platform/FileTypes.cpp
         src/platform/CrashGuard.cpp
         src/platform/Paths.cpp
+        src/platform/Package.cpp
         src/platform/NativeEmbed.cpp
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
@@ -293,12 +316,14 @@ if(LYNX_BUILD_APP)
         src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
         src/engine/AudioLogger.cpp
+        src/engine/MidiSyncIo.cpp
         src/engine/PreviewPlayer.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp
         src/ui/PianoRollComponent.cpp
         src/ui/PlaylistComponent.cpp
         src/ui/MixerComponent.cpp
+        src/ui/QuickPick.cpp
         src/ui/PluginWindow.cpp
         src/ui/PluginPresetMenu.cpp
         src/ui/ProjectLoading.cpp
@@ -315,6 +340,9 @@ if(LYNX_BUILD_APP)
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
         src/ui/VisualEditors.cpp
+        src/ui/FlExtraEditors.cpp
+        src/ui/VisualGl.cpp
+        src/ui/DanceView.cpp
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
         src/ui/LayerEditor.cpp
@@ -405,6 +433,7 @@ if(LYNX_BUILD_APP)
             juce::juce_audio_utils
             juce::juce_audio_processors
             juce::juce_dsp
+            juce::juce_opengl
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags)

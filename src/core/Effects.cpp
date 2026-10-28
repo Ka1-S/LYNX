@@ -49,6 +49,7 @@
 #include "core/VoiceTools.h"
 #include "core/VoiceShift.h"
 #include "core/VisualFx.h"
+#include "core/FlExtraFx.h"
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
 
@@ -2911,6 +2912,28 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                 { "Input stereo", 1.0f }, { "Round trip", 0.0f }, { "Ping", 0.0f } } };
             return info;
         }
+        case EffectKind::fruityMute2:
+        {
+            // round 165g: a new Fruity Mute 2 lets the sound through (Mute = On means sound on, FL's labels), both sides selected
+            static const EffectInfo info { "Fruity Mute 2", { { "Mute", 1.0f }, { "Channel", 1.0f / 3.0f } } };
+            return info;
+        }
+        case EffectKind::bigClock:
+        {
+            static const EffectInfo info { "Fruity Big Clock", { { "Display", 0.0f } } };
+            return info;
+        }
+        case EffectKind::tuner:
+        {
+            // FL's Default preset: 440 Hz, fast, bass off, Dial
+            static const EffectInfo info { "Tuner", { { "Reference", 0.5f }, { "Reactivity", 1.0f }, { "Bass", 0.0f }, { "Visual", 1.0f } } };
+            return info;
+        }
+        case EffectKind::htmlNotebook:
+        {
+            static const EffectInfo info { "Fruity HTML NoteBook", {} };
+            return info;
+        }
         case EffectKind::waveCandy:
         {
             // round 164c (core/VisualFx.h wavecandy::Param): a new one shows the spectrum, like FL's Default preset's analyser
@@ -2943,6 +2966,9 @@ const EffectInfo& effectInfo (EffectKind kind)
                         info.params.push_back ({ names[a][i], d[(std::size_t) (4 * a + i)] });
                 info.params.push_back ({ "Speed", d[(std::size_t) xy::speed (k)] });
                 info.params.push_back ({ "Acceleration", d[(std::size_t) xy::acceleration (k)] });
+                if (k == EffectKind::xyzController) // round 165: each axis' output curve mode (FL's point modes)
+                    for (const auto* n : { "X curve", "Y curve", "Z curve" })
+                        info.params.push_back ({ n, 0.0f });
                 return info;
             };
             static const EffectInfo xyInfo = make (EffectKind::xyController), xyzInfo = make (EffectKind::xyzController);
@@ -2954,7 +2980,7 @@ const EffectInfo& effectInfo (EffectKind kind)
             static const EffectInfo info = [] {
                 EffectInfo i { "Control Surface", {} };
                 static std::vector<std::string> names;
-                for (int k = 0; k < surface::maxOutputs; ++k)
+                for (int k = 0; k < surface::maxSurfaceOutputs; ++k)
                     names.push_back ("Control " + std::to_string (k + 1));
                 for (const auto& n : names)
                     i.params.push_back ({ n.c_str(), 0.0f });
@@ -2972,6 +2998,21 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, 
         return mixsuite::ridge::k4ParamText (param, v);
     if (kind == EffectKind::ridgeStrip && mixsuite::ridge::eVoicing (context)) // round 123: the console's own scales
         return mixsuite::ridge::eParamText (param, v);
+    if (kind == EffectKind::ridgeStrip && (param == mixsuite::ridge::lfGain || param == mixsuite::ridge::lmfGain
+                                           || param == mixsuite::ridge::hmfGain || param == mixsuite::ridge::hfGain))
+    {
+        // round 165: Ridge's own engine shows the gain of the curve in use (it showed both: "+6.0 dB / +7.2")
+        char text[32];
+        std::snprintf (text, sizeof text, "%+.1f dB", mixsuite::ridge::bandGainDb (v, context[(std::size_t) mixsuite::ridge::curve] > 0.5f));
+        return text;
+    }
+    if (kind == EffectKind::geminiDoubler && (param == voicetools::gemini::lowGain || param == voicetools::gemini::highGain)
+        && ! voicetools::gemini::measuredEq (context)) // round 165w: round 124's shelves read −30 … +12 dB
+    {
+        char text[32];
+        std::snprintf (text, sizeof text, "%+.1f dB", voicetools::gemini::shelfDb (v, false));
+        return text;
+    }
     if (kind == EffectKind::glowLeveler && mixsuite::glow::classic (context))
         return mixsuite::glow::classicParamText (param, v);
     if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))
@@ -3428,6 +3469,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return lowlifter::paramText (param, v);
         case EffectKind::hardwareInsert:
             return hwinsert::paramText (param, v);
+        case EffectKind::fruityMute2:
+            return flextra::mute2::paramText (param, v);
+        case EffectKind::bigClock:
+            return flextra::bigclock::paramText (param, v);
+        case EffectKind::tuner:
+            return flextra::tuner::paramText (param, v);
+        case EffectKind::htmlNotebook:
+            return {};
         case EffectKind::waveCandy:
             return visualfx::wavecandy::paramText (param, v);
         case EffectKind::visualizer:
@@ -3513,12 +3562,21 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 152: Ember saved before the effect characters' measured law keeps the static stand-ins
     if (slot.kind == EffectKind::ember && savedCount <= (std::size_t) mixsuite::ember::effectLaw)
         slot.params[(std::size_t) mixsuite::ember::effectLaw] = 0.0f;
+    // round 165: … and before Punish's measured law keeps round 136's Classic Punish
+    if (slot.kind == EffectKind::ember && savedCount <= (std::size_t) mixsuite::ember::classicLaw)
+        slot.params[(std::size_t) mixsuite::ember::classicLaw] = 0.0f;
     if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
         && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)
         slot.params[(std::size_t) echosuite::echoform::voicingStereo] = 0.0f;
     // round 152: a Glow Leveler saved before the measured opto law keeps the round-123 Limit and no classic auto make-up
     if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::optoLaw)
         slot.params[(std::size_t) mixsuite::glow::optoLaw] = 0.0f;
+    // round 165w: a Gemini Doubler saved before the measured shelves keeps round 124's (−30 … +12 dB, first order)
+    if (slot.kind == EffectKind::geminiDoubler && savedCount <= (std::size_t) voicetools::gemini::eqLaw)
+        slot.params[(std::size_t) voicetools::gemini::eqLaw] = 0.0f;
+    // round 165w: … and before the measured release keeps round 123's
+    if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::releaseLaw)
+        slot.params[(std::size_t) mixsuite::glow::releaseLaw] = 0.0f;
     // round 152: a Compressor saved before the measured vintage curve keeps the round-150 curve
     if (slot.kind == EffectKind::compressor && savedCount <= 18 && slot.params.size() > 18)
         slot.params[18] = 0.0f;
@@ -3690,6 +3748,10 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::flLowLifter: return lowlifter::make(); // round 154
         case EffectKind::hardwareInsert: return std::make_unique<hwinsert::HardwareInsertFx>(); // round 164d
+        case EffectKind::fruityMute2: return flextra::mute2::make(); // round 165g
+        case EffectKind::bigClock:
+        case EffectKind::tuner:
+        case EffectKind::htmlNotebook: return visualfx::make(); // round 165g: pass the sound, feed the editor's tap
         case EffectKind::waveCandy:
         case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
         case EffectKind::xyController:

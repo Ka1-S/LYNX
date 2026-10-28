@@ -225,4 +225,14 @@ std::vector<std::uint8_t> encodeWav (const Document& doc, WavFormat format = Wav
 bool decodeWav (const std::uint8_t* data, std::size_t size, Document& out);
 // Only the markers/regions/loop of a WAV (the audio is read elsewhere). False if none.
 bool decodeWavMarkers (const std::uint8_t* data, std::size_t size, Document& out);
+
+// What FL hands a plugin about a WAV besides its audio: the starts of its cue points and regions (ascending, clamped to
+// `frames` − 1) and the ACID chunk's beat count (0 = none). `data` may hold only the RIFF header and the non-audio
+// chunks (the "data" chunk skipped).
+struct WavExtras
+{
+    std::vector<std::int64_t> markerStarts;
+    float acidBeats = 0.0f;
+};
+WavExtras decodeWavExtras (const std::uint8_t* data, std::size_t size, std::int64_t frames);
 } // namespace lynx::audioedit

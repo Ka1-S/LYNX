@@ -23,6 +23,7 @@
 #include "core/LiveInput.h"
 #include "core/Meters.h"
 #include "core/Pdc.h"
+#include "core/Performance.h"
 #include "core/Scheduler.h"
 #include "core/Vfx.h"
 #include "core/Song.h"
@@ -42,6 +43,7 @@ struct RackState
     // Indices into song.automations, or -1 = no automation.
     static constexpr int maxAutomations = 1024;
     std::vector<std::vector<int>> automationClips; // per automation: clips in the Playlist
+    std::vector<char> zoneAutomations;             // per automation: it has clips in the performance zone
     std::vector<int> channelVolumeAuto, channelPanAuto;
     std::vector<int> mixerVolumeAuto, mixerPanAuto;
     std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [track][slot][param] (built-in)
@@ -66,6 +68,7 @@ struct RackState
     std::vector<PluginParamBinding> pluginParams;
     bool hasAutomation = false;
     ScheduleIndex schedule; // index to schedule the Playlist without scanning every note
+    std::vector<int> performanceZone; // Performance mode: the zone's clips (perf::zoneClips), empty when off
     int tempoAutomation = -1; // tempo automation, if any
 
     // PDC: per-edge delays (nullptr = no delay) and the latencies used to build the plan.
@@ -129,7 +132,20 @@ struct RackState
     std::vector<int> threadedChannels, audioThreadChannels;
     std::vector<std::vector<int>> threadedLayers, audioThreadLayers;
     bool parallel = false;                            // worth splitting across threads
+    // Task graph (round 165i): the channels and the inserts as one dependency graph, so an insert starts as soon as
+    // the channels and inserts feeding it are done instead of waiting for every channel and for the whole previous
+    // layer (FL hands its mixer tracks to its threads by readiness too, REA_rodada165i). Tasks: channel c = c, insert
+    // t = graphChannels + t − 1. Each insert sums its own channels (in channel order) before its effects, so the
+    // arithmetic is the layered path's, bit for bit. Off (layers) when an insert or channel is pinned to the audio
+    // thread or the mixer routing has a cycle.
+    bool graphOk = false;
+    int graphChannels = 0;                            // channels in the graph (the first ones of song.channels)
+    std::vector<int> graphIndegree;                   // [task] tasks that must finish first
+    std::vector<int> graphNextStart, graphNext;       // [task] → successors (CSR)
+    std::vector<int> graphRoots;                      // tasks with nothing before them, heaviest kind first
+    std::vector<std::vector<int>> trackChannels;      // [track] the channels playing into it, in channel order
     void buildMixerGraph();
+    void buildTaskGraph (const std::vector<int>& depth);
 
     void buildAutomationTables();
     // The automation slots that drive `target` in a snapshot of `song` (its automations, then its pattern event
@@ -163,6 +179,8 @@ struct RackState
     // VFX channels (round 164b): their notes go through their processor; output k goes out on MIDI port vfxPort + k
     std::vector<int> vfxChannels;
     std::vector<int> vfxPort; // [channel] (−1 = not a VFX channel)
+    // Dashboard channels (round 165): what their controls send in MIDI goes to the plugins on their port (midiTargets)
+    std::vector<int> dashboardChannels;
     void buildMidiRoutes();
 
     // Loads (or fetches from cache) a file's audio; nullptr on failure.
@@ -250,6 +268,8 @@ public:
     // Hardware output targets of the inserts (REA round 156): their post-fader output is added into `out`'s buses
     // while `out->active`. Set before playback.
     void setHardwareOutput (HardwareOutput* out) noexcept { hwOut = out; }
+    // Performance mode (round 165m): the launch commands / what plays, shared with the UI. Set before playback.
+    void setPerformance (perf::Live* live) noexcept { perfLive = live; }
 
     // Allocates the mixer buffers: call off the audio thread.
     // Blocks larger than maxBlockSize are processed in pieces.
@@ -300,6 +320,8 @@ public:
 
     // Tempo used in the last block (changes with tempo automation). The transport advances with it.
     double currentBpm() const noexcept { return bpm; }
+    // > 0: the tempo of an external MIDI clock LYNX follows (round 165f), over the song's tempo and its automation
+    void setTempoOverride (double b) noexcept { tempoOverride = b; }
 
     // Events of the last block (for tests and diagnostics).
     const EventBuffer& lastEvents() const noexcept { return events; }
@@ -319,12 +341,14 @@ private:
     void updateAutomation (const RackState& state, double startTick) noexcept;
     // ticks from `tick` to the next pattern event (or pattern clip edge) that changes a lane's value; +inf if none
     static double ticksToNextEvent (const RackState& state, double tick) noexcept;
-    void applyPluginParams (const RackState& state, int firstSlot) noexcept; // bindings from this automation slot on
+    // bindings from this automation slot on (andLive: and those of live controllers, the links)
+    void applyPluginParams (const RackState& state, int firstSlot, bool andLive = false) noexcept;
     float automated (int automation, float base) const noexcept;
     float* trackBuffer (int track, int channel) noexcept;
 
     double sampleRate = 44100.0;
     double bpm = 120.0;
+    double tempoOverride = 0.0;
     bool wasPlaying = false;
     double expectedTick = -1.0; // where the next block should start, to detect jumps
     bool resumeAudio = false;
@@ -366,10 +390,24 @@ private:
     WorkerPool* workers = nullptr;
     LiveInput* liveInput = nullptr;
     HardwareOutput* hwOut = nullptr;
+    perf::Live* perfLive = nullptr;
+    perf::Player perfPlayer;
+    double perfClock = 0.0;      // the Player's steady clock (ticks): the transport's position, never wrapping
+    bool perfRunning = false;
     std::vector<float> hwScratch; // 2 × blockCapacity
     void mixHardwareOutputs (const RackState& state, int n) noexcept;
     int liveInputOffset = 0; // of the chunk within the process() block
     void mixLiveInput (const RackState& state, bool playing, int n) noexcept;
+    void mixLiveInputTrack (const RackState& state, int track, bool recording, bool playing, int n) noexcept;
+    // the task graph run (RackState::graphOk): per chunk, each task's unfinished predecessors and the ready queue
+    // (positions are taken in order by the pool's indices; a task is written to the next free position when its last
+    // predecessor finishes)
+    static constexpr int graphCapacity = maxChannels + maxMixerTracks;
+    std::unique_ptr<std::atomic<int>[]> graphPending = std::make_unique<std::atomic<int>[]> (graphCapacity);
+    std::unique_ptr<std::atomic<int>[]> graphSlots = std::make_unique<std::atomic<int>[]> (graphCapacity);
+    std::atomic<int> graphPushed { 0 };
+    bool runTaskGraph (const RackState& state, bool playing, int channels, int numSamples, MeterBank* meters) noexcept;
+    void sumChannelsInto (const RackState& state, int track, int channels, int n) noexcept;
     std::atomic<bool> profiling { false };
     std::unique_ptr<UnitTimes> units = std::make_unique<UnitTimes>();
     std::unique_ptr<ProcessTimes> times = std::make_unique<ProcessTimes>();

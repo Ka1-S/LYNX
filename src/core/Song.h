@@ -373,6 +373,13 @@ struct SurfaceControl
     float value = 0.0f, valueY = 0.0f; // 0..1 (an XY pad has two)
     float x = 40.0f, y = 40.0f;        // place on the Surface tab
     float size = 1.0f;                 // a Control Surface / Dashboard control's scale (round 164; 0.5…3)
+    // A Dashboard control that sends MIDI on the Dashboard's port (round 165, FL's record types): none = a controller
+    // output only; cc, rpn, nrpn (parameter number midiNumber), channel pressure, note (key midiNumber). The value
+    // 0..1 maps to midiLow…midiHigh (high > 127: 14-bit).
+    enum class Midi : std::int8_t { none = -1, cc = 0, rpn = 1, nrpn = 2, pressure = 3, note = 5 };
+    Midi midi = Midi::none;
+    int midiNumber = 0;
+    int midiLow = 0, midiHigh = 127;
     // control outputs: one each, an XY pad two (X then Y)
     int outputs() const noexcept { return kind == Kind::xy ? 2 : 1; }
     bool operator== (const SurfaceControl&) const = default;
@@ -657,10 +664,14 @@ enum class EffectKind : std::uint8_t
     xyController,    // FL's X-Y Controller (REA_rodada164a, core/XyController.h): no sound; outputs X, Y follow a pad
     xyzController,   // FL's X-Y-Z Controller (REA_rodada164a, core/XyController.h): the same with a Z axis (mouse wheel)
     controlSurface,  // FL's Control Surface (REA_rodada164a, core/ControlSurface.h): a user panel; output k = params[k]
-    hardwareInsert   // LYNX's hardware insert (REA_rodada164d, core/HardwareInsert.h): send to device outputs, return from inputs, pinged round trip
+    hardwareInsert,  // LYNX's hardware insert (REA_rodada164d, core/HardwareInsert.h): send to device outputs, return from inputs, pinged round trip
+    fruityMute2,     // FL's Fruity Mute 2, exact (REA_rodada165g §1, core/FlExtraFx.h): mute, channel (L, L + R, R)
+    bigClock,        // FL's Fruity Big Clock (REA_rodada165g §2, core/FlExtraFx.h): no sound; the song position in big digits
+    tuner,           // FL's Tuner (REA_rodada165g §3, core/FlExtraFx.h): no sound; chromatic tuner fed by the slot's tap
+    htmlNotebook     // FL's Fruity HTML NoteBook (REA_rodada165g §4, core/FlExtraFx.h): no sound; its page's address in EffectSlot::state
 };
 // the last EffectKind (loops over every kind; update when one is appended)
-constexpr EffectKind lastEffectKind = EffectKind::hardwareInsert;
+constexpr EffectKind lastEffectKind = EffectKind::htmlNotebook;
 
 constexpr int maxEffectParams = 160; // round 150: Prism Multiband 155, Ember 133. LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
 constexpr int maxEffectSlots = 10; // as in FL
@@ -1004,6 +1015,27 @@ std::vector<MidiLink> linksWithGlobal (const std::vector<MidiLink>& project, con
 
 enum class PlaylistTrackMode : std::uint8_t { unassigned, audio, instrument };
 
+// FL's Performance mode track settings (round 165m: the track menu's "Performance settings" [DFM], stored in the
+// .flp Playlist track record 0xEE at bytes 22…45 [DATA]; the numbers are FL's menu Tags = the stored values).
+// How a clip launched in the performance zone (the Playlist before the "Start" marker) plays on its track.
+struct TrackPerformance
+{
+    enum class Press : std::uint8_t { retrigger, holdStop, holdMotion, latch };
+    enum class Motion : std::uint8_t { stay, oneShot, marchWrap, marchStay, marchStop, random, exclusiveRandom };
+    // Trigger / position sync: off, 1/4, 1/2, 1, 2 or 4 beats, or auto (the clip's own length)
+    enum class Sync : std::uint8_t { off, quarterBeat, halfBeat, beat, twoBeats, fourBeats, autoLength };
+
+    Press press = Press::retrigger;
+    Motion motion = Motion::stay;
+    Sync triggerSync = Sync::fourBeats; // a launch waits for the next multiple of this (FL's default 4 beats)
+    bool queue = false;                 // a launch waits for the playing clip to end
+    bool tolerant = true;               // a launch a little after the grid point still starts on it (FL's default on)
+    Sync positionSync = Sync::off;      // the launched clip starts at the song position modulo this, not at its start
+
+    bool isDefault() const noexcept { return *this == TrackPerformance {}; }
+    bool operator== (const TrackPerformance&) const = default;
+};
+
 // Header of a Playlist track.
 struct PlaylistTrack
 {
@@ -1021,6 +1053,7 @@ struct PlaylistTrack
     PlaylistTrackMode mode = PlaylistTrackMode::unassigned;
     int mixerTrack = -1; // audio / instrument tracks: the linked mixer track (-1 = none)
     int channel = -1;    // instrument tracks: the channel
+    TrackPerformance performance {}; // FL's Performance settings (round 165m)
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.
@@ -1039,6 +1072,7 @@ struct Marker
     // (punch in), 10 "Stop recording" (punch out); other FL actions are kept as their number (no effect in LYNX)
     int action = 0;
     static constexpr int punchIn = 9, punchOut = 10;
+    static constexpr int songStart = 5; // FL's "Start": the song starts here; Performance mode's zone ends here
 
     bool isSignature() const noexcept { return numerator > 0; }
     bool operator== (const Marker&) const = default;
@@ -1119,6 +1153,14 @@ struct Song
     }
 
     bool hasLoop() const noexcept { return loopEnd > loopStart; }
+
+    // FL's Performance mode (Playlist › Options › Performance mode, Ctrl+P; round 165m): the clips before the first
+    // "Start" marker (the performance zone) don't play with the song; they are launched live (click, controller pads)
+    // and loop on their track by its Performance settings, while the song plays from the Start marker on.
+    bool performanceMode = false;
+    // The end of the performance zone: the first Start marker's tick, or 0 (no zone) without one / when off.
+    std::int64_t performanceZoneEnd() const noexcept;
+    bool inPerformanceZone (const Clip& clip) const noexcept { return performanceMode && clip.start < performanceZoneEnd(); }
 
     // Markers of the current arrangement.
     std::vector<Marker>& markers();

@@ -15,6 +15,12 @@
 
 namespace lynx
 {
+struct LiveInput;
+struct HardwareOutput;
+}
+
+namespace lynx
+{
 namespace vfx
 {
 class Processor;
@@ -30,6 +36,10 @@ public:
     virtual void noteOnAt (int key, float velocity, double /*startSeconds*/) noexcept { noteOn (key, velocity); }
     virtual void noteOff (int key) noexcept = 0;
     virtual void allNotesOff() noexcept = 0;
+    // A cut group's "cut" (another note of the group starts): the sound stops; a Patcher's VFX nodes keep the notes
+    // they hold, as FL's do (round 165d: FL's Arpeggiator script on a "cut itself" Patcher keeps arpeggiating a chord
+    // whose notes start apart [EXEC: FL render, REA_rodada165d §4])
+    virtual void cut() noexcept { allNotesOff(); }
     // A note on a given MIDI channel (0…15), from a MIDI Out channel routed to this one's MIDI input port. Only
     // hosted plugins see the channel; the others play it as a plain note.
     virtual void noteOnMidi (int key, float velocity, int /*midiChannel*/) noexcept { noteOn (key, velocity); }
@@ -93,10 +103,17 @@ public:
         float velocity = 0.0f; // 0 = note off
     };
     virtual int takeMidiOutput (MidiOutNote* /*out*/, int /*max*/) noexcept { return 0; }
+    // Short MIDI messages it sends on its MIDI port (a Dashboard's controls and program, round 165): audio thread;
+    // each one packed as status | data1 << 8 | data2 << 16 (a 0xC0 / 0xD0 status has no data 2). Fills `out` with up
+    // to `max` and returns how many; the rest wait for the next call.
+    virtual int takeMidiMessages (std::uint32_t* /*out*/, int /*max*/) noexcept { return 0; }
     // Extra outputs to other mixer inserts (a generator Patcher's extra "To LYNX" outputs, REA_rodada141): the rack
     // calls beginChunk (n) before a chunk's render() calls, which then also add each extra output's audio (gains
     // applied) into auxOutputData (k, side) from the chunk's start; auxOutputTrack (k) = the insert it feeds.
     virtual void beginChunk (int /*n*/) noexcept {}
+    // A generator Patcher holding a Hardware Insert (round 165c): the device's buses for this chunk (null: offline) and
+    // where the chunk starts in the callback piece. The rack calls it after beginChunk.
+    virtual void setHardwareIo (const LiveInput* /*in*/, HardwareOutput* /*out*/, int /*offset*/) noexcept {}
     virtual int auxOutputCount() const noexcept { return 0; }
     virtual int auxOutputTrack (int /*k*/) const noexcept { return -1; }
     virtual const float* auxOutputData (int /*k*/, int /*side*/) const noexcept { return nullptr; }
@@ -120,6 +137,10 @@ struct SampleData
     double sampleRate = 44100.0;
     // the file's own loop (WAV smpl chunk, first loop): frames [loopStart, loopEnd), −1 = none
     std::int64_t loopStart = -1, loopEnd = -1;
+    // a WAV's cue points / regions (their starts, ascending) and ACID beat count (0 = none): what FL hands a plugin as
+    // the sample's regions and beats (Fruity Granulizer's slices and tempo sync)
+    std::vector<std::int64_t> markerStarts;
+    float acidBeats = 0.0f;
 
     const float* mappedLeft = nullptr;
     const float* mappedRight = nullptr; // nullptr = mono

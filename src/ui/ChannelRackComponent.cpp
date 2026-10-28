@@ -1,8 +1,11 @@
+#include "core/FruityDance.h"
 #include "ui/ColourPicker.h"
 #include "ui/PatcherEditor.h"
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
 #include "ui/ChannelRackComponent.h"
+#include "core/Patcherize.h"
+#include "ui/QuickPick.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 
@@ -175,6 +178,11 @@ int ChannelRackComponent::numSteps() const
     return juce::jlimit (16, 512, steps);
 }
 
+int ChannelRackComponent::shownSteps() const
+{
+    return juce::jmin (512, numSteps() + ghostSteps);
+}
+
 bool ChannelRackComponent::isShown (int row) const
 {
     const auto& channels = engine.getSong().channels;
@@ -310,7 +318,12 @@ void ChannelRackComponent::groupSelected()
 void ChannelRackComponent::updateSize()
 {
     const auto rows = shownCount() + 1; // +1 = "add channel" row
-    setSize (gridLeft() + numSteps() * stepWidth + 8, rows * rowHeight + 8 + (graphRow() >= 0 ? laneHeight : 0));
+    // FL's ghost steps: when the rack is wider than the pattern, the free width shows faint steps after its end;
+    // clicking one adds a step there and makes the pattern longer (issue #11)
+    ghostSteps = 0;
+    if (const auto* holder = getParentComponent())
+        ghostSteps = juce::jmax (0, (holder->getWidth() - gridLeft() - 8) / stepWidth - numSteps());
+    setSize (gridLeft() + shownSteps() * stepWidth + 8, rows * rowHeight + 8 + (graphRow() >= 0 ? laneHeight : 0));
 }
 
 int ChannelRackComponent::graphRow() const
@@ -429,7 +442,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         return;
 
     const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
-    const auto steps = numSteps();
+    const auto steps = shownSteps(), realSteps = numSteps();
     const auto clip = g.getClipBounds();
     const auto primary = engine.getSelectedChannel();
     const auto& selection = engine.getSelectedChannels();
@@ -477,8 +490,16 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             const auto any = onGrid || cellHasNote (row, step);
 
             const auto hoverStepHere = hoverArea == Area::grid && hoverRow == row && hoverStep == step && paintMode == PaintMode::none;
-            const auto fill = any ? (onGrid ? stepOn : stepNote) : theme::stepOff (step);
-            theme::fillRoundRect (g, r.toFloat(), theme::radius::sm, hoverStepHere ? fill.brighter (any ? 0.15f : 0.35f) : fill);
+            const auto ghost = step >= realSteps && ! any; // after the pattern's end: faint until clicked
+            auto fill = any ? (onGrid ? stepOn : stepNote) : theme::stepOff (step);
+            if (ghost) // a faint outlined cell, filled while hovered
+            {
+                theme::fillRoundRect (g, r.toFloat(), theme::radius::sm, fill.withMultipliedAlpha (hoverStepHere ? 0.9f : 0.35f));
+                g.setColour (fill.brighter (0.25f).withMultipliedAlpha (0.55f));
+                g.drawRoundedRectangle (r.toFloat().reduced (0.5f), theme::radius::sm, 1.0f);
+            }
+            else
+                theme::fillRoundRect (g, r.toFloat(), theme::radius::sm, hoverStepHere ? fill.brighter (any ? 0.15f : 0.35f) : fill);
 
             if (hoverStepHere)
             {
@@ -770,7 +791,7 @@ void ChannelRackComponent::mouseMove (const juce::MouseEvent& e)
     int row = 0;
     const auto area = areaAt (e.x, e.y, row);
     const auto step = area == Area::grid || area == Area::lane ? (e.x - gridLeft()) / stepWidth : -1;
-    setHover (area, row, step >= 0 && step < numSteps() ? step : -1);
+    setHover (area, row, step >= 0 && step < (area == Area::grid ? shownSteps() : numSteps()) ? step : -1);
 }
 
 void ChannelRackComponent::mouseExit (const juce::MouseEvent&)
@@ -1760,7 +1781,8 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             if (! song.patterns.empty() && showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row, pianoRollView))
                 h.text = name + " - " + tr ("Piano Roll notes: [LMB] opens them in the Piano Roll");
             else
-                h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
+                h.text = name + " - " + (hoverStep >= numSteps() ? tr ("After the pattern's end: [LMB] adds a step and makes the pattern longer")
+                                                                : tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases"));
             // and the step's position as bar:step:tick, like FL's hint bar
             if (hoverStep >= 0)
                 h.value = juce::String (stepPositionText ((std::int64_t) hoverStep * ticksPerStep, song.beatsPerBar));
@@ -1790,7 +1812,7 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
     if (laneBounds().contains (e.getPosition()))
         return;
 
-    if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < stickyX + gridLeft()
+    if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= shownSteps() || e.x < stickyX + gridLeft()
         || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip
         || showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row, pianoRollView)) // drag-paint skips note rows
         return;
@@ -1802,13 +1824,15 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
     lastPaintedStep = step;
     const auto on = paintMode == PaintMode::add;
 
-    engine.editSong ([row, step, on] (Song& s) { setStep (s.patterns[(std::size_t) s.currentPattern], row, step, on); });
-
-    if (on) // the new step sounds while the button is held (the previous one stops)
-    {
-        previews.releaseAll();
-        previews.press (row, 60, 0.78f);
-    }
+    // FL: setting a step is silent, stopped or playing (issue #11; Ctrl+click on the channel button auditions it)
+    engine.editSong ([row, step, on] (Song& s) {
+        auto& p = s.patterns[(std::size_t) s.currentPattern];
+        setStep (p, row, step, on);
+        // a ghost step of a pattern with a set length: the length grows to the bar holding it (automatic lengths
+        // follow the notes by themselves)
+        if (on)
+            p.lengthTicks = lengthWithStep (p.lengthTicks, step, ticksPerStep, (std::int64_t) ppq * std::max (1, s.beatsPerBar));
+    });
 }
 
 // --- menus -------------------------------------------------------------------------------------
@@ -1882,6 +1906,12 @@ void ChannelRackComponent::showChannelMenu (int channel)
         menu.addSubMenu (tr ("Insert"), insert);
     }
     menu.addSubMenu (tr ("Replace"), instruments);
+    // FL's Patcherize (round 165m): the channel's instrument into a new Patcher, same sound
+    menu.addItem (tr ("Patcherize"), selected <= 1 && patcherize::canPatcherizeChannel (engine.getSong(), channel), false, [this, channel] {
+        engine.capturePluginStates(); // (the plugin's current settings go with it)
+        closeEditor (channel);
+        engine.editSong ([channel] (Song& s) { patcherize::patcherizeChannel (s, channel); });
+    });
     menu.addItem (selected > 1 ? tr ("Clone {0} channels", { juce::String (selected) }) : tr ("Clone") + "\tAlt+C", [this] { cloneSelected(); });
 
     if (selected > 1)
@@ -2137,6 +2167,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         const auto added = add (c);
         openChannelSettings (engine, added);
     });
+    // FL's Fruity Dance (round 165e): LYNX's own dancer over the workspace, its notes pick the moves (no sound)
+    menu.addItem ("Fruity Dance", [this, add] {
+        ChannelDef c;
+        c.name = "Fruity Dance";
+        c.instrument = InstrumentKind::fruitydance;
+        c.pluginState = dance::toState (dance::Settings {});
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
     // FL's own instrument engines (round 142, issue #5): their editor opens
     {
         juce::PopupMenu engines;
@@ -2195,8 +2234,16 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
 void ChannelRackComponent::showAddChannelMenu (int insertAt)
 {
     juce::PopupMenu menu;
+    // FL's renamed plugins first (issue #11): "1_Synth" renamed in the Browser's Plugin database is added by typing 1
+    std::vector<quickpick::Pick> picks;
+    if (insertAt < 0)
+        picks = quickpick::renamedGenerators (engine, [safe = juce::Component::SafePointer<ChannelRackComponent> (this)] (ChannelDef c) {
+            if (safe != nullptr)
+                safe->addChannel (std::move (c), true);
+        });
+    quickpick::addPicks (menu, picks);
     addInstrumentItems (menu, insertAt);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    quickpick::showMenu (menu, juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), std::move (picks));
 }
 
 void ChannelRackComponent::chooseSample (int channel)

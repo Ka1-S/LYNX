@@ -1,8 +1,10 @@
+#include "platform/Paths.h"
 #include "ui/ColourPicker.h"
 #include "ui/MixerComponent.h"
 #include "ui/UiTrace.h"
 #include "ui/TextCache.h"
 
+#include "core/Patcherize.h"
 #include "core/FlEffects.h"
 #include "core/ProjectContents.h"
 #include "core/FruityVocoder.h"
@@ -35,6 +37,7 @@
 #include "ui/Theme.h"
 #include "ui/AudioEditor.h"
 #include "ui/Dialogs.h"
+#include "ui/QuickPick.h"
 
 namespace lynx
 {
@@ -1459,7 +1462,7 @@ namespace
 {
 juce::File mixerStatesFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Mixer states");
+    return lynx::platform::documentsFolder().getChildFile ("LYNX/Mixer states");
 }
 
 juce::Array<juce::File> savedMixerStates()
@@ -1876,6 +1879,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::hardcore,
                                       EffectKind::multibandDelay, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter,
                                       EffectKind::waveCandy, EffectKind::visualizer, // visual plugins (round 164c)
+                                      EffectKind::fruityMute2, EffectKind::bigClock, EffectKind::tuner, EffectKind::htmlNotebook, // round 165g
                                       // FL engines that need more than their parameters (round 142, issue #5): a new one starts from
                                       // the plugin's Default preset of the user's FL installation (core/NativeEngines.h)
                                       EffectKind::maximus, EffectKind::vocodex, EffectKind::equo, EffectKind::distructor, EffectKind::lovePhilter,
@@ -4046,6 +4050,29 @@ void EffectsPanel::showAddMenu (int)
 {
     juce::PopupMenu menu;
 
+    // FL's renamed plugins first (issue #11): "1_EQ" renamed in the Browser's Plugin database is added by typing 1
+    auto picks = quickpick::renamedEffects (engine, [this] (EffectSlot fx) {
+        const auto t = track;
+        bool added = false;
+        engine.editSong ([t, &fx, &added] (Song& song) {
+            if (t < 0 || t >= (int) song.mixer.size())
+                return;
+            auto& effects = song.mixer[(std::size_t) t].effects;
+            if ((int) effects.size() < maxEffectSlots)
+            {
+                effects.push_back (std::move (fx));
+                added = true;
+            }
+        });
+        if (! added)
+            return;
+        selectedSlot = (int) slots()->size() - 1;
+        if ((*slots())[(std::size_t) selectedSlot].kind == EffectKind::plugin)
+            openPluginWindow (selectedSlot);
+        repaint();
+    });
+    quickpick::addPicks (menu, picks);
+
     for (auto kind : allEffects)
         menu.addItem (addableEffectName (kind), addableEffectAvailable (kind), false, [this, kind] {
             const auto made = newAddableEffect (kind, engine.getSong().bpm);
@@ -4097,7 +4124,7 @@ void EffectsPanel::showAddMenu (int)
     menu.addSeparator();
     menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    quickpick::showMenu (menu, juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), std::move (picks));
 }
 
 void EffectsPanel::showSlotMenu (int slot)
@@ -4277,14 +4304,48 @@ void EffectsPanel::showSlotMenu (int slot)
             addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::effectParam, track, slot, 0 });
     }
 
+    // FL's Patcherize / Patcherize all (round 165m): the effect (or the whole chain) into a new Patcher, same sound
     menu.addSeparator();
-    menu.addItem (tr ("Delete"), [this, slot] {
-        engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });
-        selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
+    menu.addItem (tr ("Patcherize"), patcherize::canPatcherizeSlot (engine.getSong(), track, slot), false, [this, slot] {
+        engine.capturePluginStates(); // (the plugins' current settings go with them)
+        int placed = -1;
+        engine.editSong ([t = track, slot, &placed] (Song& song) { placed = patcherize::patcherizeSlots (song, t, slot, false); });
+        if (placed >= 0)
+            selectedSlot = placed;
         repaint();
     });
+    menu.addItem (tr ("Patcherize all"), patcherize::slotsForAll (engine.getSong(), track).size() > 1, false, [this, slot] {
+        engine.capturePluginStates();
+        int placed = -1;
+        engine.editSong ([t = track, slot, &placed] (Song& song) { placed = patcherize::patcherizeSlots (song, t, slot, true); });
+        if (placed >= 0)
+            selectedSlot = placed;
+        repaint();
+    });
+    menu.addSeparator();
+    menu.addItem (tr ("Delete") + "\tDel", [this, slot] { deleteSlot (slot); });
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    // FL: with the slot's menu open, Delete removes the plugin (issue #11)
+    quickpick::showMenu (menu, juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), {},
+                         [safe = juce::Component::SafePointer<EffectsPanel> (this), slot] (const juce::KeyPress& key) {
+                             if (! key.isKeyCode (juce::KeyPress::deleteKey) || safe == nullptr)
+                                 return false;
+                             juce::MessageManager::callAsync ([safe, slot] {
+                                 if (safe != nullptr)
+                                     safe->deleteSlot (slot);
+                             });
+                             return true;
+                         });
+}
+
+void EffectsPanel::deleteSlot (int slot)
+{
+    const auto* s = slots();
+    if (s == nullptr || slot < 0 || slot >= (int) s->size())
+        return;
+    engine.editSong ([t = track, slot] (Song& song) { song.removeEffectSlot (t, slot); });
+    selectedSlot = juce::jmin (slot, (int) slots()->size() - 1);
+    repaint();
 }
 
 void EffectsPanel::changeListenerCallback (juce::ChangeBroadcaster*)
@@ -4542,6 +4603,8 @@ bool MixerComponent::runAction (const std::string& id)
         strips.linkSelectedChannels (true);
     else if (id == "mixer.selectLinkedChannels")
         strips.selectLinkedChannels();
+    else if (id == "mixer.deleteEffect") // FL: Delete on the selected effect slot (issue #11)
+        effects.deleteSlot (effects.getSelectedSlot());
     else
         return false;
 

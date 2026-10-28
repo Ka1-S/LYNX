@@ -17,6 +17,7 @@
 #include "engine/PluginSandbox.h"
 #include "engine/FlStudio.h"
 #include "platform/CrashGuard.h"
+#include "core/Denormals.h"
 #include "ui/I18n.h"
 
 #if JUCE_WINDOWS
@@ -168,6 +169,13 @@ struct BlockCall
     juce::MidiBuffer* midi;
     void operator()() const { plugin->processBlock (*view, *midi); }
 };
+
+// a block call under the crash guard, with this thread's floating-point mode put back after it (core/Denormals.h)
+std::uint32_t runBlock (BlockCall call) noexcept
+{
+    const KeepFloatMode keep;
+    return crashguard::run (call);
+}
 } // namespace
 
 int pluginCrashCount() noexcept
@@ -421,7 +429,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
             juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
             view.clear();
             if (! crashed.load (std::memory_order_relaxed))
-                if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &pending }); code != 0)
+                if (const auto code = runBlock (BlockCall { plugin.get(), &view, &pending }); code != 0)
                 {
                     failed (code);
                     view.clear(); // silent from here on
@@ -454,7 +462,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
         const auto count = juce::jmin (blockSize, n - done);
         juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
         view.clear();
-        if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+        if (const auto code = runBlock (BlockCall { plugin.get(), &view, &midi }); code != 0)
         {
             midi.clear();
             failed (code);
@@ -561,7 +569,7 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
             view.clear();
             view.copyFrom (0, 0, ch[0], count);
             view.copyFrom (1, 0, ch[1], count);
-            if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+            if (const auto code = runBlock (BlockCall { plugin.get(), &view, &midi }); code != 0)
             {
                 midi.clear();
                 failed (code); // this block keeps its dry input
@@ -581,7 +589,7 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
         view.clear();
         view.copyFrom (0, 0, left + done, count);
         view.copyFrom (1, 0, right + done, count);
-        if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+        if (const auto code = runBlock (BlockCall { plugin.get(), &view, &midi }); code != 0)
         {
             midi.clear();
             failed (code); // this block keeps its dry input
@@ -689,6 +697,7 @@ PluginHost::PluginHost (bool keep)
         if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
             known.recreateFromXml (*xml);
         favouriteIds = prefs::parseFavourites (settingsFolder().getChildFile ("plugin-favourites.txt").loadFileAsString().toStdString());
+        userNames = prefs::parsePluginNames (settingsFolder().getChildFile ("plugin-names.txt").loadFileAsString().toStdString());
         // once: files marked as failed by scans before the class-count timeout (REA_rodada107 §2) get another try,
         // since a large bundle (Waves shell) was marked "hung" only for taking longer than 30 s
         const auto retried = settingsFolder().getChildFile ("scan-retry.txt");
@@ -923,11 +932,47 @@ int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<boo
     return found;
 }
 
+namespace
+{
+// A file of the plugin folders is a module or a bundle folder (VST3 / CLAP / LV2); some plugins in a VST3 bundle
+// are listed by the module inside it (Contents\x86_64-win\<name>.vst3 — Antares, sonible…). Round 165i: those
+// listings never matched the bundle folder, so every start-up's background scan described all of them again (a
+// child process loading each plugin, ~4 s and 100–400 MB apiece, with their licence helpers).
+bool listedInside (const juce::KnownPluginList& known, juce::AudioPluginFormat& format, const juce::String& file)
+{
+    const juce::File bundle (file);
+    if (! juce::File::isAbsolutePath (file) || ! bundle.isDirectory())
+        return false;
+    auto any = false;
+    for (const auto& d : known.getTypes())
+    {
+        if (d.pluginFormatName != format.getName() || ! juce::File::isAbsolutePath (d.fileOrIdentifier)
+            || ! juce::File (d.fileOrIdentifier).isAChildOf (bundle))
+            continue;
+        if (format.pluginNeedsRescanning (d))
+            return false;
+        any = true;
+    }
+    return any;
+}
+} // namespace
+
+bool PluginHost::sameModule (const juce::PluginDescription& d, const juce::String& file)
+{
+    return d.fileOrIdentifier == file
+        || (juce::File::isAbsolutePath (file) && juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (file).isDirectory()
+            && juce::File (d.fileOrIdentifier).isAChildOf (juce::File (file)));
+}
+
 int PluginHost::scanFiles (const juce::StringArray& files, const std::function<bool (float, const juce::String&)>& progress)
 {
     const std::scoped_lock lock (scanLock);
     stopScan = false;
     const auto before = known.getNumTypes();
+    // what was found so far is saved as the scan goes (at most every few seconds): LYNX closed in the middle of a
+    // background scan used to lose it all, and the next start described the same files again
+    auto lastSave = juce::Time::getMillisecondCounter();
+    auto unsaved = false;
     for (int i = 0; i < files.size() && ! stopScan; ++i)
     {
         const auto& file = files[i];
@@ -939,9 +984,18 @@ int PluginHost::scanFiles (const juce::StringArray& files, const std::function<b
         {
             if (! format->canScanForPlugins() || ! format->fileMightContainThisPluginType (file))
                 continue;
-            if (! known.isListingUpToDate (file, *format) && ! emptyScanIsCurrent (file))
+            if (! known.isListingUpToDate (file, *format) && ! listedInside (known, *format, file) && ! emptyScanIsCurrent (file))
+            {
                 scanOne (*format, file);
+                unsaved = true;
+            }
             break;
+        }
+        if (unsaved && juce::Time::getMillisecondCounter() - lastSave > 5000)
+        {
+            save();
+            lastSave = juce::Time::getMillisecondCounter();
+            unsaved = false;
         }
     }
     save();
@@ -967,7 +1021,7 @@ void PluginHost::startBackgroundScanOfFiles (const juce::StringArray& files)
 void PluginHost::forgetFile (const juce::String& file)
 {
     for (const auto& t : known.getTypes())
-        if (t.fileOrIdentifier == file)
+        if (sameModule (t, file))
             known.removeType (t);
     known.removeFromBlacklist (file);
     {
@@ -1086,6 +1140,17 @@ void PluginHost::setFavourite (const std::string& id, bool favourite)
         favouriteIds.erase (id);
     if (persistent)
         settingsFolder().getChildFile ("plugin-favourites.txt").replaceWithText (juce::String (prefs::formatFavourites (favouriteIds)));
+}
+
+void PluginHost::setPluginName (const std::string& key, const std::string& name)
+{
+    auto clean = juce::String::fromUTF8 (name.c_str()).replaceCharacters ("\t\r\n", "   ").trim().toStdString();
+    if (clean.empty())
+        userNames.erase (key);
+    else
+        userNames[key] = clean;
+    if (persistent)
+        settingsFolder().getChildFile ("plugin-names.txt").replaceWithText (juce::String::fromUTF8 (prefs::formatPluginNames (userNames).c_str()));
 }
 
 void PluginHost::startBackgroundScan (const juce::FileSearchPath& paths)

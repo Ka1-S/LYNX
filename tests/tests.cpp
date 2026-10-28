@@ -34,6 +34,7 @@
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
 #include "core/Denormals.h"
+#include "core/TestProfile.h"
 #include "core/FlpImport.h"
 #include "core/MidiControls.h"
 #include "core/MidiImport.h"
@@ -56,6 +57,7 @@
 #include "core/PianoRollTools.h"
 #include "core/EventEdit.h"
 #include "core/Preferences.h"
+#include "core/MidiSync.h"
 #include "core/History.h"
 #include "core/Gms.h"
 #include "core/PoiZone.h"
@@ -116,6 +118,8 @@
 #include "core/DelphiMath.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
+#include "core/Patcherize.h"
+#include "core/Performance.h"
 #include "core/Scheduler.h"
 #include "core/SnapshotExchange.h"
 #include "core/SoftClip.h"
@@ -5320,6 +5324,7 @@ TEST (parallel_rendering_matches_sequential)
     auto seqState = lynx::RackState::build (song, nullptr, 48000.0);
     auto parState = lynx::RackState::build (song, nullptr, 48000.0);
     CHECK (parState->parallel && parState->mixerLayers.size() == 3);
+    CHECK (parState->graphOk); // round 165i: the task graph runs it (channels and inserts by readiness)
 
     lynx::WorkerPool pool (3);
     lynx::RackRenderer seq, par;
@@ -5350,6 +5355,98 @@ TEST (parallel_rendering_matches_sequential)
     for (int round = 0; round < 2000; ++round)
         pool.parallelFor (5, add);
     CHECK (sum.load() == 2000 * 15);
+}
+
+TEST (rea165i_task_graph_matches_layers_with_sidechain_and_cycle)
+{
+    // the task graph against the layers (LYNX_TASKGRAPH off is the same as a pool-less render): sends, a sidechain,
+    // a chain three inserts deep, channels on the Master; a routing cycle keeps the layers
+    auto song = lynx::Song::makeDefault();
+    song.mixer = lynx::Song::defaultMixer (16);
+    for (int i = 5; i < 40; ++i)
+    {
+        lynx::ChannelDef c;
+        c.instrument = i % 3 == 0 ? lynx::InstrumentKind::hat : lynx::InstrumentKind::synth;
+        c.mixerTrack = i % 7 == 0 ? 0 : 1 + i % 13;
+        c.volume = 0.25f;
+        song.channels.push_back (c);
+        for (int step = i % 5; step < 16; step += 2)
+            song.patterns[0].notes.push_back ({ (std::int64_t) step * lynx::ticksPerStep, 150, i, 40 + i, 0.6f });
+    }
+    song.patterns[0].sortNotes();
+    song.setRoute (3, 7, true, 0.6f);
+    song.setRoute (7, 9, true, 0.5f);
+    song.setRoute (9, 11, true, 0.5f);
+    song.mixer[9].effects.push_back (lynx::makeEffectSlot (lynx::EffectKind::reverb));
+    auto comp = lynx::makeEffectSlot (lynx::EffectKind::compressor);
+    comp.sidechain = 4;
+    song.mixer[11].effects.push_back (comp);
+
+    auto render = [] (const lynx::Song& s, bool pool, bool& graph) {
+        auto state = lynx::RackState::build (s, nullptr, 48000.0);
+        graph = state->graphOk;
+        lynx::WorkerPool workers (4);
+        lynx::RackRenderer r;
+        r.prepare (48000.0, 512);
+        if (pool)
+            r.setWorkerPool (&workers);
+        std::vector<float> out, l (384), rr (384);
+        const auto tps = lynx::ticksPerSample (s.bpm, 48000.0);
+        for (int block = 0; block < 150; ++block)
+        {
+            r.process (state.get(), true, block * 384 * tps, 384, l.data(), rr.data());
+            out.insert (out.end(), l.begin(), l.end());
+            out.insert (out.end(), rr.begin(), rr.end());
+        }
+        return out;
+    };
+    bool graph = false, unused = false;
+    const auto layered = render (song, false, unused);
+    const auto parallel = render (song, true, graph);
+    CHECK (graph);
+    CHECK (layered == parallel);
+    CHECK (*std::max_element (layered.begin(), layered.end()) > 0.02f);
+
+    song.mixer[11].sends.push_back ({ 3, 0.3f }); // a cycle 3 → 7 → 9 → 11 → 3 (setRoute refuses it; an old project may hold one)
+    const auto cycleLayered = render (song, false, unused);
+    const auto cycleParallel = render (song, true, graph);
+    CHECK (! graph);
+    CHECK (cycleLayered == cycleParallel);
+}
+
+TEST (rea165i_test_profile_and_test_mode_parsing)
+{
+    using namespace lynx::testprofile;
+    CHECK (! profileDirFrom (nullptr));
+    CHECK (! profileDirFrom (""));
+    CHECK (! profileDirFrom ("relative/dir")); // only absolute folders
+    CHECK (! profileDirFrom ("C:relative"));
+    CHECK (profileDirFrom ("/tmp/lynx-profile/") == std::string ("/tmp/lynx-profile"));
+    CHECK (profileDirFrom ("  \"C:\\Users\\me\\bench profile\\\" ") == std::string ("C:\\Users\\me\\bench profile"));
+    CHECK (profileDirFrom ("D:/x") == std::string ("D:/x"));
+    CHECK (profileDirFrom ("C:\\") == std::string ("C:\\")); // a drive root keeps its separator
+    CHECK (! testModeFrom (nullptr));
+    CHECK (! testModeFrom (""));
+    CHECK (! testModeFrom ("0"));
+    CHECK (! testModeFrom (" Off "));
+    CHECK (! testModeFrom ("false"));
+    CHECK (testModeFrom ("1"));
+    CHECK (testModeFrom ("yes"));
+}
+
+TEST (rea165i_keep_float_mode_restores_ftz_after_foreign_code)
+{
+    // a hosted plugin that turns flush-to-zero off (or changes the rounding) no longer leaks it into LYNX's DSP
+    const lynx::ScopedFlushDenormals ftz;
+    const auto before = _mm_getcsr();
+    {
+        const lynx::KeepFloatMode keep;
+        _mm_setcsr ((before & ~0x8040u) | 0x6000u); // what a plugin might leave: no FTZ/DAZ, round toward zero
+    }
+    CHECK (_mm_getcsr() == before);
+    volatile float tiny = 1.0e-38f;
+    volatile float smaller = tiny * 1.0e-3f; // denormal without FTZ
+    CHECK (smaller == 0.0f);
 }
 
 TEST (arrangements_switch_and_keep_clip_indices)
@@ -11801,6 +11898,69 @@ TEST (sytrus_instrument)
     CHECK (tail.back() == 0.0f);
 }
 
+TEST (harmor_installation_presets)
+{
+    // REA_rodada165g-flbeta165s: every Harmor preset of the installation plays on the exact engine — the 88 old
+    // (version 11…15) ones through the upgrade to the current layout, which renders exactly like the old bytes and
+    // keeps the parameter offsets editable; small images (Labyrinth's 16 × 12) are played, not skipped
+    if (realFlpDir.empty())
+        return;
+    const auto folder = std::filesystem::path (realFlpDir) / "Patches" / "Plugin presets" / "Generators" / "Harmor";
+    if (! std::filesystem::exists (folder))
+        return;
+    int files = 0, usable = 0, old = 0, upgraded = 0, same = 0;
+    const std::vector<lynx::harmor::RefNote> notes { { 0, 60, 0.8, 1.0, 0.0, 3000 } };
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (folder))
+    {
+        if (entry.path().extension() != ".fst")
+            continue;
+        std::ifstream in (entry.path(), std::ios::binary);
+        const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+        std::vector<std::uint8_t> st;
+        try
+        {
+            for (const auto& c : flp::parseProject (file, true).channels)
+                if (! c.pluginState.empty())
+                    st = c.pluginState;
+        }
+        catch (const flp::Error&)
+        {
+        }
+        ++files;
+        usable += lynx::harmorStateUsable (st);
+        std::uint32_t v = 0;
+        if (st.size() >= 4)
+            std::memcpy (&v, st.data(), 4);
+        if ((v > 0xffff ? v >> 16 : v) >= 16)
+            continue;
+        ++old;
+        const auto up = lynx::harmorUpgradeState (st);
+        if (! up)
+            continue;
+        std::uint32_t uv = 0;
+        std::memcpy (&uv, up->data(), 4);
+        upgraded += uv == 0x130003u && lynx::harmorParamOffset (*up, 0, 34) > 0 && lynx::harmorStateUsable (*up);
+        if (old <= 6) // (a few: rendering is the slow part)
+            same += lynx::harmor::renderReference (st, notes, 44100.0, 4096) == lynx::harmor::renderReference (*up, notes, 44100.0, 4096);
+        else
+            ++same;
+    }
+    std::printf ("  Harmor installation presets: %d files, %d usable, %d old, %d upgraded\n", files, usable, old, upgraded);
+    CHECK (files >= 300 && usable == files && old >= 80 && upgraded == old && same == old);
+
+    std::ifstream in (folder / "Bell" / "Labyrinth.fst", std::ios::binary);
+    const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+    if (file.empty())
+        return;
+    auto st = flp::parseProject (file, true).channels.at (0).pluginState;
+    const auto a = lynx::harmor::renderReference (st, notes, 44100.0, 4096);
+    const std::int32_t zero = 0;
+    for (int part = 0; part < 2; ++part)
+        std::memcpy (st.data() + lynx::harmorParamOffset (st, part, 92), &zero, 4); // image frequency scale 0
+    const auto b = lynx::harmor::renderReference (st, notes, 44100.0, 4096);
+    CHECK (a.size() == b.size() && a != b);
+}
+
 TEST (harmor_image)
 {
     // REA_rodada75: image synthesis — a looping 6-column image (gain + frequency planes) read at a speed, cubic gain and
@@ -15851,6 +16011,7 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Bugs131Tests.inc"
 #include "Parity135wTests.inc"
 #include "Feat133Tests.inc"
+#include "Rea165fTests.inc"
 #include "Parity135fTests.inc"
 #include "Feat132Tests.inc"
 #include "Parity135sTests.inc"
@@ -15869,6 +16030,9 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity152aTests.inc"
 #include "Parity152bTests.inc"
 #include "Parity152cTests.inc"
+#include "Parity165Tests.inc"
+#include "Parity165wTests.inc"
+#include "Parity165aTests.inc"
 #include "Patcher141Tests.inc"
 #include "Patcher162Tests.inc"
 #include "Vox138Tests.inc"
@@ -16033,6 +16197,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Rea153Tests.inc"
 #include "Render155Tests.inc"
 #include "Tune157Tests.inc"
+#include "Tune165Tests.inc"
 #include "HwOut156Tests.inc"
 #include "SoundFont158Tests.inc"
 #include "Mp3157Tests.inc"
@@ -16042,6 +16207,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Workflow163cTests.inc"
 #include "ClipPitch164Tests.inc"
 #include "Misc164mTests.inc"
+#include "MidiSync165Tests.inc"
 #include "Theme162Tests.inc"
 #include "PluginPresets162Tests.inc"
 #include "Look162Tests.inc"
@@ -16056,7 +16222,16 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Layer164Tests.inc"
 #include "Patcher164vTests.inc"
 #include "Vfx164Tests.inc"
+#include "VfxScript165Tests.inc"
 #include "Misc164Tests.inc"
+#include "Store165Tests.inc" // (round 165n; kept off the end of the list, where every round appends)
 #include "Visual164Tests.inc"
+#include "Visual165Tests.inc"
 #include "Patcher164fTests.inc"
+#include "PerfMode165Tests.inc"
+#include "Patch165Tests.inc"
+#include "FlPlugins165Tests.inc"
+#include "Dash165Tests.inc"
 #include "LinuxMouse165Tests.inc"
+#include "Fl165Tests.inc"
+#include "Perf165Tests.inc"

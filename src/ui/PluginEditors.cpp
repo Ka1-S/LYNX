@@ -4,6 +4,7 @@
 #include "ui/Controllers164.h"
 #include "ui/NewtoneEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "ui/PluginEditors.h"
 
 #include <cstring>
@@ -74,15 +75,30 @@ class NativeEffectEditor final : public juce::Component,
                                  private juce::Timer
 {
 public:
-    NativeEffectEditor (AudioEngine& e, int t, int s, float initialScale, int initialPage)
+    // `node` (round 165c): the editor of an effect node inside a Patcher instead of a mixer slot — `node.locate` finds its
+    // slot in the song, `node.running` its running instance (the live meters); no presets bar, no automation targets
+    struct NodeTarget
+    {
+        std::function<EffectSlot* (Song&)> locate;
+        std::function<std::shared_ptr<Effect>()> running;
+        juce::String name;
+    };
+
+    NativeEffectEditor (AudioEngine& e, int t, int s, float initialScale, int initialPage, NodeTarget nodeTarget = {})
         : engine (e),
           track (t),
-          slot (s)
+          slot (s),
+          node (std::move (nodeTarget))
     {
         if (const auto* fx = current())
         {
             kind = fx->kind;
             layout = &plugui::layoutFor (kind);
+            if (kind == EffectKind::ember) // round 165: this window only opens for the Classic voicing — its one-screen
+            {                              // panel, not the 1110-unit multiband page around it
+                static const auto classic = [] { auto l = plugui::layoutFor (EffectKind::ember); l.height = 440; return l; }();
+                layout = &classic;
+            }
             if (kind == EffectKind::maximus) // Soundgoodizer runs on the Maximus engine: its own page
                 if (const auto blob = maximusfx::unpack (fx->state); blob && blob->build == hlfx::MaximusBuild::soundgoodizer)
                     layout = &plugui::soundgoodizerLayout();
@@ -94,6 +110,8 @@ public:
         }
 
         accent = skin::accentFor (sgApprox ? EffectKind::maximus : kind);
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's VU shows the output level, as the reference's
+            vuMode = 2;
         anim.onFrame = [this] { repaint(); };
         page = initialPage;
         if (kind == EffectKind::equo && initialPage == 0)
@@ -105,7 +123,7 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "grleds") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
                     || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0 || std::strcmp (item.display, "hwping") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
@@ -127,6 +145,11 @@ public:
 
     const EffectSlot* current() const
     {
+        if (node.locate)
+        {
+            const auto* fx = node.locate (const_cast<Song&> (engine.getSong()));
+            return fx != nullptr && (layout == nullptr || fx->kind == kind) ? fx : nullptr;
+        }
         const auto& mixer = engine.getSong().mixer;
 
         if (track < 0 || track >= (int) mixer.size() || slot < 0 || slot >= (int) mixer[(std::size_t) track].effects.size())
@@ -273,7 +296,24 @@ public:
     // Controls stored in the slot's state (core/StateParams.h: Maximus' bands, Delay Bank's banks, band tables...)
     // edit those bytes instead of EffectSlot::params
     // the header's undo / A-B / preset bar (round 129): every editor whose setting is its parameters
-    bool usesBar() const { return ! stateBacked() && layout != &plugui::soundgoodizerLayout() && layout != nullptr; }
+    bool usesBar() const { return ! node.locate && ! stateBacked() && layout != &plugui::soundgoodizerLayout() && layout != nullptr; }
+
+    // an edit of this editor's slot (a mixer slot or a Patcher node's)
+    void editSlot (std::function<void (EffectSlot&)> change)
+    {
+        if (node.locate)
+        {
+            engine.editSong ([l = node.locate, change = std::move (change)] (Song& song) {
+                if (auto* fx = l (song))
+                    change (*fx);
+            });
+            return;
+        }
+        engine.editSong ([t = track, sl = slot, change = std::move (change)] (Song& song) {
+            if (t >= 0 && t < (int) song.mixer.size() && sl >= 0 && sl < (int) song.mixer[(std::size_t) t].effects.size())
+                change (song.mixer[(std::size_t) t].effects[(std::size_t) sl]);
+        });
+    }
 
     bool stateBacked() const { return plugui::usesStateParams (kind) && layout != &plugui::soundgoodizerLayout(); }
     bool isStateParam (int param) const { return stateBacked() && plugui::stateIndex (kind, param) >= 0; }
@@ -298,9 +338,7 @@ public:
             const auto raw = plugui::stateRaw (kind, param, value);
             if (stateTable().get (fx->state, s) == raw)
                 return;
-            engine.editSong ([t = track, sl = slot, bytes = stateTable().with (fx->state, s, raw)] (Song& song) {
-                song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
-            });
+            editSlot ([bytes = stateTable().with (fx->state, s, raw)] (EffectSlot& target) { target.state = bytes; });
             return;
         }
         if (current() == nullptr || param < 0 || param >= maxEffectParams)
@@ -311,11 +349,15 @@ public:
                 setParams (edits);
                 return;
             }
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's Auto moves Output with Drive
+            if (const auto edits = mixsuite::ember::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
         if (usesBar())
             bar.willEdit();
-        engine.editSong ([t = track, s = slot, param, v = juce::jlimit (0.0f, 1.0f, value)] (Song& song) {
-            song.mixer[(std::size_t) t].effects[(std::size_t) s].params[(std::size_t) param] = v;
-        });
+        editSlot ([param, v = juce::jlimit (0.0f, 1.0f, value)] (EffectSlot& target) { target.params[(std::size_t) param] = v; });
     }
 
     juce::String valueText (int param, float value) const
@@ -408,6 +450,8 @@ public:
 
     juce::String trackName() const
     {
+        if (node.locate)
+            return node.name;
         const auto& mixer = engine.getSong().mixer;
         if (track == 0)
             return tr ("Master");
@@ -451,7 +495,8 @@ public:
             spec.interval = 1.0 / item.steps;
         spec.toText = [this, param] (double v) { return valueText (param, (float) v); };
         spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
-        spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
+        if (! node.locate)
+            spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
         return spec;
     }
 
@@ -534,8 +579,8 @@ public:
             g.drawRoundedRectangle (box.reduced (0.5f), radius::md, 1.0f);
         }
         g.setColour (presetName.isNotEmpty() ? colour::textPrimary : colour::textSecondary);
-        g.setFont (font (type::small, presetName.isNotEmpty()));
-        g.drawText (presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight, true);
+        ui::drawFittingText (g, presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight,
+                             font (type::small, presetName.isNotEmpty()), 8.0f, 0.0f, 0.75f);
         drawArrow (g, prevButton(), juce::MathConstants<float>::pi, hoverHeader == 3 ? accent : colour::textSecondary);
         drawArrow (g, nextButton(), 0.0f, hoverHeader == 4 ? accent : colour::textSecondary);
     }
@@ -571,8 +616,7 @@ public:
             g.drawRoundedRectangle (r.withSizeKeepingCentre (w, r.getHeight()), 3.0f, 1.0f);
         }
         g.setColour (locked ? theme::colour::textPrimary : hasStyle (item, plugui::dim) ? colour::textDisabled : skin::captionColour());
-        g.setFont (font (juce::jmax (8.0f, 9.5f * scale()), true));
-        g.drawFittedText (caps (tr (item.label)), r.toNearestInt(), j, 1, 0.7f);
+        ui::drawFittingText (g, caps (tr (item.label)), r, j, font (juce::jmax (8.0f, 9.5f * scale()), true), 7.0f); // (round 165: fit, no "...")
     }
 
     void paintItem (juce::Graphics& g, const LayoutItem& item, int index, const EffectSlot& fx)
@@ -600,9 +644,8 @@ public:
                 {
                     // the plugin's name, big and quiet (FL's logos are not reproduced)
                     g.setColour (colour::bg4);
-                    g.setFont (font (r.getHeight() * 0.62f, true));
-                    g.drawFittedText (item.label, r.toNearestInt(),
-                                      hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight, 1, 0.8f);
+                    ui::drawFittingText (g, item.label, r, hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight,
+                                         font (r.getHeight() * 0.62f, true), r.getHeight() * 0.25f, 0.0f, 0.8f); // (smaller, never "Wav...")
                     break;
                 }
                 if (hasStyle (item, plugui::boxed))
@@ -779,18 +822,16 @@ public:
                     else
                         skin::button (g, r, false, hot, accent, radius::sm);
                     g.setColour (on ? colour::onAccent : colour::textSecondary);
-                    g.setFont (font (juce::jmax (8.0f, r.getHeight() * 0.8f), true));
                     if (item.label != nullptr)
-                        g.drawText (caps (tr (item.label)), r, juce::Justification::centred, false);
+                        ui::drawFittingText (g, caps (tr (item.label)), r, juce::Justification::centred, font (juce::jmax (8.0f, r.getHeight() * 0.8f), true), 6.5f);
                     break;
                 }
                 const auto box = juce::Rectangle<float> (16.0f * s, 9.0f * s).withCentre ({ r.getX() + 9.0f * s, r.getCentreY() });
                 skin::switchPill (g, box, on, accent, fx.enabled);
                 auto text = r.withTrimmedLeft (21.0f * s);
                 g.setColour (on ? colour::textPrimary : (hot ? colour::textSecondary : colour::textDisabled));
-                g.setFont (font (juce::jmax (8.0f, 9.5f * s), true));
                 if (item.label != nullptr)
-                    g.drawFittedText (caps (tr (item.label)), text.toNearestInt(), juce::Justification::centredLeft, 1, 0.7f);
+                    ui::drawFittingText (g, caps (tr (item.label)), text, juce::Justification::centredLeft, font (juce::jmax (8.0f, 9.5f * s), true), 7.0f);
                 break;
             }
 
@@ -1631,6 +1672,8 @@ public:
             text = tr ("Ping failed: the round trip was not stable"), warn = true;
         else if (samples == 0)
             text = tr ("Not measured yet: press Ping"), warn = true;
+        else if (const auto measured = hwinsert::measuredSetup (fx); ! measured.empty() && measured != engine.currentSetupKey())
+            text = tr ("Measured for another audio setup (the device or the buffer size changed): press Ping"), warn = true; // round 165c
         else if (ping > 0.4f && ping < 0.6f)
             text = tr ("Measured: delay compensated");
         else
@@ -1640,7 +1683,7 @@ public:
         g.drawFittedText (text, area.toNearestInt(), juce::Justification::centred, 3, 0.8f);
     }
 
-    // applies a ping's result once (the round trip becomes the slot's delay: undoable, saved with the project)
+    // shows a ping's result once (AudioEngine makes it the slot's delay: undoable, saved with the project)
     void hwPingTick()
     {
         const auto serial = juce::roundToInt (liveMeter (hwinsert::pingSerial) * 1024.0f);
@@ -1654,8 +1697,8 @@ public:
         hwSerial = serial;
         if (std::abs (liveMeter (hwinsert::pingState) - 0.5f) < 0.01f)
         {
+            // (the engine applies the result to the slot, with the device setup it belongs to: round 165c)
             const auto samples = hwinsert::roundTripOf (liveMeter (hwinsert::pingSamples));
-            setValue (hwinsert::roundTrip, hwinsert::roundTripValue (samples));
             for (const auto& item : activeLayout().items)
                 if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "hwping") == 0)
                     ui::flashValueTip (*this, rectOf (item).toNearestInt(), tr ("Round trip: {0} samples", { juce::String (samples) }));
@@ -1738,6 +1781,11 @@ public:
     // the live meter `output` of this slot's effect (published by the audio thread; 0 when not playing)
     float liveMeter (int output) const
     {
+        if (node.running)
+        {
+            const auto fx = node.running();
+            return fx != nullptr ? fx->controlOutput (output) : 0.0f;
+        }
         const auto* times = engine.getProcessTimes();
         const auto key = (std::size_t) (track * maxEffectSlots + slot) * ProcessTimes::meterOutputs + (std::size_t) juce::jlimit (0, ProcessTimes::meterOutputs - 1, output);
         return times != nullptr && key < times->effectMeters.size() ? times->effectMeters[key].load (std::memory_order_relaxed) : 0.0f;
@@ -1970,14 +2018,15 @@ public:
             using namespace voicetools::gemini;
             grid (4, 4);
             const bool lo = param01 ("Low shelf") >= 0.5f, hi = param01 ("High shelf") >= 0.5f;
-            const auto lg = lo ? shelfDb (param01 ("Low gain")) : 0.0, hg = hi ? shelfDb (param01 ("High gain")) : 0.0;
+            // round 165w: the law's range over the height (measured: −88 … +12 dB; round 124's: −30 … +12) and its shapes
+            const bool measured = param01 ("EQ law") >= 0.5f;
+            const auto floorDb = measured ? -88.0 : -30.0, spanDb = measured ? 100.0 : 42.0;
+            const auto lg = lo ? shelfDb (param01 ("Low gain"), measured) : 0.0, hg = hi ? shelfDb (param01 ("High gain"), measured) : 0.0;
             const auto lf = freqHz (param01 ("Low freq")), hf = freqHz (param01 ("High freq"));
-            // first-order shelf shapes (display only): −30 … +12 dB over the height
             strokeCurve ([=] (float x) {
                 const auto f = 20.0 * std::pow (1000.0, (double) x);
-                const auto l = lg / (1.0 + std::pow (f / lf, 2.0));
-                const auto h = hg / (1.0 + std::pow (hf / f, 2.0));
-                return (float) ((l + h + 30.0) / 42.0);
+                const auto db = shelfResponseDb (f, lf, lg, false, measured) + shelfResponseDb (f, hf, hg, true, measured);
+                return (float) std::clamp ((db - floorDb) / spanDb, 0.0, 1.0);
             }, inner, true);
             // round 137: the L / H markers (drag: frequency / gain; double-click: on / off) and the frequency labels
             g.setFont (font (8.5f * s));
@@ -1988,7 +2037,7 @@ public:
                 const auto x = inner.getX() + inner.getWidth() * (float) (std::log (hz / 20.0) / std::log (1000.0));
                 g.drawText (text, juce::Rectangle<float> (x - 12.0f * s, inner.getBottom() - 11.0f * s, 24.0f * s, 10.0f * s), juce::Justification::centred, false);
             }
-            const auto zero = inner.getBottom() - inner.getHeight() * 30.0f / 42.0f;
+            const auto zero = inner.getBottom() - inner.getHeight() * (float) (-floorDb / spanDb);
             g.drawText ("0", juce::Rectangle<float> (inner.getX() + 1.0f * s, zero - 5.0f * s, 14.0f * s, 10.0f * s), juce::Justification::centredLeft, false);
             for (const auto& h : geminiHandles (item))
             {
@@ -2208,6 +2257,37 @@ public:
         else if (id == "hwping") // the hardware insert (round 164d): the round trip, the ping's state, what is missing
         {
             paintHwPing (g, r, fx);
+            return;
+        }
+        else if (id == "grleds") // round 165: a ladder of reduction LEDs (Ridge Strip: the console's 3 / 6 / 10 / 14 / 20 dB)
+        {
+            const auto db = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
+            auto area = r.reduced (1.0f * s);
+            const auto caption = area.removeFromBottom (14.0f * s);
+            static const int steps[] { 20, 14, 10, 6, 3 };
+            const auto h = area.getHeight() / 5.0f;
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            for (int k = 0; k < 5; ++k)
+            {
+                const auto cell = juce::Rectangle<float> (area.getX(), area.getY() + h * (float) k, area.getWidth(), h);
+                const auto led = cell.withWidth (cell.getHeight() * 0.62f).withSizeKeepingCentre (cell.getHeight() * 0.5f, cell.getHeight() * 0.5f)
+                                     .withX (cell.getX() + 2.0f * s);
+                const bool lit = fx.enabled && db >= (float) steps[k] - 0.05f;
+                g.setColour (lit ? accent : colour::gridBeat);
+                g.fillEllipse (led);
+                if (lit)
+                {
+                    g.setColour (accent.withAlpha (0.35f));
+                    g.drawEllipse (led.expanded (1.5f * s), 1.0f * s);
+                }
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (steps[k]), cell.withTrimmedLeft (led.getRight() - cell.getX() + 2.0f * s), juce::Justification::centredLeft, false);
+            }
+            if (item.label != nullptr && *item.label != 0)
+            {
+                g.setColour (colour::textSecondary);
+                g.drawText (caps (tr (item.label)), caption, juce::Justification::centred, false);
+            }
             return;
         }
         else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
@@ -2834,11 +2914,10 @@ public:
             return;
         if (usesBar())
             bar.willEdit();
-        engine.editSong ([t = track, sl = slot, changes] (Song& song) {
-            auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) sl].params;
+        editSlot ([changes] (EffectSlot& target) {
             for (auto [p, v] : changes)
                 if (p >= 0 && p < maxEffectParams)
-                    params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
+                    target.params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
         });
     }
 
@@ -3058,8 +3137,9 @@ public:
             auto add = [&] (int freqP, int gainP, int onP) {
                 const auto hz = freqHz (valueOf (freqP));
                 const auto x = (float) (std::log (juce::jlimit (20.0, 20000.0, hz) / 20.0) / std::log (1000.0));
-                const auto db = valueOf (onP) >= 0.5f ? shelfDb (valueOf (gainP)) : 0.0;
-                out.push_back ({ freqP, gainP, onP, { inner.getX() + inner.getWidth() * x, inner.getBottom() - inner.getHeight() * (float) ((db + 30.0) / 42.0) } });
+                const bool measured = valueOf (eqLaw) >= 0.5f; // round 165w: the height is the gain's own scale
+                const auto y = valueOf (onP) >= 0.5f ? valueOf (gainP) : shelfValue (0.0, measured);
+                out.push_back ({ freqP, gainP, onP, { inner.getX() + inner.getWidth() * x, inner.getBottom() - inner.getHeight() * y } });
             };
             add (lowFreq, lowGain, lowOn);
             add (highFreq, highGain, highOn);
@@ -4248,10 +4328,7 @@ public:
         }
         const auto* fx = current();
         menu.addItem (tr ("Bypass"), true, fx != nullptr && ! fx->enabled, [this] {
-            engine.editSong ([t = track, s = slot] (Song& song) {
-                auto& target = song.mixer[(std::size_t) t].effects[(std::size_t) s];
-                target.enabled = ! target.enabled;
-            });
+            editSlot ([] (EffectSlot& target) { target.enabled = ! target.enabled; });
         });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (menuButton().toNearestInt())));
     }
@@ -4295,7 +4372,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "grleds") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
@@ -4307,6 +4384,7 @@ private:
 
     AudioEngine& engine;
     int track, slot;
+    NodeTarget node;
     EffectKind kind = EffectKind::eq;
     const plugui::Layout* layout = nullptr;
     int page = 0;
@@ -4419,6 +4497,12 @@ std::unique_ptr<juce::Component> makeNativeEffectEditor (AudioEngine& engine, in
     return std::make_unique<NativeEffectEditor> (engine, track, slot, scale, page);
 }
 
+std::unique_ptr<juce::Component> makeNodeEffectEditor (AudioEngine& engine, std::function<EffectSlot* (Song&)> locate,
+                                                       std::function<std::shared_ptr<Effect>()> running, const juce::String& name, float scale)
+{
+    return std::make_unique<NativeEffectEditor> (engine, -1, -1, scale, 0, NativeEffectEditor::NodeTarget { std::move (locate), std::move (running), name });
+}
+
 namespace NativeEffectWindows
 {
 bool canOpen (EffectKind kind)
@@ -4447,6 +4531,11 @@ void open (AudioEngine& engine, int track, int slot)
     if (VisualWindows::handles (kind)) // Wave Candy / Visualizer: displays fed by the slot's tap (round 164c)
     {
         VisualWindows::open (engine, track, slot);
+        return;
+    }
+    if (FlExtraWindows::handles (kind)) // Big Clock, Tuner, HTML NoteBook (round 165g)
+    {
+        FlExtraWindows::open (engine, track, slot);
         return;
     }
     if (! canOpen (fxSlot))
@@ -4508,6 +4597,7 @@ void closeAll()
     Controller164Windows::closeAll();
     NewtoneWindows::closeAll();
     VisualWindows::closeAll();
+    FlExtraWindows::closeAll();
     FacetEqWindows::closeAll();
     ProEditorWindows::closeAll();
 }

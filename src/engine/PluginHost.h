@@ -233,6 +233,12 @@ public:
     const std::set<std::string>& favourites() const noexcept { return favouriteIds; }
     void setFavourite (const std::string& id, bool favourite);
 
+    // Names the user gave plugins (FL's renamed Plugin database entries, issue #11; core/Preferences.h): the
+    // Browser's Plugin database shows them and the slot / channel menus list them first, picked by their first
+    // character. Saved in %APPDATA%\LYNX\plugin-names.txt. UI thread.
+    const std::map<std::string, std::string>& pluginNames() const noexcept { return userNames; }
+    void setPluginName (const std::string& key, const std::string& name); // "" = the original name again
+
     // Scan child mode: describes a file's plugins into `output` (XML). Returns the number found.
     static int scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output);
 
@@ -328,6 +334,8 @@ private:
     mutable std::mutex preloadLock;
     double preloadRate = 44100.0;
     bool emptyScanIsCurrent (const juce::String& file);
+    // a plugin described from this file: the same path, or a module inside this bundle folder (round 165i)
+    static bool sameModule (const juce::PluginDescription& d, const juce::String& file);
     bool fileStillThere (const juce::String& file); // cached until clearPreloaded (one check per file per open)
     std::map<juce::String, bool> existsCache;
     std::mutex existsLock;
@@ -346,6 +354,7 @@ private:
     bool flDbLoaded = false;
 
     std::set<std::string> favouriteIds;
+    std::map<std::string, std::string> userNames;
 
     class BackgroundScan;
     std::unique_ptr<BackgroundScan> background;

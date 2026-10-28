@@ -45,9 +45,9 @@ void syncParams (EffectSlot& slot) noexcept
     int k = 0;
     for (const auto& c : slot.patcher.surface)
     {
-        if (k < maxOutputs)
+        if (k < maxSurfaceOutputs)
             slot.params[(std::size_t) k] = c.value;
-        if (c.kind == SurfaceControl::Kind::xy && k + 1 < maxOutputs)
+        if (c.kind == SurfaceControl::Kind::xy && k + 1 < maxSurfaceOutputs)
             slot.params[(std::size_t) k + 1] = c.valueY;
         k += c.outputs();
     }
@@ -61,7 +61,7 @@ void setValue (EffectSlot& slot, int index, float value, float valueY)
 
 int add (EffectSlot& slot, SurfaceControl control)
 {
-    if (firstOutput (slot.patcher.surface, (int) slot.patcher.surface.size()) + control.outputs() > maxOutputs)
+    if (firstOutput (slot.patcher.surface, (int) slot.patcher.surface.size()) + control.outputs() > maxSurfaceOutputs)
         return -1;
     slot.patcher.surface.push_back (std::move (control));
     syncParams (slot);
@@ -89,6 +89,116 @@ std::vector<SurfaceControl> starterControls()
     return { a, b };
 }
 
+int midiValueOf (const SurfaceControl& c, float value) noexcept
+{
+    const auto v = std::isfinite (value) ? std::clamp (value, 0.0f, 1.0f) : 0.0f;
+    const auto raw = (int) std::lround ((double) c.midiLow + (double) (c.midiHigh - c.midiLow) * (double) v);
+    return std::clamp (raw, std::min (c.midiLow, c.midiHigh), std::max (c.midiLow, c.midiHigh));
+}
+
+namespace
+{
+// FL's Dashboard record send [DECOMP Dashboard_x64.dll 0x7b79b0; the RPN / NRPN select CCs from its table 0x81fefe]
+int midiMessages (const SurfaceControl& c, int value, int channel, MidiBytes out[6]) noexcept
+{
+    int n = 0;
+    auto put = [&] (int status, int d1, int d2, int size) {
+        out[n].bytes[0] = (std::uint8_t) status;
+        out[n].bytes[1] = (std::uint8_t) (d1 & 127);
+        out[n].bytes[2] = (std::uint8_t) (d2 & 127);
+        out[n].size = (std::uint8_t) size;
+        ++n;
+    };
+    const auto ch = channel & 15;
+    const auto wide = c.midiHigh > 127;
+    value = std::max (0, value);
+    switch (c.midi)
+    {
+        case SurfaceControl::Midi::cc:
+            if (wide) // (FL sends both halves on the same CC)
+            {
+                put (0xB0 | ch, c.midiNumber, value >> 7, 3);
+                put (0xB0 | ch, c.midiNumber, value, 3);
+            }
+            else
+                put (0xB0 | ch, c.midiNumber, value, 3);
+            break;
+        case SurfaceControl::Midi::rpn:
+        case SurfaceControl::Midi::nrpn:
+        {
+            const auto rpn = c.midi == SurfaceControl::Midi::rpn;
+            put (0xB0 | ch, rpn ? 101 : 99, c.midiNumber >> 7, 3);
+            put (0xB0 | ch, rpn ? 100 : 98, c.midiNumber, 3);
+            if (wide)
+            {
+                put (0xB0 | ch, 6, value >> 7, 3);
+                put (0xB0 | ch, 38, value, 3);
+            }
+            else
+                put (0xB0 | ch, 6, value, 3);
+            break;
+        }
+        case SurfaceControl::Midi::pressure: put (0xD0 | ch, value, 0, 2); break;
+        case SurfaceControl::Midi::note:
+            if (value == 0)
+                put (0x80 | ch, c.midiNumber, 0, 3);
+            else
+                put (0x90 | ch, c.midiNumber, value, 3);
+            break;
+        case SurfaceControl::Midi::none: break;
+    }
+    return n;
+}
+} // namespace
+
+int midiOf (const SurfaceControl& c, float value, int channel, MidiBytes out[6]) noexcept
+{
+    return midiMessages (c, midiValueOf (c, value), channel, out);
+}
+
+// FL's Dashboard state starts: i32 version 2, 6 × i32 (0 MIDI channel, 1 −1, 2 bank MSB, 3 bank LSB, 4, 5 MIDI port
+// [DECOMP 0x7b50a0 → +0x15c…+0x170, 0x7b7d40: port << 24 | channel, 0x7b82e0: the bank CCs]), i32 n, n × i32
+// parameters (0 = the patch selector: program + 1, 0 = none [DECOMP 0x7b8100]), …
+DashboardMidi dashboardMidi (const std::vector<std::uint8_t>& d) noexcept
+{
+    DashboardMidi s;
+    auto at = [&] (std::size_t o) {
+        std::int32_t v = 0;
+        std::memcpy (&v, d.data() + o, 4);
+        return v;
+    };
+    if (d.size() < 32 || at (0) != 2)
+        return s;
+    s.channel = std::clamp (at (4), 0, 15);
+    s.bankMsb = at (12) >= 0 && at (12) < 128 ? at (12) : -1;
+    s.bankLsb = at (16) >= 0 && at (16) < 128 ? at (16) : -1;
+    s.port = std::clamp (at (24), 0, 255);
+    if (at (28) >= 1 && d.size() >= 36)
+        s.program = std::clamp (at (32), 0, 128);
+    return s;
+}
+
+void writeDashboardMidi (std::vector<std::uint8_t>& d, const DashboardMidi& s)
+{
+    auto put = [&] (std::size_t o, std::int32_t v) { std::memcpy (d.data() + o, &v, 4); };
+    std::int32_t version = 0, params = 0;
+    if (d.size() >= 32)
+        std::memcpy (&version, d.data(), 4), std::memcpy (&params, d.data() + 28, 4);
+    if (version != 2 || params < 1 || d.size() < 36)
+    {
+        // LYNX's short state: FL's header with one parameter and no records (no panel: LYNX's controls are its own)
+        d.assign (40, 0);
+        put (0, 2);
+        put (8, -1);
+        put (28, 1);
+    }
+    put (4, std::clamp (s.channel, 0, 15));
+    put (12, s.bankMsb >= 0 && s.bankMsb < 128 ? s.bankMsb : -1);
+    put (16, s.bankLsb >= 0 && s.bankLsb < 128 ? s.bankLsb : -1);
+    put (24, std::clamp (s.port, 0, 255));
+    put (32, std::clamp (s.program, 0, 128));
+}
+
 namespace
 {
 class SurfaceEffect final : public Effect
@@ -98,46 +208,185 @@ public:
     void reset() noexcept override {}
     void process (float*, float*, int, const EffectParams& params, double) noexcept override
     {
-        for (int k = 0; k < maxOutputs; ++k)
+        for (int k = 0; k < maxSurfaceOutputs; ++k)
             values[(std::size_t) k].store (params[(std::size_t) k], std::memory_order_relaxed);
     }
     float controlOutput (int k) const noexcept override
     {
-        return k >= 0 && k < maxOutputs ? values[(std::size_t) k].load (std::memory_order_relaxed) : 0.0f;
+        return k >= 0 && k < maxSurfaceOutputs ? values[(std::size_t) k].load (std::memory_order_relaxed) : 0.0f;
     }
 
 private:
-    std::array<std::atomic<float>, maxOutputs> values {};
+    std::array<std::atomic<float>, maxSurfaceOutputs> values {};
 };
+
+// A MIDI-sending control's wanted message, packed so one compare tells "changed": the raw value (bits 0…15), the
+// number (16…29), the type + 1 (30…33, 0 = sends nothing), the MIDI channel (34…37), the range's high end over 127
+// (bit 38: 14-bit)
+constexpr std::uint64_t packMidi (int type, int number, int value, int channel, bool wide) noexcept
+{
+    return (std::uint64_t) (value & 0xffff) | ((std::uint64_t) (number & 0x3fff) << 16) | ((std::uint64_t) ((type + 1) & 15) << 30)
+           | ((std::uint64_t) (channel & 15) << 34) | ((std::uint64_t) (wide ? 1 : 0) << 38);
+}
 
 class DashboardInstrument final : public Instrument
 {
 public:
+    DashboardInstrument()
+    {
+        for (auto& w : wanted)
+            w.store (0, std::memory_order_relaxed);
+        sent.fill (0);
+        configuredValue.fill (-1.0f);
+        configuredKey.fill (0);
+    }
+
     void prepare (double) noexcept override {}
     void noteOn (int, float) noexcept override {}
     void noteOff (int) noexcept override {}
     void allNotesOff() noexcept override {}
     void render (float*, float*, int, float, float) noexcept override {}
     bool idle() const noexcept override { return true; }
+
+    // (the build thread; the audio thread may run meanwhile: everything it reads is atomic)
     void configure (const ChannelDef& channel, double) noexcept override
     {
+        const auto settings = dashboardMidi (channel.pluginState);
+        const auto header = packHeader (settings);
+        auto changed = header != wantedHeader.load (std::memory_order_relaxed);
+        wantedHeader.store (header, std::memory_order_relaxed);
         int k = 0;
         for (const auto& c : channel.patcher.surface)
         {
-            if (k < maxOutputs)
-                values[(std::size_t) k].store (c.value, std::memory_order_relaxed);
-            if (c.kind == SurfaceControl::Kind::xy && k + 1 < maxOutputs)
-                values[(std::size_t) k + 1].store (c.valueY, std::memory_order_relaxed);
+            if (k + c.outputs() > maxOutputs)
+                break;
+            // a value the song changed (not one automation set since): the output and its MIDI follow it
+            setFromSong (k, c.value, c, settings.channel, changed);
+            if (c.kind == SurfaceControl::Kind::xy)
+                setFromSong (k + 1, c.valueY, SurfaceControl {}, settings.channel, changed);
             k += c.outputs();
         }
+        for (int i = k; i < count.load (std::memory_order_relaxed); ++i) // (controls removed: nothing more to send)
+            if (wanted[(std::size_t) i].exchange (0, std::memory_order_relaxed) != 0)
+                configuredKey[(std::size_t) i] = 0;
+        count.store (k, std::memory_order_relaxed);
+        if (changed)
+            dirty.store (true, std::memory_order_release);
     }
+
+    // automation / a link on output k (channelParam k): the output, and its MIDI when it sends some
+    void setParameter (int k, float v) noexcept override
+    {
+        if (k < 0 || k >= maxOutputs || ! std::isfinite (v))
+            return;
+        v = std::clamp (v, 0.0f, 1.0f);
+        values[(std::size_t) k].store (v, std::memory_order_relaxed);
+        const auto key = wanted[(std::size_t) k].load (std::memory_order_relaxed);
+        if (((key >> 30) & 15) == 0)
+            return;
+        const auto r = range[(std::size_t) k].load (std::memory_order_relaxed);
+        const auto low = (int) (r & 0xffff), high = (int) (r >> 16);
+        const auto raw = (int) std::lround ((double) low + (double) (high - low) * (double) v);
+        const auto next = (key & ~(std::uint64_t) 0xffff) | (std::uint64_t) (raw & 0xffff);
+        if (next != key)
+        {
+            wanted[(std::size_t) k].store (next, std::memory_order_relaxed);
+            dirty.store (true, std::memory_order_release);
+        }
+    }
+
     float controlOutput (int k) const noexcept override
     {
         return k >= 0 && k < maxOutputs ? values[(std::size_t) k].load (std::memory_order_relaxed) : 0.0f;
     }
 
+    int takeMidiMessages (std::uint32_t* out, int max) noexcept override
+    {
+        if (! dirty.exchange (false, std::memory_order_acquire))
+            return 0;
+        int n = 0;
+        auto put = [&] (int status, int d1, int d2) { out[n++] = (std::uint32_t) (status & 0xff) | ((std::uint32_t) (d1 & 127) << 8) | ((std::uint32_t) (d2 & 127) << 16); };
+        // the bank select and program first (FL sends them at load and when the patch changes)
+        const auto header = wantedHeader.load (std::memory_order_relaxed);
+        if (header != sentHeader && max >= 3)
+        {
+            sentHeader = header;
+            const auto channel = (int) (header & 15);
+            const auto program = (int) ((header >> 4) & 0xff), msb = (int) ((header >> 12) & 0xff), lsb = (int) ((header >> 20) & 0xff);
+            if (msb < 128)
+                put (0xB0 | channel, 0, msb);
+            if (lsb < 128)
+                put (0xB0 | channel, 32, lsb);
+            if (program > 0)
+                put (0xC0 | channel, program - 1, 0);
+        }
+        const auto total = count.load (std::memory_order_relaxed);
+        for (int k = resume; k < total; ++k)
+        {
+            const auto key = wanted[(std::size_t) k].load (std::memory_order_relaxed);
+            if (key == sent[(std::size_t) k])
+                continue;
+            if (n + 6 > max) // the rest next time
+            {
+                resume = k;
+                dirty.store (true, std::memory_order_relaxed);
+                return n;
+            }
+            sent[(std::size_t) k] = key;
+            if (((key >> 30) & 15) == 0)
+                continue;
+            SurfaceControl c;
+            c.midi = (SurfaceControl::Midi) ((int) ((key >> 30) & 15) - 1);
+            c.midiNumber = (int) ((key >> 16) & 0x3fff);
+            c.midiLow = 0;
+            c.midiHigh = ((key >> 38) & 1) != 0 ? 16383 : 127;
+            MidiBytes m[6];
+            const auto value = (int) (key & 0xffff);
+            const auto made = midiMessages (c, value, (int) ((key >> 34) & 15), m);
+            for (int i = 0; i < made; ++i)
+                put (m[i].bytes[0], m[i].bytes[1], m[i].bytes[2]);
+        }
+        resume = 0;
+        return n;
+    }
+
 private:
+    static std::uint64_t packHeader (const DashboardMidi& s) noexcept
+    {
+        const auto byte = [] (int v) { return (std::uint64_t) (v < 0 || v > 127 ? 0xff : v); };
+        return (std::uint64_t) (s.channel & 15) | ((std::uint64_t) std::clamp (s.program, 0, 128) << 4) | (byte (s.bankMsb) << 12) | (byte (s.bankLsb) << 20);
+    }
+
+    void setFromSong (int k, float value, const SurfaceControl& c, int channel, bool& changed) noexcept
+    {
+        const auto key = c.midi == SurfaceControl::Midi::none
+                             ? 0
+                             : packMidi ((int) c.midi, c.midiNumber, midiValueOf (c, value), channel, c.midiHigh > 127);
+        if (value != configuredValue[(std::size_t) k] || key != configuredKey[(std::size_t) k])
+        {
+            configuredValue[(std::size_t) k] = value;
+            configuredKey[(std::size_t) k] = key;
+            values[(std::size_t) k].store (value, std::memory_order_relaxed);
+            range[(std::size_t) k].store ((std::uint32_t) std::clamp (c.midiLow, 0, 0xffff) | ((std::uint32_t) std::clamp (c.midiHigh, 0, 0xffff) << 16),
+                                          std::memory_order_relaxed);
+            wanted[(std::size_t) k].store (key, std::memory_order_relaxed);
+            changed = true;
+        }
+    }
+
     std::array<std::atomic<float>, maxOutputs> values {};
+    std::array<std::atomic<std::uint64_t>, maxOutputs> wanted;
+    std::array<std::atomic<std::uint32_t>, maxOutputs> range {};
+    std::atomic<std::uint64_t> wantedHeader { 0 };
+    std::atomic<int> count { 0 };
+    std::atomic<bool> dirty { false };
+    // the build thread's own (what configure last saw)
+    std::array<float, maxOutputs> configuredValue;
+    std::array<std::uint64_t, maxOutputs> configuredKey;
+    // the audio thread's own (what it sent)
+    std::array<std::uint64_t, maxOutputs> sent;
+    std::uint64_t sentHeader = ~(std::uint64_t) 0;
+    int resume = 0;
 };
 } // namespace
 
@@ -247,7 +496,7 @@ std::optional<std::vector<SurfaceControl>> parseFlControlSurface (const std::vec
                  : c.type == 2         ? SurfaceControl::Kind::slider
                  : c.type == 3         ? SurfaceControl::Kind::button
                                        : SurfaceControl::Kind::knob;
-        if (firstOutput (controls, (int) controls.size()) + s.outputs() > maxOutputs)
+        if (firstOutput (controls, (int) controls.size()) + s.outputs() > maxSurfaceOutputs)
             break;
         static const char* names[] = { "Knob", "Slider", "Button", "Check box", "XY" };
         const auto number = ++count[s.kind];
@@ -274,7 +523,7 @@ std::optional<int> flOutputToLynx (const std::vector<std::uint8_t>& state, int f
         const auto outputs = c.outputs.size() >= 2 ? 2 : 1;
         for (int i = 0; i < outputs && i < (int) c.outputs.size(); ++i)
             if (c.outputs[(std::size_t) i].first == flOutput)
-                return k + i < maxOutputs ? std::optional<int> (k + i) : std::nullopt;
+                return k + i < maxSurfaceOutputs ? std::optional<int> (k + i) : std::nullopt;
         k += outputs;
     }
     return std::nullopt;
@@ -477,6 +726,15 @@ std::optional<FlDashboard> parseFlDashboard (const std::vector<std::uint8_t>& st
             sc.size = std::clamp ((float) c.h / 140.0f, 0.5f, 3.0f);
         else
             sc.size = 0.5f;
+        // a record of another type sends MIDI on the Dashboard's port when active (number ≥ 0; bit 31 = deactivated
+        // until the user moves the control in FL — LYNX leaves those silent) [DECOMP 0x7b79b0, 0x7b5f70]
+        if (rec != nullptr && rec->number >= 0 && (rec->type == 0 || rec->type == 1 || rec->type == 2 || rec->type == 3 || rec->type == 5))
+        {
+            sc.midi = (SurfaceControl::Midi) rec->type;
+            sc.midiNumber = (int) (rec->number & 0x3fff);
+            sc.midiLow = std::clamp (rec->low, 0, 16383);
+            sc.midiHigh = std::clamp (rec->high, 0, 16383);
+        }
         out.flOutputs.push_back (rec != nullptr && rec->type == 4 && rec->number != -1 ? (int) (rec->number & 0x3fffffff) : -1);
         out.controls.push_back (sc);
         placed.push_back ({ sc, &c });

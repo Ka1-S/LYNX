@@ -1,5 +1,6 @@
 #include "core/Song.h"
 #include "core/FlSynths.h"
+#include "core/VoltageController.h"
 
 #include <algorithm>
 #include <iterator>
@@ -67,6 +68,16 @@ std::int64_t Song::songLength() const noexcept
         end = patterns[(std::size_t) currentPattern].effectiveLength (beatsPerBar);
 
     return std::max<std::int64_t> (bar, (end + bar - 1) / bar * bar);
+}
+
+std::int64_t Song::performanceZoneEnd() const noexcept
+{
+    if (! performanceMode)
+        return 0;
+    for (const auto& m : markers())
+        if (m.action == Marker::songStart)
+            return std::max<std::int64_t> (0, m.tick);
+    return 0;
 }
 
 void followPatternLengths (const std::vector<std::int64_t>& before, Song& song)
@@ -758,6 +769,27 @@ void Song::removeArrangement (int index)
         --currentArrangement;
 }
 
+namespace
+{
+// The value field behind output k of a panel (a Dashboard's: its control's value, an XY pad's X then Y)
+const float* surfaceOutputValue (const std::vector<SurfaceControl>& controls, int k) noexcept
+{
+    if (k < 0)
+        return nullptr;
+    for (const auto& c : controls)
+    {
+        if (k < c.outputs())
+            return k == 0 ? &c.value : &c.valueY;
+        k -= c.outputs();
+    }
+    return nullptr;
+}
+float* surfaceOutputValue (std::vector<SurfaceControl>& controls, int k) noexcept
+{
+    return const_cast<float*> (surfaceOutputValue (std::as_const (controls), k));
+}
+} // namespace
+
 float Song::targetValue (const AutomationTarget& t) const noexcept
 {
     const auto validChannel = t.index >= 0 && t.index < (int) channels.size();
@@ -783,6 +815,13 @@ float Song::targetValue (const AutomationTarget& t) const noexcept
                 && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
                 if (const auto ec = parseEnvelopeController (channels[(std::size_t) t.index].controllerState))
                     return t.param == envelopeControllerModXParam ? ec->modX : ec->modY;
+            // a Dashboard's output k (its control's value), the Voltage Controller's offsets / scales (round 165)
+            if (channels[(std::size_t) t.index].instrument == InstrumentKind::dashboard)
+                if (const auto* v = surfaceOutputValue (channels[(std::size_t) t.index].patcher.surface, t.param))
+                    return *v;
+            if (channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0 && t.param < voltage::paramCount)
+                if (const auto vs = voltage::parse (channels[(std::size_t) t.index].pluginState))
+                    return voltage::paramValue (*vs, t.param);
             return 0.5f;
         case AutomationTargetKind::effectMix:
             return validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
@@ -829,6 +868,19 @@ bool Song::setTargetValue (const AutomationTarget& t, float v) noexcept
                 {
                     (t.param == envelopeControllerModXParam ? ec->modX : ec->modY) = v;
                     channels[(std::size_t) t.index].controllerState = writeEnvelopeController (*ec);
+                    return true;
+                }
+            if (validChannel && channels[(std::size_t) t.index].instrument == InstrumentKind::dashboard)
+                if (auto* value = surfaceOutputValue (channels[(std::size_t) t.index].patcher.surface, t.param))
+                {
+                    *value = v;
+                    return true;
+                }
+            if (validChannel && channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0 && t.param < voltage::paramCount)
+                if (auto vs = voltage::parse (channels[(std::size_t) t.index].pluginState))
+                {
+                    voltage::setParamValue (*vs, t.param, v);
+                    channels[(std::size_t) t.index].pluginState = voltage::write (*vs);
                     return true;
                 }
             return false;
