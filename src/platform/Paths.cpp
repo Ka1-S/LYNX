@@ -1,6 +1,7 @@
 #include "platform/Paths.h"
 
 #include "core/FlpImport.h"
+#include "core/TestProfile.h"
 #include "platform/Package.h"
 
 #include <iterator>
@@ -31,8 +32,54 @@ juce::File xdgFolder (const char* variable, const char* fallback)
 #endif
 } // namespace
 
+namespace
+{
+// (JUCE's reader: the wide environment on Windows, so a non-ASCII folder survives; "" when unset)
+std::string envValue (const char* name)
+{
+    return juce::SystemStats::getEnvironmentVariable (name, {}).toStdString();
+}
+} // namespace
+
+juce::File profileOverride()
+{
+    static const juce::File folder = [] {
+        const auto dir = testprofile::profileDirFrom (envValue ("LYNX_PROFILE_DIR").c_str());
+        if (! dir)
+            return juce::File();
+        juce::File f (juce::String::fromUTF8 (dir->c_str()));
+        f.createDirectory();
+        return f;
+    }();
+    return folder;
+}
+
+bool testMode()
+{
+    static const bool on = testprofile::testModeFrom (envValue ("LYNX_TEST_MODE").c_str());
+    return on;
+}
+
+void testModeLog (const juce::String& what)
+{
+    settingsFile ("test-mode.log").appendText (juce::Time::getCurrentTime().toISO8601 (true) + " | skipped: " + what + "\n");
+}
+
+juce::File documentsFolder()
+{
+    if (const auto profile = profileOverride(); profile != juce::File())
+        return profile.getChildFile ("Documents");
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+}
+
 juce::File settingsFolder()
 {
+    if (const auto profile = profileOverride(); profile != juce::File())
+    {
+        auto folder = profile.getChildFile ("LYNX");
+        folder.createDirectory();
+        return folder;
+    }
    #if JUCE_WINDOWS
     // the Microsoft Store build: the real path of the package's redirected %APPDATA%\LYNX (platform/Package.h)
     if (const auto packaged = packagedSettingsFolder(); packaged != juce::File())
@@ -54,6 +101,8 @@ juce::File settingsFile (const juce::String& relativePath)
 
 juce::File cacheFolder (const juce::String& name)
 {
+    if (const auto profile = profileOverride(); profile != juce::File())
+        return profile.getChildFile ("cache").getChildFile (name);
    #if JUCE_WINDOWS
     return settingsFolder().getChildFile (name);
    #elif JUCE_MAC

@@ -148,10 +148,12 @@ juce::String packageReport()
     if (runningPackaged())
     {
         // the settings folder must be the package's real folder, so Explorer and other programs find its files
+        // (LYNX_PROFILE_DIR, a test profile, wins over the package folder on purpose)
         const auto expected = packagedSettingsFolder();
+        const bool profile = profileOverride() != juce::File();
         const bool inPackageData = expected != juce::File() && settings == expected;
-        lines.add ("settingsIsPackageFolder=" + juce::String (inPackageData ? "yes" : "NO"));
-        ok = ok && inPackageData;
+        lines.add ("settingsIsPackageFolder=" + juce::String (inPackageData ? "yes" : profile ? "no (LYNX_PROFILE_DIR)" : "NO"));
+        ok = ok && (inPackageData || profile);
         lines.add ("migration=" + settings.getChildFile (store::migrationMarker).loadFileAsString().replace ("\n", " | ").trim());
     }
 
