@@ -98,6 +98,13 @@ public:
     // wins over a default one, else the panel's (the Shortcut manager tells which).
     std::vector<std::string> shadowedBy (const Chord& chord, const std::string& actionId) const;
 
+    // A key a secondary window (Undo history, Settings, Tempo tapper, Quick-add, Audio editor, a plugin or channel
+    // window...) did not use: the global action it runs there, or "". FL runs its shortcuts from those windows too
+    // (round 165q's find for issue #12: Space and F12 did nothing while such a window had the focus). Only global
+    // actions (a panel's keys belong to the panel), and nothing a text field types (`typingIntoText`: a text field has
+    // the focus, so its unmodified letters, Space, arrows, Enter... stay text editing).
+    std::string findFromSecondaryWindow (const Chord& chord, bool typingIntoText, bool typingPiano) const;
+
     // True when the chord plays a note (piano on, unmodified, mapped key).
     static bool playsNote (const Chord& chord, bool typingPiano) noexcept;
 

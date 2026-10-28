@@ -435,6 +435,19 @@ bool KeyMap::playsNote (const Chord& c, bool typingPiano) noexcept
     return typingPiano && (c.mods & (ctrl | alt | shift)) == 0 && typingPianoNote (c.key) >= 0;
 }
 
+std::string KeyMap::findFromSecondaryWindow (const Chord& c, bool typingIntoText, bool typingPiano) const
+{
+    if (! c.isValid() || c.key == escape) // (Esc closes the window)
+        return {};
+    const auto editingKey = c.isPrintable() || c.key == space || c.key == enter || c.key == tab || c.key == backspace || c.key == del
+                            || c.key == insert || (c.key >= up && c.key <= end);
+    if (typingIntoText && editingKey && (c.mods & (ctrl | alt)) == 0)
+        return {};
+    if (auto own = findUserBound (c, Context::global, typingPiano); ! own.empty())
+        return own;
+    return find (c, Context::global, typingPiano);
+}
+
 std::string KeyMap::findUserBound (const Chord& c, Context focus, bool typingPiano) const
 {
     if (! c.isValid() || playsNote (c, typingPiano))

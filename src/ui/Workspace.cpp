@@ -498,6 +498,7 @@ public:
         else
             setBounds (screenBounds);
 
+        getProperties().set ("lynxOwnKeys", true); // (its keyPressed hands every key to the main window itself)
         setVisible (true);
         keepAboveMainWindow (*this);
     }

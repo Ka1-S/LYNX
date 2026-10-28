@@ -255,8 +255,37 @@ void applyRenderingChoice (juce::Component& window)
             applyToPeer (*peer, false);
 }
 
+namespace
+{
+struct SecondaryKeyForwarder final : juce::KeyListener
+{
+    std::function<bool (const juce::KeyPress&)> handler;
+
+    bool keyPressed (const juce::KeyPress& key, juce::Component* window) override
+    {
+        if (handler == nullptr || key == juce::KeyPress::escapeKey)
+            return false;
+        if (window != nullptr && (bool) window->getProperties().getWithDefault ("lynxOwnKeys", false))
+            return false;
+        return handler (key);
+    }
+};
+
+SecondaryKeyForwarder& keyForwarder()
+{
+    static SecondaryKeyForwarder forwarder;
+    return forwarder;
+}
+} // namespace
+
+void setSecondaryWindowKeyHandler (std::function<bool (const juce::KeyPress&)> handler)
+{
+    keyForwarder().handler = std::move (handler);
+}
+
 void keepAboveMainWindow (juce::Component& window)
 {
+    window.addKeyListener (&keyForwarder()); // (JUCE adds it once)
     applyRenderingChoice (window);
     auto& all = keepers();
     auto& keeper = all[&window];
