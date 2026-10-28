@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <condition_variable>
 #include <mutex>
 #include <set>
@@ -10,6 +11,7 @@
 #include "core/OggVorbis.h"
 #include "core/Mp3Decoder.h"
 #include "core/TimeStretch.h"
+#include "core/LoadTrace.h"
 #include "engine/Mp3Format.h"
 #include "engine/WavPackFormat.h"
 
@@ -331,8 +333,13 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
             return it->second;
     }
 
-    const auto onDisk = stretchCacheFile (path, ratio, method);
-    std::shared_ptr<const SampleData> stretched = readStretched (onDisk);
+    static const bool useDisk = [] { const auto* e = std::getenv ("LYNX_STRETCH_DISK"); return e == nullptr || e[0] != '0'; }();
+    const auto onDisk = useDisk ? stretchCacheFile (path, ratio, method) : juce::File();
+    std::shared_ptr<const SampleData> stretched;
+    {
+        const loadtrace::Scope timing ("stretch_disk_read");
+        stretched = readStretched (onDisk);
+    }
     if (stretched == nullptr)
     {
         auto original = load (path);
@@ -340,9 +347,16 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
         if (original == nullptr)
             return nullptr;
 
-        auto made = timeStretch (*original, ratio, method);
+        std::shared_ptr<SampleData> made;
+        {
+            const loadtrace::Scope timing ("stretch_compute");
+            made = timeStretch (*original, ratio, method);
+        }
         if (made != nullptr)
+        {
+            const loadtrace::Scope timing ("stretch_disk_write");
             writeStretched (onDisk, *made);
+        }
         stretched = std::move (made);
     }
 
