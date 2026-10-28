@@ -14,8 +14,10 @@ flq.py DLL vs FL renders, lynxfl.py LYNX's import + render vs FL renders, mk2.py
 - 2026-10-28 05:10 — started. Decompiled Voice_Render 0x753ea0, update 0x752290, sync 0x7524e0/0x752490/0x752520,
   Dispatcher 0x13 (0x7517f8), TriggerVoice 0x753580, slice set-up 0x7548c0, sample load 0x754b30.
 - 05:40 — engine done in `core/Granulizer.cpp` (slices + transient hold, tempo sync, key modes 2/3, FL's render
-  quality); C++ vs DLL 127 random cases, 0 bad. FL renders g11…g16 settle the three open questions (§3). Editor:
-  Key to / Transients / Tempo locked / Beats. Next: LYNX-vs-FL end-to-end (renderwav), tests, drop "(beta)", land.
+  quality); C++ vs DLL 127 random cases, 0 bad. FL renders g11…g16 settle the three open questions (§3).
+- 06:05 — LYNX's whole chain (FL import → rack → render, `renderwav`) matches all 17 FL renders at the 16-bit floor
+  (§5) → "(beta)" dropped. Editor: Key to / Transients / Tempo locked / Beats (pt-BR). Tests `granulizer165_*`.
+  Commit ea68d1e2 on wip/flgran165. Next: core tests green, Linux GUI shot of the editor, land.
 
 ## 1. The grain clock with slices [DECOMP 0x753ea0, 0x752290]
 
@@ -69,3 +71,37 @@ FL's playback value is not measured; it mirrors the sampler's].
 beats, tempos 90…174, mono/stereo, sample rate ≠ host rate, 44.1/48/96 kHz, blocks 64…1000, 1–2 notes and
 releases): seeds 1–5, 102 cases — before the fix of §2's key-mode rule one bad case; after it **0 bad**, typically
 −130…−140 dB, worst −105.9 dB (positions on the reader's edge path, as round 67's isolated near-integer samples).
+
+## 5. LYNX vs FL, end to end [FL render + RUN]
+
+`lynxfl.py`: `build-local/renderwav` imports each FL project (the importer, the rack, the instrument, the voice
+processor and the mixer, as LYNX exports: 16-point reader) and the raw float output is compared with FL's 16-bit render
+up to the pattern end (renderwav then restarts the pattern; FL's render stops ~600 samples after the note-off):
+
+| render | what | residual (gain 1.0000, lag 0) |
+|---|---|---|
+| g0_plain / g1_sync0 / g4_v5_4b | plain; sync byte but no beats; v5 state with TIME 4 (sync off) | −78.4 dB |
+| g2_sync4b / g3_sync8b / g5_acid | sync with TIME 4 (140 BPM), TIME 8 (100 BPM), ACID 4 | −76.6 / −76.2 / −76.6 dB |
+| g6_slice2 / g7_slice1cue / g8_slice1reg | auto slices, cue points, regions + transient hold | −76.3 / −76.7 / −76.8 dB |
+| g9_key3 / g10_key2sync | Transient keys (auto slices), Step keys with sync; three notes, releases included | −78.1 / −76.5 dB |
+| g11_mul / g12_acidtime / g16_mulneg | TIME + MUL, ACID + TIME, auto slices + sync + MUL | −76.6 / −76.6 / −76.8 dB |
+| g13_48slice2 / g14_48sync / g15_48cuekey3 | 48 kHz sample: auto slices, sync, cue points + Transient keys + sync at 130 BPM | −75.9 / −76.6 / −77.6 dB |
+
+The 16-bit quantisation floor of these renders is about −76…−78 dB; the worst 8192-sample blocks (−55 dB) are the
+quiet ones, where the quantisation noise dominates. Live playback (12 points) differs from FL's render only for samples
+off the host rate (g13–g15), by the interpolation's own error (about −40 dB on this material).
+
+## 6. LYNX side
+
+- `core/Granulizer`: `Engine::sliceHold` (§1), `syncOn` / `update` (§2), key modes 2/3 in `trigger`, reader quality
+  `points` (16 while `offlineRendering()`, else 12). The instrument builds the slice list once per slice mode in
+  `configure` (UI thread: the WAV's `markerStarts`, or `flslice::autoSlice` — about 1.4 s for a 3-minute stereo sample,
+  30 ms for a 4-second loop; FL also slices synchronously behind a "Slicing..." hint) and the audio thread only reads it.
+  Beat count = `SampleData::acidBeats`, else `ChannelDef::sampler.stretchBeats` (the importer keeps TIME/192 for this
+  engine, without MUL). A state with Transient keys and no slice mode reads as auto slicing.
+- Editor (Channel settings › plugin page): *Key to* (Pitch / Percent / Step / Transient), *Transients* (Off / Use
+  regions / Detect), *Tempo locked*, *Beats* (the channel's TIME; 0 = the sample's own ACID beats).
+- `tools/granulizerrender` takes `tempo=`, `beats=`, `slices=auto|file`, `points=`; `tools/WavReader.h` reads cue
+  points / regions / ACID beats like the app.
+- Tests: `granulizer165_modes`, `granulizer165_goldens` (goldens from LYNX checked against the DLL: −134 / −94 / −136 dB),
+  `granulizer165_instrument` (ACID beats over TIME, regions = detect with the same positions, render vs live quality).
