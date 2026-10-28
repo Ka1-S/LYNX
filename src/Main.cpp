@@ -62,6 +62,7 @@
 #include "core/VoltageController.h"
 #include "ui/Controllers164.h"
 #include "ui/ExportDialog.h"
+#include "ui/QuickAddPalette.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
 #include "engine/ProjectPackage.h"
@@ -5578,6 +5579,34 @@ private:
         lynx::PatcherWindows::shootMenus (offline, true, lynx::vfx::kindCount, 0, [&] (const juce::Image& image, const juce::String& name) {
             savePng (image, prefix + "-patcher-menu-" + name + ".png");
         });
+
+        // a plugin renamed in the Plugin database ("1_EQ", FL): the Quick-add palette and the mixer slot show the new name
+        if (juce::SystemStats::getEnvironmentVariable ("LYNX_TEST_MODE", {}).isNotEmpty())
+        {
+            const auto key = std::string ("lynx:fx:") + lynx::effectInfo (lynx::EffectKind::parametricEq).name;
+            offline.getPluginHost().setPluginName (key, "1_EQ");
+            offline.editSong ([] (lynx::Song& s) {
+                if (s.mixer.size() > 1)
+                {
+                    lynx::EffectSlot slot;
+                    slot.kind = lynx::EffectKind::parametricEq;
+                    s.mixer[1].effects.push_back (slot);
+                }
+            });
+            offline.dispatchPendingMessages();
+            {
+                lynx::QuickAddTargets targets;
+                targets.addInstrument = [] (lynx::ChannelDef) {};
+                targets.addEffect = [] (lynx::EffectSlot) {};
+                auto palette = lynx::makeQuickAddPalette (offline, std::move (targets));
+                savePng (palette->createComponentSnapshot (palette->getLocalBounds()), prefix + "-quickadd-renamed.png");
+            }
+            ui.selectTabForSnapshot (3);
+            ui.getMixerForSnapshot().selectTrack (1);
+            offline.dispatchPendingMessages();
+            savePng (ui.createComponentSnapshot (ui.getLocalBounds()), prefix + "-mixer-renamed.png");
+            offline.getPluginHost().setPluginName (key, "");
+        }
     }
 
     void runPerfShot (const juce::String& prefix, const juce::String& projectPath)

@@ -1709,6 +1709,12 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
         return;
     }
 
+    if (m.isProgramChange()) // (round 165c: the selected channel's plugin / VFX Sequencer, as FL passes it on)
+    {
+        playControl (NoteEvent::controlProgram, (float) m.getProgramChangeNumber() / 127.0f);
+        return;
+    }
+
     if (! m.isNoteOnOrOff())
         return;
 

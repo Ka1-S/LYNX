@@ -40,6 +40,10 @@ std::vector<EffectEntry> effectEntries (AudioEngine& engine);
 // The user's name for `key`, else `original`.
 juce::String shownName (AudioEngine& engine, const std::string& key, const juce::String& original);
 
+// What a mixer slot shows (round 165c): a plugin renamed in the Plugin database ("1_EQ") shows that name, as in FL;
+// otherwise the slot's own name (core/ProjectContents.h effectSlotName).
+juce::String slotName (AudioEngine& engine, const EffectSlot& slot);
+
 // Asks for a new name (empty: the original again); `done` runs after a change.
 void rename (AudioEngine& engine, const std::string& key, const juce::String& original, std::function<void()> done);
 
