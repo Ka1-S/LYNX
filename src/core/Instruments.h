@@ -15,6 +15,12 @@
 
 namespace lynx
 {
+struct LiveInput;
+struct HardwareOutput;
+}
+
+namespace lynx
+{
 namespace vfx
 {
 class Processor;
@@ -30,6 +36,10 @@ public:
     virtual void noteOnAt (int key, float velocity, double /*startSeconds*/) noexcept { noteOn (key, velocity); }
     virtual void noteOff (int key) noexcept = 0;
     virtual void allNotesOff() noexcept = 0;
+    // A cut group's "cut" (another note of the group starts): the sound stops; a Patcher's VFX nodes keep the notes
+    // they hold, as FL's do (round 165d: FL's Arpeggiator script on a "cut itself" Patcher keeps arpeggiating a chord
+    // whose notes start apart [EXEC: FL render, REA_rodada165d §4])
+    virtual void cut() noexcept { allNotesOff(); }
     // A note on a given MIDI channel (0…15), from a MIDI Out channel routed to this one's MIDI input port. Only
     // hosted plugins see the channel; the others play it as a plain note.
     virtual void noteOnMidi (int key, float velocity, int /*midiChannel*/) noexcept { noteOn (key, velocity); }
@@ -101,6 +111,9 @@ public:
     // calls beginChunk (n) before a chunk's render() calls, which then also add each extra output's audio (gains
     // applied) into auxOutputData (k, side) from the chunk's start; auxOutputTrack (k) = the insert it feeds.
     virtual void beginChunk (int /*n*/) noexcept {}
+    // A generator Patcher holding a Hardware Insert (round 165c): the device's buses for this chunk (null: offline) and
+    // where the chunk starts in the callback piece. The rack calls it after beginChunk.
+    virtual void setHardwareIo (const LiveInput* /*in*/, HardwareOutput* /*out*/, int /*offset*/) noexcept {}
     virtual int auxOutputCount() const noexcept { return 0; }
     virtual int auxOutputTrack (int /*k*/) const noexcept { return -1; }
     virtual const float* auxOutputData (int /*k*/, int /*side*/) const noexcept { return nullptr; }

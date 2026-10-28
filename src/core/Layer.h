@@ -51,6 +51,9 @@ void setChildren (Song& song, int layer, std::vector<int> selected);
 // its root on C5.
 void splitChildren (Song& song, int layer);
 void resetChildren (Song& song, int layer);
+// The same on any children (round 165c: a Layer node's, inside a Patcher), in their order.
+void splitChildren (const ChannelDef& layer, const std::vector<ChannelDef*>& children);
+void resetChildren (const std::vector<ChannelDef*>& children);
 
 // Moves a channel's root note to `key` the way the Root note keyboard does: a sampler's pitch moves with it (within
 // ±24 semitones) so the sample keeps its pitch on the root; other instruments just store it.

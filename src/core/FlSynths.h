@@ -118,6 +118,9 @@ struct KeyboardControllerData
     bool autoRelease = false;
 };
 std::optional<KeyboardControllerData> parseKeyboardController (const std::vector<std::uint8_t>& state);
+// Writes `data` into a version 3 state (round 165c, the Keyboard Controller's editor): the other bytes of a valid `state`
+// (smoothing, the UI's key range, "link") are kept; anything else becomes a new state with FL's defaults.
+void writeKeyboardController (const KeyboardControllerData& data, std::vector<std::uint8_t>& state);
 
 // Fruity Love Philter (REA_rodada16 §2): zlib state with 6 globals, Mod X/Y and 8 filter units, each
 // with 12 parameters, mode (stages), type, flags and 8 articulators (pan, volume, cutoff, resonance,

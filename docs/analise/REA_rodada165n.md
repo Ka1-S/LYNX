@@ -43,6 +43,21 @@ Evidence markers: **[DOC]** Microsoft Learn (MSIX docs), **[CODE]** LYNX source,
   of tests.cpp's list; wip/store165 force-pushed once (my own wip branch, to drop tune165's leaked commits).
 - 02:40 land #3 queued behind ~12 landings on the merge lock; Release run 40592904988: Version, Build LYNX.exe,
   Linux, macOS green; Windows "Self-test and package" (the MSIX job) still queued on GitHub's runners.
+- 03:40 LANDED 3988d3c6 (land #3: 1,779,733 checks 0 failures, Windows build, selftest result=OK).
+- 03:45 local check with the landed LYNX.exe (CLI only, no window) [TEST]: `--packageinfo` unpackaged → settings
+  %APPDATA%\LYNX, result=OK; with LYNX_SIMULATE_PACKAGE_FAMILY → settings
+  %LOCALAPPDATA%\Packages\<family>\LocalCache\Roaming\LYNX, wave cache and the user Plugins folder follow it, the
+  first start copied 13 preference entries (plugins.xml, favourites, Presets, ui-options, audio-device...) and skipped
+  wavecache / autosave / flp-embedded / crash reports / logs, result=OK. Simulated folder deleted afterwards.
+  Follow-up: the probe file is deleted when not packaged and never migrated.
+- 04:20 **Release run 40592904988 green on every job** [TEST, CI, windows-latest, Windows SDK 10.0.26100]: makepri +
+  `makeappx pack` → `LYNX-0.1.19-973cde6-store.msix` (14.1 MB, 103 files, "Package creation succeeded"); the test
+  identity package installed with `Add-AppxPackage -AllowUnsigned`
+  (`C:\Program Files\WindowsApps\LYNX.DAW_0.1.19.0_x64__dmy9vrm0dn9mt`); LYNX run through the `lynx.exe` alias:
+  `packaged=yes`, settings `…\Packages\LYNX.DAW_dmy9vrm0dn9mt\LocalCache\Roaming\LYNX`, `settingsIsPackageFolder=yes`,
+  result=OK; the probe file seen from outside the package; `--selftest` inside the package result=OK; package removed.
+  (That run was queued before the repository variables existed, so it still used the placeholder identity; the
+  layout script now defaults to KA1WARE.LYNXSHARE and the variables hold it too.)
 
 ## 1. Facts that shaped the design
 
