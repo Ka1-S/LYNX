@@ -44,7 +44,19 @@ class ExportJob
 public:
     ExportJob (const Song& song, const ExportSettings& settings, const juce::File& output);
     ExportJob (const Song& song, const exportopts::Options& options, const juce::File& output);
+    // A real-time bounce through the audio device (round 165c, "Render through the hardware in real time"): the live
+    // engine plays the song while its Master is recorded, so hardware inserts' returns are in the file. The file is
+    // written at the device's rate; the range is the song or the Playlist selection, played once, with the Master's
+    // effects and the playback quality (what you hear). Construct on the UI thread; run() on another thread (it asks
+    // the message thread to start and stop playback).
+    ExportJob (AudioEngine& live, const exportopts::Options& options, const juce::File& output);
     ~ExportJob();
+
+    // What a real-time bounce needs: the song has an active hardware insert. The options it changes (and why) for the
+    // Export window, and the length it takes (the music and the longest tail).
+    static exportopts::Options realtimeOptions (exportopts::Options o, double deviceRate);
+    // A message for the user after run() (dropouts during a real-time bounce); empty when nothing to say
+    juce::String getNotice() const { return notice; }
 
     // progress(0..1) returns false to cancel. On error or cancellation the file is deleted. With several formats
     // (Options::moreFormats) every file is written from the one render: `output`, then the same name per extension.
@@ -58,7 +70,12 @@ private:
     bool writeBuffered (std::vector<float>& left, std::vector<float>& right, juce::String& error);
     bool writeFile (const exportopts::Options& o, const juce::File& file, float* left, float* right, int frames, int channels, juce::String& error);
 
+    bool runRealtime (const std::function<bool (double)>& progress, juce::String& error);
+
     std::unique_ptr<AudioEngine> engine;
+    AudioEngine* live = nullptr; // a real-time bounce
+    double startTick = 0.0;
+    juce::String notice;
     exportopts::Options options;
     juce::File output;
     std::string title, artist;

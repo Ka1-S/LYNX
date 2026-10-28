@@ -75,10 +75,20 @@ class NativeEffectEditor final : public juce::Component,
                                  private juce::Timer
 {
 public:
-    NativeEffectEditor (AudioEngine& e, int t, int s, float initialScale, int initialPage)
+    // `node` (round 165c): the editor of an effect node inside a Patcher instead of a mixer slot — `node.locate` finds its
+    // slot in the song, `node.running` its running instance (the live meters); no presets bar, no automation targets
+    struct NodeTarget
+    {
+        std::function<EffectSlot* (Song&)> locate;
+        std::function<std::shared_ptr<Effect>()> running;
+        juce::String name;
+    };
+
+    NativeEffectEditor (AudioEngine& e, int t, int s, float initialScale, int initialPage, NodeTarget nodeTarget = {})
         : engine (e),
           track (t),
-          slot (s)
+          slot (s),
+          node (std::move (nodeTarget))
     {
         if (const auto* fx = current())
         {
@@ -135,6 +145,11 @@ public:
 
     const EffectSlot* current() const
     {
+        if (node.locate)
+        {
+            const auto* fx = node.locate (const_cast<Song&> (engine.getSong()));
+            return fx != nullptr && (layout == nullptr || fx->kind == kind) ? fx : nullptr;
+        }
         const auto& mixer = engine.getSong().mixer;
 
         if (track < 0 || track >= (int) mixer.size() || slot < 0 || slot >= (int) mixer[(std::size_t) track].effects.size())
@@ -281,7 +296,24 @@ public:
     // Controls stored in the slot's state (core/StateParams.h: Maximus' bands, Delay Bank's banks, band tables...)
     // edit those bytes instead of EffectSlot::params
     // the header's undo / A-B / preset bar (round 129): every editor whose setting is its parameters
-    bool usesBar() const { return ! stateBacked() && layout != &plugui::soundgoodizerLayout() && layout != nullptr; }
+    bool usesBar() const { return ! node.locate && ! stateBacked() && layout != &plugui::soundgoodizerLayout() && layout != nullptr; }
+
+    // an edit of this editor's slot (a mixer slot or a Patcher node's)
+    void editSlot (std::function<void (EffectSlot&)> change)
+    {
+        if (node.locate)
+        {
+            engine.editSong ([l = node.locate, change = std::move (change)] (Song& song) {
+                if (auto* fx = l (song))
+                    change (*fx);
+            });
+            return;
+        }
+        engine.editSong ([t = track, sl = slot, change = std::move (change)] (Song& song) {
+            if (t >= 0 && t < (int) song.mixer.size() && sl >= 0 && sl < (int) song.mixer[(std::size_t) t].effects.size())
+                change (song.mixer[(std::size_t) t].effects[(std::size_t) sl]);
+        });
+    }
 
     bool stateBacked() const { return plugui::usesStateParams (kind) && layout != &plugui::soundgoodizerLayout(); }
     bool isStateParam (int param) const { return stateBacked() && plugui::stateIndex (kind, param) >= 0; }
@@ -306,9 +338,7 @@ public:
             const auto raw = plugui::stateRaw (kind, param, value);
             if (stateTable().get (fx->state, s) == raw)
                 return;
-            engine.editSong ([t = track, sl = slot, bytes = stateTable().with (fx->state, s, raw)] (Song& song) {
-                song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
-            });
+            editSlot ([bytes = stateTable().with (fx->state, s, raw)] (EffectSlot& target) { target.state = bytes; });
             return;
         }
         if (current() == nullptr || param < 0 || param >= maxEffectParams)
@@ -327,9 +357,7 @@ public:
             }
         if (usesBar())
             bar.willEdit();
-        engine.editSong ([t = track, s = slot, param, v = juce::jlimit (0.0f, 1.0f, value)] (Song& song) {
-            song.mixer[(std::size_t) t].effects[(std::size_t) s].params[(std::size_t) param] = v;
-        });
+        editSlot ([param, v = juce::jlimit (0.0f, 1.0f, value)] (EffectSlot& target) { target.params[(std::size_t) param] = v; });
     }
 
     juce::String valueText (int param, float value) const
@@ -422,6 +450,8 @@ public:
 
     juce::String trackName() const
     {
+        if (node.locate)
+            return node.name;
         const auto& mixer = engine.getSong().mixer;
         if (track == 0)
             return tr ("Master");
@@ -465,7 +495,8 @@ public:
             spec.interval = 1.0 / item.steps;
         spec.toText = [this, param] (double v) { return valueText (param, (float) v); };
         spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
-        spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
+        if (! node.locate)
+            spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
         return spec;
     }
 
@@ -1641,6 +1672,8 @@ public:
             text = tr ("Ping failed: the round trip was not stable"), warn = true;
         else if (samples == 0)
             text = tr ("Not measured yet: press Ping"), warn = true;
+        else if (const auto measured = hwinsert::measuredSetup (fx); ! measured.empty() && measured != engine.currentSetupKey())
+            text = tr ("Measured for another audio setup (the device or the buffer size changed): press Ping"), warn = true; // round 165c
         else if (ping > 0.4f && ping < 0.6f)
             text = tr ("Measured: delay compensated");
         else
@@ -1650,7 +1683,7 @@ public:
         g.drawFittedText (text, area.toNearestInt(), juce::Justification::centred, 3, 0.8f);
     }
 
-    // applies a ping's result once (the round trip becomes the slot's delay: undoable, saved with the project)
+    // shows a ping's result once (AudioEngine makes it the slot's delay: undoable, saved with the project)
     void hwPingTick()
     {
         const auto serial = juce::roundToInt (liveMeter (hwinsert::pingSerial) * 1024.0f);
@@ -1664,8 +1697,8 @@ public:
         hwSerial = serial;
         if (std::abs (liveMeter (hwinsert::pingState) - 0.5f) < 0.01f)
         {
+            // (the engine applies the result to the slot, with the device setup it belongs to: round 165c)
             const auto samples = hwinsert::roundTripOf (liveMeter (hwinsert::pingSamples));
-            setValue (hwinsert::roundTrip, hwinsert::roundTripValue (samples));
             for (const auto& item : activeLayout().items)
                 if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "hwping") == 0)
                     ui::flashValueTip (*this, rectOf (item).toNearestInt(), tr ("Round trip: {0} samples", { juce::String (samples) }));
@@ -1748,6 +1781,11 @@ public:
     // the live meter `output` of this slot's effect (published by the audio thread; 0 when not playing)
     float liveMeter (int output) const
     {
+        if (node.running)
+        {
+            const auto fx = node.running();
+            return fx != nullptr ? fx->controlOutput (output) : 0.0f;
+        }
         const auto* times = engine.getProcessTimes();
         const auto key = (std::size_t) (track * maxEffectSlots + slot) * ProcessTimes::meterOutputs + (std::size_t) juce::jlimit (0, ProcessTimes::meterOutputs - 1, output);
         return times != nullptr && key < times->effectMeters.size() ? times->effectMeters[key].load (std::memory_order_relaxed) : 0.0f;
@@ -2876,11 +2914,10 @@ public:
             return;
         if (usesBar())
             bar.willEdit();
-        engine.editSong ([t = track, sl = slot, changes] (Song& song) {
-            auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) sl].params;
+        editSlot ([changes] (EffectSlot& target) {
             for (auto [p, v] : changes)
                 if (p >= 0 && p < maxEffectParams)
-                    params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
+                    target.params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
         });
     }
 
@@ -4291,10 +4328,7 @@ public:
         }
         const auto* fx = current();
         menu.addItem (tr ("Bypass"), true, fx != nullptr && ! fx->enabled, [this] {
-            engine.editSong ([t = track, s = slot] (Song& song) {
-                auto& target = song.mixer[(std::size_t) t].effects[(std::size_t) s];
-                target.enabled = ! target.enabled;
-            });
+            editSlot ([] (EffectSlot& target) { target.enabled = ! target.enabled; });
         });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (menuButton().toNearestInt())));
     }
@@ -4350,6 +4384,7 @@ private:
 
     AudioEngine& engine;
     int track, slot;
+    NodeTarget node;
     EffectKind kind = EffectKind::eq;
     const plugui::Layout* layout = nullptr;
     int page = 0;
@@ -4460,6 +4495,12 @@ void setNativeEditorDemo (bool on)
 std::unique_ptr<juce::Component> makeNativeEffectEditor (AudioEngine& engine, int track, int slot, float scale, int page)
 {
     return std::make_unique<NativeEffectEditor> (engine, track, slot, scale, page);
+}
+
+std::unique_ptr<juce::Component> makeNodeEffectEditor (AudioEngine& engine, std::function<EffectSlot* (Song&)> locate,
+                                                       std::function<std::shared_ptr<Effect>()> running, const juce::String& name, float scale)
+{
+    return std::make_unique<NativeEffectEditor> (engine, -1, -1, scale, 0, NativeEffectEditor::NodeTarget { std::move (locate), std::move (running), name });
 }
 
 namespace NativeEffectWindows

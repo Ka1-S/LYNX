@@ -118,15 +118,12 @@ void setRootNote (ChannelDef& d, int key)
         d.misc.rootNote = key;
 }
 
-void splitChildren (Song& song, int layer)
+void splitChildren (const ChannelDef& layer, const std::vector<ChannelDef*>& children)
 {
-    if (layer < 0 || layer >= (int) song.channels.size())
-        return;
-    const auto root = song.channels[(std::size_t) layer].misc.rootNote;
-    const auto kids = validChildren (song, layer);
-    for (std::size_t k = 0; k < kids.size(); ++k)
+    const auto root = layer.misc.rootNote;
+    for (std::size_t k = 0; k < children.size(); ++k)
     {
-        auto& c = song.channels[(std::size_t) kids[k]];
+        auto& c = *children[k];
         const auto key = std::clamp (root + (int) k, 0, 127);
         c.keyLow = c.keyHigh = key;
         setRootNote (c, key);
@@ -136,18 +133,37 @@ void splitChildren (Song& song, int layer)
     }
 }
 
-void resetChildren (Song& song, int layer)
+void resetChildren (const std::vector<ChannelDef*>& children)
 {
-    for (const auto k : validChildren (song, layer))
+    for (auto* c : children)
     {
-        auto& c = song.channels[(std::size_t) k];
-        c.keyLow = 0;
-        c.keyHigh = 127;
-        setRootNote (c, 60);
-        if (c.instrument != InstrumentKind::sampler && c.instrument != InstrumentKind::audioClip)
-            c.misc.addToKey = false;
+        c->keyLow = 0;
+        c->keyHigh = 127;
+        setRootNote (*c, 60);
+        if (c->instrument != InstrumentKind::sampler && c->instrument != InstrumentKind::audioClip)
+            c->misc.addToKey = false;
     }
 }
+
+namespace
+{
+std::vector<ChannelDef*> childPointers (Song& song, int layer)
+{
+    std::vector<ChannelDef*> out;
+    for (const auto k : validChildren (song, layer))
+        out.push_back (&song.channels[(std::size_t) k]);
+    return out;
+}
+} // namespace
+
+void splitChildren (Song& song, int layer)
+{
+    if (layer < 0 || layer >= (int) song.channels.size())
+        return;
+    splitChildren (song.channels[(std::size_t) layer], childPointers (song, layer));
+}
+
+void resetChildren (Song& song, int layer) { resetChildren (childPointers (song, layer)); }
 
 std::vector<int> parentsOf (const Song& song, int channel)
 {

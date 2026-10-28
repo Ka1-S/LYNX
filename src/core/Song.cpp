@@ -70,6 +70,16 @@ std::int64_t Song::songLength() const noexcept
     return std::max<std::int64_t> (bar, (end + bar - 1) / bar * bar);
 }
 
+std::int64_t Song::performanceZoneEnd() const noexcept
+{
+    if (! performanceMode)
+        return 0;
+    for (const auto& m : markers())
+        if (m.action == Marker::songStart)
+            return std::max<std::int64_t> (0, m.tick);
+    return 0;
+}
+
 void followPatternLengths (const std::vector<std::int64_t>& before, Song& song)
 {
     if (before.size() != song.patterns.size())

@@ -1057,7 +1057,7 @@ public:
     MidiPage (AudioEngine& e, SettingsHooks h, bool keep) : engine (e), hooks (std::move (h)), persistent (keep)
     {
         for (auto* c : std::initializer_list<juce::Component*> { &inputsTitle, &notesTitle, &controllersTitle, &inputsNote, &refresh, &noDevices,
-                                                                 &velocityLabel, &velocityBox, &velocityNote, &typeLabel, &typeValue, &pickup,
+                                                                 &velocityLabel, &velocityBox, &velocityNote, &perfLabel, &perfBox, &perfNote, &typeLabel, &typeValue, &pickup,
                                                                  &pickupNote, &linksLabel, &links, &removeLink, &removeAll, &outputsTitle,
                                                                  &outputsNote, &noOutputs, &syncTitle, &clockLabel, &clockBox, &clockOffsetLabel,
                                                                  &clockOffset, &clockStatusLabel, &clockStatus, &clockNote })
@@ -1124,6 +1124,20 @@ public:
         };
         styleCombo (velocityBox);
         styleNote (velocityNote, tr ("For notes from MIDI devices (the typing keyboard always plays at the Piano Roll's velocity)."));
+
+        // FL's "MIDI channel used for playlist live mode" (round 165m)
+        styleLabel (perfLabel, tr ("Performance mode channel"));
+        perfBox.addItem (tr ("Off"), 1);
+        for (int c = 1; c <= 16; ++c)
+            perfBox.addItem (tr ("Channel") + " " + juce::String (c), c + 1);
+        perfBox.onChange = [this] {
+            auto p = engine.getMidiPrefs();
+            p.performanceChannel = juce::jlimit (0, 16, perfBox.getSelectedId() - 1);
+            set (p);
+        };
+        styleCombo (perfBox);
+        styleNote (perfNote, tr ("With Performance mode on, its notes launch the Playlist's clips: an octave per track, a note per clip; "
+                                 "notes 120/121 move the tracks, 122/123 the clips, 124 switches big steps."));
 
         styleLabel (typeLabel, tr ("Controller type"));
         typeLabel.setJustificationType (juce::Justification::topLeft);
@@ -1219,6 +1233,8 @@ private:
         r.section (notesTitle);
         velocityBox.setBounds (r.row (velocityLabel, 300));
         velocityNote.setBounds (r.indented (16).translated (0, -3));
+        perfBox.setBounds (r.row (perfLabel, 300));
+        perfNote.setBounds (r.indented (32).translated (0, -3));
 
         r.section (controllersTitle);
         {
@@ -1256,6 +1272,7 @@ private:
         const auto& p = engine.getMidiPrefs();
         velocityBox.setSelectedId ((int) p.velocity + 1, juce::dontSendNotification);
         pickup.setToggleState (p.pickup, juce::dontSendNotification);
+        perfBox.setSelectedId (p.performanceChannel + 1, juce::dontSendNotification);
         {
             auto id = 1;
             for (int i = 0; i < clockInputs.size(); ++i)
@@ -1414,9 +1431,9 @@ private:
     juce::ComboBox clockBox;
     juce::Slider clockOffset;
     SectionTitle inputsTitle { tr ("Input devices") }, notesTitle { tr ("Notes") }, controllersTitle { tr ("Controllers") };
-    juce::Label inputsNote, noDevices, velocityLabel, velocityNote, typeLabel, typeValue, pickupNote, linksLabel;
+    juce::Label inputsNote, noDevices, velocityLabel, velocityNote, perfLabel, perfNote, typeLabel, typeValue, pickupNote, linksLabel;
     juce::TextButton refresh { tr ("Refresh device list") }, removeLink { tr ("Remove link") }, removeAll { tr ("Remove all") };
-    juce::ComboBox velocityBox;
+    juce::ComboBox velocityBox, perfBox;
     juce::ToggleButton pickup;
     juce::ListBox links;
 };

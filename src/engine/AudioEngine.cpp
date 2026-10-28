@@ -259,6 +259,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
         deviceStateSaver = std::make_unique<DeviceStateSaver> (*this);
         midiPrefs = midiPrefsShared = prefs::MidiPrefs::fromText (midiSettingsFile().loadFileAsString().toStdString());
+        performanceMidiChannel.store (midiPrefs.performanceChannel);
         recordingSettings = loadRecordingSettings();
         saveGlobalLinks = true;
 
@@ -333,6 +334,7 @@ void AudioEngine::buildInitialGraph()
     {
         rackProcessor->setLiveInput (&liveInput);
         rackProcessor->setHardwareOutput (&hwOutput);
+        rackProcessor->setPerformance (performanceLive.get());
     }
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
     auto previewOwned = std::make_unique<PreviewPlayer>();
@@ -617,7 +619,12 @@ ProcessTimes* AudioEngine::getProcessTimes() noexcept
 void AudioEngine::play() noexcept
 {
     if (! transport.playing.load())
+    {
         resetToInitialValues();
+        // Performance mode: the song plays from its Start marker (the zone before it is launched, not played)
+        if (const auto zone = song.mode == PlayMode::song ? song.performanceZoneEnd() : 0; zone > 0 && transport.positionTicks.load() < (double) zone)
+            seek ((double) zone);
+    }
     transport.playing.store (true);
 }
 
@@ -1633,6 +1640,16 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
 
     midiActivity.fetch_add (1, std::memory_order_relaxed); // the toolbar's MIDI input light
 
+    // FL's playlist live mode channel (round 165m): its notes launch the performance clips instead of playing
+    if (const auto pc = performanceMidiChannel.load (std::memory_order_relaxed);
+        pc != 0 && m.getChannel() == pc && m.isNoteOnOrOff() && performanceMidiOn.load (std::memory_order_relaxed))
+    {
+        perf::Command c;
+        if (performanceMidi.note (m.getNoteNumber(), m.isNoteOn(), c))
+            performanceLive->midiCommands.push (c);
+        return;
+    }
+
     if (device.midiChannel != 0 && m.getChannel() != device.midiChannel)
         return;
 
@@ -1776,6 +1793,7 @@ void AudioEngine::setMidiPrefs (const prefs::MidiPrefs& p, bool save)
         const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
         midiPrefsShared = p;
     }
+    performanceMidiChannel.store (p.performanceChannel);
     if (! p.pickup)
         pickups.clear();
     if (prefetcher != nullptr) // (only with an audio device: the real app)
@@ -1934,6 +1952,7 @@ void AudioEngine::setSong (Song newSong)
     selectedChannel = 0;
     selectedChannels = { 0 };
     modified = false;
+    checkHardwareInserts = true; // (a project measured on another setup: the notice, round 165c)
 
     // arming isn't saved: a new project starts disarmed; its inserts' audio inputs open the device input
     for (const auto t : std::vector<int> (armedInserts))
@@ -2560,6 +2579,7 @@ void AudioEngine::publishSong()
     transport.loopStart.store ((double) song.loopStart);
     transport.loopEnd.store ((double) song.loopEnd);
     transport.songEnd.store ((double) song.songLength());
+    transport.songStart.store ((double) song.performanceZoneEnd());
 
     const loadtrace::Scope buildTiming ("rack_build");
     RackState::Factories factories;
@@ -2960,9 +2980,15 @@ void AudioEngine::timerCallback()
     }
 
     updateRealtimeStats();
+    if (++hwTicks >= 5) // (6 times a second)
+    {
+        hwTicks = 0;
+        applyHardwareInsertPings();
+    }
     rt::promotePending(); // Linux: real-time priority for the audio threads seen since the last tick (round 161)
     applyControllers();
     updateRecording();
+    updatePerformanceRecording();
     rackExchange.collectGarbage();
 
     // Plugins are prepared at a fixed rate; if the device changed rate, recreate them.
@@ -2982,6 +3008,47 @@ void AudioEngine::timerCallback()
         ++latencyRepublishes;
         publishSong();
     }
+}
+
+// Performance mode's recording (FL's "Clips" filter, REA round 146 B5: a launched clip is written to its playlist
+// track): every pass of a launched clip that ended while recording becomes a copy of that clip in the arrangement,
+// on the same track, where the song position was when the pass began.
+void AudioEngine::updatePerformanceRecording()
+{
+    auto& live = *performanceLive;
+    performanceMidiOn.store (song.performanceMode && song.mode == PlayMode::song && song.performanceZoneEnd() > 0, std::memory_order_relaxed);
+    const auto on = transport.recording.load() && transport.playing.load() && song.performanceMode && song.mode == PlayMode::song
+                    && recordOptions.recordClips;
+    if (on && ! live.recording.load (std::memory_order_relaxed))
+        perfTakeHasUndoStep = false;
+    live.recording.store (on, std::memory_order_relaxed);
+
+    std::vector<Clip> clips;
+    perf::RecordedPass pass;
+    while (live.recorded.pop (pass))
+        if (Clip c; perf::recordedClip (song, pass, c) && c.start >= song.performanceZoneEnd())
+            clips.push_back (c);
+    if (clips.empty())
+        return;
+    editSong ([&clips] (Song& s) {
+        for (const auto& c : clips)
+        {
+            // the take replaces what was under it on that track (like FL's recorded clips)
+            const auto end = c.end();
+            for (auto& o : s.playlist)
+                if (o.track == c.track && o.start < end && o.end() > c.start && o.start >= s.performanceZoneEnd())
+                {
+                    if (o.start >= c.start)
+                        o.length = 0; // removed below
+                    else
+                        o.length = c.start - o.start;
+                }
+            s.playlist.erase (std::remove_if (s.playlist.begin(), s.playlist.end(), [] (const Clip& o) { return o.length <= 0; }),
+                              s.playlist.end());
+            s.playlist.push_back (c);
+        }
+    }, ! perfTakeHasUndoStep);
+    perfTakeHasUndoStep = true;
 }
 
 void AudioEngine::choosePreferredDriver()
@@ -3323,7 +3390,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         const auto loop = playbackLoop (transport.songMode.load (std::memory_order_relaxed),
                                         throughRegion ? 0.0 : transport.loopStart.load (std::memory_order_relaxed),
                                         throughRegion ? 0.0 : transport.loopEnd.load (std::memory_order_relaxed),
-                                        linear ? 0.0 : transport.songEnd.load (std::memory_order_relaxed));
+                                        linear ? 0.0 : transport.songEnd.load (std::memory_order_relaxed),
+                                        transport.songStart.load (std::memory_order_relaxed));
         const auto loopStart = loop.start, loopEnd = loop.end;
         const auto looping = playing && loop.active() && tps > 0.0;
 
@@ -3572,16 +3640,14 @@ void AudioEngine::openTargetedOutputs()
         for (int c = first; c < first + count; ++c)
             if (c < available)
                 wanted.setBit (c);
-        // the hardware inserts' sends (round 164d)
-        for (const auto& fx : t.effects)
-            if (fx.kind == EffectKind::hardwareInsert)
-            {
-                const auto [from, n] = outputChannelsOf (hwinsert::channelOf (fx.params[hwinsert::output]), hwinsert::outputModeOf (fx.params));
-                for (int c = from; c < from + n; ++c)
-                    if (c < available)
-                        wanted.setBit (c);
-            }
     }
+    // the hardware inserts' sends (round 164d; inside Patchers too, round 165c)
+    hwinsert::forEachHardwareInsert (song, [&wanted, available] (const EffectSlot& fx, bool) {
+        const auto [from, n] = outputChannelsOf (hwinsert::channelOf (fx.params[hwinsert::output]), hwinsert::outputModeOf (fx.params));
+        for (int c = from; c < from + n; ++c)
+            if (c < available)
+                wanted.setBit (c);
+    });
 
     if (wanted == before)
         return;
@@ -3589,6 +3655,244 @@ void AudioEngine::openTargetedOutputs()
     setup.useDefaultOutputChannels = false;
     setup.outputChannels = wanted;
     deviceManager.setAudioDeviceSetup (setup, true);
+    sendChangeMessage();
+}
+
+// --- hardware inserts anywhere in the song (round 165c) ------------------------------------------------------------
+
+namespace
+{
+template <typename F>
+void walkHardwareInserts (const PatcherDoc& doc, AudioEngine::HardwareInsertRef& ref, F&& f)
+{
+    for (int n = 0; n < (int) doc.nodes.size(); ++n)
+    {
+        const auto& node = doc.nodes[(std::size_t) n];
+        ref.nodes.push_back (n);
+        if (node.generator ? node.channel.instrument == InstrumentKind::patcher : node.effect.kind == EffectKind::patcher)
+            walkHardwareInserts (node.generator ? node.channel.patcher : node.effect.patcher, ref, f);
+        else if (! node.generator && node.effect.kind == EffectKind::hardwareInsert)
+            f (ref);
+        ref.nodes.pop_back();
+    }
+}
+} // namespace
+
+std::vector<AudioEngine::HardwareInsertRef> AudioEngine::getHardwareInserts() const
+{
+    std::vector<HardwareInsertRef> out;
+    auto add = [&out] (const HardwareInsertRef& r) { out.push_back (r); };
+    for (int t = 0; t < (int) song.mixer.size(); ++t)
+        for (int s = 0; s < (int) song.mixer[(std::size_t) t].effects.size(); ++s)
+        {
+            const auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) s];
+            HardwareInsertRef ref { false, t, s, {} };
+            if (fx.kind == EffectKind::hardwareInsert)
+                out.push_back (ref);
+            else if (fx.kind == EffectKind::patcher)
+                walkHardwareInserts (fx.patcher, ref, add);
+        }
+    for (int c = 0; c < (int) song.channels.size(); ++c)
+        if (song.channels[(std::size_t) c].instrument == InstrumentKind::patcher)
+        {
+            HardwareInsertRef ref { true, c, 0, {} };
+            walkHardwareInserts (song.channels[(std::size_t) c].patcher, ref, add);
+        }
+    return out;
+}
+
+EffectSlot* AudioEngine::locateHardwareInsert (Song& s, const HardwareInsertRef& ref)
+{
+    PatcherDoc* doc = nullptr;
+    if (ref.channel)
+    {
+        if (ref.index < 0 || ref.index >= (int) s.channels.size() || s.channels[(std::size_t) ref.index].instrument != InstrumentKind::patcher)
+            return nullptr;
+        doc = &s.channels[(std::size_t) ref.index].patcher;
+    }
+    else
+    {
+        if (ref.index < 0 || ref.index >= (int) s.mixer.size() || ref.slot < 0 || ref.slot >= (int) s.mixer[(std::size_t) ref.index].effects.size())
+            return nullptr;
+        auto& fx = s.mixer[(std::size_t) ref.index].effects[(std::size_t) ref.slot];
+        if (ref.nodes.empty())
+            return fx.kind == EffectKind::hardwareInsert ? &fx : nullptr;
+        if (fx.kind != EffectKind::patcher)
+            return nullptr;
+        doc = &fx.patcher;
+    }
+    for (std::size_t k = 0; k < ref.nodes.size(); ++k)
+    {
+        const auto n = ref.nodes[k];
+        if (doc == nullptr || n < 0 || n >= (int) doc->nodes.size())
+            return nullptr;
+        auto& node = doc->nodes[(std::size_t) n];
+        if (k + 1 == ref.nodes.size())
+            return ! node.generator && node.effect.kind == EffectKind::hardwareInsert ? &node.effect : nullptr;
+        doc = node.generator ? (node.channel.instrument == InstrumentKind::patcher ? &node.channel.patcher : nullptr)
+                             : (node.effect.kind == EffectKind::patcher ? &node.effect.patcher : nullptr);
+    }
+    return nullptr;
+}
+
+std::shared_ptr<Effect> AudioEngine::runningHardwareInsert (const HardwareInsertRef& ref) const
+{
+    patcher::Graph* graph = nullptr;
+    if (ref.channel)
+        graph = patcher::graphOf (getChannelInstrument (ref.index).get());
+    else
+    {
+        auto fx = getEffect (ref.index, ref.slot);
+        if (ref.nodes.empty())
+            return fx;
+        graph = patcher::graphOf (fx.get());
+    }
+    for (std::size_t k = 0; k < ref.nodes.size() && graph != nullptr; ++k)
+    {
+        const auto n = ref.nodes[k];
+        if (n < 0 || n >= graph->nodeCount())
+            return nullptr;
+        if (k + 1 == ref.nodes.size())
+            return graph->effectAt (n);
+        auto* next = patcher::graphOf (graph->effectAt (n).get());
+        graph = next != nullptr ? next : patcher::graphOf (graph->instrumentAt (n).get());
+    }
+    return nullptr;
+}
+
+std::vector<AudioEngine::HardwareInsertRef> AudioEngine::staleHardwareInserts() const
+{
+    std::vector<HardwareInsertRef> out;
+    const auto key = currentSetupKey();
+    if (key.empty())
+        return out;
+    for (const auto& ref : getHardwareInserts())
+        if (const auto* fx = locateHardwareInsert (const_cast<Song&> (song), ref))
+            if (fx->enabled && hwinsert::isRouted (fx->params))
+                if (const auto measured = hwinsert::measuredSetup (*fx); ! measured.empty() && measured != key)
+                    out.push_back (ref);
+    return out;
+}
+
+void AudioEngine::pingHardwareInserts (const std::vector<HardwareInsertRef>& refs)
+{
+    if (refs.empty())
+        return;
+    editSong ([refs] (Song& s) {
+        for (const auto& ref : refs)
+            if (auto* fx = locateHardwareInsert (s, ref))
+                fx->params[hwinsert::ping] = fx->params[hwinsert::ping] >= 0.5f ? 0.0f : 1.0f; // (a momentary value: any change)
+    }, false);
+}
+
+void AudioEngine::applyHardwareInsertPings()
+{
+    if (deviceManager.getCurrentAudioDevice() == nullptr)
+        return;
+    const auto refs = getHardwareInserts();
+    const auto key = currentSetupKey();
+
+    // the device setup changed: the inserts measured for the old one (or, measured before LYNX kept the setup, for the
+    // one that was running) want a new ping — a notice for the UI, nothing pinged by itself
+    if (key != lastSetupKey)
+    {
+        const auto previous = std::exchange (lastSetupKey, key);
+        if (! previous.empty() && ! refs.empty())
+        {
+            editSong ([refs, previous] (Song& s) {
+                for (const auto& ref : refs)
+                    if (auto* fx = locateHardwareInsert (s, ref); fx != nullptr && hwinsert::measuredSetup (*fx).empty()
+                                                                  && hwinsert::isRouted (fx->params) && hwinsert::roundTripOf (fx->params[hwinsert::roundTrip]) > 0)
+                        hwinsert::setMeasuredSetup (*fx, previous);
+            }, false);
+            hwNotice = staleHardwareInserts();
+            if (! hwNotice.empty())
+                sendChangeMessage();
+        }
+    }
+
+    if (std::exchange (checkHardwareInserts, false) && hwNotice.empty())
+    {
+        hwNotice = staleHardwareInserts();
+        if (! hwNotice.empty())
+            sendChangeMessage();
+    }
+
+    // ping results: each one becomes its slot's round trip once (undoable, saved with the project), with this setup
+    for (const auto& ref : refs)
+    {
+        const auto fx = runningHardwareInsert (ref);
+        if (fx == nullptr)
+            continue;
+        const auto serial = juce::roundToInt (fx->controlOutput (hwinsert::pingSerial) * 1024.0f);
+        const auto [it, fresh] = hwPingSerials.try_emplace (fx.get(), serial);
+        if (fresh || it->second == serial)
+            continue;
+        it->second = serial;
+        if (std::abs (fx->controlOutput (hwinsert::pingState) - 0.5f) >= 0.01f)
+            continue; // (failed: the editor says why; the old round trip stays)
+        const auto samples = hwinsert::roundTripOf (fx->controlOutput (hwinsert::pingSamples));
+        editSong ([ref, samples, key] (Song& s) {
+            if (auto* slot = locateHardwareInsert (s, ref))
+            {
+                slot->params[hwinsert::roundTrip] = hwinsert::roundTripValue (samples);
+                hwinsert::setMeasuredSetup (*slot, key);
+            }
+        });
+    }
+    if (hwPingSerials.size() > 4 * refs.size() + 16) // (instances rebuilt meanwhile)
+        hwPingSerials.clear();
+}
+
+// --- real-time bounce (round 165c) ----------------------------------------------------------------------------------
+
+juce::String AudioEngine::startRealtimeBounce (double startTick)
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr || transport.sampleRate.load() <= 0.0)
+        return tr ("No audio device is open");
+    if (transport.recording.load() || takeCount > 0)
+        return tr ("Stop recording first");
+    if (ping.isRunning())
+        return tr ("A latency ping is running");
+    if (bouncing)
+        return tr ("A real-time bounce is already running");
+
+    stop();
+    bounceReturnTick = transport.positionTicks.load();
+    bounceRestoreMode = song.mode != PlayMode::song;
+    if (bounceRestoreMode)
+        editSong ([] (Song& s) { s.mode = PlayMode::song; }, false);
+    bouncing = true;
+    updateLinearSong(); // (plays on past the song's end and through the loop region, like a linear recording)
+    bounceStartLatency = getLatencySamples();
+    bounceStartXruns = device->getXRunCount();
+    meters.bounceTap.setSource (0); // (pushed only while the song plays: the first frame is the start's)
+    transport.positionTicks.store (juce::jmax (0.0, startTick));
+    transport.seekRequest.store (juce::jmax (0.0, startTick));
+    play();
+    sendChangeMessage();
+    return {};
+}
+
+int AudioEngine::bounceDropouts() const
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    const auto xruns = device != nullptr ? juce::jmax (0, device->getXRunCount() - bounceStartXruns) : 0;
+    return xruns + (meters.bounceTap.droppedFrames() > 0 ? 1 : 0);
+}
+
+void AudioEngine::finishRealtimeBounce()
+{
+    if (! bouncing)
+        return;
+    stop();
+    meters.bounceTap.setSource (AudioCapture::off);
+    bouncing = false;
+    updateLinearSong();
+    if (std::exchange (bounceRestoreMode, false))
+        editSong ([] (Song& s) { s.mode = PlayMode::pattern; }, false);
+    seek (bounceReturnTick);
     sendChangeMessage();
 }
 } // namespace lynx
