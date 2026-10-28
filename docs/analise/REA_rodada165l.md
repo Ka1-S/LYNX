@@ -114,3 +114,13 @@ start from the same shapes (the numbers, not the files).
   time mul / length / target tempo (one setting three ways), method Stretch / Resample, Insert, Formant
   preservation (shift coarse/fine, order 8..512 = 128, Copy from pitch). Formants: a cepstral envelope (order/4
   coefficients of a 2048 frame) of the original at the same moment replaces the processed one's (`correctFormants`).
+
+## 5. FL side by side [UI]
+
+FL Studio 2026, Edison on the Master track with `Packs/Loops/DL Breaker.wav` (FL GUI under the wingui + FL locks, FL
+closed right after): `D:/lynx-work/edison165/flshots/03-tools.png` (Edison's Tools menu: the same groups as LYNX's),
+`fl-amp.png`, `fl-equalizer.png`, `fl-cleanup.png`, `fl-claw.png`, `fl-stretch.png`, `fl-drumstretch.png`. LYNX:
+`D:/lynx-work/edison165/shots/ed-tool-*.png` (`LYNX.exe --edisonshot`). Same sections, controls and defaults; LYNX
+draws them in its own style (sliders / knobs / check boxes in rows, one curve editor per form). FL's Claw machine
+showed "Trash every 1/4" (a remembered value; the form's default is 4/4, which LYNX uses). Items of FL's menu LYNX
+does not have: Deverb (AI model), Convert to score and dump to piano roll, Run script / Edit last script.
