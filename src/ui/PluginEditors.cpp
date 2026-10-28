@@ -4,6 +4,7 @@
 #include "ui/Controllers164.h"
 #include "ui/NewtoneEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "ui/PluginEditors.h"
 
 #include <cstring>
@@ -4489,6 +4490,11 @@ void open (AudioEngine& engine, int track, int slot)
         VisualWindows::open (engine, track, slot);
         return;
     }
+    if (FlExtraWindows::handles (kind)) // Big Clock, Tuner, HTML NoteBook (round 165g)
+    {
+        FlExtraWindows::open (engine, track, slot);
+        return;
+    }
     if (! canOpen (fxSlot))
         return;
     if (kind == EffectKind::formulaController) // the formula, its knobs and a monitor (REA round 133)
@@ -4548,6 +4554,7 @@ void closeAll()
     Controller164Windows::closeAll();
     NewtoneWindows::closeAll();
     VisualWindows::closeAll();
+    FlExtraWindows::closeAll();
     FacetEqWindows::closeAll();
     ProEditorWindows::closeAll();
 }
