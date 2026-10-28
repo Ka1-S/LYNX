@@ -62,6 +62,7 @@ public:
 
     juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
     Transport& getTransport() noexcept { return transport; }
+    const Transport& getTransport() const noexcept { return transport; }
     SampleLibrary& getSampleLibrary() noexcept { return samples; }
     MeterBank& getMeters() noexcept { return meters; }
     // Tools > Audio logger (REA round 153): records everything the Master plays to a WAV in the background.
@@ -559,6 +560,8 @@ public:
 
     // Total latency compensated by PDC (at the Master output), in samples.
     int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
+    // The last published PDC plan (per-track latencies: outLat, inAlign). Message thread.
+    const PdcPlan& getPdcPlan() const noexcept { return lastPublishedShape.pdc; }
 
 private:
     void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,

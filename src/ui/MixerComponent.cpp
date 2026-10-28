@@ -1294,6 +1294,18 @@ ui::Hint MixerStrips::hintAt (juce::Point<int> p)
                                             : names.joinIntoString (", ");
         return "   " + tr ("Channels: {0}", { shown });
     };
+    // FL's "Track latency compensation" label (REA round 165f-mixer): the manual latency and the bypass, when set
+    auto latency = [&song, t] {
+        const auto& track = song.mixer[(std::size_t) t];
+        juce::String text;
+        if (track.latencyMs != 0.0f)
+            text << "   " << tr ("Track latency: {0}", { (track.latencyMs > 0.0f ? "+" : "") + juce::String (track.latencyMs, 2) + " ms" });
+        if (track.latencyBypass == LatencyBypass::always)
+            text << "   " << tr ("Bypass track latency compensation") << ": " << tr ("Always");
+        else if (track.latencyBypass == LatencyBypass::whenRecordingOrStopped)
+            text << "   " << tr ("Bypass track latency compensation") << ": " << tr ("When recording or not playing");
+        return text;
+    };
 
     switch (part)
     {
@@ -1310,12 +1322,12 @@ ui::Hint MixerStrips::hintAt (juce::Point<int> p)
         case Part::route: h.text = name + " - " + tr ("Send from the selected insert to this one (drag after enabling: level; right-click: sidechain, only here)"); h.hasMenu = true; break;
         case Part::add: h.text = tr ("Add a mixer insert"); break;
         case Part::header:
-            h.text = name + " - " + tr ("[LMB] selects  [Ctrl]+[LMB] adds  [Shift]+[LMB] range  [LMB] drag sideways reorders  [RMB] insert menu") + feeds();
+            h.text = name + " - " + tr ("[LMB] selects  [Ctrl]+[LMB] adds  [Shift]+[LMB] range  [LMB] drag sideways reorders  [RMB] insert menu") + feeds() + latency();
             h.hasMenu = true;
             break;
         case Part::body:
         case Part::none:
-            h.text = name + " - " + tr ("Click selects the insert (Ctrl: add, Shift: range), right-click opens its menu; Alt+Left/Right moves the selection") + feeds();
+            h.text = name + " - " + tr ("Click selects the insert (Ctrl: add, Shift: range), right-click opens its menu; Alt+Left/Right moves the selection") + feeds() + latency();
             h.hasMenu = true;
             break;
     }
@@ -1476,6 +1488,119 @@ std::unique_ptr<juce::FileChooser>& mixerStateChooser()
 {
     static std::unique_ptr<juce::FileChooser> chooser;
     return chooser;
+}
+
+// --- FL's track latency menu (REA round 165f-mixer: DelayMenu, FUN_012ae090 / FUN_012ad520 / FUN_012acd30) ---------
+
+double sampleRateOf (const AudioEngine& engine)
+{
+    return juce::jmax (1.0, engine.getTransport().sampleRate.load());
+}
+
+// The track's latency in the current PDC plan (its output: inputs + effects + manual), in ms
+double trackLatencyMs (const AudioEngine& engine, int t)
+{
+    const auto& plan = engine.getPdcPlan();
+    return t >= 0 && t < (int) plan.outLat.size() ? 1000.0 * plan.outLat[(std::size_t) t] / sampleRateOf (engine) : 0.0;
+}
+
+// FL's label: "(none)" or "<ms> ms / <samples> smp" of the manual latency
+juce::String manualLatencyText (const AudioEngine& engine, const MixerTrack& track)
+{
+    if (track.latencyMs == 0.0f)
+        return tr ("(none)");
+    const auto samples = manualLatencySamples (track, sampleRateOf (engine));
+    return (track.latencyMs > 0.0f ? "+" : "") + juce::String (track.latencyMs, 2) + " ms / " + (samples > 0 ? "+" : "") + juce::String (samples) + " smp";
+}
+
+void setTrackLatency (AudioEngine& engine, int t, double ms)
+{
+    if (t < 0 || t >= (int) engine.getSong().mixer.size() || ! std::isfinite (ms))
+        return;
+    const auto v = (float) juce::jlimit ((double) -maxTrackLatencyMs, (double) maxTrackLatencyMs, ms);
+    engine.editSong ([t, v] (Song& s) { s.mixer[(std::size_t) t].latencyMs = v; });
+}
+
+// "Set in ms / samples / beats": FL's input box, the value in that unit (FUN_012ad520)
+void askTrackLatency (AudioEngine& engine, int t, int unit)
+{
+    const auto& track = engine.getSong().mixer[(std::size_t) t];
+    const auto rate = sampleRateOf (engine);
+    const auto bpm = juce::jmax (1.0, engine.getSong().bpm);
+    const juce::String units[] = { tr ("Latency (ms)"), tr ("Latency (samples)"), tr ("Latency (beats)") };
+    const auto value = unit == 0 ? juce::String (track.latencyMs, 2)
+                     : unit == 1 ? juce::String (manualLatencySamples (track, rate))
+                                 : juce::String (track.latencyMs * bpm / 60000.0, 6);
+    auto* w = new juce::AlertWindow (tr ("Track latency"),
+                                     tr ("Positive: the other tracks wait for this one (it plays earlier). Negative: this track is delayed."),
+                                     juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("v", value, units[juce::jlimit (0, 2, unit)]);
+    w->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([w, &engine, t, unit, rate, bpm] (int result) {
+        if (result != 1)
+            return;
+        const auto text = w->getTextEditorContents ("v").trim().replaceCharacter (',', '.');
+        if (! text.containsAnyOf ("0123456789"))
+            return;
+        const auto v = text.getDoubleValue();
+        setTrackLatency (engine, t, unit == 0 ? v : unit == 1 ? v * 1000.0 / rate : v * 60000.0 / bpm);
+    }), true);
+}
+
+juce::PopupMenu trackLatencyMenu (AudioEngine& engine, int t)
+{
+    const auto& song = engine.getSong();
+    const auto& track = song.mixer[(std::size_t) t];
+    juce::PopupMenu menu;
+    // FL's hint "^Track latency": "<x>ms (auto) <y>ms (manual)"
+    // auto = the plan's latency without the manual part, in samples (no ms rounding left over when no plugin has any)
+    const auto total = trackLatencyMs (engine, t);
+    const auto rate = sampleRateOf (engine);
+    const auto autoMs = total - 1000.0 * lynx::manualLatencySamples (track, rate) / rate;
+    menu.addSectionHeader (tr ("Latency {0} ms (auto {1} ms, manual {2} ms)",
+                               { juce::String (total, 2), juce::String (std::abs (autoMs) < 0.005 ? 0.0 : autoMs, 2), juce::String (track.latencyMs, 2) }));
+    menu.addItem (tr ("Reset"), track.latencyMs != 0.0f, false, [&engine, t] { setTrackLatency (engine, t, 0.0); });
+    menu.addItem (tr ("Set in ms..."), [&engine, t] { askTrackLatency (engine, t, 0); });
+    menu.addItem (tr ("Set in samples..."), [&engine, t] { askTrackLatency (engine, t, 1); });
+    menu.addItem (tr ("Set in beats..."), [&engine, t] { askTrackLatency (engine, t, 2); });
+    {
+        // FL's "Set from": the tracks whose latency is not zero; this track's total becomes theirs (FUN_012acd30)
+        juce::PopupMenu from;
+        for (int o = 0; o < (int) song.mixer.size(); ++o)
+        {
+            const auto ms = trackLatencyMs (engine, o);
+            if (o == t || std::abs (ms) < 0.005)
+                continue;
+            const auto name = o == 0 ? tr ("Master") : juce::String (o) + " " + juce::String::fromUTF8 (song.mixer[(std::size_t) o].name.c_str());
+            from.addItem (name + "  (" + juce::String (ms, 2) + " ms)", [&engine, t, o] {
+                const auto manual = (double) engine.getSong().mixer[(std::size_t) t].latencyMs + trackLatencyMs (engine, o) - trackLatencyMs (engine, t);
+                if (manual < 0.0)
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Track latency"),
+                                                            tr ("The delay introduced by this mixer track is higher than the delay introduced by the source "
+                                                                "mixer track. Set a make-up latency on the source track instead."));
+                else
+                    setTrackLatency (engine, t, manual);
+            });
+        }
+        menu.addSubMenu (tr ("Set from"), from, from.getNumItems() > 0);
+    }
+    menu.addSeparator();
+    menu.addItem (tr ("Compensate for master latency"), track.outputChannel >= 0, track.compensateMasterLatency, [&engine, t] {
+        engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].compensateMasterLatency = ! s.mixer[(std::size_t) t].compensateMasterLatency; });
+    });
+    if (t > 0)
+    {
+        menu.addSectionHeader (tr ("Bypass track latency compensation"));
+        const std::pair<const char*, LatencyBypass> modes[] = { { TR_NOOP ("Never"), LatencyBypass::never },
+                                                                 { TR_NOOP ("Always"), LatencyBypass::always },
+                                                                 { TR_NOOP ("When recording or not playing"), LatencyBypass::whenRecordingOrStopped } };
+        for (const auto& [label, mode] : modes)
+            menu.addItem (tr (label), true, track.latencyBypass == mode, [&engine, t, mode = mode] {
+                engine.editSong ([t, mode] (Song& s) { s.mixer[(std::size_t) t].latencyBypass = mode; });
+            });
+    }
+    return menu;
 }
 } // namespace
 
@@ -1647,21 +1772,40 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
     menu.addItem (tr ("Reset selected track(s) routing"), [this, targets] { engine.editSong ([targets] (Song& s) { mixerops::resetRouting (s, targets); }); });
     menu.addItem (tr ("Unroute tracks routed to the selected track(s)"), [this, targets] { engine.editSong ([targets] (Song& s) { mixerops::unrouteInto (s, targets); }); });
     {
-        // route the other selected inserts into this one
-        std::vector<int> sources;
-        for (auto s : selection)
-            if (s > 0 && s != t)
-                sources.push_back (s);
-
-        if (! sources.empty())
-        {
-            menu.addItem (tr ("Route the selected inserts here"), [this, sources, t] {
-                engine.editSong ([sources, t] (Song& s) { mixerops::routeTo (s, sources, t, false); });
+        // FL's Routing submenu (REA round 165f-mixer: FUN_012ac520 / FUN_012ac950): selected tracks ⇄ this track
+        std::vector<int> others;
+        for (auto x : selection)
+            if (x != t)
+                others.push_back (x);
+        const auto any = ! others.empty();
+        juce::PopupMenu routing;
+        routing.addSectionHeader (tr ("Selected tracks to this track"));
+        using K = mixerops::RouteKind;
+        auto selToThis = [this, others, t] (K kind) { engine.editSong ([others, t, kind] (Song& s) { mixerops::routeSelectedTo (s, others, t, kind); }); };
+        auto thisToSel = [this, others, t] (K kind) { engine.editSong ([others, t, kind] (Song& s) { mixerops::routeToSelected (s, t, others, kind); }); };
+        routing.addItem (tr ("Route selected to this track"), any, false, [selToThis] { selToThis (K::route); });
+        routing.addItem (tr ("Route selected to this track only"), any, false, [selToThis] { selToThis (K::routeOnly); });
+        routing.addItem (tr ("Sidechain selected to this track"), any && t > 0, false, [selToThis] { selToThis (K::sidechain); });
+        routing.addItem (tr ("Sidechain selected to this track only"), any && t > 0, false, [selToThis] { selToThis (K::sidechainOnly); });
+        routing.addSeparator();
+        routing.addItem (tr ("Create submix..."), any && t > 0, false, [this, others, t] {
+            const auto& track = engine.getSong().mixer[(std::size_t) t];
+            const auto name = mixerops::hasDefaultName (engine.getSong(), t) ? juce::String() : juce::String::fromUTF8 (track.name.c_str());
+            showNameAndColourDialog (tr ("Create submix"), name, track.colour, [this, others, t] (const juce::String& n, std::uint32_t colour) {
+                if (t < (int) engine.getSong().mixer.size())
+                    engine.editSong ([others, t, n = n.trim().toStdString(), colour] (Song& s) {
+                        s.mixer[(std::size_t) t].colour = colour;
+                        mixerops::createSubmix (s, others, t, n);
+                    });
             });
-            menu.addItem (tr ("Route the selected inserts only here"), [this, sources, t] {
-                engine.editSong ([sources, t] (Song& s) { mixerops::routeTo (s, sources, t, true); });
-            });
-        }
+        });
+        const auto thisIsInsert = t > 0;
+        routing.addSectionHeader (tr ("This track to selected tracks"));
+        routing.addItem (tr ("Route this track to selected"), any && thisIsInsert, false, [thisToSel] { thisToSel (K::route); });
+        routing.addItem (tr ("Route this track to selected only"), any && thisIsInsert, false, [thisToSel] { thisToSel (K::routeOnly); });
+        routing.addItem (tr ("Sidechain this track to selected"), any && thisIsInsert, false, [thisToSel] { thisToSel (K::sidechain); });
+        routing.addItem (tr ("Sidechain this track to selected only"), any && thisIsInsert, false, [thisToSel] { thisToSel (K::sidechainOnly); });
+        menu.addSubMenu (tr ("Selected tracks ⇄ this track"), routing);
     }
     if (selected > 0 && selected != t && (t == 0 || song.canRoute (selected, t) || song.routes (selected, t)))
         menu.addItem (tr ("Send \"{0}\" only to this track", { juce::String::fromUTF8 (song.mixer[(std::size_t) selected].name.c_str()) }),
@@ -1698,6 +1842,8 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
                     engine.setInsertArmed (x, false);
         });
     }
+    // FL's track latency (the "Track latency compensation" label's menu, REA round 165f-mixer)
+    menu.addSubMenu (tr ("Track latency: {0}", { manualLatencyText (engine, song.mixer[(std::size_t) t]) }), trackLatencyMenu (engine, t));
 
     // --- LYNX's sound items (FL has them on the strip itself) -------------------------------------------
     menu.addSectionHeader (tr ("Sound"));
@@ -1796,6 +1942,34 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
     }
 
     menu.addSectionHeader (tr ("Mixer"));
+    {
+        // FL's Mixer › Disk recording (REA round 165f-mixer: FUN_012a7a80 / FUN_012a7d80)
+        std::vector<int> armed;
+        for (int x = 1; x < (int) song.mixer.size(); ++x)
+            if (engine.isInsertArmed (x))
+                armed.push_back (x);
+        juce::PopupMenu disk;
+        disk.addItem (tr ("Render armed tracks to wave file(s)..."), ! armed.empty(), false, [armed] {
+            if (mixeroptions::renderTracks)
+                mixeroptions::renderTracks (armed);
+        });
+        disk.addItem (tr ("Render selected tracks to wave file(s)..."), ! targets.empty(), false, [targets] {
+            if (mixeroptions::renderTracks)
+                mixeroptions::renderTracks (targets);
+        });
+        menu.addSubMenu (tr ("Disk recording"), disk);
+        juce::PopupMenu pdc;
+        const auto manual = std::count_if (song.mixer.begin(), song.mixer.end(), [] (const MixerTrack& m) { return m.latencyMs != 0.0f; });
+        pdc.addItem (tr ("Reset manual latency on all tracks"), manual > 0, false, [this] {
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, tr ("Warning"),
+                                                tr ("This will reset manual latency values on all mixer tracks."), tr ("OK"), tr ("Cancel"), nullptr,
+                                                juce::ModalCallbackFunction::create ([this] (int r) {
+                                                    if (r == 1)
+                                                        engine.editSong ([] (Song& s) { mixerops::resetManualLatency (s); });
+                                                }));
+        });
+        menu.addSubMenu (tr ("Plugin delay compensation"), pdc);
+    }
     mixeroptions::addItems (menu, engine, false);
 
     return menu;
@@ -2331,6 +2505,7 @@ namespace mixeroptions
 {
 std::function<void()> changed;
 std::function<void (bool)> setShowUsedOnly;
+std::function<void (std::vector<int>)> renderTracks;
 
 namespace
 {

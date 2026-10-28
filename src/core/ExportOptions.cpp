@@ -399,6 +399,19 @@ std::vector<int> stemTracks (const Song& song)
     return out;
 }
 
+std::vector<int> stemTracks (const Song& song, const std::vector<int>& only)
+{
+    if (only.empty())
+        return stemTracks (song);
+    std::vector<int> out;
+    for (auto t : only)
+        if (t > 0 && t < (int) song.mixer.size())
+            out.push_back (t);
+    std::sort (out.begin(), out.end());
+    out.erase (std::unique (out.begin(), out.end()), out.end());
+    return out;
+}
+
 std::vector<int> stemChannels (const Song& song, Range range)
 {
     std::set<int> used;

@@ -16236,3 +16236,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "LinuxMouse165Tests.inc"
 #include "Fl165Tests.inc"
 #include "Perf165Tests.inc"
+#include "MixerLatency165Tests.inc"
