@@ -1,5 +1,6 @@
 #include "core/Patcher.h"
 #include "core/ControlSurface.h"
+#include "core/VfxScript.h"
 #include "core/XyController.h"
 
 #include <algorithm>
@@ -142,6 +143,10 @@ NodePorts nodePorts (const PatchNode& node)
             p.audioOuts = 0;
             p.midiOut = true;
             p.midiOuts = vfx::outputCount (*kind);
+            if (*kind == vfx::Kind::script) // its output controllers (round 165d)
+                if (const auto state = vfx::readState (node.channel.pluginState))
+                    if (const auto settings = vfx::parseScript (state->fl))
+                        p.controlOuts = (int) vfx::script::describe (*settings)->outputs.size();
         }
         if (node.channel.instrument == InstrumentKind::patcher)
             p.audioOuts = 1 + (int) node.channel.patcher.outputTracks.size();
@@ -971,6 +976,13 @@ void Graph::allNotesOff() noexcept
             n->instrument->allNotesOff();
 }
 
+void Graph::cut() noexcept
+{
+    for (auto& n : nodes)
+        if (n->instrument != nullptr)
+            n->instrument->cut();
+}
+
 void Graph::slideTo (int key, float cents, float samples) noexcept
 {
     for (const auto t : noteTargets)
@@ -1451,6 +1463,7 @@ public:
     void noteOn (int key, float velocity) noexcept override { graph.noteOn (key, velocity); }
     void noteOff (int key) noexcept override { graph.noteOff (key); }
     void allNotesOff() noexcept override { graph.allNotesOff(); }
+    void cut() noexcept override { graph.cut(); }
     void midiMessage (const std::uint8_t* bytes, int size) noexcept override { graph.midiMessage (bytes, size); }
     void pitchBend (float semitones) noexcept override { graph.pitchBend (semitones); }
     void controlChange (int cc, float value) noexcept override { graph.controlChange (cc, value); }
