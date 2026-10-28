@@ -3,6 +3,7 @@
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 #include "core/HardwareInsert.h"
 #include "core/EchoSuite.h"
 #include "core/LynxTune.h"
@@ -27,6 +28,7 @@
 #include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
+#include "platform/Package.h"
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
 #include "ui/FlExtraEditors.h"
@@ -51,6 +53,7 @@
 #include "core/RackOps.h"
 #include "core/Layer.h"
 #include "core/XyController.h"
+#include "core/FlCurve.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "ui/Controllers164.h"
@@ -123,6 +126,7 @@ struct StartupTrace
     }
 };
 StartupTrace startupTrace;
+void startupMarkHook (const char* step) { startupTrace.mark (step); }
 
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
 void onCrash (void* exceptionPointers)
@@ -371,6 +375,15 @@ public:
             lynx::crashguard::exitNow (0);
         }
 
+        if (args.contains ("--packageinfo"))
+        {
+            // round 165n: the Microsoft Store (MSIX) build's identity and folders (platform/Package.h); the release
+            // workflow runs it inside the installed test package
+            juce::File (args[args.indexOf ("--packageinfo") + 1].unquoted()).replaceWithText (lynx::platform::packageReport());
+            quit();
+            return;
+        }
+
         if (args.contains ("--paths"))
         {
             // diagnostics: folders LYNX searches
@@ -442,6 +455,17 @@ public:
             return;
         }
 
+        if (args.contains ("--midisync-test"))
+        {
+            // LYNX --midisync-test report.txt ["output device"] ["input device"] (round 165f): MIDI clock timing
+            const auto i = args.indexOf ("--midisync-test");
+            const auto out = args.size() > i + 2 && ! args[i + 2].startsWith ("--") ? args[i + 2].unquoted() : juce::String();
+            const auto in = args.size() > i + 3 && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
+            juce::File (args[i + 1].unquoted()).replaceWithText (lynx::MidiSyncIo::selfTest (out, in));
+            quit();
+            return;
+        }
+
         if (args.contains ("--devices") || args.contains ("--dispositivos")) // --dispositivos: legacy alias
         {
             // diagnostics: driver types and output devices JUCE offers (without opening any)
@@ -463,6 +487,10 @@ public:
                 for (const auto& name : type->getDeviceNames (true))
                     report << "  input=" << name << "\n";
             }
+            for (const auto& d : juce::MidiInput::getAvailableDevices())
+                report << "midi-in=" << d.name << "\n";
+            for (const auto& d : juce::MidiOutput::getAvailableDevices())
+                report << "midi-out=" << d.name << "\n";
 
             const auto flag = args.contains ("--devices") ? args.indexOf ("--devices") : args.indexOf ("--dispositivos");
             juce::File (args[flag + 1].unquoted()).replaceWithText (report);
@@ -967,6 +995,8 @@ public:
         startHangWatch();
 
         startupTrace.mark ("initialise (normal start)");
+        if (startupTrace.on)
+            lynx::startupMark = startupMarkHook;
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         lynx::themeui::loadSaved(); // the user's theme (Options › Theme, round 162d)
         startupOptions = lynx::StartupOptions::load();
@@ -1005,7 +1035,9 @@ public:
         // the splash first, so it is on screen while the audio device opens; the main window is built
         // once the pepper has landed (the scene is still for a moment then) and shown when the splash ends
         splash = std::make_unique<lynx::SplashScreen>();
+        startupTrace.mark ("splash made");
         splash->showOnDesktop();
+        startupTrace.mark ("splash on the desktop");
 
         juce::Timer::callAfterDelay (40, [this] {
             startEngine();
@@ -3430,7 +3462,7 @@ private:
             int frame = -1;
             std::vector<double> times, rendered; // whole frames (event + paint + blit, when this timer paints) / the window's paints
             double setupMs = 0.0, wallStart = 0.0;
-            std::clock_t cpuStart = 0;
+            double cpuStart = 0.0; // process CPU seconds (std::clock is wall time on Windows)
 
             UiPerf (LynxApplication& a, juce::File r) : app (a), report (std::move (r)) {}
 
@@ -3463,7 +3495,7 @@ private:
                     times.clear();
                     rendered.clear();
                     wallStart = juce::Time::getMillisecondCounterHiRes();
-                    cpuStart = std::clock();
+                    cpuStart = lynx::processCpuSeconds();
                     frame = 0;
                     return;
                 }
@@ -3476,7 +3508,7 @@ private:
                     return;
 
                 const auto wall = juce::Time::getMillisecondCounterHiRes() - wallStart;
-                const auto cpu = 1000.0 * (double) (std::clock() - cpuStart) / CLOCKS_PER_SEC;
+                const auto cpu = 1000.0 * (lynx::processCpuSeconds() - cpuStart);
                 text << s.name << ": show " << juce::String (setupMs, 1) << " ms\n"
                      << "    painted frames: " << stats (rendered) << "\n"
                      << "    timed here (event + paint + blit): " << stats (times)
@@ -4704,6 +4736,33 @@ private:
                     png.writeImageToStream (image, *stream);
             }
 
+            // round 165: Ember's Classic voicing (the Decapitator role) in its one-screen panel
+            {
+                namespace em = lynx::mixsuite::ember;
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::ember);
+                fx.params[em::voicing] = 1.0f;
+                fx.params[em::classicDrive] = 0.35f;
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Ember Saturator-classic.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
+            }
+
             // round 152: Foil Plate's one-knob Plate view (the Little Plate role)
             {
                 auto fx = lynx::makeEffectSlot (lynx::EffectKind::foilPlate);
@@ -4962,6 +5021,12 @@ private:
             auto xyzFx = lynx::makeEffectSlot (lynx::EffectKind::xyzController);
             xyzFx.params[(std::size_t) lynx::xy::level (2)] = 0.8f;
             song.mixer[1].effects.push_back (xyzFx);
+            // round 165: an X-Y-Z whose X curve is FL's "Stairs" (tension +40 %) and Y a bent single curve
+            xyzFx.params[(std::size_t) lynx::xy::curveMode (0)] = lynx::xy::curveModeValue (lynx::flcurve::stairs);
+            xyzFx.params[(std::size_t) lynx::xy::tension (0)] = 0.7f;
+            xyzFx.params[(std::size_t) lynx::xy::level (0)] = 0.62f;
+            xyzFx.params[(std::size_t) lynx::xy::tension (1)] = 0.825f;
+            song.mixer[1].effects.push_back (xyzFx);
             auto panel = lynx::makeEffectSlot (lynx::EffectKind::controlSurface);
             lynx::SurfaceControl c;
             for (const auto& [kind, name, v, x, y] : std::vector<std::tuple<lynx::SurfaceControl::Kind, const char*, float, float, float>> {
@@ -5062,7 +5127,8 @@ private:
             const lynx::AutomationTarget target { lynx::AutomationTargetKind::effectParam, 1, 1, 0 };
             shoot (lynx::makeXyControllerEditor (offline, slotOf (1), nullptr, target), "-xy-controller.png");
             shoot (lynx::makeXyControllerEditor (offline, slotOf (2), nullptr, target), "-xyz-controller.png");
-            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (3), target), "-control-surface.png");
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (3), nullptr, target), "-xyz-controller-stairs.png");
+            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (4), target), "-control-surface.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
         }
@@ -5080,9 +5146,25 @@ private:
                 offline.editSong ([&] (lynx::Song& s) {
                     s.channels[6].name = file.getFileNameWithoutExtension().toStdString();
                     s.channels[6].patcher.surface = dash->controls;
+                    s.channels[6].pluginState = preset.channels[0].pluginState; // (its MIDI port, channel, program)
                 });
                 offline.dispatchPendingMessages();
-                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + file.getFileNameWithoutExtension().replaceCharacter (' ', '-') + ".png");
+                const auto name = file.getFileNameWithoutExtension().replaceCharacter (' ', '-');
+                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + name + ".png");
+                // edit mode (round 165): each control's output number and the MIDI it sends ("1 CC74")
+                if (auto panel = lynx::makeChannelSettingsPanel (offline, 6))
+                {
+                    std::function<void (juce::Component&)> pressEdit = [&] (juce::Component& c) {
+                        for (auto* child : c.getChildren())
+                        {
+                            if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText() == lynx::tr ("Edit"))
+                                b->setToggleState (true, juce::sendNotificationSync);
+                            pressEdit (*child);
+                        }
+                    };
+                    pressEdit (*panel);
+                    shoot (std::move (panel), "-dashboard-fl-" + name + "-edit.png");
+                }
             }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))

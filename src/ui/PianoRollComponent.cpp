@@ -1,4 +1,5 @@
 #include "ui/PianoRollComponent.h"
+#include "core/NoteNames.h"
 
 #include "core/TransportEdit.h"
 #include "ui/UiTrace.h"
@@ -30,8 +31,7 @@ bool isBlackKey (int key)
 // FL-style name: key 60 = C5.
 juce::String keyName (int key)
 {
-    static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    return juce::String (names[key % 12]) + juce::String (key / 12);
+    return juce::String (notenames::keyName (key)); // Settings › General › Note names (round 165f)
 }
 
 const Pattern& currentPattern (const Song& s)
@@ -175,7 +175,6 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     chordBox.setTooltip (tr ("Clicking creates this chord (the clicked note is the root)"));
 
     // scale: root x type
-    static const char* noteNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     for (int s = 0; s < (int) scales().size(); ++s)
     {
         if (s == 0)
@@ -185,7 +184,7 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
         }
 
         for (int root = 0; root < 12; ++root)
-            scaleBox.addItem (tr ("{0} {1}", { juce::String (noteNames[root]), tr (scales()[(std::size_t) s].name) }), s * 100 + root + 1);
+            scaleBox.addItem (tr ("{0} {1}", { juce::String (notenames::pitchName (root)), tr (scales()[(std::size_t) s].name) }), s * 100 + root + 1);
     }
     scaleBox.setSelectedId (1, juce::dontSendNotification);
     scaleSnapButton.setEnabled (false); // until a scale is chosen
@@ -2917,8 +2916,18 @@ void PianoRollComponent::updateChordReadout()
             if (i >= 0 && i < (int) notes.size())
                 keys.push_back (notes[(std::size_t) i].key);
     }
-    const auto chord = prtools::detectChord (keys);
-    const auto text = chord ? juce::String (chord->name) : juce::String();
+    const auto chord = prtools::detectChord (keys, notenames::flats());
+    juce::String text;
+    if (chord)
+    {
+        // the root and the bass in the chosen note names (Settings › General, round 165f): "Do m7/Mib"
+        auto name = juce::String (chord->name);
+        auto quality = name.fromFirstOccurrenceOf (juce::String (chord->name).substring (0, name.length() > 1 && (name[1] == '#' || name[1] == 'b') ? 2 : 1),
+                                                   false, false).upToFirstOccurrenceOf ("/", false, false);
+        text = juce::String (notenames::pitchName (chord->root)) + quality;
+        if (name.contains ("/"))
+            text << "/" << notenames::pitchName (chord->bass);
+    }
     if (chordLabel.getText() != text)
         chordLabel.setText (text, juce::dontSendNotification);
 }

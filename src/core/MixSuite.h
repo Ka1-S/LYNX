@@ -292,8 +292,15 @@ enum Param
     mod1Source, mod1Target, mod1Amount, mod2Source, mod2Target, mod2Amount,
     mod3Source, mod3Target, mod3Amount, mod4Source, mod4Target, mod4Amount,
     effectLaw,
+    // round 165 (Decapitator parity, measured black-box on the trial, REA_rodada165ha; appended): the Classic voicing's
+    // Auto (its editor moves Output −1.6 dB per Drive unit, as the reference's; no audio effect) and the Classic law
+    // (1 = Punish's measured law; projects saved before round 165 keep round 136's +9.75 dB)
+    classicAuto, classicLaw,
     count
 };
+// round 165: an editor edit of `param` with the Classic voicing's Auto on also moves Output (the reference's link);
+// returns every (parameter, value) to set — just the edit itself when nothing is linked
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value);
 // round 152: crossover k's slope (0 … 4) in dB/oct — its own, or the global Crossover slope
 int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept;
 constexpr int ownSlopes = 5;                    // 6, 12, 24, 36, 48

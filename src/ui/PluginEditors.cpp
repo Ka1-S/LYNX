@@ -84,6 +84,11 @@ public:
         {
             kind = fx->kind;
             layout = &plugui::layoutFor (kind);
+            if (kind == EffectKind::ember) // round 165: this window only opens for the Classic voicing — its one-screen
+            {                              // panel, not the 1110-unit multiband page around it
+                static const auto classic = [] { auto l = plugui::layoutFor (EffectKind::ember); l.height = 440; return l; }();
+                layout = &classic;
+            }
             if (kind == EffectKind::maximus) // Soundgoodizer runs on the Maximus engine: its own page
                 if (const auto blob = maximusfx::unpack (fx->state); blob && blob->build == hlfx::MaximusBuild::soundgoodizer)
                     layout = &plugui::soundgoodizerLayout();
@@ -95,6 +100,8 @@ public:
         }
 
         accent = skin::accentFor (sgApprox ? EffectKind::maximus : kind);
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's VU shows the output level, as the reference's
+            vuMode = 2;
         anim.onFrame = [this] { repaint(); };
         page = initialPage;
         if (kind == EffectKind::equo && initialPage == 0)
@@ -308,6 +315,12 @@ public:
             return;
         if (kind == EffectKind::echoform) // round 135w: Filter link moves the low and high cut together
             if (const auto edits = echosuite::echoform::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's Auto moves Output with Drive
+            if (const auto edits = mixsuite::ember::linkedEdit (current()->params, param, value); edits.size() > 1)
             {
                 setParams (edits);
                 return;
@@ -535,8 +548,8 @@ public:
             g.drawRoundedRectangle (box.reduced (0.5f), radius::md, 1.0f);
         }
         g.setColour (presetName.isNotEmpty() ? colour::textPrimary : colour::textSecondary);
-        g.setFont (font (type::small, presetName.isNotEmpty()));
-        g.drawText (presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight, true);
+        ui::drawFittingText (g, presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight,
+                             font (type::small, presetName.isNotEmpty()), 8.0f, 0.0f, 0.75f);
         drawArrow (g, prevButton(), juce::MathConstants<float>::pi, hoverHeader == 3 ? accent : colour::textSecondary);
         drawArrow (g, nextButton(), 0.0f, hoverHeader == 4 ? accent : colour::textSecondary);
     }
@@ -572,8 +585,7 @@ public:
             g.drawRoundedRectangle (r.withSizeKeepingCentre (w, r.getHeight()), 3.0f, 1.0f);
         }
         g.setColour (locked ? theme::colour::textPrimary : hasStyle (item, plugui::dim) ? colour::textDisabled : skin::captionColour());
-        g.setFont (font (juce::jmax (8.0f, 9.5f * scale()), true));
-        g.drawFittedText (caps (tr (item.label)), r.toNearestInt(), j, 1, 0.7f);
+        ui::drawFittingText (g, caps (tr (item.label)), r, j, font (juce::jmax (8.0f, 9.5f * scale()), true), 7.0f); // (round 165: fit, no "...")
     }
 
     void paintItem (juce::Graphics& g, const LayoutItem& item, int index, const EffectSlot& fx)
@@ -601,9 +613,8 @@ public:
                 {
                     // the plugin's name, big and quiet (FL's logos are not reproduced)
                     g.setColour (colour::bg4);
-                    g.setFont (font (r.getHeight() * 0.62f, true));
-                    g.drawFittedText (item.label, r.toNearestInt(),
-                                      hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight, 1, 0.8f);
+                    ui::drawFittingText (g, item.label, r, hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight,
+                                         font (r.getHeight() * 0.62f, true), r.getHeight() * 0.25f, 0.0f, 0.8f); // (smaller, never "Wav...")
                     break;
                 }
                 if (hasStyle (item, plugui::boxed))
@@ -780,18 +791,16 @@ public:
                     else
                         skin::button (g, r, false, hot, accent, radius::sm);
                     g.setColour (on ? colour::onAccent : colour::textSecondary);
-                    g.setFont (font (juce::jmax (8.0f, r.getHeight() * 0.8f), true));
                     if (item.label != nullptr)
-                        g.drawText (caps (tr (item.label)), r, juce::Justification::centred, false);
+                        ui::drawFittingText (g, caps (tr (item.label)), r, juce::Justification::centred, font (juce::jmax (8.0f, r.getHeight() * 0.8f), true), 6.5f);
                     break;
                 }
                 const auto box = juce::Rectangle<float> (16.0f * s, 9.0f * s).withCentre ({ r.getX() + 9.0f * s, r.getCentreY() });
                 skin::switchPill (g, box, on, accent, fx.enabled);
                 auto text = r.withTrimmedLeft (21.0f * s);
                 g.setColour (on ? colour::textPrimary : (hot ? colour::textSecondary : colour::textDisabled));
-                g.setFont (font (juce::jmax (8.0f, 9.5f * s), true));
                 if (item.label != nullptr)
-                    g.drawFittedText (caps (tr (item.label)), text.toNearestInt(), juce::Justification::centredLeft, 1, 0.7f);
+                    ui::drawFittingText (g, caps (tr (item.label)), text, juce::Justification::centredLeft, font (juce::jmax (8.0f, 9.5f * s), true), 7.0f);
                 break;
             }
 

@@ -216,8 +216,11 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 {
     inputSlot.fill (-1);
     outputSlot.fill (-1);
+    const auto mark = [] (const char* step) { if (startupMark != nullptr) startupMark (step); };
+    mark ("  engine: workers + default song");
     publishSong();
     buildInitialGraph();
+    mark ("  engine: graph");
 
     if (openAudioDevice)
     {
@@ -235,6 +238,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             deviceManager.getAvailableDeviceTypes();
             deviceManager.addAudioDeviceType (std::move (pipeWire));
         }
+        mark ("  engine: device types");
 
         // 0 inputs, 2 outputs; the device of the last session (Settings › Audio) if it is still there, else the default.
         const auto saved = juce::XmlDocument::parse (audioDeviceFile());
@@ -249,6 +253,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             choosePreferredDriver(); // Linux: PipeWire, then JACK, then ALSA
             chooseSafeBufferSize(); // no saved setup: a buffer with room for heavy projects (Settings › Audio changes it)
         }
+        mark ("  engine: device opened");
         deviceManager.addAudioCallback (this);
         if (rackProcessor != nullptr)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
@@ -257,11 +262,15 @@ AudioEngine::AudioEngine (bool openAudioDevice)
         recordingSettings = loadRecordingSettings();
         saveGlobalLinks = true;
 
+        mark ("  engine: callback + settings");
         prefetcher = std::make_unique<StreamPrefetcher> (transport);
         prefetcher->update (song, samples);
         enableAllMidiInputs();
+        midiSync.configure (midiPrefs);
+        midiSync.sendAllNotesOff(); // FL's "Send all notes off": on init and after a render
         deviceManager.addMidiInputDeviceCallback ({}, this); // {} = all inputs enabled
         midiDevicesChanged = juce::MidiDeviceListConnection::make ([this] { enableAllMidiInputs(); });
+        mark ("  engine: MIDI inputs");
     }
 
     startTimerHz (30); // recording and collection of retired snapshots
@@ -830,6 +839,36 @@ void AudioEngine::markHeldKey (int key, bool on) noexcept
         heldKeyBits[key >> 6].fetch_and (~bit);
 }
 
+void AudioEngine::logPlayedNote (int channel, int key, float velocity, bool on)
+{
+    if (channel < 0)
+        return;
+    const auto ms = juce::Time::getMillisecondCounterHiRes();
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    if (on)
+        scoreLog.noteOn (ms, channel, key, velocity);
+    else
+        scoreLog.noteOff (ms, channel, key);
+}
+
+std::vector<scorelog::Entry> AudioEngine::scoreLogSnapshot() const
+{
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    return scoreLog.snapshot();
+}
+
+bool AudioEngine::scoreLogEmpty() const
+{
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    return scoreLog.size() == 0;
+}
+
+void AudioEngine::clearScoreLog()
+{
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    scoreLog.clear();
+}
+
 std::vector<int> AudioEngine::heldInputKeys() const
 {
     std::vector<int> keys;
@@ -866,6 +905,8 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, b
     e.key = key;
     e.velocity = velocity;
     liveEvents.push (e);
+    if (record)
+        logPlayedNote (channel, key, velocity, on);
 
     if (record && transport.recording.load() && transport.playing.load())
         uiRecorded.push_back ({ estimatedPositionNow(), channel, key, velocity, on });
@@ -1586,6 +1627,10 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
     if (! device.enabled)
         return;
 
+    // the external clock LYNX follows (round 165f): clock, start / stop / continue, song position
+    if (m.getRawDataSize() > 0 && (m.getRawData()[0] >= 0xf2) && source != nullptr && midiSync.handleInput (source->getName(), m))
+        return;
+
     midiActivity.fetch_add (1, std::memory_order_relaxed); // the toolbar's MIDI input light
 
     if (device.midiChannel != 0 && m.getChannel() != device.midiChannel)
@@ -1675,6 +1720,7 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
         e.key = t.key;
         e.velocity = velocity;
         midiEvents.push (e);
+        logPlayedNote (e.channel, e.key, e.velocity, noteOn);
 
         if (transport.recording.load() && transport.playing.load())
             midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, noteOn });
@@ -1733,7 +1779,10 @@ void AudioEngine::setMidiPrefs (const prefs::MidiPrefs& p, bool save)
     if (! p.pickup)
         pickups.clear();
     if (prefetcher != nullptr) // (only with an audio device: the real app)
+    {
         enableAllMidiInputs();
+        midiSync.configure (p);
+    }
     if (save)
         midiSettingsFile().replaceWithText (juce::String (p.toText()));
     sendChangeMessage();
@@ -2279,7 +2328,11 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             std::atomic<std::size_t> nextStretch { 0 };
             auto stretchWorker = [&] {
                 for (auto i = nextStretch++; i < stretches.size(); i = nextStretch++)
-                    library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio, stretches[i].method);
+                    if (auto stretched = library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio, stretches[i].method))
+                    {
+                        const std::scoped_lock l (keep); // held until the rack is built (the cache drops unused lengths)
+                        out.decoded.push_back (std::move (stretched));
+                    }
             };
             std::vector<std::thread> helpers;
             for (std::size_t i = 1; i < juce::jmin (threads, stretches.size()); ++i)
@@ -3101,6 +3154,8 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::setPluginsRenderMode (bool offline)
 {
+    if (! offline)
+        midiSync.sendAllNotesOff(); // FL's "Send all notes off": after a render
     // FL's "Notify about rendering mode" off: that plugin is not told (round 149); "Reset plugin when FL Studio
     // resets": reset as the export starts (round 151)
     for (std::size_t i = 0; i < song.channels.size(); ++i)
@@ -3230,6 +3285,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
     if (const auto target = transport.seekRequest.exchange (-1.0); target >= 0.0)
         transport.positionTicks.store (target);
 
+    // an external MIDI clock moves the transport (round 165f)
+    midiSync.beginBlock (transport, callbackStart, numSamples);
+
     // With the loop region on, the block is split at the loop end and the position jumps back to
     // its start (the nodes see a jump and release their notes, as in FL).
     // the audio editor's input recording (nothing happens unless it chose the input)
@@ -3324,6 +3382,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         for (int ch = 0; ch < numOutputChannels; ++ch)
             outputs[(std::size_t) ch] = outputChannelData[ch] != nullptr ? outputChannelData[ch] + done : nullptr;
 
+        // master sync out (round 165f): this part's clock / MTC messages, time-stamped for the sender thread
+        midiSync.subBlock (transport.positionTicks.load (std::memory_order_relaxed), tps, n, done, playing);
+
         player.audioDeviceIOCallbackWithContext (inputs.data(), numInputChannels, outputs.data(), numOutputChannels, n, context);
         routeOutputs (outputs.data(), numOutputChannels, n);
 
@@ -3395,6 +3456,7 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     rtStats.deviceRestarted();
     rt::resetForNewDevice();
     transport.sampleRate.store (device->getCurrentSampleRate());
+    midiSync.deviceStarted (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples(), device->getOutputLatencyInSamples());
     // FL's fixed size buffers: 2 ms, or the device buffer with "Process maximum size buffers" (REA round 134)
     setFixedPluginBlock (device->getCurrentBufferSizeSamples(), device->getCurrentSampleRate());
 
