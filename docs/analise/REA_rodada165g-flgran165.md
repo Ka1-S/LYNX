@@ -18,6 +18,11 @@ flq.py DLL vs FL renders, lynxfl.py LYNX's import + render vs FL renders, mk2.py
 - 06:05 — LYNX's whole chain (FL import → rack → render, `renderwav`) matches all 17 FL renders at the 16-bit floor
   (§5) → "(beta)" dropped. Editor: Key to / Transients / Tempo locked / Beats (pt-BR). Tests `granulizer165_*`.
   Commit ea68d1e2 on wip/flgran165. Next: core tests green, Linux GUI shot of the editor, land.
+- 2026-10-28 14:05 (after the 2nd BSOD) — merged origin/main (pt-BR conflict: both kept), build-local with FL Data
+  0 failures (1 781 826 checks), `lynxfl.py` again on the merged build: all 17 renders unchanged (−75.9…−78.4 dB).
+  Landing. Open question for a next round: the instrument's `ppq = 96.0` (setSongPosition) looks like it should be
+  LYNX's 960 — the FL-tick grid of `newTick` would then follow the song position; it does not change any of the 17
+  renders (static parameters), so it was left as it is until a render with automation shows the difference.
 
 ## 1. The grain clock with slices [DECOMP 0x753ea0, 0x752290]
 
