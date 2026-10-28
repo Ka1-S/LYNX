@@ -322,13 +322,15 @@ void shiftPattern (SequencerSettings& s, int delta);
 
 // VFX Script: FL's Python note scripts. The state is an INI text (UTF-8 with a BOM, CRLF): [Script] Source= (the
 // source on one line, line breaks as "<linebreak>"), [Parameters] (the script's controls by name), [Surface].
-// LYNX keeps it as it is; it does not run Python, so the notes pass through.
+// LYNX keeps it as it is and runs the script with its built-in Python (core/VfxScript.h, round 165d).
 struct ScriptSettings
 {
     std::string text;
     std::string source() const;                 // line breaks restored ("\n")
     void setSource (const std::string& source); // (keeps every other line)
     std::vector<std::pair<std::string, std::string>> parameters() const;
+    // Replaces the [Parameters] section (written after [Script], before [Surface], as FL orders them)
+    void setParameters (const std::vector<std::pair<std::string, std::string>>& lines);
     bool hasSurface() const;
     bool operator== (const ScriptSettings&) const = default;
 };
@@ -366,6 +368,7 @@ struct State
     Kind kind = Kind::keyMapper;
     int port = 0;
     std::vector<std::uint8_t> fl;
+    std::uint32_t tag = 0; // (round 165d) an id the editor gives a VFX Script, to find its running instance (0 = none)
 };
 std::optional<State> readState (const std::vector<std::uint8_t>& pluginState);
 std::vector<std::uint8_t> writeState (const State& state);
@@ -426,13 +429,17 @@ public:
     virtual bool busy() const noexcept { return false; }
     // New FL state (UI thread); taken at the next block. False if it does not parse.
     virtual bool configure (const std::vector<std::uint8_t>& flState) = 0;
-    // FL's automatable parameter `index` (an automation / a Patcher control cable), value 0..1 (audio thread; the
-    // value holds until the next configure). Round 165c: the Level Scaler's 36 parameters.
-    virtual void setParameter (int /*index*/, float /*value*/) noexcept {}
+    // FL's automatable parameter `index` (an automation / a Patcher control cable, VFX Script's controls), value 0..1
+    // (audio thread; the value holds until the next configure). Round 165c: the Level Scaler's 36 parameters; 165d: VFX Script.
+    virtual void setParameter (int /*index*/, float /*value01*/) noexcept {}
     // An incoming MIDI program change (round 165c; audio thread, between blocks): the VFX Sequencer selects that
     // sequence when its "Program change" option says so. The others ignore it.
     virtual void programChange (int /*program*/) noexcept {}
     Monitor& monitor() noexcept { return live; }
+    // Control outputs (VFX Script's output controllers, round 165d). Audio thread.
+    virtual float controlOutput (int /*output*/) const noexcept { return 0.0f; }
+    // The state's tag (State::tag; UI thread)
+    virtual void setTag (std::uint32_t /*tag*/) {}
 
 protected:
     double rate = 44100.0;

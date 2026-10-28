@@ -2941,13 +2941,18 @@ public:
             {
                 processor = vfx::makeProcessor (state->kind, state->fl);
                 processor->prepare (rate);
+                processor->setTag (state->tag);
+                lastState = state->fl;
             }
             return;
         }
+        processor->setTag (state->tag);
         if (state->fl != lastState)
             processor->configure (state->fl);
         lastState = state->fl;
     }
+    // a VFX Script's output controllers (round 165d; its controls come in through setParameter above)
+    float controlOutput (int output) const noexcept override { return processor != nullptr ? processor->controlOutput (output) : 0.0f; }
 
 private:
     std::unique_ptr<vfx::Processor> processor;

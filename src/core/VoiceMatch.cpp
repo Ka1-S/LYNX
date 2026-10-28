@@ -996,6 +996,16 @@ namespace opto
 namespace
 {
 #include "core/VoiceMatchOpto.inc"
+// round 165w [EXEC] (REA_rodada165w §2): the measured release — fitted on the trial's gain recovery (1 kHz bursts of 0.1 …
+// 10 s at −24 … 0 dBFS, then a −40 dBFS probe for 25 s; Compress at peak reduction 46 / 62.6 / 80, Limit at 62.6). The
+// trial recovers the same after 0.5, 2 or 10 s of reduction (no long memory) and is back within 0.1 dB after ≈ 10 s;
+// round 123's slow conductance kept ≈ 0.8 dB for many seconds. Each conductance releases as dC/dt = −a Cⁿ − b C.
+struct ReleaseLaw { double a, n, share, slowAttackMs, a2, n2, b, b2; };
+constexpr ReleaseLaw release123 { releaseA, releaseN, slowShare, attackSlowMs, releaseA2, releaseN2, 0.0, 0.0 };
+// fitted (glowfit, Nelder-Mead on 18 trajectories, 10 ms windows, the first 3 s of each recovery weighted ×10): rms 0.61 →
+// 0.24 dB overall, the recovery 0.03 … 0.15 dB rms (round 123: 0.08 … 0.84); held out, round 152's 0.5 s stairs (falling
+// half, Compress 46 / 62.6 / 80): 0.52 / 0.76 / 0.65 → 0.35 / 0.39 / 0.45 dB
+constexpr ReleaseLaw release165 { 3.77134, 1.8446, 0.626219, 4622.87, 8.63099, 3.36638, 4.51261, 0.337878 };
 } // namespace
 
 void Leveler::prepare (double sampleRate) noexcept
@@ -1030,7 +1040,8 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
     const double Y0 = dbToGain (y0Db + shift), Yt = dbToGain (ytDb + shift), gam = s.limit ? (ml ? limitGamma152 : limitGamma) : gamma;
     const double ff = ml ? limitFeedForward : 0.0, gFloor = ml ? dbToGain (-limitFloorDb) : 0.0;
     const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb + (s.measured && s.autoMakeup ? autoMakeupDb (s.peakReduction) : 0.0));
-    const double cA = 1.0 - std::exp (-dt * 1000.0 / attackSlowMs), mUp = 1.0 - std::exp (-dt * 1000.0 / memUpMs), mDn = 1.0 - std::exp (-dt * 1000.0 / memDownMs);
+    const auto& rl = s.measuredRelease ? release165 : release123;
+    const double cA = 1.0 - std::exp (-dt * 1000.0 / rl.slowAttackMs), mUp = 1.0 - std::exp (-dt * 1000.0 / memUpMs), mDn = 1.0 - std::exp (-dt * 1000.0 / memDownMs);
     const double K = 2.0 * sr;
     // the idle response measured at 48 kHz; other rates take its bilinear analog prototype (approximate)
     const double* tb = idleB;
@@ -1041,7 +1052,7 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
         const double e0 = sc.process ((float) (yc[0] + ff * xp[0]), 0), e1 = sc.process ((float) (yc[1] + ff * xp[1]), 1);
         el = std::max (std::abs (e0), std::abs (e1)); // the light follows the drive within the sample (fitted)
         const double ct = (el > Yt ? std::pow ((el - Yt) / Y0, gam) : 0.0) * (1.0 + memGain * mem);
-        const double ctf = (1.0 - slowShare) * ct, cts = slowShare * ct;
+        const double ctf = (1.0 - rl.share) * ct, cts = rl.share * ct;
         if (ctf > cf)
         {
             double cd = std::log1p (cf);
@@ -1049,11 +1060,11 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
             cf = std::expm1 (cd);
         }
         else
-            cf = std::max (ctf, cf - dt * releaseA * std::pow (cf, releaseN));
+            cf = std::max (ctf, cf - dt * (rl.a * std::pow (cf, rl.n) + rl.b * cf));
         if (cts > cs)
             cs += (cts - cs) * cA;
         else
-            cs = std::max (cts, cs - dt * releaseA2 * std::pow (cs, releaseN2));
+            cs = std::max (cts, cs - dt * (rl.a2 * std::pow (cs, rl.n2) + rl.b2 * cs));
         const double g = std::max (gFloor, 1.0 / (1.0 + cf + cs));
         mem += ((1.0 - g) > mem ? mUp : mDn) * ((1.0 - g) - mem);
         const double gp = g + (1.0 - g) * (tiltC0 - tiltC1 * g);

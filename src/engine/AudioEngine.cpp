@@ -28,6 +28,7 @@
 #include "platform/LinuxRealtime.h"
 #include "engine/Metronome.h"
 #include "core/NoteTools.h"
+#include "core/VfxScript.h"
 #include "engine/PreviewPlayer.h"
 #include "flp/Flp.h"
 
@@ -216,6 +217,8 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 {
     inputSlot.fill (-1);
     outputSlot.fill (-1);
+    // VFX Script (round 165d): the audio thread waits a bounded time for the Python thread (exports wait for it)
+    vfx::script::setRealtime (openAudioDevice);
     const auto mark = [] (const char* step) { if (startupMark != nullptr) startupMark (step); };
     mark ("  engine: workers + default song");
     publishSong();
@@ -259,6 +262,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
         deviceStateSaver = std::make_unique<DeviceStateSaver> (*this);
         midiPrefs = midiPrefsShared = prefs::MidiPrefs::fromText (midiSettingsFile().loadFileAsString().toStdString());
+        performanceMidiChannel.store (midiPrefs.performanceChannel);
         recordingSettings = loadRecordingSettings();
         saveGlobalLinks = true;
 
@@ -333,6 +337,7 @@ void AudioEngine::buildInitialGraph()
     {
         rackProcessor->setLiveInput (&liveInput);
         rackProcessor->setHardwareOutput (&hwOutput);
+        rackProcessor->setPerformance (performanceLive.get());
     }
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
     auto previewOwned = std::make_unique<PreviewPlayer>();
@@ -617,7 +622,12 @@ ProcessTimes* AudioEngine::getProcessTimes() noexcept
 void AudioEngine::play() noexcept
 {
     if (! transport.playing.load())
+    {
         resetToInitialValues();
+        // Performance mode: the song plays from its Start marker (the zone before it is launched, not played)
+        if (const auto zone = song.mode == PlayMode::song ? song.performanceZoneEnd() : 0; zone > 0 && transport.positionTicks.load() < (double) zone)
+            seek ((double) zone);
+    }
     transport.playing.store (true);
 }
 
@@ -1633,6 +1643,16 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
 
     midiActivity.fetch_add (1, std::memory_order_relaxed); // the toolbar's MIDI input light
 
+    // FL's playlist live mode channel (round 165m): its notes launch the performance clips instead of playing
+    if (const auto pc = performanceMidiChannel.load (std::memory_order_relaxed);
+        pc != 0 && m.getChannel() == pc && m.isNoteOnOrOff() && performanceMidiOn.load (std::memory_order_relaxed))
+    {
+        perf::Command c;
+        if (performanceMidi.note (m.getNoteNumber(), m.isNoteOn(), c))
+            performanceLive->midiCommands.push (c);
+        return;
+    }
+
     if (device.midiChannel != 0 && m.getChannel() != device.midiChannel)
         return;
 
@@ -1782,6 +1802,7 @@ void AudioEngine::setMidiPrefs (const prefs::MidiPrefs& p, bool save)
         const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
         midiPrefsShared = p;
     }
+    performanceMidiChannel.store (p.performanceChannel);
     if (! p.pickup)
         pickups.clear();
     if (prefetcher != nullptr) // (only with an audio device: the real app)
@@ -2567,6 +2588,7 @@ void AudioEngine::publishSong()
     transport.loopStart.store ((double) song.loopStart);
     transport.loopEnd.store ((double) song.loopEnd);
     transport.songEnd.store ((double) song.songLength());
+    transport.songStart.store ((double) song.performanceZoneEnd());
 
     const loadtrace::Scope buildTiming ("rack_build");
     RackState::Factories factories;
@@ -2975,6 +2997,7 @@ void AudioEngine::timerCallback()
     rt::promotePending(); // Linux: real-time priority for the audio threads seen since the last tick (round 161)
     applyControllers();
     updateRecording();
+    updatePerformanceRecording();
     rackExchange.collectGarbage();
 
     // Plugins are prepared at a fixed rate; if the device changed rate, recreate them.
@@ -2994,6 +3017,47 @@ void AudioEngine::timerCallback()
         ++latencyRepublishes;
         publishSong();
     }
+}
+
+// Performance mode's recording (FL's "Clips" filter, REA round 146 B5: a launched clip is written to its playlist
+// track): every pass of a launched clip that ended while recording becomes a copy of that clip in the arrangement,
+// on the same track, where the song position was when the pass began.
+void AudioEngine::updatePerformanceRecording()
+{
+    auto& live = *performanceLive;
+    performanceMidiOn.store (song.performanceMode && song.mode == PlayMode::song && song.performanceZoneEnd() > 0, std::memory_order_relaxed);
+    const auto on = transport.recording.load() && transport.playing.load() && song.performanceMode && song.mode == PlayMode::song
+                    && recordOptions.recordClips;
+    if (on && ! live.recording.load (std::memory_order_relaxed))
+        perfTakeHasUndoStep = false;
+    live.recording.store (on, std::memory_order_relaxed);
+
+    std::vector<Clip> clips;
+    perf::RecordedPass pass;
+    while (live.recorded.pop (pass))
+        if (Clip c; perf::recordedClip (song, pass, c) && c.start >= song.performanceZoneEnd())
+            clips.push_back (c);
+    if (clips.empty())
+        return;
+    editSong ([&clips] (Song& s) {
+        for (const auto& c : clips)
+        {
+            // the take replaces what was under it on that track (like FL's recorded clips)
+            const auto end = c.end();
+            for (auto& o : s.playlist)
+                if (o.track == c.track && o.start < end && o.end() > c.start && o.start >= s.performanceZoneEnd())
+                {
+                    if (o.start >= c.start)
+                        o.length = 0; // removed below
+                    else
+                        o.length = c.start - o.start;
+                }
+            s.playlist.erase (std::remove_if (s.playlist.begin(), s.playlist.end(), [] (const Clip& o) { return o.length <= 0; }),
+                              s.playlist.end());
+            s.playlist.push_back (c);
+        }
+    }, ! perfTakeHasUndoStep);
+    perfTakeHasUndoStep = true;
 }
 
 void AudioEngine::choosePreferredDriver()
@@ -3166,6 +3230,7 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::setPluginsRenderMode (bool offline)
 {
+    vfx::script::setRealtime (! offline); // (an export waits for every VFX Script answer: exact and repeatable)
     if (! offline)
         midiSync.sendAllNotesOff(); // FL's "Send all notes off": after a render
     // FL's "Notify about rendering mode" off: that plugin is not told (round 149); "Reset plugin when FL Studio
@@ -3335,7 +3400,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         const auto loop = playbackLoop (transport.songMode.load (std::memory_order_relaxed),
                                         throughRegion ? 0.0 : transport.loopStart.load (std::memory_order_relaxed),
                                         throughRegion ? 0.0 : transport.loopEnd.load (std::memory_order_relaxed),
-                                        linear ? 0.0 : transport.songEnd.load (std::memory_order_relaxed));
+                                        linear ? 0.0 : transport.songEnd.load (std::memory_order_relaxed),
+                                        transport.songStart.load (std::memory_order_relaxed));
         const auto loopStart = loop.start, loopEnd = loop.end;
         const auto looping = playing && loop.active() && tps > 0.0;
 

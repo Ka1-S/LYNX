@@ -180,7 +180,9 @@ namespace glow
 // peak reduction / gain / emphasis read 0 .. 100 like the original's dials (emphasis = its Hi Freq)
 // round 152 (REA_rodada152a §2): appended — the opto law (the Opto classic voicing's measured Limit and AUTO MAKEUP; a
 // project saved before keeps the round-123 law) and ANALOG (Off / 50 Hz / 60 Hz: the reference's measured hum and noise)
-enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, count };
+// round 165w (REA_rodada165w §2): appended — the opto release (the Opto classic voicing's measured gain recovery; a
+// project saved before keeps round 123's slower tail)
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, releaseLaw, count };
 int analogHz (float v) noexcept; // 0 (off), 50 or 60
 bool classic (const EffectParams& p) noexcept;
 std::string classicParamText (int param, float v);
@@ -205,7 +207,10 @@ namespace hush
 // (core/VoiceMatch.h vocalds: band detector + "stands out" test, look-ahead within a fixed 15 ms latency); uses the
 // threshold, range, frequency (the band's high-pass), low-pass, look-ahead, mode and listen controls
 enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
-             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing, count };
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing,
+             // round 165w (appended): the reference's input / output pan (a balance: the far side × (1 − |pan|), measured)
+             inputPan, outputPan, count };
+double panValue (float v) noexcept; // −1 … +1
 bool vocal (const EffectParams& p) noexcept; // round 148
 int oversamplingOf (float v) noexcept; // 1 (off), 2, 4, 8
 double hz (float v) noexcept;          // 2 .. 16 kHz
