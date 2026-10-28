@@ -8,11 +8,12 @@ Evidence markers: [DECOMP addr], [DATA], [FL render], [EXEC FL] (the installatio
 
 ## Where I stopped
 
-- 2026-10-27 ~16:40 — PAUSED by the r165g parent (load limit: one sub-round at a time). Nothing built yet this session.
-- Done (uncommitted code now committed as WIP, NOT compiled yet):
-  - `core/AudioEdit` `decodeWavExtras` (cue/region starts + ACID beats of a WAV's chunks);
-  - `SampleData::markerStarts`, `SampleData::acidBeats`; `engine/SampleLibrary` `readWavExtras` fills them for
-    in-memory WAVs (chunk walk, audio skipped; streamed long samples: not read).
+- 2026-10-27 23:40 — landing the verified part; the round ends here (parent: keep scope small, no new long REA).
+- Landed: `core/FlAutoSlicer` (FL's auto slicing, [TEST] `fl_auto_slicer_matches_fl` = the DLL's slice starts
+  [EXEC FL, tmp/r165g/py/gold.py]), `core/AudioEdit` `decodeWavExtras` ([TEST] `audioedit_wav_extras_markers_and_acid`),
+  `SampleData::markerStarts` / `acidBeats` filled by `engine/SampleLibrary` for in-memory WAVs. Core tests: 0 failures.
+- NOT done: the engine side below (steps 1–6) — Fruity Granulizer, Newtime and Newtone keep "(beta)". Nothing in the
+  engine reads the slicer / markers / beats yet.
 - Verified this session [EXEC FL vs FL render], scripts in the scratchpad (copies: tmp/r165g/py, cmpg.py, sl.py, blk.py):
   - g0/g1/g4: DLL with no beats == FL render (−78.6 dB = 16-bit quantisation). g4 (state v5, no sync byte) plays
     WITHOUT sync although FL sends beats → states without the sync byte: sync off (FL sends Dispatcher 0x13 with 0
