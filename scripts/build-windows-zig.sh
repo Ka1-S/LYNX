@@ -22,7 +22,7 @@ mkdir -p "$OUT/juce" "$OUT/app" "$OUT/shim"
 echo '#include <dbghelp.h>' > "$OUT/shim/Dbghelp.h"
 
 MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basics juce_gui_extra
-         juce_audio_basics juce_audio_devices juce_audio_formats juce_audio_processors juce_audio_utils juce_dsp)
+         juce_audio_basics juce_audio_devices juce_audio_formats juce_audio_processors juce_audio_utils juce_dsp juce_opengl)
 
 {
     echo '#pragma once'
@@ -147,6 +147,7 @@ APP_SOURCES+=(src/core/CrashReport.cpp src/ui/CrashReporter.cpp)
 APP_SOURCES+=(src/core/VisualFx.cpp src/ui/VisualEditors.cpp)
 # FL plugins LYNX lacked: Mute 2, Big Clock, Tuner, HTML NoteBook (round 165g)
 APP_SOURCES+=(src/core/FlExtraFx.cpp src/ui/FlExtraEditors.cpp)
+APP_SOURCES+=(src/core/VisualFx.cpp src/core/FruityDance.cpp src/ui/VisualEditors.cpp src/ui/VisualGl.cpp src/ui/DanceView.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

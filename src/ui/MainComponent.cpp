@@ -6,6 +6,7 @@
 
 #include "core/TransportEdit.h"
 #include "ui/CrashReporter.h"
+#include "ui/DanceView.h"
 #include "engine/AudioLogger.h"
 #include "ui/PluginSkin.h"
 #include "platform/Paths.h"
@@ -400,6 +401,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
     }
+    // the dancers of the project's dance channels (FL's Fruity Dance) over the workspace (round 165e)
+    danceStage = std::make_unique<DanceStage> (engine);
+    danceStage->setMouseClickGrabsKeyboardFocus (false);
+    addAndMakeVisible (*danceStage);
 
     for (auto& b : panelButtons)
     {
@@ -785,6 +790,11 @@ void MainComponent::resized()
         toolbarEditor->toFront (false);
     }
     workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight + tray));
+    if (danceStage != nullptr)
+    {
+        danceStage->setBounds (getLocalBounds());
+        danceStage->toFront (false);
+    }
     if (setupOverlay != nullptr)
     {
         setupOverlay->setBounds (getLocalBounds());
@@ -1686,6 +1696,8 @@ void MainComponent::selectTabForSnapshot (int tab)
 void MainComponent::showDesktopForSnapshot (bool extraPanels)
 {
     workspace.resetLayout();
+    if (auto* stage = dynamic_cast<DanceStage*> (danceStage.get()))
+        stage->update(); // (the project's dancers now: no timer runs before the picture)
 
     if (extraPanels)
     {

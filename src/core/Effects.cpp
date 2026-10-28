@@ -2995,6 +2995,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, 
         return mixsuite::ridge::k4ParamText (param, v);
     if (kind == EffectKind::ridgeStrip && mixsuite::ridge::eVoicing (context)) // round 123: the console's own scales
         return mixsuite::ridge::eParamText (param, v);
+    if (kind == EffectKind::ridgeStrip && (param == mixsuite::ridge::lfGain || param == mixsuite::ridge::lmfGain
+                                           || param == mixsuite::ridge::hmfGain || param == mixsuite::ridge::hfGain))
+    {
+        // round 165: Ridge's own engine shows the gain of the curve in use (it showed both: "+6.0 dB / +7.2")
+        char text[32];
+        std::snprintf (text, sizeof text, "%+.1f dB", mixsuite::ridge::bandGainDb (v, context[(std::size_t) mixsuite::ridge::curve] > 0.5f));
+        return text;
+    }
     if (kind == EffectKind::glowLeveler && mixsuite::glow::classic (context))
         return mixsuite::glow::classicParamText (param, v);
     if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))
