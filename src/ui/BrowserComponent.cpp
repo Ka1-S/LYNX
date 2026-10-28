@@ -37,7 +37,7 @@ namespace
 {
 bool isAudio (const juce::File& f)
 {
-    return f.hasFileExtension ("wav;flac;ogg;mp3;aif;aiff;wv");
+    return SampleLibrary::isSampleFile (f);
 }
 
 bool isListed (const juce::File& f)

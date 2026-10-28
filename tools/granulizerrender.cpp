@@ -1,6 +1,7 @@
 // Renders a Fruity Granulizer state with LYNX's engine exactly like the round-67 EXEC harness drives the DLL
 // (verification harness, REA_rodada67 §4): granulizerrender <state.bin> <sample.raw> <channels> <format 0=int16 1=float>
-//   <sample rate> <out.f32> <length> <rate> [blk=N] [seed=N] [note=start,key,finalVol,finalPan,pitchCents,release ...]
+//   <sample rate> <out.f32> <length> <rate> [blk=N] [seed=N] [tempo=BPM] [beats=N] [slices=auto|<file of starts>]
+//   [note=start,key,finalVol,finalPan,pitchCents,release ...]
 // The state is normalised first; the raw sample is interleaved frames. Writes interleaved stereo float32.
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "core/FlAutoSlicer.h"
 #include "core/Granulizer.h"
 
 int main (int argc, char** argv)
@@ -54,6 +56,24 @@ int main (int argc, char** argv)
             opt.block = std::atoi (a.c_str() + 4);
         else if (a.rfind ("seed=", 0) == 0)
             opt.seed = (std::uint32_t) std::strtoul (a.c_str() + 5, nullptr, 10);
+        else if (a.rfind ("tempo=", 0) == 0)
+            opt.tempo = std::atof (a.c_str() + 6);
+        else if (a.rfind ("points=", 0) == 0)
+            opt.points = std::atoi (a.c_str() + 7);
+        else if (a.rfind ("beats=", 0) == 0)
+            opt.beats = (float) std::atof (a.c_str() + 6);
+        else if (a == "slices=auto")
+            opt.slices = lynx::flslice::autoSlice (smp.left.data(), ch > 1 ? smp.right.data() : nullptr, (std::int64_t) frames, smp.sampleRate);
+        else if (a.rfind ("slices=", 0) == 0)
+        {
+            if (std::FILE* sf = std::fopen (a.c_str() + 7, "r"))
+            {
+                long long v;
+                while (std::fscanf (sf, "%lld", &v) == 1)
+                    opt.slices.push_back (v);
+                std::fclose (sf);
+            }
+        }
         else if (a.rfind ("note=", 0) == 0)
         {
             lynx::granulizer::RefNote n;

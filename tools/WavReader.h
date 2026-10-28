@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "core/AudioEdit.h"
 #include "core/Instruments.h"
 #include "core/Mp3Decoder.h"
 #include "core/OggVorbis.h"
@@ -151,6 +152,10 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
             sample->right[i] = read (frame + bytesPerSample);
     }
 
+    // cue points / regions and ACID beats, as the app's SampleLibrary keeps them (Fruity Granulizer's slices and sync)
+    const auto extras = audioedit::decodeWavExtras (d.data(), d.size(), (std::int64_t) frames);
+    sample->markerStarts = extras.markerStarts;
+    sample->acidBeats = extras.acidBeats;
     return sample;
 }
 } // namespace lynx::tools

@@ -1878,6 +1878,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
             def.sampler.keepPitch = c.stretchMode != 0; // only FL's "Resample" changes the pitch
             def.sampler.stretchMethod = stretchMethodForFlMode (c.stretchMode);
+            // Fruity Granulizer: FL hands the plugin TIME as its beat count, without MUL (REA_rodada165g-flgran165 §3)
+            if (def.instrument == InstrumentKind::granulizer)
+                def.sampler.stretchBeats = (float) (c.stretchTime / 192.0);
         }
 
         // FL's time-stretching panel on a sample channel or an audio clip [FL: measured, REA_rodada164e-clippitch §2]:

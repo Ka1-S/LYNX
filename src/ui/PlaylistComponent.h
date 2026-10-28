@@ -231,6 +231,9 @@ private:
     juce::Rectangle<int> trackArrow (int track) const; // a group header's fold arrow (empty for other tracks)
     void editTrack (int track, std::function<void (PlaylistTrack&)> change);
     int currentTrack = -1; // the track selected by a click on its header (FL marks it next to the LED)
+    std::vector<int> selectedTracks; // Ctrl / Shift+click on headers: more selected tracks (round 165m)
+    bool isTrackSelected (int track) const;
+    std::vector<int> tracksForMenu (int track) const;
 
     AudioEngine& engine;
     juce::ScrollBar hBar { false }, vBar { true }; // hBar is hidden: the overview strip scrolls sideways

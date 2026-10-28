@@ -41,16 +41,23 @@ struct Command
     std::int64_t clipStart = 0; // identifies the clip on its track (stable across edits that don't move it)
     std::int64_t columnStart = 0, columnEnd = 0; // launchColumn: every zone clip starting in [columnStart, columnEnd)
     int column = -1; // press / release from a controller: the track's column-th zone clip (clipStart unused)
+    // a controller's modifier notes ([DECOMP] FUN_01221c00 flags 0x80 / 0x100 / 0x8)
+    enum class Scope : std::uint8_t { track, column, columnPlaying };
+    Scope scope = Scope::track; // column: every track's clip in that clip's column; columnPlaying: only tracks playing
+    bool barSync = false;       // starts on the next bar instead of the track's trigger sync
 };
 
 // FL's "MIDI channel used for playlist live mode" ([DECOMP] 0x1181be1): on that channel a note below 120 launches
 // track (note / 12 + trackOffset), column (note % 12 + columnOffset) — one octave per track, twelve clips each;
 // 120 / 121 move the track offset down / up (by 1, or 10), 122 / 123 the column offset (by 1, or 12), 124 switches
-// the big steps. False when the note is a navigation key (offsets changed, no command).
+// the big steps; 125 / 126 / 127 are held modifiers (flags 0x80, 0x180, 0x8 on the launches, FUN_01221c00): 125 = the
+// note launches its clip's whole column, 126 = the column on the tracks already playing only, 127 = the launch waits
+// for the next bar instead of the track's trigger sync. False when the note is a navigation or modifier key.
 struct MidiMapping
 {
     int trackOffset = 0, columnOffset = 0;
     bool bigSteps = false;
+    bool columnHeld = false, playingHeld = false, barHeld = false;
     bool note (int key, bool on, Command& out) noexcept;
 };
 
@@ -143,7 +150,7 @@ private:
     TrackState* stateOf (int track, bool create) noexcept;
     void apply (const Song& song, const std::vector<int>& zone, const Command& c, double now, Live* live) noexcept;
     void launch (const Song& song, const std::vector<int>& zone, TrackState& t, std::int64_t clipStart, double now,
-                 bool immediate) noexcept;
+                 bool immediate, double syncOverride = 0.0) noexcept;
     void stopTrack (const Song& song, const std::vector<int>& zone, TrackState& t, double now, bool quantized) noexcept;
     void recordPartial (const Song& song, const std::vector<int>& zone, const TrackState& t, const Play& p, double at,
                         Live* live) noexcept;
@@ -163,4 +170,9 @@ void schedulePerformance (const Song& song, const Player& player, double clock, 
 
 // Recording: turns a pass into a clip copy for the arrangement (the zone clip moved to the song position).
 bool recordedClip (const Song& song, const RecordedPass& pass, Clip& out);
+
+// FL's Tools › Macros › Prepare for performance mode ([DECOMP] FUN_0122d010): makes room for a launch grid before the
+// song — `count` columns `spacing` ticks wide are inserted at the start (everything moves right), a marker at each
+// column, a "Start" marker where the song now begins, and Performance mode on (song mode).
+void prepareForPerformance (Song& song, int count, std::int64_t spacing);
 } // namespace lynx::perf

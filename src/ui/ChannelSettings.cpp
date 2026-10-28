@@ -947,8 +947,11 @@ public:
             for (int i = 0; i < threeOscParamCount(); ++i)
                 addThreeOsc (i);
         else if (granulizer)
+        {
             for (int i = 0; i < granulizerParamCount(); ++i)
                 addGranulizer (i);
+            setupGranulizerModes (def);
+        }
         else if (drumaxx)
         {
             addDrumaxx (0x2c1, "Master");
@@ -1020,7 +1023,7 @@ public:
             for (const auto& [index, name] : drumpadKnobs)
                 add (index, name);
         const auto rows = ((int) knobs.size() + 6) / 7; // the grid of resized()
-        setSize (720, std::max (dx10 || threeOsc ? 500 : 384, 46 + rows * 110 + 8));
+        setSize (720, std::max (dx10 || threeOsc ? 500 : 384, 46 + rows * 110 + 8 + (granulizerModes ? 64 : 0)));
 
         // a Granulizer node inside a Patcher (round 165c): no channel to drop a sample on, so its own Sample button
         if (granulizer && ref.index < 0)
@@ -1450,9 +1453,94 @@ public:
         constexpr int columns = 7, w = 96, h = 92;
         for (std::size_t i = 0; i < knobs.size(); ++i)
             knobs[i]->setBounds (12 + (int) (i % columns) * (w + 4), 46 + (int) (i / columns) * (h + 18), w, h);
+        if (granulizerModes)
+        {
+            // FL's KEY TO, TRANSIENTS and TEMPO LOCKED controls, in a row under the knobs
+            const auto rows = ((int) knobs.size() + columns - 1) / columns;
+            const auto y = 46 + rows * (h + 18) + 4;
+            granKeyToLabel.setBounds (12, y, 150, 18);
+            granKeyTo.setBounds (12, y + 20, 150, 24);
+            granTransientsLabel.setBounds (174, y, 150, 18);
+            granTransients.setBounds (174, y + 20, 150, 24);
+            granTempoLocked.setBounds (336, y + 20, 140, 24);
+            granBeatsLabel.setBounds (488, y, 200, 18);
+            granBeats.setBounds (488, y + 20, 200, 24);
+        }
     }
 
 private:
+    // Fruity Granulizer: what the keys move (Key to), where the slices come from (Transients), tempo lock and the beat
+    // count it uses (REA_rodada165g-flgran165)
+    void setupGranulizerModes (const ChannelDef& def)
+    {
+        const auto keyMode = granulizerMode (def.pluginState, 1), sliceMode = granulizerMode (def.pluginState, 0),
+                   sync = granulizerMode (def.pluginState, 2);
+        if (! keyMode || ! sliceMode || ! sync)
+            return;
+        granulizerModes = true;
+        auto label = [this] (juce::Label& l, const juce::String& text) {
+            l.setText (text, juce::dontSendNotification);
+            l.setFont (theme::font (theme::type::small));
+            addAndMakeVisible (l);
+        };
+        label (granKeyToLabel, tr ("Key to"));
+        granKeyTo.addItem (tr ("Pitch"), 1);
+        granKeyTo.addItem (tr ("Percent"), 2);
+        granKeyTo.addItem (tr ("Step"), 3);
+        granKeyTo.addItem (tr ("Transient"), 4);
+        granKeyTo.setSelectedId (std::clamp (*keyMode, 0, 3) + 1, juce::dontSendNotification);
+        granKeyTo.setTooltip (tr ("What the keys do: Pitch = transpose; Percent = start point (sample time, C5 to C7); "
+                                  "Step = start point in 16th notes (song time); Transient = start at the slice of the key"));
+        granKeyTo.onChange = [this] {
+            const auto v = granKeyTo.getSelectedId() - 1;
+            ref.edit (engine, [v] (ChannelDef& d) { granulizerSetMode (d.pluginState, 1, v); });
+            if (v == 3 && granTransients.getSelectedId() == 1) // as FL: transient keys switch slice detection on
+                granTransients.setSelectedId (3, juce::dontSendNotification);
+        };
+        addAndMakeVisible (granKeyTo);
+        label (granTransientsLabel, tr ("Transients"));
+        granTransients.addItem (tr ("Off"), 1);
+        granTransients.addItem (tr ("Use regions"), 2);
+        granTransients.addItem (tr ("Detect"), 3);
+        granTransients.setSelectedId (std::clamp (*sliceMode, 0, 2) + 1, juce::dontSendNotification);
+        granTransients.setTooltip (tr ("Transients source: the sample's cue points / regions, or FL's automatic slicing. "
+                                       "Grains then line up with the slices and the Transient hold knob sets how long each "
+                                       "slice's first grain holds"));
+        granTransients.onChange = [this] {
+            const auto v = granTransients.getSelectedId() - 1;
+            ref.edit (engine, [v] (ChannelDef& d) { granulizerSetMode (d.pluginState, 0, v); });
+        };
+        addAndMakeVisible (granTransients);
+        granTempoLocked.setButtonText (tr ("Tempo locked"));
+        granTempoLocked.setToggleState (*sync != 0, juce::dontSendNotification);
+        granTempoLocked.setTooltip (tr ("Match song tempo: the sample plays once per its length in beats (the WAV's ACID "
+                                        "beats, else Beats below). Loop is always on and Wave spacing has no effect while "
+                                        "locked"));
+        granTempoLocked.onClick = [this] {
+            const auto on = granTempoLocked.getToggleState();
+            ref.edit (engine, [on] (ChannelDef& d) { granulizerSetMode (d.pluginState, 2, on ? 1 : 0); });
+        };
+        addAndMakeVisible (granTempoLocked);
+        label (granBeatsLabel, tr ("Beats (0 = the sample's own)"));
+        granBeats.setSliderStyle (juce::Slider::LinearHorizontal);
+        granBeats.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 20);
+        granBeats.setRange (0.0, 64.0, 0.25);
+        granBeats.setValue (def.sampler.stretchBeats, juce::dontSendNotification);
+        granBeats.setTooltip (tr ("The sample's length in beats for Tempo locked and the Step keys, as FL's time-stretch "
+                                  "TIME; a WAV with ACID beats uses its own"));
+        granBeats.onValueChange = [this] {
+            const auto v = (float) granBeats.getValue();
+            ref.edit (engine, [v] (ChannelDef& d) { d.sampler.stretchBeats = v; });
+        };
+        addAndMakeVisible (granBeats);
+    }
+
+    bool granulizerModes = false;
+    juce::ComboBox granKeyTo, granTransients;
+    juce::ToggleButton granTempoLocked;
+    juce::Slider granBeats;
+    juce::Label granKeyToLabel, granTransientsLabel, granBeatsLabel;
+
     AudioEngine& engine;
     ChannelRef ref;
     juce::Colour accent { skin::colour::crimson }; // the plugin page's accent (ui/PluginSkin.h)
