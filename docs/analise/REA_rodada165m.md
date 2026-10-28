@@ -6,7 +6,12 @@ Patcherize / Patcherize all (null before/after). Clean-room: FL behaviour from R
 menus/DFM, the demo projects and FL running; no copied code or graphics.
 
 ## Where I stopped
-- 2026-10-27 16:50: worktree created from main 5ed718d1; studying FL (DFM menus, demo .flp 0xEE records, REA next).
+- 2026-10-27 21:10: core + UI built (Linux GUI, core tests 0 failures for perf165), merged origin/main, landing batch 1:
+  Performance mode (zone before the Start marker, launching by click / column / MIDI channel, every track setting,
+  recording the passes as clips, .flp import of the settings and of the project flag), Patcherize / Patcherize all.
+- Left: FL's "Prepare for performance mode" macro; the Performance settings apply to the clicked track (FL: every
+  selected track); FL's modifier keys 125–127 on the MIDI channel (meaning not decoded); a controller-script layer
+  (Launchpad / APC grids) beyond the generic note mapping.
 
 ## 1. Evidence
 
@@ -60,3 +65,28 @@ FL's default track: motion Stay, press Retrigger, trigger sync 4 beats, tolerant
 - `PatcherizeMenuClick` 0x11f9050 → FUN_011f8ee0 (the "lose automation links" confirmation) → FUN_011f9650 (moves
   the slot / all slots). `ChanPatcherizeMenuClick` 0x11f59b0 → same confirmation → FUN_01189ba0 (loads the generator
   template with the channel's plugin).
+
+- MIDI "playlist live mode" channel (Settings › MIDI, `PLLiveChanSelect` field 0xa70 → global 0x15c26ac, read in the
+  MIDI input handler at 0x1181be1): when the message's channel matches, Performance mode is on, the transport plays
+  in song mode: notes 120 / 121 = track offset −/+ (1, or 10 with the big-step toggle 124, clamped 0…500), 122 / 123
+  = column offset −/+ (1 or 12); 125–127 held set modifier bits 0x80 / 0x180 / 0x8 on the launches; any other note →
+  launch (FUN_01221c00) of track note / 12 + offset, column note % 12 + offset, velocity 0 = release (flag 0x20).
+- .flp: event 0x1F (byte) = Performance mode on — 1 in all six performance demos, 0 in all 20 demo songs.
+
+### 1.5 FL running [FL] (2026-10-27, Charles Deluxe demo, flref in tmp/perfmode165)
+- The project opens in Performance mode with the view on the zone (markers named Pad #1…#5); the zone's idle clips are
+  dimmed, the launched ones bright with a ▸ mark at the left edge (× on the others); while playing the Playlist title
+  reads "Performance" and the launched clip's played part is lighter (its progress).
+
+## 2. LYNX (what landed)
+- core/Performance.{h,cpp}: the Player (audio thread, lock-free commands from the UI and from the MIDI thread), every
+  press / motion / trigger sync / Queue / Tolerant / position sync; Tolerant = a launch up to 1/8 of the sync step late
+  starts at once as if on the grid point (LYNX's window; FL's exact one not decoded); stops are quantized to the
+  trigger sync grid; launches while stopped are dropped (FL launches only while playing).
+- Scheduler: the zone's clips don't play with the song; the song (and its loop) starts at the Start marker.
+- Recording (record filter "Clips", FL's bit 8): each pass becomes a clip copy on its track at the song position.
+- Playlist: click = launch (held for the hold modes), right-click = stop the track, ruler menu: Start marker, launch a
+  column, stop all; View: clip / track progress; Zoom on performance clips; Ctrl+P.
+- core/Patcherize.{h,cpp}: channel → generator Patcher (Notes → plugin → To LYNX), insert slot / all slots → effect
+  Patcher in series (side-chain through the Patcher's side-chain pin); null tests (channel max diff 3e-8, slots 0);
+  automation and links follow to the published parameters (FL loses them).
