@@ -42,7 +42,7 @@ before → after (blank = not touched in round 165). Lowest first.
 | Ember Saturator | Saturn 2 | 9 | 8 | 152b | |
 | Aether | Fresh Air | 9 | 8 | 128 | |
 | Glow Leveler | CLA-2A (Waves) | 9 | 8 | 152a | |
-| Hush De-esser | DeEsser (Waves) | 9 | 8 | 147 | |
+| Hush De-esser | DeEsser (Waves) | 10 | 8 | 165 | 9 → 10 / 8 → 8 |
 | Gemini Doubler | Doubler2 / Doubler4 (Waves) | 9 | 8 | 137 | |
 | Echoform | H-Delay (Waves) | 9 | 8 | 137 | |
 | Echoform | ValhallaDelay | 9 | 8 | 137 | |
@@ -892,7 +892,7 @@ Trial on this PC: yes (no screenshot this round).
 | Factory presets | Default (5506 Hz HP Split), Male Ess 4500, Male Shh 3385, Female Ess 6779, Female Shh 5077 (all BandPass + Split) | none | ✅ | 4–5 generic-named presets (frequency + detector) would cover it; round 135w: "Classic split (band detector)" folder: Classic default 5.5 kHz, Male S 4.5, Male SH 3.4, Female S 6.8, Female SH 5.1 kHz (LYNX names; classic voicing, band detector, split) |
 | Thresh | slider −80…0 dB, default **0**, aligned with the Energy Detector meter | "Threshold" big knob −60…0 dB, default **−30 dB**; also a draggable line on the waveform and an arrow on the meter | ⚠️ | 3 ways to set it ➕; range is 20 dB shorter; default differs |
 | Freq | value window 2000–16000 Hz (log), default **5506 Hz** | horizontal slider 2–16 kHz with end labels, same log law; default **6.02 kHz** | ✅ | same law; set the default to 5506 (v = 0.487) |
-| SideChain HighPass / BandPass | button, default HighPass | "Detection: High-pass \| Band" tabs (+ bottom-bar menu), default High-pass | ✅ | Hush BP Q 1.4; Waves "very sharp", Q unknown |
+| SideChain HighPass / BandPass | button, default HighPass | "Detection: High-pass \| Band" tabs (+ bottom-bar menu), default High-pass | ✅ | **round 165** [EXEC]: the trial's BandPass is its HighPass side chain followed by a 4th-order low-pass (Q 0.68 ×2 at 1.84 × the frequency at 5.5 kHz, 1.75 × at 8 kHz): 0.1 … 0.35 dB rms at 4.5 … 14 kHz; BandPass states are now translated (17.1 stores HighPass 1 / BandPass 0, they were all read as HighPass) |
 | Audio Split / Wideband | button, default **Split** | "Processing: Wide band \| Split band" tabs, default Split | ✅ | Hush's split is 2nd order at the frequency; Waves' is 1st order at ≈ Freq/π (engine) |
 | Monitor Output / SideChain (+ yellow light) | button | "Audition" toggle under the frequency slider (plays the detection band) | ✅ | same function, different name |
 | Energy Detector meter (side-chain energy, dB below 0 dBFS, blue) aligned with the threshold | main meter | "IN" meter = input peak with a threshold arrow, and **inside it a blue bar = the detector's energy** (what the threshold is compared with, in the threshold's scale; both engines) | ✅ | round 147 |
@@ -901,9 +901,9 @@ Trial on this PC: yes (no screenshot this round).
 | Frequency-response display | **none in the classic DeEsser** (the manual lists no graph; Renaissance DeEsser has one) | small detector-band graph only in the generic `hushDeEsser()` layout; the display-first editor shows the scrolling waveform with the reduction in red | ➕ | nothing to add for parity |
 | Range | none (the floor is the split's leakage) | "Range" 0–24 dB, default 12 | ➕ | translator fixes it at 12 dB |
 | Release | none (hidden, unknown) | 10–250 ms, default 61 ms | ➕ | |
-| Lookahead | none, 0 latency | 2 ms toggle, **on** by default (adds 2 ms of latency) | ➕/⚠️ | the default should be Off for Waves parity (spec §7.3) |
+| Lookahead | none, 0 latency | 2 ms toggle, **on** by default (adds 2 ms of latency) in Hush's own engine | ✅ | **round 165** [EXEC]: the classic voicing (the DeEsser role, where the substitutes start) has no latency, as the trial (it reported 96 samples) |
 | Output gain | none | ±12 dB | ➕ | |
-| Knee / ratio | hard knee, effective ratio ≈ 7, RMS energy | 3 dB soft knee, ratio ∞, peak | ⚠️ | engine (spec §7.2) |
+| Knee / ratio | hard knee, effective ratio ≈ 7, RMS energy | classic voicing (round 123): ratio 7.1, 1.3 dB knee, power detector; Hush's own engine: 3 dB soft knee, ∞, peak | ✅ | **round 165** [EXEC] 7 kHz stairs, thresholds −10 … −60, HighPass / BandPass, Split / Wideband (24 settings): 0.10 … 0.25 dB rms; the wide-band reduction stops at 25.6 dB (was unlimited: up to 24 dB off at −60) |
 | Gestures | slider drag, value-window typing | drag, Ctrl fine, wheel, reset, right-click entry, line/arrow drags | ✅ | |
 | Saved-state translation | — | frequency (×0.81), threshold (+5 dB), Split/Wide, HP/BP, Monitor translated; range fixed at 12 dB | ✅ | round 113 §3c |
 
@@ -911,6 +911,8 @@ Trial on this PC: yes (no screenshot this round).
 editor is Pro-DS-like. A DeEsser user finds Threshold, Freq, HP/BP, Split/Wide and Monitor (as "Audition")
 quickly. What they miss: the side-chain energy meter beside the threshold, the Attn peak hold, the output meter,
 presets, and the Waves defaults.
+
+**Round 165** (REA_rodada165h §2): configuration 9 → **10**, design 8 → 8 — BandPass measured and translated, the 25.6 dB floor, no latency; vocal-take nulls −16 … −37 dB over six settings (as shipped: −12 … −34, BandPass states playing as HighPass). Left (design): Hush's threshold knob vs the reference's −80 … 0 slider aligned with the meter.
 
 **Top gaps:**
 1. **Defaults:**

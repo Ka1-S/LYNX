@@ -49,3 +49,21 @@ tmp/parity165h/{cmp.sh,null.py,ufit.py}.
   chain) as on the reference; the band gain read-out shows only the curve in use; Split only in the E voicing.
 - Scores: config 8 → 9, design 7 → 8. Left: the E voicing's threshold direction (clockwise = higher; changing it needs
   a state migration), output fader range, gate-open LED, Expand default.
+
+## 2. Hush De-esser (classic voicing) ← Waves DeEsser (17.1 trial, black-box)
+
+Harness: D:\lynx-work\parity165\dees (s.txt: 7 kHz stairs −70 … 0 dBFS in 2 dB steps of 0.3 s at thresholds −10 … −60 ×
+HighPass / BandPass × Split / Wideband; f.txt / g.txt: 4.5 … 16 kHz stairs at dial 5506 and 8000 Hz; c.txt: a vocal take
+at six settings), states saved with `savecomponent` and translated by LYNX's substitute.
+
+- [EXEC] **Latency**: the trial reports 0; the classic voicing reported 96 samples (a plain delay). Now 0.
+- [EXEC] **BandPass states**: 17.1 stores the side chain as HighPass 1 / BandPass 0 (RealWorld 13); the translator took
+  ≥ 1.5 as BandPass, so every BandPass state played as HighPass. Fixed (0 or 2 = BandPass).
+- [EXEC] **BandPass shape**: relative to its own HighPass the trial's BandPass needs 0.3 / 0.7 / 1.8 / 4.4 / 11.9 dB more
+  input at 4.5 / 5.5 / 7 / 9 / 12 kHz (dial 5506) and 0.9 / 1.5 / 3.1 / 6.5 / 10.9 dB at 9 / 10 / 12 / 14 / 16 kHz (dial
+  8000): the high-pass side chain followed by a 4th-order low-pass (two sections, Q 0.68) at 1.8435 × (f / 5506)^−0.139
+  × the dial (0.06 dB rms at 5.5 kHz). Round 123's band-pass (Q 1.3, +3.9 dB) was up to 8 dB off.
+- [EXEC] **Floor**: in Wideband the trial never reduces more than 25.6 dB (thresholds −40 … −60); LYNX went to 49 dB.
+- Result: the 24 stair settings 0.10 … 0.25 dB rms (max 0.65); 4.5 … 14 kHz 0.1 … 0.35 dB rms (0.9 at 12 kHz, dial
+  8 kHz, HighPass); vocal take −16 … −37 dB null (−94 dB where nothing is reduced).
+- Scores: config 9 → 10, design 8 → 8.
