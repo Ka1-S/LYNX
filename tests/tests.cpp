@@ -151,6 +151,7 @@
 #include "core/Templates.h"
 #include "flp/Flp.h"
 #include "ui/I18nData.h"
+#include "ui/I18nLocale.h"
 #include "core/CrashReport.h"
 
 namespace
@@ -6452,7 +6453,7 @@ std::map<std::string, std::string> parseTable (const std::string& text, std::vec
     return table;
 }
 
-// string literals passed to tr() / TR_NOOP() in the sources (adjacent literals are concatenated)
+// string literals passed to tr() / trc() / TR_NOOP() in the sources (adjacent literals are concatenated)
 std::map<std::string, std::string> sourceKeys (const std::filesystem::path& srcDir)
 {
     std::map<std::string, std::string> keys;
@@ -6473,7 +6474,7 @@ std::map<std::string, std::string> sourceKeys (const std::filesystem::path& srcD
         }
 
         auto isIdent = [] (char c) { return std::isalnum ((unsigned char) c) || c == '_'; };
-        for (const std::string name : { "tr", "TR_NOOP" })
+        for (const std::string name : { "tr", "trc", "TR_NOOP" })
             for (auto at = text.find (name); at != std::string::npos; at = text.find (name, at + 1))
             {
                 if ((at > 0 && isIdent (text[at - 1])) || isIdent (text[at + name.size()]))
@@ -6549,10 +6550,124 @@ TEST (translations_cover_every_ui_string)
 
 TEST (translations_embedded_table_is_up_to_date)
 {
-    // src/ui/I18nData.h must be regenerated (tools/make_i18n.py) whenever the .txt changes
-    const auto text = i18ntest::readFile ("resources/i18n/pt-BR.txt");
-    CHECK (text.size() == sizeof (lynx::i18n::data::ptBR));
-    CHECK (std::memcmp (text.data(), lynx::i18n::data::ptBR, std::min (text.size(), sizeof (lynx::i18n::data::ptBR))) == 0);
+    // src/ui/i18n/<id>.h + I18nData.h must be regenerated (tools/make_i18n.py) whenever a resources/i18n/*.txt changes
+    int files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator ("resources/i18n"))
+        if (entry.path().extension() == ".txt")
+        {
+            ++files;
+            const auto id = entry.path().stem().string();
+            const auto text = i18ntest::readFile (entry.path());
+            const lynx::i18n::data::Table* found = nullptr;
+            for (const auto& t : lynx::i18n::data::tables)
+                if (id == t.id)
+                    found = &t;
+            CHECK (found != nullptr);
+            if (found == nullptr)
+            {
+                std::printf ("  %s.txt is not embedded: run python3 tools/make_i18n.py\n", id.c_str());
+                continue;
+            }
+            const auto unpacked = lynx::inflateZlib (found->zlib, found->zlibSize, false, found->textSize + 16);
+            const bool same = unpacked && unpacked->size() == text.size() && found->textSize == text.size()
+                              && std::memcmp (unpacked->data(), text.data(), text.size()) == 0;
+            CHECK (same);
+            if (! same)
+                std::printf ("  %s.txt changed since the last python3 tools/make_i18n.py\n", id.c_str());
+        }
+    CHECK (files == (int) std::size (lynx::i18n::data::tables));
+}
+
+TEST (translations_every_language_covers_the_reference_table)
+{
+    // every key of pt-BR.txt (the reference table) exists, translated, in every other language; keys just added to
+    // pt-BR.txt may wait in resources/i18n/pending.keys ("English" lines) until the other tables catch up
+    using namespace i18ntest;
+    std::vector<std::string> unused;
+    const auto reference = parseTable (readFile ("resources/i18n/pt-BR.txt"), unused);
+    std::set<std::string> pending;
+    {
+        std::istringstream in (readFile ("resources/i18n/pending.keys"));
+        std::string line, raw;
+        while (std::getline (in, line))
+            if (std::size_t pos = line.find_first_not_of (" \t"); pos != std::string::npos && quoted (line, pos, raw))
+                pending.insert (unescape (raw));
+    }
+    auto count = [] (const std::string& s, const std::string& what) {
+        int n = 0;
+        for (auto at = s.find (what); at != std::string::npos; at = s.find (what, at + what.size()))
+            ++n;
+        return n;
+    };
+
+    int languages = 0;
+    for (const auto& entry : std::filesystem::directory_iterator ("resources/i18n"))
+    {
+        const auto id = entry.path().stem().string();
+        if (entry.path().extension() != ".txt" || id == "pt-BR")
+            continue;
+        ++languages;
+        const auto text = readFile (entry.path());
+        CHECK (text.rfind ("language: ", 0) == 0); // JUCE LocalisedStrings header
+        std::vector<std::string> duplicates;
+        const auto table = parseTable (text, duplicates);
+        CHECK (duplicates.empty());
+        for (const auto& d : duplicates)
+            std::printf ("  duplicate %s entry: \"%s\"\n", id.c_str(), d.c_str());
+
+        int missing = 0, bad = 0;
+        for (const auto& [english, unusedValue] : reference)
+        {
+            const auto it = table.find (english);
+            if ((it == table.end() || it->second.empty()) && pending.count (english) == 0)
+            {
+                if (++missing <= 10)
+                    std::printf ("  no %s translation for \"%s\" (python3 tools/i18n_tool.py status)\n", id.c_str(), english.c_str());
+            }
+        }
+        for (const auto& [english, translated] : table)
+        {
+            std::string why;
+            if (translated.empty())
+                why = "empty";
+            else if (placeholders (english) != placeholders (translated))
+                why = "placeholders differ";
+            else if (count (english, "\n") != count (translated, "\n"))
+                why = "line breaks differ";
+            else if (count (english, "%") != count (translated, "%"))
+                why = "% signs differ";
+            if (! why.empty() && ++bad <= 10)
+                std::printf ("  %s: %s: \"%s\"\n", id.c_str(), why.c_str(), english.c_str());
+        }
+        CHECK (missing == 0);
+        CHECK (bad == 0);
+        if (missing > 10 || bad > 10)
+            std::printf ("  %s: %d missing, %d bad in all\n", id.c_str(), missing, bad);
+    }
+    CHECK (languages >= 0);
+}
+
+TEST (translations_os_locale_picks_the_interface_language)
+{
+    const std::vector<std::string> ids { "en", "pt-BR", "de", "es", "ja", "zh-Hans", "zh-Hant", "id", "ko" };
+    using lynx::i18n::languageForLocale;
+    CHECK (languageForLocale ("de-AT", ids) == "de");
+    CHECK (languageForLocale ("de_DE.UTF-8", ids) == "de");
+    CHECK (languageForLocale ("pt-BR", ids) == "pt-BR");
+    CHECK (languageForLocale ("pt_PT", ids) == "pt-BR");
+    CHECK (languageForLocale ("zh-Hans-CN", ids) == "zh-Hans");
+    CHECK (languageForLocale ("zh-CN", ids) == "zh-Hans");
+    CHECK (languageForLocale ("zh_TW.UTF-8", ids) == "zh-Hant");
+    CHECK (languageForLocale ("zh-Hant-HK", ids) == "zh-Hant");
+    CHECK (languageForLocale ("zh-HK", ids) == "zh-Hant");
+    CHECK (languageForLocale ("ja_JP.UTF-8@euro", ids) == "ja");
+    CHECK (languageForLocale ("in_ID", ids) == "id");
+    CHECK (languageForLocale ("es-419", ids) == "es");
+    CHECK (languageForLocale ("en-US", ids) == "en");
+    CHECK (languageForLocale ("ko:en", ids) == "ko");
+    CHECK (languageForLocale ("fr-FR", ids).empty()); // not in the list
+    CHECK (languageForLocale ("C", ids).empty());
+    CHECK (languageForLocale ("", ids).empty());
 }
 
 // --- workflow shell: pattern/channel operations, key map, workspace layout, control math -------------

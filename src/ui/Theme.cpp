@@ -19,6 +19,39 @@ juce::Font uiFont (float size, bool bold = false)
     return juce::Font (font (size, bold));
 }
 
+// A text that drawFittedText would cut (ellipsis) or squeeze below its minimum scale shows whole in the tooltip
+// (round 165o: translated labels and buttons). Only sets a tooltip the component doesn't have one of its own.
+void tooltipIfCut (juce::Component& c, juce::SettableTooltipClient& tip, const juce::Font& f, const juce::String& text,
+                   juce::Rectangle<int> area, int lines, float minScale)
+{
+    static const juce::Identifier autoTip ("lynxAutoTooltip");
+    auto& props = c.getProperties();
+    const auto own = tip.getTooltip();
+    if (own.isNotEmpty() && own != props[autoTip].toString())
+        return;
+    bool cut = false;
+    if (text.isNotEmpty() && area.getWidth() > 4 && juce::GlyphArrangement::getStringWidth (f, text) > (float) area.getWidth())
+    {
+        juce::GlyphArrangement fitted, full;
+        fitted.addFittedText (f, text, 0.0f, 0.0f, (float) area.getWidth(), (float) juce::jmax (1, area.getHeight()),
+                              juce::Justification::centredLeft, juce::jmax (1, lines), minScale);
+        full.addLineOfText (f, text, 0.0f, 0.0f);
+        auto visible = [] (juce::GlyphArrangement& ga) {
+            int n = 0;
+            for (int i = 0; i < ga.getNumGlyphs(); ++i)
+                n += ga.getGlyph (i).isWhitespace() ? 0 : 1;
+            return n;
+        };
+        cut = visible (fitted) < visible (full);
+    }
+    const auto wanted = cut ? text : juce::String();
+    if (wanted != own)
+    {
+        tip.setTooltip (wanted);
+        props.set (autoTip, wanted);
+    }
+}
+
 void fillRounded (juce::Graphics& g, juce::Rectangle<float> r, float corner, juce::Colour c)
 {
     fillRoundRect (g, r, corner, c);
@@ -339,6 +372,26 @@ void setPalette (const themes::Palette& p)
     theme::playhead = accent; theme::text = textPrimary;
 }
 
+int labelColumnWidth (std::initializer_list<const juce::Label*> labels, int minWidth, int maxWidth)
+{
+    float widest = 0.0f;
+    for (const auto* l : labels)
+        if (l != nullptr && l->getText().isNotEmpty())
+        {
+            const auto font = const_cast<juce::Label*> (l)->getLookAndFeel().getLabelFont (*const_cast<juce::Label*> (l));
+            widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, l->getText()) + (float) l->getBorderSize().getLeftAndRight() + 2.0f);
+        }
+    return juce::jlimit (minWidth, juce::jmax (minWidth, maxWidth), (int) std::ceil (widest));
+}
+
+int buttonWidth (const juce::TextButton& button, int minWidth, int maxWidth)
+{
+    auto& b = const_cast<juce::TextButton&> (button);
+    const auto font = b.getLookAndFeel().getTextButtonFont (b, juce::jmax (20, b.getHeight()));
+    const auto needed = (int) std::ceil (juce::GlyphArrangement::getStringWidth (font, b.getButtonText()) + 18.0f);
+    return juce::jlimit (minWidth, juce::jmax (minWidth, maxWidth), needed);
+}
+
 themes::Palette currentPalette()
 {
     auto c = [] (juce::Colour x) { return x.getARGB(); };
@@ -356,6 +409,51 @@ LookAndFeel::LookAndFeel()
     setDefaultSansSerifTypefaceName ("Segoe UI");
    #endif
     refreshColours();
+}
+
+juce::String uiFontForLanguage (const juce::String& languageId)
+{
+    // first installed family wins (Windows 10/11 and macOS ship these; Linux: Noto CJK / Source Han / WenQuanYi...)
+    std::initializer_list<const char*> families;
+    if (languageId == "ja")
+        families = { "Yu Gothic UI", "Meiryo UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", "Noto Sans JP",
+                     "Source Han Sans JP", "IPAexGothic", "IPAPGothic", "TakaoPGothic", "VL PGothic" };
+    else if (languageId == "ko")
+        families = { "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR", "Source Han Sans KR", "NanumGothic",
+                     "UnDotum" };
+    else if (languageId == "zh-Hans")
+        families = { "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+                     "Source Han Sans SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "Droid Sans Fallback" };
+    else if (languageId == "zh-Hant")
+        families = { "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "PingFang HK", "Noto Sans CJK TC", "Noto Sans TC",
+                     "Source Han Sans TC", "WenQuanYi Micro Hei", "AR PL UMing TW", "Droid Sans Fallback" };
+    else
+        return {};
+
+    static const auto installed = juce::Font::findAllTypefaceNames();
+    for (const auto* family : families)
+        if (installed.contains (family))
+            return family;
+    // Linux lists only the first face of a font collection (NotoSansCJK.ttc -> "Noto Sans CJK JP"): any of
+    // them covers Chinese, Japanese and Korean
+    for (const auto& family : installed)
+        for (const auto* prefix : { "Noto Sans CJK", "Noto Sans Mono CJK", "Source Han Sans", "WenQuanYi", "Droid Sans Fallback" })
+            if (family.startsWith (prefix))
+                return family;
+    return {};
+}
+
+bool needsOwnFont (const juce::String& languageId)
+{
+    return languageId == "ja" || languageId == "ko" || languageId == "zh-Hans" || languageId == "zh-Hant";
+}
+
+juce::String LookAndFeel::applyLanguageFont (const juce::String& languageId)
+{
+    const auto family = uiFontForLanguage (languageId);
+    if (family.isNotEmpty())
+        setDefaultSansSerifTypefaceName (family);
+    return family; // empty: JUCE's per-glyph font fallback still finds whatever CJK font the OS has
 }
 
 void LookAndFeel::refreshColours()
@@ -507,10 +605,12 @@ void LookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, b
         g.setColour (fg);
         content.removeFromLeft (6.0f);
         g.drawFittedText (button.getButtonText(), content.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
+        tooltipIfCut (button, button, font, button.getButtonText(), content.toNearestInt(), 1, 0.85f);
         return;
     }
 
     g.drawFittedText (button.getButtonText(), area, juce::Justification::centred, 2, 0.85f);
+    tooltipIfCut (button, button, font, button.getButtonText(), area, 2, 0.85f);
 }
 
 void LookAndFeel::drawTickBox (juce::Graphics& g, juce::Component& component, float x, float y, float w, float h, bool ticked, bool enabled,
@@ -541,9 +641,9 @@ void LookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& butto
 
     g.setColour (button.findColour (juce::ToggleButton::textColourId).withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
     g.setFont (uiFont (fontSize));
-    g.drawFittedText (button.getButtonText(),
-                      button.getLocalBounds().withTrimmedLeft (juce::roundToInt (tickSize) + 8).withTrimmedRight (2),
-                      juce::Justification::centredLeft, 2, 0.85f);
+    const auto textArea = button.getLocalBounds().withTrimmedLeft (juce::roundToInt (tickSize) + 8).withTrimmedRight (2);
+    g.drawFittedText (button.getButtonText(), textArea, juce::Justification::centredLeft, 2, 0.85f);
+    tooltipIfCut (button, button, uiFont (fontSize), button.getButtonText(), textArea, 2, 0.85f);
 }
 
 // --- combo boxes and menus -------------------------------------------------------------------------
@@ -737,7 +837,9 @@ juce::Font LookAndFeel::getMenuBarFont (juce::MenuBarComponent&, int, const juce
 
 int LookAndFeel::getMenuBarItemWidth (juce::MenuBarComponent& bar, int itemIndex, const juce::String& itemText)
 {
-    return juce::roundToInt (juce::GlyphArrangement::getStringWidth (getMenuBarFont (bar, itemIndex, itemText), itemText)) + 16;
+    // a long (translated) menu bar takes tighter item padding so the toolbar keeps its panels (round 165o)
+    const auto padding = (bool) bar.getProperties().getWithDefault ("lynxTightMenuBar", false) ? 8 : 16;
+    return juce::roundToInt (juce::GlyphArrangement::getStringWidth (getMenuBarFont (bar, itemIndex, itemText), itemText)) + padding;
 }
 
 void LookAndFeel::drawMenuBarItem (juce::Graphics& g, int width, int height, int itemIndex, const juce::String& itemText, bool isMouseOverItem,
@@ -976,8 +1078,9 @@ void LookAndFeel::drawLabel (juce::Graphics& g, juce::Label& label)
         g.setColour (label.findColour (juce::Label::textColourId).withMultipliedAlpha (alpha));
         g.setFont (font);
         const auto textArea = getLabelBorderSize (label).subtractedFrom (label.getLocalBounds());
-        g.drawFittedText (label.getText(), textArea, label.getJustificationType(),
-                          juce::jmax (1, (int) ((float) textArea.getHeight() / font.getHeight())), label.getMinimumHorizontalScale());
+        const auto lines = juce::jmax (1, (int) ((float) textArea.getHeight() / font.getHeight()));
+        g.drawFittedText (label.getText(), textArea, label.getJustificationType(), lines, label.getMinimumHorizontalScale());
+        tooltipIfCut (label, label, font, label.getText(), textArea, lines, label.getMinimumHorizontalScale());
     }
 
     const auto outline = label.findColour (juce::Label::outlineColourId);

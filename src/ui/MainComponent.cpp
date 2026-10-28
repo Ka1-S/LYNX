@@ -604,9 +604,19 @@ void MainComponent::resized()
 
     // panel widths
     auto& lf = getLookAndFeel();
-    int menuWidth = 0;
-    for (const auto& name : getMenuBarNames())
-        menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
+    auto measureMenu = [&] {
+        int w = 0;
+        for (const auto& name : getMenuBarNames())
+            w += lf.getMenuBarItemWidth (menuBar, 0, name);
+        return w;
+    };
+    menuBar.getProperties().set ("lynxTightMenuBar", false);
+    int menuWidth = measureMenu();
+    if (menuWidth > 390) // translated menu titles (German, Russian...): English stays as it was
+    {
+        menuBar.getProperties().set ("lynxTightMenuBar", true);
+        menuWidth = measureMenu();
+    }
 
     const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
     const int tempoWidth = 90 + grow, timeWidth = 110 + grow, captionWidth = 50, gridWidth = 148;

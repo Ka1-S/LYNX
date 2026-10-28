@@ -30,7 +30,7 @@ crashing plugin cannot take your session down.
 • Opens FL Studio projects (.flp) with their patterns, notes, mixer, automation and samples, and imports MIDI files.
 • Low latency: ASIO (including LYNX's own ASIO driver for any device), WASAPI shared and exclusive modes.
 • Record audio and MIDI, edit audio, automate anything, render to WAV, FLAC, MP3, OGG or stems.
-• Interface in English and Portuguese (Brazil).
+• Interface in 15 languages: English, Portuguese (Brazil), Spanish, French, German, Italian, Dutch, Polish, Russian, Turkish, Indonesian, Japanese, Korean and Chinese (Simplified and Traditional).
 
 No account, no subscription, no ads and no telemetry. LYNX is free software (GNU AGPL-3.0); the source code is on
 GitHub.
@@ -55,7 +55,7 @@ five more FL effects bit-identical to FL, Dashboard controls that send MIDI, and
 6. Multi-core engine that stays light on older PCs
 7. Audio and MIDI recording, audio editor, automation clips
 8. Export to WAV, FLAC, MP3, OGG and stems
-9. Interface in English and Portuguese (Brazil)
+9. Interface in 15 languages, including Japanese, Korean and Chinese
 10. Free and open source (AGPL-3.0): no account, no ads, no telemetry
 
 ## Search terms

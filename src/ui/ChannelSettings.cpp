@@ -1559,8 +1559,8 @@ public:
 
         auto top = area.removeFromTop (110);
         {
-            // Gain, Pitch, Stretch and the keep-pitch switch in four columns
-            const auto w4 = top.getWidth() / 4;
+            // Gain, Pitch, Stretch and the keep-pitch switch (a third of the width: its text is long)
+            const auto w4 = top.getWidth() * 2 / 9;
             for (auto [slider, label] : { std::pair { &gain, &gainLabel }, { &pitch, &pitchLabel }, { &stretch, &stretchLabel } })
             {
                 auto column = top.removeFromLeft (w4);
@@ -2156,9 +2156,10 @@ public:
                          isMouseOverOrDragging() ? theme::colour::accent : theme::colour::knobArc, isMouseOver());
         g.setFont (theme::font (theme::type::caption));
         g.setColour (theme::colour::textPrimary);
-        g.drawText (spec.text (getter()), valueArea, juce::Justification::centred);
+        // squeezed (down to 65 %) before an ellipsis: translated captions are often longer (round 165o)
+        g.drawFittedText (spec.text (getter()), valueArea.toNearestInt(), juce::Justification::centred, 1, 0.65f);
         g.setColour (theme::colour::textSecondary);
-        g.drawText (theme::caps (label), caption, juce::Justification::centred);
+        g.drawFittedText (theme::caps (label), caption.toNearestInt(), juce::Justification::centred, 1, 0.65f);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -2565,7 +2566,7 @@ public:
         fullPorta.onClick = [this] { edit ([on = fullPorta.getToggleState()] (ChannelDef& d) { d.misc.fullPorta = on; }); };
         // Vol / Key tracking
         trackVol.setButtonText (tr ("Vol"));
-        trackKey.setButtonText (tr ("Key"));
+        trackKey.setButtonText (trc ("@key tracking: Key"));
         for (auto* b : { &trackVol, &trackKey })
         {
             b->setClickingTogglesState (true);
@@ -2869,10 +2870,11 @@ public:
         {
             auto rootRow = section (area.removeFromTop (74), tr ("Root note"));
             rootSection = (int) sections.size() - 1;
-            auto toggles = rootRow.removeFromLeft (150);
+            const auto resetWidth = theme::buttonWidth (rootReset, 50, 96); // long "Reset" translations
+            auto toggles = rootRow.removeFromLeft (100 + resetWidth);
             mainPitch.setBounds (toggles.removeFromTop (22));
             auto line = toggles.removeFromTop (22);
-            rootReset.setBounds (line.removeFromRight (50).reduced (0, 1));
+            rootReset.setBounds (line.removeFromRight (resetWidth).reduced (0, 1));
             addToKey.setBounds (line);
             auto fine = rootRow.removeFromLeft (58);
             row (fine, { fineTune });

@@ -275,34 +275,51 @@ public:
     {
         auto r = getLocalBounds().reduced (12, 8);
         auto top = r.removeFromTop (30);
-        title.setBounds (top.removeFromLeft (230));
+        // round 165o: buttons and labels as wide as their (translated) text needs; the title and sliders give way
+        int modeWidth[3], i = 0;
+        for (auto* b : { &drawButton, &lineButton, &selectButton })
+            modeWidth[i++] = theme::buttonWidth (*b, 64, 120);
+        const auto clearWidth = theme::buttonWidth (clearButton, 70, 120);
+        const auto gridWidth = theme::labelColumnWidth ({ &gridLabel }, 40, 110);
+        const auto fixedTop = 240 + 12 + modeWidth[0] + modeWidth[1] + modeWidth[2] + 12 + gridWidth + 110 + clearWidth;
+        title.setBounds (top.removeFromLeft (juce::jlimit (120, 230, top.getWidth() - fixedTop)));
         targetBox.setBounds (top.removeFromLeft (240).reduced (0, 2));
         top.removeFromLeft (12);
+        i = 0;
         for (auto* b : { &drawButton, &lineButton, &selectButton })
-            b->setBounds (top.removeFromLeft (64).reduced (1, 2));
+            b->setBounds (top.removeFromLeft (modeWidth[i++]).reduced (1, 2));
         top.removeFromLeft (12);
-        gridLabel.setBounds (top.removeFromLeft (40));
+        gridLabel.setBounds (top.removeFromLeft (gridWidth));
         gridBox.setBounds (top.removeFromLeft (110).reduced (0, 2));
-        clearButton.setBounds (top.removeFromRight (70).reduced (0, 2));
+        clearButton.setBounds (top.removeFromRight (clearWidth).reduced (0, 2));
 
         auto tools = r.removeFromBottom (32);
         r.removeFromBottom (6);
         canvas = r.withTrimmedTop (4);
 
-        scaleLabel.setBounds (tools.removeFromLeft (42));
-        scaleSlider.setBounds (tools.removeFromLeft (140).reduced (0, 4));
+        const auto scaleW = theme::labelColumnWidth ({ &scaleLabel }, 42, 120), offsetW = theme::labelColumnWidth ({ &offsetLabel }, 44, 120),
+                   randomW = theme::labelColumnWidth ({ &randomLabel }, 66, 140), lfoW = theme::labelColumnWidth ({ &lfoLabel }, 28, 80);
+        const auto randomButtonW = theme::buttonWidth (randomButton, 52, 106) + 4, lfoButtonW = theme::buttonWidth (lfoButton, 52, 106) + 4;
+        const auto grown = (scaleW - 42) + (offsetW - 44) + (randomW - 66) + (lfoW - 28) + (randomButtonW - 56) + (lfoButtonW - 56);
+        const auto spare = tools.getWidth() - 874; // the widths below at their minimum (was 834: 40 px short)
+        // the three sliders give the room back first, then the LFO boxes (round 165o: German / Russian captions)
+        const auto overflow = juce::jmax (0, grown - spare);
+        const auto shrink = juce::jmin (70, overflow / 3);
+        const auto boxShrink = juce::jmin (16, juce::jmax (0, overflow - 3 * shrink) / 2);
+        scaleLabel.setBounds (tools.removeFromLeft (scaleW));
+        scaleSlider.setBounds (tools.removeFromLeft (140 - shrink).reduced (0, 4));
         tools.removeFromLeft (8);
-        offsetLabel.setBounds (tools.removeFromLeft (44));
-        offsetSlider.setBounds (tools.removeFromLeft (140).reduced (0, 4));
+        offsetLabel.setBounds (tools.removeFromLeft (offsetW));
+        offsetSlider.setBounds (tools.removeFromLeft (140 - shrink).reduced (0, 4));
         tools.removeFromLeft (12);
-        randomLabel.setBounds (tools.removeFromLeft (66));
-        amountSlider.setBounds (tools.removeFromLeft (110).reduced (0, 4));
-        randomButton.setBounds (tools.removeFromLeft (56).reduced (2, 3));
+        randomLabel.setBounds (tools.removeFromLeft (randomW));
+        amountSlider.setBounds (tools.removeFromLeft (juce::jmax (50, 110 - shrink)).reduced (0, 4));
+        randomButton.setBounds (tools.removeFromLeft (randomButtonW).reduced (2, 3));
         tools.removeFromLeft (10);
-        lfoLabel.setBounds (tools.removeFromLeft (28));
-        shapeBox.setBounds (tools.removeFromLeft (84).reduced (1, 3));
-        periodBox.setBounds (tools.removeFromLeft (78).reduced (1, 3));
-        lfoButton.setBounds (tools.removeFromLeft (56).reduced (2, 3));
+        lfoLabel.setBounds (tools.removeFromLeft (lfoW));
+        shapeBox.setBounds (tools.removeFromLeft (84 - boxShrink).reduced (1, 3));
+        periodBox.setBounds (tools.removeFromLeft (78 - boxShrink).reduced (1, 3));
+        lfoButton.setBounds (tools.removeFromLeft (lfoButtonW).reduced (2, 3));
 
         if (! fitted && plotArea().getWidth() > 50) // the whole pattern, with a little room after it
         {
