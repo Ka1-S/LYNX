@@ -380,3 +380,32 @@ TEST (export165_stem_tracks_filter)
     CHECK (exportopts::stemTracks (s, {}) == std::vector<int> ({ 1, 2, 3 }));
     CHECK (exportopts::stemTracks (s, { 4, 2, 0, 2, 99 }) == std::vector<int> ({ 2, 4 })); // armed / selected, in order
 }
+
+// LAT165_BENCH=1: the renderer's cost per 256-sample block, 16 inserts with a latent plugin, all "Never" vs all "When
+// recording or not playing" (stopped = the delay lines are skipped)
+TEST (latency165_bench_bypass_cost)
+{
+    using namespace lynx;
+    if (std::getenv ("LAT165_BENCH") == nullptr)
+        return;
+    auto run = [] (LatencyBypass mode, bool playing) {
+        auto song = latency165::impulses (16, true);
+        for (auto& t : song.mixer)
+            t.latencyBypass = mode;
+        song.mixer[0].latencyBypass = LatencyBypass::never;
+        auto state = RackState::build (song, nullptr, 48000.0, latency165::factories (100));
+        RackRenderer renderer;
+        renderer.prepare (48000.0, 256);
+        std::vector<float> l (256), r (256);
+        for (int i = 0; i < 200; ++i)
+            renderer.process (state.get(), playing, 0.0, 256, l.data(), r.data(), nullptr);
+        const auto blocks = 20000;
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < blocks; ++i)
+            renderer.process (state.get(), playing, 0.0, 256, l.data(), r.data(), nullptr);
+        return std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - start).count() / blocks;
+    };
+    for (auto playing : { true, false })
+        std::fprintf (stderr, "playing=%d never %.3f us/block, whenIdle %.3f us/block, always %.3f us/block\n", (int) playing,
+                      run (LatencyBypass::never, playing), run (LatencyBypass::whenRecordingOrStopped, playing), run (LatencyBypass::always, playing));
+}

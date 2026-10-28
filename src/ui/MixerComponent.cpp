@@ -1553,9 +1553,12 @@ juce::PopupMenu trackLatencyMenu (AudioEngine& engine, int t)
     const auto& track = song.mixer[(std::size_t) t];
     juce::PopupMenu menu;
     // FL's hint "^Track latency": "<x>ms (auto) <y>ms (manual)"
+    // auto = the plan's latency without the manual part, in samples (no ms rounding left over when no plugin has any)
     const auto total = trackLatencyMs (engine, t);
+    const auto rate = sampleRateOf (engine);
+    const auto autoMs = total - 1000.0 * lynx::manualLatencySamples (track, rate) / rate;
     menu.addSectionHeader (tr ("Latency {0} ms (auto {1} ms, manual {2} ms)",
-                               { juce::String (total, 2), juce::String (total - track.latencyMs, 2), juce::String (track.latencyMs, 2) }));
+                               { juce::String (total, 2), juce::String (std::abs (autoMs) < 0.005 ? 0.0 : autoMs, 2), juce::String (track.latencyMs, 2) }));
     menu.addItem (tr ("Reset"), track.latencyMs != 0.0f, false, [&engine, t] { setTrackLatency (engine, t, 0.0); });
     menu.addItem (tr ("Set in ms..."), [&engine, t] { askTrackLatency (engine, t, 0); });
     menu.addItem (tr ("Set in samples..."), [&engine, t] { askTrackLatency (engine, t, 1); });

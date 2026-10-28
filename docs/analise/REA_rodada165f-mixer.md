@@ -91,8 +91,21 @@ you select an input!".
   *Auto-unarm* / *Auto-create audio clip* of FL's track render (LYNX renders to files only), the label's mouse wheel
   (FL: 10 ms per notch).
 
+## 6. Checks
+- Unit tests (tests/MixerLatency165Tests.inc): the plan (manual ± latency, on top of effects, through sends, on the
+  Master, the ±5000 ms clamp), defaults change nothing, *Always* in the plan (routes and sends), the renderer (impulse
+  onsets: Never 100 samples late; *When recording or not playing* 0 stopped / 100 playing / 0 recording; *Always* 0;
+  −2.08 ms manual = 100 samples late), hardware outputs, `DelayLine::clear`, the .flp import (FL's SeamlessR demo insert 7
+  = −3.49 ms), reset, routing selected ⇄ this track, Create submix, the stem filter. `--selftest`: `track_latency=OK`
+  (.lynx round trip).
+- `--snapshot` (Linux, Xvfb): `-menus165-mixer.png` (track menu + the four submenus) and `-export165-tracks.png` (the
+  Export window for Render selected tracks) — the item order and texts follow FL's `DelayMenu` / Routing / Disk recording
+  menus of TFXForm.dfm.
+
 ## Where I stopped
-- REA done for §1–§4; §1–§3 built (model, planner, renderer bypass, .flp/.lynx, menus, render tracks, routing/submix),
-  WIP commit 37824e23 + later UI/snapshot edits. Fixing the latency165 unit tests (test setup: slot latencies need
-  effect slots; impulse sample at 48 kHz). Next: Linux GUI build + --snapshot look, null render vs main, land.
-- §4 (record source point) deferred: needs renderer taps feeding the takes (takes come from raw live input today).
+- §1–§3 built and tested; merged origin/main (conflicts: RackRenderer.cpp next to round 165i's task graph — the bypass
+  state is set once per chunk before the graph runs, read-only inside it; tests.cpp; I18nData.h regenerated).
+  Running build-local with FL Data + Windows build, then land.
+- §4 (record source point) deferred: needs renderer taps (post effects / EQ / level / track) feeding the takes after the
+  render, with the latency compensation; takes come from the raw live input today (AudioEngine). .flp 0xA5 is parsed
+  (`MixerInsert::recordSource`).
