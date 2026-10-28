@@ -636,6 +636,11 @@ private:
     void markHeldKey (int key, bool on) noexcept;
     KeyLedger playedKeys;        // UI thread: the keys the typing piano started (after the scale snap)
     SpscQueue<RecordedEvent, 1024> midiRecordQueue; // MIDI thread -> UI (recording)
+    // a controller's pitch wheel while recording (MIDI thread -> UI): key = its MIDI channel 0…15, velocity = 0..1;
+    // written as the channel's pitch bend automation like a moved knob (issue #12: the bend was heard, not recorded)
+    SpscQueue<RecordedEvent, 2048> bendRecordQueue;
+    std::map<int, float> liveBends; // UI thread: the last recorded bend of each channel (its "current value")
+    void takeRecordedBends();
 
     struct ControllerEvent
     {
@@ -667,6 +672,10 @@ private:
     int automationPattern = 0;
     int recordedAutomationPoints = 0;
     bool automationOverrideActive = false; // touched targets override their automation in the renderer
+    // Song mode, no loop region: once a parameter moved while recording, the song plays on past its end (no wrap to
+    // the start) until recording stops, and the take's clip grows with the playhead (issue #12: it cut itself)
+    bool automationLinear = false;
+    std::int64_t lastAutomationTick = -1; // the song position of the take's last update (song mode)
     std::vector<AutomationWrite> takeWrites; // per target: where this take writes (its own clip grows)
     bool takeHasUndoStep = false;
     bool perfTakeHasUndoStep = false; // the first clip a performance recording writes is the take's undo step
@@ -767,7 +776,7 @@ private:
     // the audio thread's view of the above while takes record (false when none is open)
     void updateLinearSong() noexcept
     {
-        const auto on = takeCount > 0 && linearRecording();
+        const auto on = (takeCount > 0 || automationLinear) && linearRecording();
         liveInput.linearSong.store (on || bouncing);
         liveInput.noLoopRegion.store ((on && song.hasLoop()) || bouncing);
     }

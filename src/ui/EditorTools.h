@@ -42,6 +42,8 @@ struct EditToolInfo
 };
 
 const std::vector<EditToolInfo>& editTools();
+// The tool's key map name ("pencil", "drumPaint"...): the editors' actions are "pianoRoll.tool.<it>" / "playlist.tool.<it>".
+const char* editToolId (EditTool tool);
 
 // The mouse cursor of each editor gesture (core/EditorGestures.h): the system arrows for moving,
 // resizing and selecting, LYNX's own tool icons (outlined, so they read on any background) for
@@ -66,6 +68,8 @@ public:
     int getIdealWidth (int height) const;
 
     std::function<void (EditTool)> onChange;
+    // The tooltips with the keys the key map gives the tools now (`keyOf` returns "" for a tool without one).
+    void refreshKeys (const std::function<juce::String (EditTool)>& keyOf);
 
     void resized() override;
     // the wheel over the strip steps through the tools
@@ -153,6 +157,14 @@ public:
     // with the playhead while playing; off, they stay where the user scrolled. Saved with the UI options.
     bool isFollowing (bool pianoRoll) const noexcept { return pianoRoll ? followPianoRoll : followPlaylist; }
     void setFollowing (bool pianoRoll, bool on, bool save = true); // save: call onOptionsChanged
+    // The Channel Rack's and the Audio Editor's Follow (issue #12): the rack pages to the playing step of a long
+    // pattern, the Audio Editor to its playback position.
+    enum class FollowView { playlist, pianoRoll, channelRack, audioEditor };
+    bool isFollowingView (FollowView v) const noexcept
+    {
+        return v == FollowView::channelRack ? followRack : v == FollowView::audioEditor ? followAudioEditor : isFollowing (v == FollowView::pianoRoll);
+    }
+    void setFollowingView (FollowView v, bool on, bool save = true);
     // Called after an option the main window saves changed here (it writes ui-options.txt).
     std::function<void()> onOptionsChanged;
 
@@ -160,7 +172,7 @@ private:
     EditorGlobals() = default;
     int gridOption = grid::screenOption, lastGridOption = grid::screenOption;
     std::int64_t defaultNoteLength = 0;
-    bool followPlaylist = true, followPianoRoll = true;
+    bool followPlaylist = true, followPianoRoll = true, followRack = true, followAudioEditor = true;
 };
 
 // The global grid selector of the main toolbar: left-click picks the grid, right-click sets the
