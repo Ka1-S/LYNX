@@ -9,6 +9,19 @@ Evidence markers: **[EXEC]** measured here, **[DECOMP]** Ghidra pseudocode of FL
 
 ## Where I stopped
 
+- **2026-10-28 02:45 — round finished.** Everything is on main (`2f520ca6` test profile / test mode / `--opentime`;
+  `b3934edb` the rest: task graph, rescan fix, KeepFloatMode, stretch disk cache written in the background, parallel
+  key shifters, fixed stretch seed). Results in §2, changes in §4. Open ideas, measured but not done:
+  - Empty start is ~0.8 s behind FL (2.5 vs 1.7 s): the splash's minimum time / landing delay (a UI decision) and
+    the audio device opening (~1.4 s) before the window; opening the device in parallel with the window build is the
+    next candidate.
+  - Warm opens read the stretched copies whole (505 ms thread time for Thief's 229 MB): memory-map them like the
+    PCM cache.
+  - Parallel plugin instantiation at open (FL loads bridged plugins through a queue); risky with plugins that are
+    not thread-safe at creation.
+  - The temp LYNX-cache on this PC is 2.4 GB: a size limit for the PCM cache like the stretch cache's 1 GB.
+  - Realtime A/B of the task graph through the audio device (`--rtstress`) was not run (it plays through the
+    speakers); the offline renders show the gain.
 - 2026-10-27 23:10 (resumed after the BSOD): landed so far — the test profile / test mode / `--opentime` (main
   `2f520ca6`). On feature/perf165, still to land: the task graph, the plugin rescan fix, KeepFloatMode, the stretch disk
   cache, and (new, `bae869a6`) the keep-pitch shifters made in parallel (`prepareKeyShifts`, `rack_keyshift` in
