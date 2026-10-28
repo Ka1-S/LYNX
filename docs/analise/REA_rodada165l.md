@@ -7,6 +7,11 @@ undoable, previewable, computed off the audio thread; nulls vs FL where the tool
 
 ## Where I stopped
 
+- 2026-10-28 (after the 2nd BSOD): merged origin/main (CMakeLists, build scripts, Main.cpp shots, pt-BR: duplicate
+  "1/4 beat" dropped); build-local with FL Data 1 781 887 checks, 0 failures; Windows build OK; `--edisonshot` re-run on
+  Windows with a fresh profile + LYNX_TEST_MODE (C:/Users/kauan/lynx-test/edison165/shots): the tool windows and the
+  volume envelope look as in the earlier shots. Landing.
+
 - 2026-10-27 21:15: everything compiles (Windows build OK, Linux syntax checks OK); the core tests pass in a mini
   harness (209 checks, 0 failures) and the full `build-local` had only 2 failures, both fixed since (vocal denoiser
   noise floor, events-to-automation simplification); a second `build-local` and Windows build are queued.
