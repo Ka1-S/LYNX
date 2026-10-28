@@ -18,6 +18,7 @@
 #include "core/Recorder.h"
 #include "core/TakeRecording.h"
 #include "core/WorkerPool.h"
+#include "engine/MidiSyncIo.h"
 #include "core/RackRenderer.h"
 #include "core/RtStats.h"
 #include "core/ScoreLog.h"
@@ -366,6 +367,8 @@ public:
     const prefs::MidiPrefs& getMidiPrefs() const noexcept { return midiPrefs; }
     // Applies them (and saves them in %APPDATA%\LYNX\midi-settings.txt when `save`).
     void setMidiPrefs (const prefs::MidiPrefs& prefs, bool save = true);
+    // master sync out / external clock in / all notes off (round 165f)
+    MidiSyncIo& getMidiSync() noexcept { return midiSync; }
 
     // How many undo steps are kept (Settings › General).
     void setUndoLevels (int levels);
@@ -605,6 +608,7 @@ private:
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorPlayer player;
     Transport transport;
+    MidiSyncIo midiSync; // (before the MIDI callbacks and the audio callback use it)
     SampleLibrary samples;
     LiveEventQueue liveEvents;   // UI -> audio
     LiveEventQueue midiEvents;   // MIDI thread -> audio

@@ -123,7 +123,7 @@ private:
     double sr = 48000.0, designedHz = -1.0;
     float lastDet = -120.0f;
     bool designedBp = false;
-    Biquad sc1, sc2;
+    Biquad sc1, sc2, bp1, bp2; // round 165: bp1 / bp2 = BandPass's low-pass after the high-pass
     double lpB = 0.0, lpA = 0.0, lpX[2] {}, lpY[2] {};
     double env = 0.0, gr = 0.0;
     float last = 0.0f;

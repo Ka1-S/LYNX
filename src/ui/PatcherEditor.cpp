@@ -1,5 +1,6 @@
 #include "ui/PatcherEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "ui/VoltageEditor.h"
@@ -1528,7 +1529,10 @@ private:
             case EffectKind::patcher:
                 return "Patcher";
             case EffectKind::waveCandy: case EffectKind::visualizer:
+            case EffectKind::bigClock: case EffectKind::htmlNotebook: // round 165g
                 return "Visual";
+            case EffectKind::tuner: // round 165g (FL's Tuner: an analyser)
+                return "Misc";
             default:
                 return "Misc";
         }
@@ -1831,14 +1835,16 @@ private:
             openToolWindow (std::move (editor), title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
-        if (! node.generator && VisualWindows::handles (node.effect.kind)) // Wave Candy / Visualizer in a Patcher (round 164c)
+        const auto extra = FlExtraWindows::handles (node.effect.kind); // Big Clock / Tuner / HTML NoteBook (round 165g)
+        if (! node.generator && (VisualWindows::handles (node.effect.kind) || extra)) // Wave Candy / Visualizer in a Patcher (round 164c)
         {
             VisualTarget vt;
             vt.engine = &engine;
             vt.locate = [t = target, n] (Song& song) -> EffectSlot* {
                 auto* doc = t.doc (song);
                 return doc != nullptr && n < (int) doc->nodes.size() && ! doc->nodes[(std::size_t) n].generator
-                               && VisualWindows::handles (doc->nodes[(std::size_t) n].effect.kind)
+                               && (VisualWindows::handles (doc->nodes[(std::size_t) n].effect.kind)
+                                   || FlExtraWindows::handles (doc->nodes[(std::size_t) n].effect.kind))
                            ? &doc->nodes[(std::size_t) n].effect
                            : nullptr;
             };
@@ -1850,7 +1856,10 @@ private:
                 return g != nullptr ? g->effectAt (n) : nullptr;
             };
             vt.running = [runningIn = vt.runningIn, &e = engine] { return runningIn (e); };
-            VisualWindows::openNode (vt, title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            if (extra)
+                FlExtraWindows::openNode (vt, title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
+            else
+                VisualWindows::openNode (vt, title + " - " + tr ("Patcher"), target.key() + "-node-" + juce::String (n));
             return;
         }
         if (! node.generator && node.effect.kind == EffectKind::hardwareInsert) // round 165c: the editor it has in a mixer slot

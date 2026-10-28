@@ -4,6 +4,7 @@
 #include "ui/Controllers164.h"
 #include "ui/NewtoneEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "ui/PluginEditors.h"
 
 #include <cstring>
@@ -93,6 +94,11 @@ public:
         {
             kind = fx->kind;
             layout = &plugui::layoutFor (kind);
+            if (kind == EffectKind::ember) // round 165: this window only opens for the Classic voicing — its one-screen
+            {                              // panel, not the 1110-unit multiband page around it
+                static const auto classic = [] { auto l = plugui::layoutFor (EffectKind::ember); l.height = 440; return l; }();
+                layout = &classic;
+            }
             if (kind == EffectKind::maximus) // Soundgoodizer runs on the Maximus engine: its own page
                 if (const auto blob = maximusfx::unpack (fx->state); blob && blob->build == hlfx::MaximusBuild::soundgoodizer)
                     layout = &plugui::soundgoodizerLayout();
@@ -104,6 +110,8 @@ public:
         }
 
         accent = skin::accentFor (sgApprox ? EffectKind::maximus : kind);
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's VU shows the output level, as the reference's
+            vuMode = 2;
         anim.onFrame = [this] { repaint(); };
         page = initialPage;
         if (kind == EffectKind::equo && initialPage == 0)
@@ -337,6 +345,12 @@ public:
             return;
         if (kind == EffectKind::echoform) // round 135w: Filter link moves the low and high cut together
             if (const auto edits = echosuite::echoform::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's Auto moves Output with Drive
+            if (const auto edits = mixsuite::ember::linkedEdit (current()->params, param, value); edits.size() > 1)
             {
                 setParams (edits);
                 return;
@@ -4517,6 +4531,11 @@ void open (AudioEngine& engine, int track, int slot)
         VisualWindows::open (engine, track, slot);
         return;
     }
+    if (FlExtraWindows::handles (kind)) // Big Clock, Tuner, HTML NoteBook (round 165g)
+    {
+        FlExtraWindows::open (engine, track, slot);
+        return;
+    }
     if (! canOpen (fxSlot))
         return;
     if (kind == EffectKind::formulaController) // the formula, its knobs and a monitor (REA round 133)
@@ -4576,6 +4595,7 @@ void closeAll()
     Controller164Windows::closeAll();
     NewtoneWindows::closeAll();
     VisualWindows::closeAll();
+    FlExtraWindows::closeAll();
     FacetEqWindows::closeAll();
     ProEditorWindows::closeAll();
 }
