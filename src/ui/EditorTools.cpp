@@ -27,6 +27,24 @@ const std::vector<EditToolInfo>& editTools()
     return list;
 }
 
+const char* editToolId (EditTool tool)
+{
+    switch (tool)
+    {
+        case EditTool::pencil: return "pencil";
+        case EditTool::brush: return "brush";
+        case EditTool::drumPaint: return "drumPaint";
+        case EditTool::eraser: return "eraser";
+        case EditTool::mute: return "mute";
+        case EditTool::knife: return "knife";
+        case EditTool::lasso: return "lasso";
+        case EditTool::zoom: return "zoom";
+        case EditTool::listen: return "listen";
+        case EditTool::slip: return "slip";
+    }
+    return "pencil";
+}
+
 const EditToolInfo& editToolInfo (EditTool tool)
 {
     for (const auto& t : editTools())
@@ -34,6 +52,22 @@ const EditToolInfo& editToolInfo (EditTool tool)
             return t;
 
     return editTools().front();
+}
+
+namespace
+{
+void setKeyTip (IconButton& button, const EditToolInfo& info, const juce::String& key)
+{
+    button.setTooltip (tr (info.name) + (key.isNotEmpty() ? " (" + key + ")" : juce::String()) + "\n" + tr (info.description) + "\n"
+                       + tr ("Every tool: right-click deletes, Alt ignores the grid, Ctrl+drag selects"));
+    ui::setQuickTip (button, tr (info.name), key);
+}
+} // namespace
+
+void ToolStrip::refreshKeys (const std::function<juce::String (EditTool)>& keyOf)
+{
+    for (std::size_t i = 0; i < tools.size() && i < buttons.size(); ++i)
+        setKeyTip (*buttons[i], editToolInfo (tools[i]), keyOf (tools[i]));
 }
 
 ToolStrip::ToolStrip (bool includeSlip)
@@ -52,9 +86,7 @@ ToolStrip::ToolStrip (bool includeSlip)
         button->setMouseClickGrabsKeyboardFocus (false);
         button->setOnColour (theme::colour::accent.withAlpha (0.16f)); // the light header style: a faint accent wash
         button->setIconColourWhenOn (theme::colour::accentHover);
-        button->setTooltip (tr (info.name) + " (" + juce::String::charToString ((juce::juce_wchar) info.key) + ")\n" + tr (info.description) + "\n"
-                            + tr ("Every tool: right-click deletes, Alt ignores the grid, Ctrl+drag selects"));
-        ui::setQuickTip (*button, tr (info.name), juce::String::charToString ((juce::juce_wchar) info.key));
+        setKeyTip (*button, info, juce::String::charToString ((juce::juce_wchar) info.key));
         button->setToggleState (info.tool == tool, juce::dontSendNotification);
         button->onClick = [this, t = info.tool] {
             if (tool != t)
@@ -348,6 +380,20 @@ void EditorGlobals::setFollowing (bool pianoRoll, bool on, bool save)
 {
     auto& flag = pianoRoll ? followPianoRoll : followPlaylist;
 
+    if (flag != on)
+    {
+        flag = on;
+        sendChangeMessage();
+        if (save && onOptionsChanged)
+            onOptionsChanged();
+    }
+}
+
+void EditorGlobals::setFollowingView (FollowView v, bool on, bool save)
+{
+    if (v == FollowView::playlist || v == FollowView::pianoRoll)
+        return setFollowing (v == FollowView::pianoRoll, on, save);
+    auto& flag = v == FollowView::channelRack ? followRack : followAudioEditor;
     if (flag != on)
     {
         flag = on;

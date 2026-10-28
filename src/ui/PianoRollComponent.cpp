@@ -1,4 +1,5 @@
 #include "ui/PianoRollComponent.h"
+#include "core/KeyMap.h"
 #include "core/NoteNames.h"
 
 #include "core/TransportEdit.h"
@@ -3196,7 +3197,7 @@ bool PianoRollComponent::handleKey (const juce::KeyPress& key)
     const auto alt = mods.isAltDown();
     const auto shift = mods.isShiftDown();
     const auto code = key.getKeyCode();
-    const auto letter = (int) juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code);
+    const auto letter = keys::letterOfKeyCode (code); // (0 for F-keys, numpad, arrows: issue #12)
     const auto grid = gridTicks();
     const auto bar = (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
 
@@ -3331,28 +3332,31 @@ bool PianoRollComponent::handleKey (const juce::KeyPress& key)
         }
     }
 
-    // single letters: only while the typing piano is off (otherwise they play notes)
-    if (! cmd && ! alt && ! shift && ! EditorGlobals::get().typingPiano)
-    {
-        for (const auto& t : editTools())
-            if (t.tool != EditTool::slip && letter == t.key)
-            {
-                tools.setTool (t.tool);
-                return true;
-            }
-
-        switch (letter)
-        {
-            case 'S': slideButton.setToggleState (! slideButton.getToggleState(), juce::dontSendNotification); return true;
-            case 'G': stepChannel (-1, false); return true; // previous channel
-            case 'K': stepChannel (1, false); return true;  // next channel
-            case 'H': stepChannel (-1, true); return true;  // previous channel with notes
-            case 'J': stepChannel (1, true); return true;   // next channel with notes
-            default: break;
-        }
-    }
-
+    // (the tools and the other single letters are key map actions now: runKeyAction, issue #12)
     return false;
+}
+
+bool PianoRollComponent::runKeyAction (const std::string& id)
+{
+    for (const auto& t : editTools())
+        if (t.tool != EditTool::slip && id == "pianoRoll.tool." + std::string (editToolId (t.tool)))
+        {
+            tools.setTool (t.tool);
+            return true;
+        }
+
+    if (id == "pianoRoll.slide") slideButton.setToggleState (! slideButton.getToggleState(), juce::dontSendNotification);
+    else if (id == "pianoRoll.previousChannel") stepChannel (-1, false);
+    else if (id == "pianoRoll.nextChannel") stepChannel (1, false);
+    else if (id == "pianoRoll.previousChannelWithNotes") stepChannel (-1, true);
+    else if (id == "pianoRoll.nextChannelWithNotes") stepChannel (1, true);
+    else return false;
+    return true;
+}
+
+void PianoRollComponent::refreshToolKeys (const std::function<juce::String (const std::string&)>& keyOf)
+{
+    tools.refreshKeys ([&keyOf] (EditTool t) { return keyOf ("pianoRoll.tool." + std::string (editToolId (t))); });
 }
 
 juce::PopupMenu PianoRollComponent::midiMenu()
