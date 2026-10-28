@@ -9,6 +9,7 @@
 #include "core/AudioCapture.h"
 #include "core/WaveAnalysis.h"
 #include "core/ValueMath.h"
+#include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "ui/HintBar.h"
 #include "ui/ValueControl.h"
@@ -701,13 +702,13 @@ public:
     // --- drag and drop of files -----------------------------------------------------------------------------
     bool isInterestedInFileDrag (const juce::StringArray& files) override
     {
-        return files.size() == 1 && juce::File (files[0]).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+        return files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
     }
 
     // a sample dragged from LYNX's Browser too (issue #12)
     bool isInterestedInDragSource (const SourceDetails& details) override
     {
-        return BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+        return BrowserComponent::isBrowserDrag (details) && SampleLibrary::isSampleFile (BrowserComponent::draggedFile (details));
     }
 
     void itemDropped (const SourceDetails& details) override

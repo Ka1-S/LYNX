@@ -881,7 +881,11 @@ public:
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override
     {
-        return ! flat && std::any_of (files.begin(), files.end(), [] (const juce::String& f) { return juce::File (f).existsAsFile(); });
+        // the files the Browser lists (samples, MIDI, projects, presets): an other file would not show in the folder
+        return ! flat && std::any_of (files.begin(), files.end(), [] (const juce::String& f) {
+            const juce::File file (f);
+            return file.existsAsFile() && isListed (file);
+        });
     }
 
     void fileDragMove (const juce::StringArray&, int, int y) override
@@ -916,7 +920,7 @@ public:
         for (const auto& path : files)
         {
             const juce::File source (path);
-            if (! source.existsAsFile() || source.getParentDirectory() == folder)
+            if (! source.existsAsFile() || ! isListed (source) || source.getParentDirectory() == folder)
                 continue;
             // never over a file that is there: "Kick (2).wav"
             auto target = folder.getChildFile (source.getFileName());

@@ -39,6 +39,7 @@
 #include "core/SytrusEngine.h"
 #include "core/SynthPresets.h"
 #include "core/PluginLayout.h"
+#include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "core/RackOps.h"
 #include "ui/ControllerEditors.h"
@@ -1747,7 +1748,7 @@ public:
     // A sample dropped on the waveform (from the Browser or the system) replaces the channel's sample (issue #12)
     bool isInterestedInDragSource (const SourceDetails& details) override
     {
-        return BrowserComponent::isBrowserDrag (details) && BrowserComponent::isAudioFile (BrowserComponent::draggedFile (details));
+        return BrowserComponent::isBrowserDrag (details) && SampleLibrary::isSampleFile (BrowserComponent::draggedFile (details));
     }
     void itemDragEnter (const SourceDetails&) override { setDropHighlight (true); }
     void itemDragExit (const SourceDetails&) override { setDropHighlight (false); }
@@ -1758,7 +1759,7 @@ public:
     }
     bool isInterestedInFileDrag (const juce::StringArray& files) override
     {
-        return files.size() == 1 && BrowserComponent::isAudioFile (juce::File (files[0]));
+        return files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
     }
     void fileDragEnter (const juce::StringArray&, int, int) override { setDropHighlight (true); }
     void fileDragExit (const juce::StringArray&) override { setDropHighlight (false); }
