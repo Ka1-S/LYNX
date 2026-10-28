@@ -1615,8 +1615,11 @@ Layout ridgeStrip()
     v.push_back (section (4, 4, 276, 104, TR_NOOP ("Filters")));
     v.push_back (dial (54, 50, 36, "HPF", TR_NOOP ("High-pass")));
     v.push_back (dial (140, 50, 36, "LPF", TR_NOOP ("Low-pass")));
-    v.push_back (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")));
-    v.push_back (when (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split")), "4K voicing", 0.0f, 0.5f)); // round 123: E voicing, filters before dynamics
+    // round 165: the old "filters to the side chain" switch only shows while it is on (older projects); the side chain
+    // now takes the filters and the EQ together ("EQ to SC", the Dynamics section), as on the reference
+    v.push_back (when (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")), "Filters to SC", 0.5f, 1.0f));
+    // round 123: the E voicing's filter split (filters before the dynamics); round 165: only where it acts
+    v.push_back (when (when (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split")), "4K voicing", 0.0f, 0.5f), "Voicing", 0.5f, 1.0f));
     const char* names[] = { TR_NOOP ("HF"), TR_NOOP ("HMF"), TR_NOOP ("LMF"), TR_NOOP ("LF") };
     const char* gains[] = { "HF gain", "HMF gain", "LMF gain", "LF gain" };
     const char* freqs[] = { "HF freq.", "HMF freq.", "LMF freq.", "LF freq." };
@@ -1634,7 +1637,8 @@ Layout ridgeStrip()
     }
     v.push_back (section (4, 520, 276, 192, TR_NOOP ("Equalizer")));
     v.push_back (display (10, 540, 264, 118, "ridgeeq"));
-    v.push_back (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f));
+    // round 165: the Brown / Black curves are Ridge's own engine's (the E console voicing has the console's one curve)
+    v.push_back (when (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f), "Voicing", 0.0f, 0.5f));
     // round 148: the 4K voicing (the console measured on the SSL 4K E trial) — its three EQ colours, the mic pre and
     // its gain, the make-up offset; the rest of the panel drives it with the console's own scales
     v.push_back (when (tabs (10, 664, 150, 20, "EQ colour", TR_NOOP ("Brown|Black|Orange")), "4K voicing", 0.5f, 1.0f));
@@ -1661,12 +1665,23 @@ Layout ridgeStrip()
     v.push_back (dial (330, 370, 32, "Gate release", TR_NOOP ("Release")));
     v.push_back (toggle (396, 380, 70, 20, "Gate fast", TR_NOOP ("Fast")));
     v.push_back (tabs (396, 408, 154, 20, "Expander", TR_NOOP ("Gate|Expand")));
+    // round 165: the reference's two LED ladders (compressor, expander / gate: 3 … 20 dB of reduction) on the left, the
+    // routing on the right — the dynamics in, where they sit (before / after the EQ), the EQ into their side chain
     v.push_back (section (284, 444, 272, 132, TR_NOOP ("Dynamics")));
-    v.push_back (meter (292, 466, 256, 12, 0, TR_NOOP ("Comp")));
-    v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
-    v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
-    v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
-    v.push_back (toggle (292, 540, 84, 20, "Analog", TR_NOOP ("Analog"))); // round 147b: the console emulation's colour
+    {
+        auto comp = display (292, 462, 30, 108, "grleds");
+        comp.steps = 0;
+        comp.label = TR_NOOP ("Comp");
+        v.push_back (comp);
+        auto gate = display (326, 462, 30, 108, "grleds");
+        gate.steps = 1;
+        gate.label = TR_NOOP ("Exp");
+        v.push_back (gate);
+    }
+    v.push_back (toggle (366, 464, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
+    v.push_back (toggle (456, 464, 92, 20, "Analog", TR_NOOP ("Analog"))); // round 147b: the console emulation's colour
+    v.push_back (tabs (366, 494, 182, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    v.push_back (when (toggle (366, 524, 182, 20, "EQ to SC", TR_NOOP ("EQ to side chain")), "4K voicing", 0.0f, 0.5f));
     // the GAIN block (round 129, the reference's): input trim and phase, the output fader beside the input / output
     // level meter with its peak read-outs
     v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));

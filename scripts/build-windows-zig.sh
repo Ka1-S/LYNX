@@ -22,7 +22,7 @@ mkdir -p "$OUT/juce" "$OUT/app" "$OUT/shim"
 echo '#include <dbghelp.h>' > "$OUT/shim/Dbghelp.h"
 
 MODULES=(juce_core juce_data_structures juce_events juce_graphics juce_gui_basics juce_gui_extra
-         juce_audio_basics juce_audio_devices juce_audio_formats juce_audio_processors juce_audio_utils juce_dsp)
+         juce_audio_basics juce_audio_devices juce_audio_formats juce_audio_processors juce_audio_utils juce_dsp juce_opengl)
 
 {
     echo '#pragma once'
@@ -89,7 +89,7 @@ APP_SOURCES+=(src/platform/FileTypes.cpp src/platform/Paths.cpp src/platform/Nat
 # SEH guard around calls into hosted plugins (round 111): the only unit built with -fms-extensions (__try / __except)
 APP_SOURCES+=(src/platform/CrashGuard.cpp)
 # workflow P2: core (note tools, mixer operations, history labels, browser search)
-APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/SearchService.cpp src/core/BrowserView.cpp src/core/EffectPresets.cpp src/core/PluginPresets.cpp src/core/ParamHelp.cpp)
+APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/FlAutoSlicer.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/SearchService.cpp src/core/BrowserView.cpp src/core/EffectPresets.cpp src/core/PluginPresets.cpp src/core/ParamHelp.cpp)
 # workflow P2: UI (note tool dialogs, tool windows, undo history, quick-add palette)
 APP_SOURCES+=(src/ui/NoteToolDialogs.cpp src/ui/EventEditor.cpp src/ui/AudioEditor.cpp src/ui/ToolWindow.cpp src/ui/TempoTapper.cpp src/ui/HistoryPanel.cpp src/ui/QuickAddPalette.cpp)
 # start-up: splash screen and its procedurally synthesised sound
@@ -144,7 +144,7 @@ APP_SOURCES+=(src/core/PluginLayout.cpp src/core/StateParams.cpp src/ui/PluginEd
 # crash / freeze reports: consent, anonymiser, upload, GitHub form (round 159)
 APP_SOURCES+=(src/core/CrashReport.cpp src/ui/CrashReporter.cpp)
 # visual plugins: Wave Candy, Visualizer, video export (round 164c)
-APP_SOURCES+=(src/core/VisualFx.cpp src/ui/VisualEditors.cpp)
+APP_SOURCES+=(src/core/VisualFx.cpp src/core/FruityDance.cpp src/ui/VisualEditors.cpp src/ui/VisualGl.cpp src/ui/DanceView.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

@@ -124,6 +124,10 @@ struct SampleData
     double sampleRate = 44100.0;
     // the file's own loop (WAV smpl chunk, first loop): frames [loopStart, loopEnd), −1 = none
     std::int64_t loopStart = -1, loopEnd = -1;
+    // a WAV's cue points / regions (their starts, ascending) and ACID beat count (0 = none): what FL hands a plugin as
+    // the sample's regions and beats (Fruity Granulizer's slices and tempo sync)
+    std::vector<std::int64_t> markerStarts;
+    float acidBeats = 0.0f;
 
     const float* mappedLeft = nullptr;
     const float* mappedRight = nullptr; // nullptr = mono
