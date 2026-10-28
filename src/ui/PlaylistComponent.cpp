@@ -4397,7 +4397,7 @@ void PlaylistComponent::openClipSource (int hit, bool other)
 bool PlaylistComponent::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+        if (SampleLibrary::isSampleFile (juce::File (f)))
             return true;
 
     return false;
@@ -4409,7 +4409,7 @@ namespace
 // file plays it instead of a new one. False when the file can't be read.
 bool addAudioClip (AudioEngine& engine, const juce::File& file, std::int64_t start, int track, bool reuse)
 {
-    if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;wv"))
+    if (! SampleLibrary::isSampleFile (file))
         return false;
 
     const auto data = engine.getSampleLibrary().load (file.getFullPathName());

@@ -1260,7 +1260,7 @@ bool ChannelRackComponent::loadSampleIntoSelected (const juce::File& file)
     const auto row = engine.getSelectedChannel();
     const auto& song = engine.getSong();
 
-    if (row < 0 || row >= (int) song.channels.size() || ! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+    if (row < 0 || row >= (int) song.channels.size() || ! SampleLibrary::isSampleFile (file))
         return false;
 
     const auto kind = song.channels[(std::size_t) row].instrument;
@@ -2364,7 +2364,7 @@ void ChannelRackComponent::sliceChannel (int channel)
 bool ChannelRackComponent::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;sf2;sf3"))
+        if (SampleLibrary::isSampleFile (juce::File (f)) || juce::File (f).hasFileExtension ("sf2;sf3"))
             return true;
 
     return false;
@@ -2387,7 +2387,7 @@ void ChannelRackComponent::filesDropped (const juce::StringArray& files, int x, 
             target = -1;
             continue;
         }
-        if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+        if (! SampleLibrary::isSampleFile (file)) // (FL's WavPack pack samples too: round 165q)
             continue;
 
         assignSample (target, file);

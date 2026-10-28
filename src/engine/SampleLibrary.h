@@ -36,6 +36,12 @@ public:
     // Filter for FileChooser ("*.wav;*.flac;...")
     juce::String wildcard() const;
 
+    // The audio files LYNX loads as samples (wav, aif(f), flac, ogg, mp3 and FL's WavPack .wv), by extension. Every
+    // drop target (Channel Rack, Playlist, Audio editor...) asks this, so they all take what the Browser lists
+    // (round 165q: the Channel Rack ignored FL's own .wv pack samples dropped from the Browser).
+    static bool isSampleFile (const juce::File& file);
+    static constexpr const char* sampleExtensions = "wav;aif;aiff;flac;ogg;mp3;wv";
+
 private:
     std::unique_ptr<juce::AudioFormatReader> createReader (const juce::File& file);
     std::shared_ptr<const SampleData> loadStreamed (const juce::File& file, juce::AudioFormatReader& reader);

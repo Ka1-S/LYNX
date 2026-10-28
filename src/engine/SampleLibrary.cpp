@@ -161,6 +161,11 @@ SampleLibrary::SampleLibrary()
     formats.registerFormat (new WavPackAudioFormat(), false); // .wv files from FL packs
 }
 
+bool SampleLibrary::isSampleFile (const juce::File& file)
+{
+    return file.hasFileExtension (sampleExtensions);
+}
+
 juce::String SampleLibrary::wildcard() const
 {
     return formats.getWildcardForAllFormats();
