@@ -4148,8 +4148,11 @@ public:
                 auto& v = records[(std::size_t) ri];
                 startRecord (v, pk, ku, nt, gsearch, hasUdk ? udk[(std::size_t) ku] : 0.0f, hzu, s14c, s108);
                 v.hr.fill (1.0f);
-                for (int i = 0; i < p.hrCnt; ++i)
-                    v.hr[(std::size_t) (p.hrSt + i)] = (float) std::exp ((double) (hrr[(std::size_t) i] * p.hrTab[(std::size_t) (p.hrSt + i)]));
+                for (int i = 0; i < p.hrCnt; ++i) // (exp through the plugin's IPP pointer +0x1150: A11 at precision 0)
+                {
+                    const auto e = hrr[(std::size_t) i] * p.hrTab[(std::size_t) (p.hrSt + i)];
+                    v.hr[(std::size_t) (p.hrSt + i)] = P->prec == 0 ? ippExpA11 (e) : (float) std::exp ((double) e);
+                }
                 v.note = slot;
                 if (nt.nv < (int) nt.voices.size())
                     nt.voices[(std::size_t) nt.nv++] = ri;
@@ -6511,6 +6514,9 @@ std::unique_ptr<Instrument> makeHarmorInstrument() { return std::make_unique<Har
 
 namespace harmor
 {
+float ippExpA11Model (float x) noexcept { return ippExpA11 (x); }
+float ippLnA11Model (float x) noexcept { return ippLnA11 (x); }
+
 std::vector<float> renderReference (const std::vector<std::uint8_t>& state, const std::vector<RefNote>& notes, double sampleRate,
                                     int length, int block, const std::vector<std::uint32_t>& mt, double bpm,
                                     const std::vector<std::uint8_t>& compressorState)
