@@ -2,6 +2,8 @@
 #include "platform/Paths.h"
 
 #include "core/LoadTrace.h"
+#include "core/Patcherize.h"
+#include "core/Performance.h"
 #include "core/Effects.h"
 #include "core/MixSuite.h"
 #include "core/HardwareInsert.h"
@@ -918,6 +920,17 @@ public:
             // LYNX.exe --patchershot prefix [project]: every Patcher's editor (round 141) as PNGs (a demo one without a project)
             const auto i = args.indexOf ("--patchershot");
             runPatcherShot (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].unquoted() : juce::String());
+            quit();
+            return;
+        }
+
+        if (args.contains ("--perfshot"))
+        {
+            // LYNX.exe --perfshot prefix project: the Playlist in Performance mode with a few clips launched and waiting,
+            // then the project patcherized (every insert's effects, the first channels) saved as prefix-patcherized.lynx
+            // for --patchershot (round 165m)
+            const auto i = args.indexOf ("--perfshot");
+            runPerfShot (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].unquoted() : juce::String());
             quit();
             return;
         }
@@ -5488,6 +5501,67 @@ private:
         lynx::PatcherWindows::shootMenus (offline, true, lynx::vfx::kindCount, 0, [&] (const juce::Image& image, const juce::String& name) {
             savePng (image, prefix + "-patcher-menu-" + name + ".png");
         });
+    }
+
+    void runPerfShot (const juce::String& prefix, const juce::String& projectPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        {
+            lynx::MainComponent ui (offline, false);
+            const auto size = juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_SIZE", "1600x900"), "x", "");
+            ui.setSize (juce::jlimit (800, 3840, size[0].getIntValue()), juce::jlimit (450, 2160, size[1].getIntValue()));
+            if (projectPath.isNotEmpty())
+                ui.openFile (juce::File (projectPath));
+            offline.dispatchPendingMessages();
+            offline.editSong ([] (lynx::Song& s) { s.performanceMode = true; s.mode = lynx::PlayMode::song; }, false);
+            offline.dispatchPendingMessages();
+
+            // what the Player would publish: on each of the first tracks with zone clips, one clip playing (part way)
+            // and on every other one the next clip waiting for its sync point
+            const auto& song = offline.getSong();
+            auto& live = offline.performanceStateForSnapshot();
+            const auto zone = lynx::perf::zoneClips (song);
+            int lastTrack = -1, launched = 0;
+            for (const auto index : zone)
+            {
+                const auto& c = song.playlist[(std::size_t) index];
+                if (c.track == lastTrack || c.track >= lynx::perf::maxTracks)
+                    continue;
+                lastTrack = c.track;
+                std::int64_t clips[64];
+                const auto n = lynx::perf::trackZoneClips (song, zone, c.track, clips, 64);
+                auto& view = live.tracks[(std::size_t) c.track];
+                view.playing.store (clips[(std::size_t) ((launched % 3) % n)]);
+                view.progress.store (0.2f + 0.15f * (float) (launched % 5));
+                if (launched % 2 == 1 && n > 1)
+                    view.pending.store (clips[(std::size_t) ((launched % 3 + 1) % n)]);
+                ++launched;
+            }
+            live.anyPlaying.store (launched > 0);
+            ui.selectTabForSnapshot (2);
+            offline.dispatchPendingMessages();
+            auto& playlist = ui.getPlaylistForSnapshot();
+            savePng (playlist.createComponentSnapshot (playlist.getLocalBounds()), prefix + "-playlist-song.png");
+            playlist.runAction ("playlist.zoomPerformance"); // as FL opens these demos: the zone fills the view
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-playlist.png");
+            savePng (playlist.createComponentSnapshot (playlist.getLocalBounds()), prefix + "-playlist-only.png");
+
+            // patcherize: the first insert with effects (all of them) and the first channel that can be
+            auto patched = offline.getSong();
+            for (int t = 0; t < (int) patched.mixer.size(); ++t)
+                if (lynx::patcherize::slotsForAll (patched, t).size() > 1)
+                {
+                    lynx::patcherize::patcherizeSlots (patched, t, 0, true);
+                    break;
+                }
+            for (int c = 0; c < (int) patched.channels.size(); ++c)
+                if (lynx::patcherize::patcherizeChannel (patched, c))
+                    break;
+            juce::String error;
+            lynx::ProjectFile::save (patched, juce::File (prefix + "-patcherized.lynx"), error);
+        }
     }
 
     void runPatcherShot (const juce::String& prefix, const juce::String& projectPath)

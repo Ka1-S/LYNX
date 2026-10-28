@@ -432,6 +432,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     for (auto& p : state->song.patterns)
         std::stable_sort (p.notes.begin(), p.notes.end(), [] (const Note& a, const Note& b) { return a.start < b.start; });
     state->schedule = makeScheduleIndex (state->song);
+    state->performanceZone = perf::zoneClips (state->song);
     state->sampleRate = sampleRate;
     state->buildMidiRoutes();
     state->buildAutomationTables();
@@ -873,13 +874,20 @@ void RackState::buildAutomationTables()
     const auto count = std::min<int> ((int) automations.size(), maxAutomations);
 
     automationClips.assign ((std::size_t) count, {});
+    zoneAutomations.assign ((std::size_t) count, 0);
+    const auto zoneEnd = song.performanceZoneEnd();
 
     for (int i = 0; i < (int) song.playlist.size(); ++i)
     {
         const auto& c = song.playlist[(std::size_t) i];
 
         if (c.kind == ClipKind::automation && c.automation >= 0 && c.automation < count && c.length > 0 && ! c.muted && ! song.isTrackMuted (c.track))
-            automationClips[(std::size_t) c.automation].push_back (i);
+        {
+            if (c.start < zoneEnd) // Performance mode: plays only when launched
+                zoneAutomations[(std::size_t) c.automation] = 1;
+            else
+                automationClips[(std::size_t) c.automation].push_back (i);
+        }
     }
 
     for (auto& clips : automationClips)
@@ -978,7 +986,7 @@ void RackState::buildAutomationTables()
     // the last automation of the same target wins
     for (int a = 0; a < count; ++a)
     {
-        if (automationClips[(std::size_t) a].empty() && ! automations[(std::size_t) a].isLive())
+        if (automationClips[(std::size_t) a].empty() && ! automations[(std::size_t) a].isLive() && zoneAutomations[(std::size_t) a] == 0)
             continue;
 
         bind (a, automations[(std::size_t) a].target);
@@ -1399,6 +1407,18 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     for (std::size_t a = 0; a < state.automationClips.size(); ++a)
         if (! state.automationClips[a].empty())
             automationValues[a] = automationValueAt (song, song.automations[a], state.automationClips[a], tick);
+
+    // Performance mode: the launched automation clips (the last block's passes) drive their automation
+    if (perfRunning)
+        for (int i = 0; i < perfPlayer.virtualCount(); ++i)
+        {
+            const auto& v = perfPlayer.virtualClip (i).clip;
+            if (v.kind != ClipKind::automation || v.automation < 0 || v.automation >= (int) song.automations.size()
+                || v.automation >= RackState::maxAutomations)
+                continue;
+            const auto local = std::clamp (perfClock - (double) v.start, 0.0, (double) v.length);
+            automationValues[(std::size_t) v.automation] = song.automations[(std::size_t) v.automation].valueAt (local + (double) v.offset);
+        }
 
     clearOverriddenValues();
     applyPluginParams (state, 0);
@@ -2491,12 +2511,36 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     events.clear();
 
-    if (playing && song.mode == PlayMode::song)
+    const auto songPlaying = playing && song.mode == PlayMode::song;
+    if (songPlaying)
     {
         scheduleSong (song, startTick, numSamples, ticksPerSample (bpm, sampleRate), events, resumeAudio, &state.schedule,
                       liveInput == nullptr || ! liveInput->linearSong.load (std::memory_order_relaxed));
     }
-    else if (playing && ! song.patterns.empty())
+    // Performance mode (round 165m): the launched clips, on the Player's steady clock (the transport's ticks from
+    // where playback started, never wrapping with the song loop)
+    if (songPlaying && (! state.performanceZone.empty() || perfRunning))
+    {
+        if (! perfRunning)
+            perfClock = startTick;
+        perfRunning = true;
+        const auto tps = ticksPerSample (bpm, sampleRate);
+        perfPlayer.process (song, state.performanceZone, perfLive, perfClock, startTick, numSamples * tps, true);
+        schedulePerformance (song, perfPlayer, perfClock, numSamples, tps, events, &state.schedule);
+        perfClock += numSamples * tps;
+    }
+    else if (perfRunning || (perfLive != nullptr && perfLive->anyPlaying.load (std::memory_order_relaxed)))
+    {
+        perfPlayer.process (song, state.performanceZone, perfLive, perfClock, startTick, 0.0, false);
+        perfRunning = false;
+    }
+    else if (perfLive != nullptr)
+    {
+        perf::Command c;
+        while (perfLive->commands.pop (c)) {} // nothing launches while stopped or in Pattern mode
+    }
+
+    if (! songPlaying && playing && ! song.patterns.empty())
     {
         const auto patternIndex = std::clamp (song.currentPattern, 0, (int) song.patterns.size() - 1);
         const auto& pattern = song.patterns[(std::size_t) patternIndex];
