@@ -2616,6 +2616,7 @@ countries: br
 "Band 1|Band 2|Band 3|Band 4" = "Banda 1|Banda 2|Banda 3|Banda 4"
 "Compress|Expand" = "Comprimir|Expandir"
 "GR" = "GR"
+"Input|GR|Output" = "Entrada|GR|Saída"
 "Plugin crashed" = "O plugin travou"
 "LYNX closed unexpectedly" = "O LYNX fechou inesperadamente"
 "The last session ended without closing normally. Last step: {0}. Backup copies of your project are in LYNX's autosave folder; details in crash-history.log." = "A última sessão terminou sem fechar normalmente. Último passo: {0}. As cópias de segurança do seu projeto ficam na pasta autosave do LYNX; detalhes em crash-history.log."

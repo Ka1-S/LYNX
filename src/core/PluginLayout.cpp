@@ -1769,7 +1769,8 @@ Layout glowLeveler()
     auto vu = display (170, 40, 200, 136, "vumeter");
     vu.steps = 0; // live output 0: gain reduction
     v.push_back (vu);
-    v.push_back (display (392, 22, 136, 18, "vusel"));
+    // round 165x: the VU DISPLAY selector is a parameter (saved with the project, translated from the reference's state)
+    v.push_back (tabs (392, 22, 136, 18, "VU display", TR_NOOP ("Input|GR|Output"), { 0.5f, 0.0f, 1.0f }));
     v.push_back (tabs (200, 184, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
     v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
     // round 123: the voicing — Glow's own engine, or the measured classic opto leveler (substitutes start there)

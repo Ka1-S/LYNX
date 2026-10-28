@@ -2512,26 +2512,10 @@ public:
             g.drawText (tapBpm > 0.0 ? caps (tr ("Tap")) + "  " + juce::String (tapBpm, 1) : caps (tr ("Tap")), r, juce::Justification::centred, false);
             return;
         }
-        else if (id == "vusel") // round 129: the VU display selector, INPUT | GR | OUTPUT (the reference's VU DISPLAY knob)
-        {
-            syncVuMode();
-            static constexpr int order[] = { 1, 0, 2 };
-            const char* names[] = { TR_NOOP ("Input"), TR_NOOP ("GR"), TR_NOOP ("Output") };
-            const auto w = r.getWidth() / 3.0f;
-            for (int k = 0; k < 3; ++k)
-            {
-                const auto cell = juce::Rectangle<float> (r.getX() + w * (float) k, r.getY(), w, r.getHeight()).reduced (1.5f * s, 0.0f);
-                skin::button (g, cell, vuMode == order[k], false, accent, radius::sm * s);
-                g.setColour (vuMode == order[k] ? colour::textPrimary : colour::textSecondary);
-                g.setFont (font (juce::jmax (7.0f, 9.5f * s), true));
-                g.drawText (caps (tr (names[k])), cell, juce::Justification::centred, false);
-            }
-            return;
-        }
         else if (id == "vumeter") // round 114: an analog-style VU needle showing the gain reduction (the optical leveler)
         {
             // gain reduction (needle down from 0 VU) or the output level (0 VU = −18 dBFS), like the reference's selector
-            // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (the "vusel" item)
+            // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (round 165x: the "VU display" parameter)
             syncVuMode();
             const auto level = liveMeter (vuMode == 1 ? 2 : 3);
             const auto target = vuMode != 0 ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, level)) + 18.0f))
@@ -3719,14 +3703,6 @@ public:
             repaint();
             return;
         }
-        if (item.type == Item::display && juce::String (item.display) == "vusel") // round 129: INPUT | GR | OUTPUT
-        {
-            const auto r = rectOf (item);
-            static constexpr int order[] = { 1, 0, 2 };
-            setVuMode (order[juce::jlimit (0, 2, (int) ((e.position.x - r.getX()) / r.getWidth() * 3.0f))]);
-            repaint();
-            return;
-        }
         if (item.type == Item::display && juce::String (item.display) == "sgpresets")
         {
             const auto r = rectOf (item);
@@ -4171,8 +4147,6 @@ public:
             return { tr ("Output limiter: lit while it keeps the output under 0 dBFS"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "outmeter")
             return { tr ("Output level (peak, dBFS): the lamp lights when the output clips, the number holds the highest peak; click to reset"), {}, false, false };
-        if (item.type == Item::display && juce::String (item.display) == "vusel")
-            return { tr ("VU display: what the meter shows (input level, gain reduction, output level)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
             return { tr ("Drag the point: both values at once"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "tunekeys") // round 147
