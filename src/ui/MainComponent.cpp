@@ -1090,6 +1090,12 @@ keys::Context MainComponent::focusContext() const
     return keys::Context::global;
 }
 
+void MainComponent::dragOperationStarted (const juce::DragAndDropTarget::SourceDetails&)
+{
+    // a drop on a window above this one (the Sampler's waveform, a plugin...) lands there, not on the panel under it
+    matchWindowOrderToScreen();
+}
+
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
     const auto chord = chordFromKeyPress (key);
