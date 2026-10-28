@@ -944,6 +944,8 @@ public:
     {
         if (vocalOn)
             return vocalEngine.latencySamples();
+        if (classicOn) // round 165 [EXEC]: the reference reports 0 samples, so the classic voicing has no latency
+            return 0;
         return delay.len + (osFactor > 1 ? Oversampler::latency() : 0);
     }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
@@ -1009,9 +1011,10 @@ private:
             scL = scR = nullptr;
             return;
         }
-        if (classic (p))
+        classicOn = classic (p);
+        if (classicOn)
         {
-            // the measured classic de-esser has no look-ahead; the fixed latency Hush reports is kept as a plain delay
+            // the measured classic de-esser has no look-ahead and (round 165) no latency, as the reference
             vmatch::deesser::Settings c;
             c.hz = hz (p[frequency]);
             c.thresholdDb = classicThresholdDb (p[threshold]);
@@ -1020,8 +1023,6 @@ private:
             c.listen = on (p[listen]);
             c.outputDb = lin (p[output], -12.0, 12.0);
             classicEngine.process (l, r, n, c);
-            for (int i = 0; i < n; ++i)
-                delay.process (l[i], r[i]);
             meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
             meters.setDetector (classicEngine.detectorDb());
             return;
@@ -1236,6 +1237,7 @@ private:
     vmatch::deesser::DeEsser classicEngine;
     vmatch::vocalds::DeEsser vocalEngine;
     bool vocalOn = false;
+    bool classicOn = false; // round 165: the classic voicing has no latency
     Biquad detect, detectLp, listenF, listenLp, split, bandLp, bandLp2, topHp, topHp2;
     double env = 0.0, gr = 0.0, fullEnv = 0.0;
     double envCh[2] {}, grCh[2] {};
