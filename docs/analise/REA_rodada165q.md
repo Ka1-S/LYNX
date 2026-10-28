@@ -7,6 +7,8 @@ works (real windows, mouse and keyboard), with a fresh `LYNX_PROFILE_DIR` + `LYN
 (shots in /mnt/d/lynx-work/audit165/, not in git).
 
 ## Where I stopped
+- 2026-10-28 13:45: sessions 6-8 done; F10 (plugin window close → activation) and F11 (.wv drops) fixed and verified
+  on Windows; .o cleanup committed. Landing now (merge origin/main under the merge lock, then land.sh).
 - 2026-10-28 13:05: session 5 done on the branch build: F2/F4/F6 verified with real input, --windowtest OK
   (16 checks incl. the name dialog). Theme FAIL withdrawn; F9 handed to r165p. Landing now; next session 6 = plugin
   window (#8 presets menu, Space in a plugin window, many plugins abuse).
@@ -60,7 +62,7 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
 | 9 | Options › Theme | PASS (first FAIL withdrawn) | s5_13/s5_15/s5_18: opens Settings › Theme cold, over Settings › MIDI, with the Mixer open and right after Mixer › Change color; i5 could not be reproduced with real input (same code) |
 | 11 | Ghost steps after the pattern's end; clicking one lengthens the pattern | PASS | f7/f8 (16 → 32 steps) |
 | 11 | Setting a step is silent | PASS | f8/f9: master meter dark right after the click (f10: it does light up while playing) |
-| 11 | Drop a Browser sample into the Channel Rack | PASS | f15: new "DL Breaker" sampler channel (drop from the OS file manager not automated) |
+| 11 | Drop a Browser sample into the Channel Rack (new channel / onto a channel to replace) | FAIL → fixed here | f15 passed with a .wav; with FL's own pack samples (WavPack .wv, e.g. Drums (ModeAudio)/Attack Kick 01.wv) the drop did nothing (s7_03-s7_05). Fixed (F11); s8_01: new channel + Snare replaced, s8_02 plays, s8_03 .wv on the Playlist |
 | 11 | Double right-click-and-hold mutes a clip | PASS | j2/j3: clip veiled + strike line (the muted look) |
 | 11 | Playlist vertical zoom with Alt+wheel | PASS | j0/j1 |
 | 9 | Sampler fine tune reaches the audio | PASS | +53 cents on a 440 Hz sine → exported WAV peak 453.67 Hz (expected 453.63) |
@@ -80,6 +82,13 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
 | 4 | Undo history Ctrl+H; Quick-add Ctrl+A / Ctrl+Z (real scan codes) | PASS | s5_10/s5_11/s5_51 — F3 stays withdrawn |
 
 ## Findings (not in the posted claims, found on the way)
+- F11 (fixed here): the Channel Rack (drop, isInterestedInFileDrag, load into selected), the Playlist's file-drag test
+  and Newtone each had their own extension list without "wv", while the Browser lists and previews FL's WavPack pack
+  samples. One list now: SampleLibrary::isSampleFile (core; Browser, Channel Rack, Playlist, Newtone use it); test
+  audit165_drop_targets_take_every_sample_the_browser_lists. (r165p's new Audio editor drop code has the same old
+  list — told the coordinator.)
+- F10 verified: after the fix, closing Pro-Q 4's window leaves LYNX in front (3/3, then 12 fast open/close cycles,
+  alive; Space right after the close plays — s7_01).
 - F10 (fixed here): closing an active third-party plugin window (its X; also F12 / Alt+F12 / removing the plugin)
   handed the Windows activation to ANOTHER program (here a terminal on the second screen) instead of LYNX, so the
   next Space or shortcut went to that program. Reproduced 2/2 with Pro-Q 4 (s6, `wins` shows fg = the terminal's
