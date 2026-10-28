@@ -45,6 +45,7 @@
 #include "core/FlpImport.h"
 #include "core/NewtoneFx.h"
 #include "core/VisualFx.h"
+#include "core/FlExtraFx.h"
 #include "flp/Flp.h"
 
 namespace lynx
@@ -1218,6 +1219,27 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             emphasizer::toParams (*s, slot.params.data());
             return slot;
         }
+    // round 165g (REA_rodada165g): Fruity Mute 2 (exact), Big Clock, Tuner, HTML NoteBook
+    if (pluginName == "Fruity Mute 2")
+    {
+        auto slot = makeEffectSlot (EffectKind::fruityMute2);
+        flextra::mute2::fromFl (state, slot);
+        return slot;
+    }
+    if (pluginName == "Fruity Big Clock")
+        return makeEffectSlot (EffectKind::bigClock);
+    if (pluginName == "Tuner")
+    {
+        auto slot = makeEffectSlot (EffectKind::tuner);
+        flextra::tuner::fromFl (state, slot);
+        return slot;
+    }
+    if (pluginName == "Fruity HTML NoteBook")
+    {
+        auto slot = makeEffectSlot (EffectKind::htmlNotebook);
+        slot.state = flextra::htmlnotebook::stateFor (flextra::htmlnotebook::address (state));
+        return slot;
+    }
     if (pluginName == "Wave Candy") // REA_rodada164c: LYNX's analyser in its role, in the display mode FL's state shows
     {
         auto slot = makeEffectSlot (EffectKind::waveCandy);
@@ -1548,6 +1570,10 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::flFrequencyShifter: return { "Frequency Shifter" };
         case EffectKind::flLowLifter: return { "Low Lifter" };
         case EffectKind::waveCandy: return { "Wave Candy" };
+        case EffectKind::fruityMute2: return { "Fruity Mute 2" };
+        case EffectKind::bigClock: return { "Fruity Big Clock" };
+        case EffectKind::tuner: return { "Tuner" };
+        case EffectKind::htmlNotebook: return { "Fruity HTML NoteBook" };
         case EffectKind::visualizer: return { "ZGameEditor Visualizer" };
         case EffectKind::xyController: return { "Fruity X-Y Controller" };
         case EffectKind::xyzController: return {}; // (FL's X-Y-Z Controller: name from REA_rodada164a)

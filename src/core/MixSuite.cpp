@@ -944,6 +944,8 @@ public:
     {
         if (vocalOn)
             return vocalEngine.latencySamples();
+        if (classicOn) // round 165 [EXEC]: the reference reports 0 samples, so the classic voicing has no latency
+            return 0;
         return delay.len + (osFactor > 1 ? Oversampler::latency() : 0);
     }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
@@ -1009,9 +1011,10 @@ private:
             scL = scR = nullptr;
             return;
         }
-        if (classic (p))
+        classicOn = classic (p);
+        if (classicOn)
         {
-            // the measured classic de-esser has no look-ahead; the fixed latency Hush reports is kept as a plain delay
+            // the measured classic de-esser has no look-ahead and (round 165) no latency, as the reference
             vmatch::deesser::Settings c;
             c.hz = hz (p[frequency]);
             c.thresholdDb = classicThresholdDb (p[threshold]);
@@ -1020,8 +1023,6 @@ private:
             c.listen = on (p[listen]);
             c.outputDb = lin (p[output], -12.0, 12.0);
             classicEngine.process (l, r, n, c);
-            for (int i = 0; i < n; ++i)
-                delay.process (l[i], r[i]);
             meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
             meters.setDetector (classicEngine.detectorDb());
             return;
@@ -1236,6 +1237,7 @@ private:
     vmatch::deesser::DeEsser classicEngine;
     vmatch::vocalds::DeEsser vocalEngine;
     bool vocalOn = false;
+    bool classicOn = false; // round 165: the classic voicing has no latency
     Biquad detect, detectLp, listenF, listenLp, split, bandLp, bandLp2, topHp, topHp2;
     double env = 0.0, gr = 0.0, fullEnv = 0.0;
     double envCh[2] {}, grCh[2] {};
@@ -1717,6 +1719,14 @@ bool modulated (const EffectParams& p) noexcept
     return false;
 }
 bool measuredEffects (const EffectParams& p) noexcept { return on (p[effectLaw]); }
+
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value)
+{
+    std::vector<std::pair<int, float>> edits { { param, value } };
+    if (param == classicDrive && on (p[classicAuto]))
+        edits.push_back ({ classicOutput, emberclassic::autoOutput (p[classicOutput], p[classicDrive], value) });
+    return edits;
+}
 double collapseRatio (double referenceDrive) noexcept { return std::exp2 (-2.0 * std::clamp (referenceDrive, 0.0, 1.0)); }
 
 float shape (Style s, float x) noexcept
@@ -2730,6 +2740,7 @@ private:
         c.steep = on (p[classicSteep]);
         c.mix = std::clamp ((double) p[classicMix], 0.0, 1.0);
         c.outputDb = emberclassic::outputDb (p[classicOutput]);
+        c.measuredPunish = on (p[classicLaw]);
         if (! classicOn || ! (c == classicSet))
         {
             if (! classicOn)
@@ -2922,7 +2933,9 @@ const EffectInfo& emberInfo()
                                      { "Mod 2 source", 0.0f }, { "Mod 2 target", 0.0f }, { "Mod 2 amount", 0.5f },
                                      { "Mod 3 source", 0.0f }, { "Mod 3 target", 0.0f }, { "Mod 3 amount", 0.5f },
                                      { "Mod 4 source", 0.0f }, { "Mod 4 target", 0.0f }, { "Mod 4 amount", 0.5f },
-                                     { "Effect law", 1.0f } } };
+                                     { "Effect law", 1.0f },
+                                     // round 165 (Decapitator: Auto, the Classic law)
+                                     { "Classic auto", 1.0f }, { "Classic law", 1.0f } } };
     return info;
 }
 
@@ -3200,6 +3213,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case mod1Target: case mod2Target: case mod3Target: case mod4Target: return modTargetName (modTargetOf (v));
             case mod1Amount: case mod2Amount: case mod3Amount: case mod4Amount: return fmt ("%+.3f", modAmount (v));
             case effectLaw: return on (v) ? "measured" : "static";
+            case classicAuto: return onOff (v);
+            case classicLaw: return on (v) ? "measured" : "round 136";
             case band2Style: case band3Style: case band4Style: case band5Style: case band6Style:
             {
                 static const char* names[] = { "tube", "tape", "transistor", "fuzz" };
