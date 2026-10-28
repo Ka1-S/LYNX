@@ -38,8 +38,8 @@ TEST (gemini_doubler_measured_shelves_round165w)
         if (std::abs (got - pt.want) >= 0.3)
             std::printf ("  shelf %s %.0f dB @ %.0f Hz, %.0f Hz: %.2f (trial %.2f)\n", pt.high ? "high" : "low", pt.db, pt.f0, pt.hz, got, pt.want);
         CHECK (std::abs (got - pt.want) < 0.3);
-        // the editor's curve (the analog prototype) agrees
-        CHECK (std::abs (g::shelfResponseDb (pt.hz, pt.f0, pt.db, pt.high, true) - pt.want) < 0.4);
+        // the editor's curve (the engine's response at 48 kHz) agrees
+        CHECK (std::abs (g::shelfResponseDb (pt.hz, pt.f0, pt.db, pt.high, true) - got) < 0.1);
     }
     // round 124's law stays for projects saved before (one first-order section, −30 … +12)
     {
@@ -49,7 +49,7 @@ TEST (gemini_doubler_measured_shelves_round165w)
         p[g::highGain] = g::shelfValue (-12.0, false);
         p[g::highFreq] = g::freqValue (2448.0);
         const auto got = level (p, 7962.0) - level (base, 7962.0);
-        CHECK (std::abs (got - g::shelfResponseDb (7962.0, 2448.0, -12.0, true, false)) < 0.4);
+        CHECK (std::abs (got - g::shelfResponseDb (7962.0, 2448.0, -12.0, true, false)) < 0.1);
         CHECK (formatEffectParam (EffectKind::geminiDoubler, g::highGain, g::shelfValue (-12.0, false), 120.0, p) == "-12.0 dB");
     }
 }
@@ -95,4 +95,96 @@ TEST (gemini_doubler_translates_deep_shelf_cuts_round165w)
     CHECK (s.kind == EffectKind::geminiDoubler && s.params[g::eqLaw] == 1.0f);
     CHECK (std::abs (g::shelfDb (s.params[g::lowGain]) + 60.0) < 1e-4 && std::abs (g::shelfDb (s.params[g::highGain]) + 88.0) < 1e-4);
     CHECK (s.params[g::lowOn] == 1.0f && s.params[g::highOn] == 1.0f);
+}
+
+// Glow's classic voicing: a 1 kHz burst, then a −40 dBFS probe; the gain (dB, against the probe's own level before the
+// burst) at times after the burst ends
+namespace p165w
+{
+inline std::vector<double> glowRecovery (const lynx::EffectParams& p, double burstDb, double burstSecs, const std::vector<double>& at)
+{
+    using namespace lynx;
+    constexpr double sr = 48000.0;
+    const auto pre = (std::size_t) sr, burst = (std::size_t) (burstSecs * sr), post = (std::size_t) (16.0 * sr);
+    std::vector<float> l (pre + burst + post), r;
+    for (std::size_t i = 0; i < l.size(); ++i)
+        l[i] = (float) (std::pow (10.0, ((i >= pre && i < pre + burst) ? burstDb : -40.0) / 20.0) * std::sin (2.0 * 3.141592653589793 * 1000.0 * (double) i / sr));
+    const auto x = l;
+    r = l;
+    auto slot = makeEffectSlot (EffectKind::glowLeveler);
+    slot.params = p;
+    auto fx = makeEffect (slot);
+    fx->prepare (sr);
+    fx->reset();
+    for (std::size_t off = 0; off < l.size(); off += 256)
+        fx->process (l.data() + off, r.data() + off, (int) std::min<std::size_t> (256, l.size() - off), p, 120.0);
+    const auto gainAt = [&] (std::size_t from) { // 10 ms window
+        double ey = 0.0, ex = 0.0;
+        for (auto i = from; i < from + 480; ++i) { ey += (double) l[i] * l[i]; ex += (double) x[i] * x[i]; }
+        return 10.0 * std::log10 (ey / ex);
+    };
+    const auto base = gainAt (pre / 2);
+    std::vector<double> out;
+    for (const auto t : at)
+        out.push_back (gainAt (pre + burst + (std::size_t) (t * sr)) - base);
+    return out;
+}
+} // namespace p165w
+
+TEST (glow_classic_measured_release_round165w)
+{
+    using namespace lynx;
+    namespace g = mixsuite::glow;
+    auto p = makeEffectSlot (EffectKind::glowLeveler).params;
+    CHECK (p[g::releaseLaw] == 1.0f && p[g::voicing] == 1.0f && (int) effectInfo (EffectKind::glowLeveler).params.size() == g::count);
+    // [EXEC] the trial (fresh instance: Gain 40, Peak reduction 46, Compress): 2 s at 0 dBFS, then the probe
+    const std::vector<double> at { 0.1, 0.5, 1.0, 2.0, 5.0, 10.0 };
+    static constexpr double trial46[] = { -6.20, -2.18, -1.29, -0.84, -0.31, -0.06 };
+    auto got = p165w::glowRecovery (p, 0.0, 2.0, at);
+    for (std::size_t k = 0; k < at.size(); ++k)
+    {
+        if (std::abs (got[k] - trial46[k]) >= 0.45)
+            std::printf ("  glow 46: %.1f s %.2f dB (trial %.2f)\n", at[k], got[k], trial46[k]);
+        CHECK (std::abs (got[k] - trial46[k]) < 0.45);
+    }
+    // the same after 10 s of reduction (the trial: no long memory, the same recovery)
+    got = p165w::glowRecovery (p, 0.0, 10.0, at);
+    for (std::size_t k = 0; k < at.size(); ++k)
+        CHECK (std::abs (got[k] - trial46[k]) < 0.6);
+    // Limit at peak reduction 62.6, 2 s at −6 dBFS
+    p[g::mode] = 1.0f;
+    p[g::peakReduction] = 0.626f;
+    static constexpr double trialLimit[] = { -9.99, -3.03, -1.74, -1.12, -0.41, -0.08 };
+    got = p165w::glowRecovery (p, -6.0, 2.0, at);
+    for (std::size_t k = 0; k < at.size(); ++k)
+    {
+        if (std::abs (got[k] - trialLimit[k]) >= 0.7)
+            std::printf ("  glow limit: %.1f s %.2f dB (trial %.2f)\n", at[k], got[k], trialLimit[k]);
+        CHECK (std::abs (got[k] - trialLimit[k]) < 0.7);
+    }
+    // round 123's release (older projects) keeps its long tail: more than 0.5 dB still held 10 s after the burst
+    p = makeEffectSlot (EffectKind::glowLeveler).params;
+    p[g::releaseLaw] = 0.0f;
+    got = p165w::glowRecovery (p, 0.0, 10.0, at);
+    CHECK (got[5] < -0.5);
+    CHECK (formatEffectParam (EffectKind::glowLeveler, g::releaseLaw, 0.0f, 120.0, p) == "round 123");
+}
+
+TEST (glow_older_projects_keep_the_round123_release_round165w)
+{
+    using namespace lynx;
+    namespace g = mixsuite::glow;
+    auto slot = makeEffectSlot (EffectKind::glowLeveler);
+    upgradeLoadedEffectParams (slot, (std::size_t) g::releaseLaw);
+    CHECK (slot.params[g::releaseLaw] == 0.0f && slot.params[g::optoLaw] == 1.0f);
+    slot = makeEffectSlot (EffectKind::glowLeveler);
+    upgradeLoadedEffectParams (slot, (std::size_t) g::count);
+    CHECK (slot.params[g::releaseLaw] == 1.0f);
+    // a CLA-2A state translates to the measured release
+    int n = 0;
+    std::string values;
+    for (int i = 0; i < 208; ++i)
+        values += i == 38 ? "40 " : i == 74 ? "46 " : i == 204 ? "100 " : i == 140 ? "2 " : "0 ";
+    const auto s = vm123::wavesSlot ("CLA-2A", values.c_str(), n);
+    CHECK (s.kind == EffectKind::glowLeveler && s.params[g::releaseLaw] == 1.0f);
 }

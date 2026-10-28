@@ -1002,7 +1002,9 @@ namespace
 // round 123's slow conductance kept ≈ 0.8 dB for many seconds. Each conductance releases as dC/dt = −a Cⁿ − b C.
 struct ReleaseLaw { double a, n, share, slowAttackMs, a2, n2, b, b2; };
 constexpr ReleaseLaw release123 { releaseA, releaseN, slowShare, attackSlowMs, releaseA2, releaseN2, 0.0, 0.0 };
-constexpr ReleaseLaw release165 { releaseA, releaseN, slowShare, attackSlowMs, releaseA2, releaseN2, 0.0, 0.0 }; // FIT
+// fitted (glowfit, Nelder-Mead on 18 trajectories, 10 ms windows): rms 0.61 → 0.24 dB overall, the recovery 0.08 … 0.25 dB
+// (round 123: 0.08 … 0.84); holdout, round 152's 0.5 s stairs, falling half: 0.52 / 0.76 / 0.65 → 0.43 / 0.45 / 0.46 dB
+constexpr ReleaseLaw release165 { 10.0803, 1.30607, 0.619196, 2380.52, 12.7434, 4.47791, 0.814689, 0.49767 };
 } // namespace
 
 void Leveler::prepare (double sampleRate) noexcept

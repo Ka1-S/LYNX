@@ -99,7 +99,7 @@ double rateValue (float v) noexcept;     // 0.1 .. 400 (log); the LFO runs at ra
 double shelfDb (float v, bool measured = true) noexcept; // measured law: −88 .. +12 dB; round 124's: −30 .. +12 dB
 float shelfValue (double db, bool measured = true) noexcept;
 bool measuredEq (const EffectParams& p) noexcept;
-// the shelf's magnitude (dB) at f for a corner f0 and a gain (the analog prototype; editor display)
+// the shelf's magnitude (dB) at f for a corner f0 and a gain: the engine's response at 48 kHz (editor display)
 double shelfResponseDb (double f, double f0, double db, bool high, bool measured) noexcept;
 double freqHz (float v) noexcept;        // 16 .. 21357 Hz (log)
 float freqValue (double hz) noexcept;

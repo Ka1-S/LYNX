@@ -418,17 +418,20 @@ float shelfValue (double db, bool measured) noexcept
 }
 bool measuredEq (const EffectParams& p) noexcept { return on (p[eqLaw]); }
 // round 165w [EXEC] (REA_rodada165w §3): the 17.1 trials' shelf is two identical first-order sections, each with half the
-// gain (dB) and its fixed corner at f0 · 1.557 (high shelf) or f0 / 1.557 (low shelf); the other corner moves with the
+// gain (dB) and its fixed corner at f0 · 1.557 (high shelf) or f0 / 1.5605 (low shelf); the other corner moves with the
 // gain, so below about −24 dB the shelf turns into a 12 dB / octave cut at that corner (the manual's "the floor drops to
 // make a cut filter"). Fitted on stepped tones at −88 … +12 dB, 101 / 281 / 1189 / 2448 Hz: within 0.04 dB rms.
-constexpr double shelfCorner = 1.557;
+constexpr double shelfCorner = 1.557, lowShelfCorner = 1.5605; // high / low (fitted separately)
 double shelfResponseDb (double f, double f0, double db, bool high, bool measured) noexcept
 {
+    // the engine's response at 48 kHz (its bilinear filters: frequencies through the same pre-warp)
+    const auto warp = [] (double hz) { return std::tan (pi * std::min (hz, 0.49 * 48000.0) / 48000.0); };
     const auto g = dbToGain (db);
+    const auto w = warp (f);
     if (measured)
     {
-        const auto a = std::sqrt (g), fp = high ? f0 * shelfCorner : f0 / shelfCorner, fz = high ? fp / a : fp * a;
-        const auto x = (1.0 + (f / fz) * (f / fz)) / (1.0 + (f / fp) * (f / fp));
+        const auto a = std::sqrt (g), wp = warp (high ? f0 * shelfCorner : f0 / lowShelfCorner), wz = high ? wp / a : wp * a;
+        const auto x = (1.0 + (w / wz) * (w / wz)) / (1.0 + (w / wp) * (w / wp));
         return 2.0 * (10.0 * std::log10 (x) + (high ? 0.0 : 20.0 * std::log10 (a)));
     }
     const auto r = std::max (g, 1.0 / g);
@@ -438,7 +441,8 @@ double shelfResponseDb (double f, double f0, double db, bool high, bool measured
         fz = g >= 1.0 ? lo : up, fp = g >= 1.0 ? up : lo, k = 1.0;
     else
         fz = g >= 1.0 ? up : lo, fp = g >= 1.0 ? lo : up, k = g >= 1.0 ? r : 1.0 / r;
-    return 20.0 * std::log10 (k) + 10.0 * std::log10 ((1.0 + (f / fz) * (f / fz)) / (1.0 + (f / fp) * (f / fp)));
+    const auto wz = warp (fz), wp = warp (fp);
+    return 20.0 * std::log10 (k) + 10.0 * std::log10 ((1.0 + (w / wz) * (w / wz)) / (1.0 + (w / wp) * (w / wp)));
 }
 double freqHz (float v) noexcept { return 16.0 * std::pow (21357.0 / 16.0, clamp01 (v)); }
 float freqValue (double hz) noexcept { return (float) std::clamp (std::log (std::max (hz, 1.0) / 16.0) / std::log (21357.0 / 16.0), 0.0, 1.0); }
@@ -732,7 +736,7 @@ private:
     void measuredShelf (Biquad& b, double f0, double db, bool high) const noexcept
     {
         const auto a = std::sqrt (dbToGain (db));
-        const auto fp = high ? f0 * shelfCorner : f0 / shelfCorner;
+        const auto fp = high ? f0 * shelfCorner : f0 / lowShelfCorner;
         const auto wp = std::tan (pi * std::min (fp, 0.49 * sr) / sr), wz = high ? wp / a : wp * a, k = high ? 1.0 : a;
         const auto n0 = k * (wz + 1.0) / wz, n1 = k * (wz - 1.0) / wz;
         const auto d0 = (wp + 1.0) / wp, d1 = (wp - 1.0) / wp;
