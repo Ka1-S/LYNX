@@ -848,6 +848,13 @@ void Graph::allNotesOff() noexcept
             n->instrument->allNotesOff();
 }
 
+void Graph::cut() noexcept
+{
+    for (auto& n : nodes)
+        if (n->instrument != nullptr)
+            n->instrument->cut();
+}
+
 void Graph::slideTo (int key, float cents, float samples) noexcept
 {
     for (const auto t : noteTargets)
@@ -1295,6 +1302,7 @@ public:
     void noteOn (int key, float velocity) noexcept override { graph.noteOn (key, velocity); }
     void noteOff (int key) noexcept override { graph.noteOff (key); }
     void allNotesOff() noexcept override { graph.allNotesOff(); }
+    void cut() noexcept override { graph.cut(); }
     void midiMessage (const std::uint8_t* bytes, int size) noexcept override { graph.midiMessage (bytes, size); }
     void pitchBend (float semitones) noexcept override { graph.pitchBend (semitones); }
     void controlChange (int cc, float value) noexcept override { graph.controlChange (cc, value); }

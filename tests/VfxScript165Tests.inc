@@ -475,11 +475,36 @@ TEST (vfx_script_runs_fl_factory_scripts)
         CHECK (keys.size() >= 4 && keys[0] == 60 && keys[1] == 64 && keys[2] == 67 && keys[3] == 60);
         CHECK (at.size() >= 2 && at[1] - at[0] == 11025);
     }
-    // FL's Note Formula (spec S7): "note + 12"
+    // ... synced, Speed 3 (as in FL's render, round 165d): the arpeggio stops when the held notes are released
+    if (auto s = load (dir / "Arpeggiator.fst"))
+    {
+        const auto info = script::describe (*s);
+        auto v = script::valuesOf (*info, *s);
+        for (auto [name, value] : { std::pair { "Sync", 1.0 }, { "Speed", 3.0 } })
+            if (const auto i = info->index (name); i >= 0)
+                v.numbers[(std::size_t) i] = value;
+        script::writeValues (*s, *info, v);
+        auto p = makeProcessor (Kind::script, writeScript (*s));
+        const auto out = vfxs165::play (*p, { vfxs165::on (5512, 60), vfxs165::on (5512, 64), vfxs165::on (6890, 67), vfxs165::off (97387, 60),
+                                              vfxs165::off (97387, 64), vfxs165::off (98765, 67) },
+                                        176400);
+        long last = 0;
+        int ons = 0;
+        for (const auto& o : out)
+            if (o.e.type == Event::Type::on)
+                last = o.at, ++ons;
+        if (last > 99000)
+            std::printf ("  synced arpeggio: %d notes, the last at %ld\n", ons, last);
+        CHECK (ons >= 10 && last <= 99000);
+    }
+    // FL's Note Formula (spec S7): "note + 12", also for a note at the render's first sample (FL has ticked before)
     if (auto s = load (dir / "Note Formula Examples" / "1 - Raise the pitch by one octave.fst"))
     {
         auto p = makeProcessor (Kind::script, writeScript (*s));
-        const auto keys = vfxs165::keysOn (vfxs165::play (*p, { vfxs165::on (300, 60) }, 2048));
+        auto keys = vfxs165::keysOn (vfxs165::play (*p, { vfxs165::on (300, 60) }, 2048));
+        CHECK ((keys == std::vector<int> { 72 }));
+        auto first = makeProcessor (Kind::script, writeScript (*s));
+        keys = vfxs165::keysOn (vfxs165::play (*first, { vfxs165::on (0, 60) }, 2048));
         CHECK ((keys == std::vector<int> { 72 }));
     }
 }

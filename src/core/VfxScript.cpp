@@ -737,6 +737,7 @@ private:
     double freeTicks = 0.0;
     bool wasPlaying = false;
     bool hasTick = false, hasTrigger = false, hasRelease = false;
+    bool warmedUp = false; // (FL has run onTick while stopped before any note: one call before the first block)
 };
 
 // --- _lynxvfx (native) ---------------------------------------------------------------------------------------------
@@ -1104,6 +1105,7 @@ void Runtime::compileOnPythonThread (const ScriptSettings& settings, bool keepVa
         publishedInfo = full;
     }
     hasTick = info->hasTick;
+    warmedUp = false;
     hasTrigger = info->hasTrigger;
     hasRelease = info->hasRelease;
     ok = info->compiled;
@@ -1188,6 +1190,23 @@ void Runtime::run (Job& j) noexcept
     auto& t = j.transport;
     const auto bpm = std::max (1.0, t.bpm);
     const auto spt = t.sampleRate * 60.0 / (bpm * ppq); // samples per script tick
+    if (! warmedUp && hasTick)
+    {
+        // FL calls onTick while the song is stopped too, so a script has always ticked before its first note (FL's
+        // Note Formula compiles its formula there); a render starts playing at once, so one stopped tick comes first
+        py_TValue a[3];
+        py_newint (&a[0], ppq);
+        py_newfloat (&a[1], bpm);
+        py_newbool (&a[2], false);
+        callGlue ("_set", 3, a);
+        py_newint (&a[0], 0);
+        callGlue ("_tick", 1, a);
+        if (! stopped)
+            call ("onTick", 0, nullptr);
+        if (! stopped)
+            callGlue ("_sync", 0, nullptr);
+    }
+    warmedUp = true;
     {
         py_TValue a[3];
         py_newint (&a[0], ppq);
