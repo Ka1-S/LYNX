@@ -1,6 +1,7 @@
 #include "ui/VideoPlayerView.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <map>
@@ -394,8 +395,21 @@ private:
 
     void publish (const std::vector<std::uint8_t>& bytes, int w, int h, double t)
     {
-        if (back.isNull() || back.getWidth() != w || back.getHeight() != h)
-            back = juce::Image (juce::Image::ARGB, w, h, false);
+        // a buffer neither shown nor still held by a window (the UI keeps the frame it drew)
+        juce::Image* free = nullptr;
+        for (auto& img : pool)
+            if (img.isValid() && img.getWidth() == w && img.getHeight() == h && img.getReferenceCount() == 1)
+                free = &img;
+        if (free == nullptr)
+        {
+            auto* slot = &pool[0];
+            for (auto& img : pool)
+                if (img.isNull() || img.getReferenceCount() == 1)
+                    slot = &img;
+            *slot = juce::Image (juce::Image::ARGB, w, h, false);
+            free = slot;
+        }
+        auto back = *free;
         {
             juce::Image::BitmapData data (back, juce::Image::BitmapData::writeOnly);
             for (int y = 0; y < h; ++y)
@@ -403,11 +417,9 @@ private:
         }
         {
             std::lock_guard<std::mutex> lock (out);
-            std::swap (shown, back);
+            shown = back;
             shownTime = t;
         }
-        if (back.isValid() && (back.getWidth() != w || back.getHeight() != h))
-            back = {};
         ++frames;
     }
 
@@ -418,7 +430,8 @@ private:
     double wantTime = 0.0;
     bool wantMoving = false, restart = false;
     std::unique_ptr<juce::ChildProcess> process;
-    juce::Image shown, back;
+    juce::Image shown;
+    std::array<juce::Image, 3> pool;
     double shownTime = -1.0, lastShown = -1e9;
     std::atomic<int> frames { 0 };
 };
@@ -608,6 +621,24 @@ private:
     }
 };
 
+// The control panel's background (docked below the video, or over its bottom like FL's undocked panel)
+class PanelBack final : public juce::Component
+{
+public:
+    juce::String status;
+    bool overlay = false;
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (theme::colour::bg3.withAlpha (overlay ? 0.82f : 1.0f));
+        g.fillRect (getLocalBounds());
+        g.setColour (theme::colour::border);
+        g.drawHorizontalLine (0, 0.0f, (float) getWidth());
+        g.setColour (theme::colour::textSecondary);
+        g.setFont (theme::font (theme::type::small));
+        g.drawText (status, getLocalBounds().withTrimmedTop (getHeight() - 18).reduced (8, 0), juce::Justification::centredLeft);
+    }
+};
+
 class ClickLabel final : public juce::Label
 {
 public:
@@ -657,12 +688,13 @@ public:
     {
         setWantsKeyboardFocus (true);
         addAndMakeVisible (surface);
+        panelBack.setInterceptsMouseClicks (false, false);
+        addAndMakeVisible (panelBack);
         surface.onSize = [this] (juce::Rectangle<int> r) {
             if (window == nullptr)
                 sizeDecoder (r);
         };
         surface.onDoubleClick = [this] { detach(); };
-        surface.addMouseListener (this, false);
 
         auto icon = [this] (IconButton& b, const juce::String& hint, std::function<void()> click) {
             ui::setHint (b, hint);
@@ -736,29 +768,17 @@ public:
         window = nullptr;
     }
 
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (theme::colour::bg2);
-        g.setColour (theme::colour::bg3);
-        g.fillRect (panelArea);
-        g.setColour (theme::colour::border);
-        g.drawHorizontalLine (panelArea.getY(), 0.0f, (float) getWidth());
-        if (! info.hasVideo && settings.path.size() > 0)
-        {
-            g.setColour (theme::colour::textSecondary);
-            g.setFont (theme::font (theme::type::small));
-        }
-        g.setColour (theme::colour::textSecondary);
-        g.setFont (theme::font (theme::type::small));
-        g.drawText (statusLine, panelArea.withTrimmedTop (panelArea.getHeight() - 18).reduced (8, 0), juce::Justification::centredLeft);
-    }
+    void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg2); }
 
     void resized() override
     {
         auto r = getLocalBounds();
         const auto panelHeight = 98;
         panelArea = r.removeFromBottom (panelHeight);
-        surface.setBounds (r);
+        // FL's "Dock control panel": the panel below the video; else over the video's bottom
+        surface.setBounds (settings.dock ? r : getLocalBounds());
+        panelBack.overlay = ! settings.dock;
+        panelBack.setBounds (panelArea);
         locateButton.setBounds (r.withSizeKeepingCentre (160, 28).translated (0, 40));
         auto p = panelArea.reduced (8, 6);
         auto row1 = p.removeFromTop (22);
@@ -850,6 +870,8 @@ private:
             loadedPath = path;
             info = path.isNotEmpty() ? probe (path).info : video::Info {};
             decoder.setSource (info.hasVideo ? path : juce::String(), info);
+            if (window == nullptr)
+                sizeDecoder (surface.getLocalBounds());
         }
         refreshControls();
     }
@@ -880,6 +902,10 @@ private:
         if (settings.delay > 0)
             s << "  |  " << tr ("Delay playback by {0}", { juce::String (video::formatTime (seconds (settings.delay), settings.timeDisplay, info.fps)) });
         statusLine = s;
+        panelBack.status = s;
+        panelBack.repaint();
+        if (panelBack.overlay == settings.dock)
+            resized();
         rail.duration = info.duration;
         rail.start = seconds (settings.start);
         rail.end = settings.end > 0 ? seconds (settings.end) : 0.0;
@@ -1181,7 +1207,8 @@ private:
         const auto delay = seconds (settings.delay);
         juce::Component::SafePointer<VideoPlayerEditor> self (this);
         statusLine = tr ("Extracting the sound...");
-        repaint();
+        panelBack.status = statusLine;
+        panelBack.repaint();
         std::thread ([self, file, ffmpeg, wav, delay] {
             bool ok = wav.existsAsFile();
             if (! ok)
@@ -1309,6 +1336,7 @@ private:
     VideoSurface* detachedSurface = nullptr;
     std::unique_ptr<DetachedWindow> window;
     juce::Rectangle<int> panelArea;
+    PanelBack panelBack;
     IconButton loadButton { IconButton::Icon::load }, optionsButton { IconButton::Icon::options }, setStartButton { IconButton::Icon::start },
         setEndButton { IconButton::Icon::end }, loopButton { IconButton::Icon::loop }, playButton { IconButton::Icon::play },
         stopButton { IconButton::Icon::stop }, soundButton { IconButton::Icon::sound }, detachButton { IconButton::Icon::detach };

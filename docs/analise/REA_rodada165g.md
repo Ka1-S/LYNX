@@ -67,6 +67,15 @@ FL Studio Mobile channels keep LYNX's synth substitute with a note saying why; R
 of their own) are imported muted, with the note (Fruity Video Player: §7 since batch 2).
 
 ## 6. Left for a next round (groundwork)
+- Transmitter, round 165g batch 2 [DECOMP Transmitter_x64.dll]: CreatePlugInstance 0x7145c0 builds the class at VMT
+  0x714360 (slot 3 SaveRestoreState 0x7157e0, slot 7 Eff_Render 0x717600). The render hands the block to a separate
+  engine object (+0x154): its vtable +0x30 processes (n, in, out, the transient / sustain envelope buffers +0x134 /
+  +0x13c), +0x48 returns the two chains' buffers; the sidechain input (+0x230) and the two envelope sends (+0x234 /
+  +0x238) are mixer tracks read / written through the host (+0x120 / +0x128). The editor's 64 controls (DFM hints):
+  Sensitivity, Lookahead, Stereo link, Hold / Release times, Detection mode and sidechain track, Transient / Sustain
+  level, amplitude, tilt, and per section Saturation (drive, warmth, mix), Diffuser (delay, depth, mix), Bounce (delay
+  curve, amp curve, mix) and Delay (time ×2 with tempo-based time, feedback, mix). A faithful port of this engine is a
+  round of its own; not started.
 - Transmitter [DATA 34 presets, tmp scratch tr.py]: state = i32 version 3 + 47 ints. Ints 1–33 are controls 0…10000
   (Default: 7475, 1968, 1968, 8743, 8743, 5000, 5000, 10000, 9112, 0, 5000, 5051, …), 34–42 flags/selectors (34–38
   0/1 enables: "Transient only" clears 38, "Sustain only" clears 37; 39–40 selectors 0…5; 41–42 0/1), 46 = 49…90,
