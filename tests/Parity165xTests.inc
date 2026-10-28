@@ -82,7 +82,7 @@ TEST (glow_auto_makeup_reference_round165x)
     namespace g = mixsuite::glow;
     namespace o = vmatch::opto;
     const auto& info = effectInfo (EffectKind::glowLeveler);
-    CHECK ((int) info.params.size() == g::count && g::makeupRef == g::count - 1);
+    CHECK ((int) info.params.size() == g::count && g::makeupRef == 11 && g::vuDisplay == g::count - 1);
     auto p = makeEffectSlot (EffectKind::glowLeveler).params;
     CHECK (p[g::makeupRef] == 0.46f); // round 152's reference: older projects unchanged
     // the level of a −40 dBFS tone (below the threshold)
@@ -142,6 +142,14 @@ TEST (glow_auto_makeup_reference_round165x)
     if (std::abs (probe (s.params) - (off + 11.37)) >= 0.15)
         std::printf ("  glow translated auto makeup: %.2f dB (expected %.2f)\n", probe (s.params), off + 11.37);
     CHECK (std::abs (probe (s.params) - (off + 11.37)) < 0.15);
+    // [EXEC] the VU DISPLAY knob (RealWorld 17: 0 In, 1 GR, 2 Out) is translated; a new Glow shows the gain reduction
+    CHECK (s.params[g::vuDisplay] == 0.5f && g::vuModeOf (s.params[g::vuDisplay]) == 1);
+    CHECK (makeEffectSlot (EffectKind::glowLeveler).params[g::vuDisplay] == 0.0f && g::vuModeOf (0.0f) == 0 && g::vuModeOf (1.0f) == 2);
+    values.clear();
+    for (int i = 0; i < 208; ++i)
+        values += i == 38 ? "40 " : i == 74 ? "46 " : i == 17 ? "2 " : "0 ";
+    CHECK (vm123::wavesSlot ("CLA-2A", values.c_str(), n).params[g::vuDisplay] == 1.0f);
+    CHECK (formatEffectParam (EffectKind::glowLeveler, g::vuDisplay, 1.0f, 120.0, makeEffectSlot (EffectKind::glowLeveler).params) == "output");
 }
 
 TEST (hush_extended_ranges_round165x)

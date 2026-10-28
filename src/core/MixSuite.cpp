@@ -3033,7 +3033,9 @@ const EffectInfo& glowInfo()
                                      // round 165w: the measured release (a project saved before keeps round 123's)
                                      { "Opto release", 1.0f },
                                      // round 165x: the dial where Auto makeup was switched on (0.46 = round 152's)
-                                     { "Makeup ref", 0.46f } } };
+                                     { "Makeup ref", 0.46f },
+                                     // round 165x: what the VU shows (0 gain reduction, 0.5 input, 1 output), saved
+                                     { "VU display", 0.0f } } };
     return info;
 }
 
@@ -3170,6 +3172,8 @@ std::string onOff (float v) { return on (v) ? "on" : "off"; }
 
 namespace glow
 {
+
+int vuModeOf (float v) noexcept { return v < 0.25f ? 0 : v < 0.75f ? 1 : 2; }
 
 std::string classicParamText (int param, float v)
 {
@@ -3317,6 +3321,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case optoLaw: return on (v) ? "measured" : "round 123";
             case releaseLaw: return on (v) ? "measured" : "round 123";
             case makeupRef: return fmt ("%.0f", v * 100.0);
+            case vuDisplay: return vuModeOf (v) == 1 ? "input" : vuModeOf (v) == 2 ? "output" : "gain reduction";
             case analog: return analogHz (v) == 0 ? "off" : analogHz (v) == 50 ? "50 Hz" : "60 Hz";
             default: return fmt ("%.2f", v);
         }

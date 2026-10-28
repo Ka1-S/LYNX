@@ -2514,6 +2514,7 @@ public:
         }
         else if (id == "vusel") // round 129: the VU display selector, INPUT | GR | OUTPUT (the reference's VU DISPLAY knob)
         {
+            syncVuMode();
             static constexpr int order[] = { 1, 0, 2 };
             const char* names[] = { TR_NOOP ("Input"), TR_NOOP ("GR"), TR_NOOP ("Output") };
             const auto w = r.getWidth() / 3.0f;
@@ -2531,6 +2532,7 @@ public:
         {
             // gain reduction (needle down from 0 VU) or the output level (0 VU = −18 dBFS), like the reference's selector
             // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (the "vusel" item)
+            syncVuMode();
             const auto level = liveMeter (vuMode == 1 ? 2 : 3);
             const auto target = vuMode != 0 ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, level)) + 18.0f))
                                             : -juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
@@ -3660,7 +3662,7 @@ public:
         }
         if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output / input
         {
-            vuMode = (vuMode + 1) % 3;
+            setVuMode ((vuMode + 1) % 3);
             repaint();
             return;
         }
@@ -3721,7 +3723,7 @@ public:
         {
             const auto r = rectOf (item);
             static constexpr int order[] = { 1, 0, 2 };
-            vuMode = order[juce::jlimit (0, 2, (int) ((e.position.x - r.getX()) / r.getWidth() * 3.0f))];
+            setVuMode (order[juce::jlimit (0, 2, (int) ((e.position.x - r.getX()) / r.getWidth() * 3.0f))]);
             repaint();
             return;
         }
@@ -4441,6 +4443,19 @@ private:
     std::vector<double> tapIntervals;
     double tapBpm = 0.0; // the "iometer" display: input and output (round 129)
     int vuMode = 0;            // what the VU shows: 0 gain reduction, 1 input level, 2 output level (0 VU = −18 dBFS)
+    // round 165x: Glow keeps the VU display as a parameter (saved with the project, translated from the reference's state)
+    void syncVuMode()
+    {
+        if (kind == EffectKind::glowLeveler)
+            if (const auto* fx = current(); fx != nullptr && fx->params.size() > (std::size_t) mixsuite::glow::vuDisplay)
+                vuMode = mixsuite::glow::vuModeOf (fx->params[(std::size_t) mixsuite::glow::vuDisplay]);
+    }
+    void setVuMode (int mode)
+    {
+        vuMode = mode;
+        if (kind == EffectKind::glowLeveler && current() != nullptr)
+            setParams ({ { mixsuite::glow::vuDisplay, mode == 1 ? 0.5f : mode == 2 ? 1.0f : 0.0f } });
+    }
     juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
 

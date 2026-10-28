@@ -1424,6 +1424,9 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
     // already holds the make-up: 40 → 53.79 after Auto Makeup on at 46 and the dial to 80; the host's Gain parameter
     // still reads 40), so the loaded dial is the make-up's reference (round 152 added the make-up again from 46)
     slot.params[g::makeupRef] = slot.params[g::peakReduction];
+    // round 165x [EXEC]: 17 = VU DISPLAY (0 In, 1 GR, 2 Out; read back through the trial's own parameter)
+    const auto vu = std::lround (wavesValue (rw, 17).value_or (1.0));
+    slot.params[g::vuDisplay] = vu == 0 ? 0.5f : vu == 2 ? 1.0f : 0.0f;
     return 8;
 }
 
