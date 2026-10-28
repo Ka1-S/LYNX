@@ -2137,6 +2137,38 @@ ImageData parseImage (const std::vector<std::uint8_t>& t)
 }
 
 inline float expF (float x) noexcept { return (float) std::exp ((double) x); }     // IPP Exp_32f (taken as correctly rounded)
+
+// IPP's 11-bit vector functions, which Harmor calls at precision "Average" (plugin +0x1150 Exp_32f_A11, +0x1158
+// Ln_32f_A11; A24 above) — measured black-box on FL's dsp_ippv2_x64.dll (REA_rodada165g-flbeta165h §3): the AVX2
+// code path (every CPU with AVX2 and FMA) evaluates them as below, bit for bit; IPP's SSE/AVX paths (CPUs without
+// AVX2) round some steps differently. fma32 is a float fused multiply-add (a·b exact in double, one rounding to float
+// except at a ~2⁻²⁹ chance of a double-rounding tie).
+inline float fma32 (float a, float b, float c) noexcept { return (float) ((double) a * (double) b + (double) c); }
+
+inline float ippExpA11 (float x) noexcept
+{
+    if (! (x > -87.3f && x < 88.7f)) // denormal / overflow range (and NaN): IPP's own handling is not modelled
+        return (float) std::exp ((double) x);
+    const auto n = std::nearbyint (x * 0x1.715476p+0f);  // round(x·log2 e)
+    const auto r = fma32 (-n, 0x1.62e430p-1f, x);        // x − n·ln 2
+    const auto q = fma32 (fma32 (fma32 (0x1.52c758p-3f, r, 0x1.01e5acp-1f), r, 0x1.0007bcp+0f), r, 1.0f);
+    return (float) std::ldexp ((double) q, (int) n);
+}
+
+inline float ippLnA11 (float x) noexcept
+{
+    if (! (x >= 1.17549435e-38f && x <= 3.40282347e+38f)) // zero, negative, denormal, inf, NaN
+        return (float) std::log ((double) x);
+    std::int32_t bits;
+    std::memcpy (&bits, &x, 4);
+    const auto e = (bits - 0x3f2aaaab) >> 23; // x = 2^e·m, m in [2/3, 4/3)
+    const std::int32_t mb = bits - (e << 23);
+    float m;
+    std::memcpy (&m, &mb, 4);
+    const auto f = m - 1.0f;
+    const auto q = fma32 (fma32 (fma32 (0x1.c25266p-3f, f, -0x1.11d1fcp-2f), f, 0x1.54e2c0p-2f), f, -0.5f);
+    return fma32 ((float) e, 0x1.62e430p-1f, fma32 (q * f, f, f));
+}
 inline float expm1F (float x) noexcept { return (float) std::expm1 ((double) x); } // IPP Expm1_32f
 inline float divF (float a, float b) noexcept { return (float) ((double) a / (double) b); } // IPP Div_32f
 
@@ -4637,6 +4669,9 @@ private:
 
     // ---- one control block of a record (FUN_0088ab10 / hmodel.Voice.control) ----
 
+    // the vector exp of the control block: IPP Exp_32f_A11 at precision 0, (nearly) exact above
+    float vexp (float x) const noexcept { return P->prec == 0 ? ippExpA11 (x) : (float) fastExp ((double) x); }
+
     void hzarr (Record& v) noexcept
     {
         if (! v.hzdirty)
@@ -4647,7 +4682,7 @@ private:
             auto h = (float) v.f[(std::size_t) i] * fsF;
             h = std::max (h, 16.3515987f);
             v.hz[(std::size_t) i] = h;
-            v.l2[(std::size_t) i] = (float) fastLog ((double) h) * 1.44269502f;
+            v.l2[(std::size_t) i] = (P->prec == 0 ? ippLnA11 (h) : (float) fastLog ((double) h)) * 1.44269502f;
         }
         v.hzdirty = false;
     }
@@ -4843,7 +4878,7 @@ private:
             {
                 const auto val = (float) (a4 * 0.0008333333333333334 * ln2);
                 for (int i = 0; i < n; ++i)
-                    v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) std::exp (p.uniTab[(std::size_t) i] * val);
+                    v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) vexp (p.uniTab[(std::size_t) i] * val);
             }
             if (v.firstblk)
             {
@@ -5057,7 +5092,7 @@ private:
             {
                 const auto gh = (float) p.glideHz;
                 for (int i = 0; i < n; ++i)
-                    v.kg[(std::size_t) i] = (float) fastExp ((double) (v.hz[(std::size_t) i] * gh));
+                    v.kg[(std::size_t) i] = vexp (v.hz[(std::size_t) i] * gh);
             }
             else
                 std::fill (v.kg.begin(), v.kg.begin() + n, (float) p.glide);
@@ -5136,7 +5171,7 @@ private:
             case 0:
                 mask();
                 for (int i = 0; i < m; ++i)
-                    v.f[(std::size_t) (4 + i)] = v.f[(std::size_t) (4 + i)] * (double) expF (buf[(std::size_t) i] * a0);
+                    v.f[(std::size_t) (4 + i)] = v.f[(std::size_t) (4 + i)] * (double) vexp (buf[(std::size_t) i] * a0);
                 break;
             case 1:
             case 2:
@@ -5183,7 +5218,7 @@ private:
                     for (int i = 0; i < n; ++i)
                     {
                         const auto w = p.hasUniTab ? (p.uniTab[(std::size_t) i] * t[(std::size_t) i]) * s : t[(std::size_t) i] * s;
-                        v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) expF (w);
+                        v.f[(std::size_t) i] = v.f[(std::size_t) i] * (double) vexp (w);
                     }
                 }
             }
@@ -5489,7 +5524,7 @@ private:
                     e = (tableRead (fl.rmask, v.l2[(std::size_t) i] * mS + mO, prec) * e) * kk;
                 else
                     e = e * kk;
-                T[i] = T[i] * (float) fastExp ((double) e);
+                T[i] = T[i] * vexp (e);
             }
         }
         else if (r > 0.0 && fl.noise && v.fcarry != 0.0)
@@ -5671,12 +5706,12 @@ private:
 
     // FUN_00888da0: per-partial pluck decay exp(table·f5); with the pluck blend exp(f5 / mix of the DLL's pluck table and
     // timbre 2), the mix being the timbre-mix value (at most 1)
-    static void pluckRates (const Part& p, const double* A, int n, float f5, float* out) noexcept
+    void pluckRates (const Part& p, const double* A, int n, float f5, float* out) const noexcept
     {
         if (p.blend != 5)
         {
             for (int i = 0; i < n; ++i)
-                out[i] = (float) fastExp ((double) (p.pkTab[(std::size_t) i] * f5));
+                out[i] = vexp (p.pkTab[(std::size_t) i] * f5);
             return;
         }
         auto m = (float) f32 (p.tmix * A[3]);
@@ -5686,7 +5721,7 @@ private:
         for (int i = 0; i < n; ++i)
         {
             const auto t = (p.pkTabDll[(std::size_t) i] - p.T2[(std::size_t) i]) * w + p.T2[(std::size_t) i];
-            out[i] = (float) std::exp ((double) (f5 / t));
+            out[i] = vexp (f5 / t);
         }
     }
 
@@ -5801,7 +5836,7 @@ private:
             if (freq)
             {
                 const auto e = masked ? (Mv * Pv) * e3 : Pv * e3;
-                const auto g = P->prec >= 1 ? std::exp ((double) e * ln2) : (double) std::exp (e * (float) ln2);
+                const auto g = P->prec >= 1 ? std::exp ((double) e * ln2) : (double) ippExpA11 (e * (float) ln2);
                 v.f[(std::size_t) i] = v.f[(std::size_t) i] * g;
             }
             else if (masked)
