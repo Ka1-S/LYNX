@@ -270,6 +270,10 @@ std::shared_ptr<SampleData> readStretched (const juce::File& file)
 
 void pruneStretchCache()
 {
+    // writes cut short by quitting (an hour old: not one another LYNX is writing now)
+    for (const auto& t : SampleLibrary::cacheFolder().findChildFiles (juce::File::findFiles, false, "*.str.*.tmp"))
+        if (t.getLastModificationTime() < juce::Time::getCurrentTime() - juce::RelativeTime::hours (1))
+            t.deleteFile();
     auto files = SampleLibrary::cacheFolder().findChildFiles (juce::File::findFiles, false, "*.str");
     juce::int64 total = 0;
     for (const auto& f : files)
@@ -319,6 +323,17 @@ void writeStretched (const juce::File& file, const SampleData& data)
     if (! temp.moveFileTo (file)) // (another LYNX wrote it meanwhile: keep that one)
         temp.deleteFile();
 }
+// The disk copy is written in the background, off the project open (round 165i: on Windows the 23 stretched copies of
+// Thief, 229 MB, took 14.7 s of the threads' time to write, the open waited 7 s more than without the cache). One
+// low-priority thread, never destroyed: a write cut short by quitting leaves a .tmp, which the next prune removes.
+void writeStretchedLater (const juce::File& file, std::shared_ptr<const SampleData> data)
+{
+    static auto* writer = new juce::ThreadPool (juce::ThreadPoolOptions{}
+                                                    .withThreadName ("LYNX stretch cache")
+                                                    .withNumberOfThreads (1)
+                                                    .withDesiredThreadPriority (juce::Thread::Priority::background));
+    writer->addJob ([file, data = std::move (data)] { writeStretched (file, *data); });
+}
 } // namespace
 
 std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::String& path, double ratio, StretchMethod method)
@@ -352,12 +367,9 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
             const loadtrace::Scope timing ("stretch_compute");
             made = timeStretch (*original, ratio, method);
         }
-        if (made != nullptr)
-        {
-            const loadtrace::Scope timing ("stretch_disk_write");
-            writeStretched (onDisk, *made);
-        }
         stretched = std::move (made);
+        if (stretched != nullptr && onDisk != juce::File())
+            writeStretchedLater (onDisk, stretched);
     }
 
     // the other lengths of this file go when nothing uses them any more (changing the BPM replaces the stretched one).
