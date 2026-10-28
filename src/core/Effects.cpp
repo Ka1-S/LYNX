@@ -2943,6 +2943,9 @@ const EffectInfo& effectInfo (EffectKind kind)
                         info.params.push_back ({ names[a][i], d[(std::size_t) (4 * a + i)] });
                 info.params.push_back ({ "Speed", d[(std::size_t) xy::speed (k)] });
                 info.params.push_back ({ "Acceleration", d[(std::size_t) xy::acceleration (k)] });
+                if (k == EffectKind::xyzController) // round 165: each axis' output curve mode (FL's point modes)
+                    for (const auto* n : { "X curve", "Y curve", "Z curve" })
+                        info.params.push_back ({ n, 0.0f });
                 return info;
             };
             static const EffectInfo xyInfo = make (EffectKind::xyController), xyzInfo = make (EffectKind::xyzController);
@@ -2954,7 +2957,7 @@ const EffectInfo& effectInfo (EffectKind kind)
             static const EffectInfo info = [] {
                 EffectInfo i { "Control Surface", {} };
                 static std::vector<std::string> names;
-                for (int k = 0; k < surface::maxOutputs; ++k)
+                for (int k = 0; k < surface::maxSurfaceOutputs; ++k)
                     names.push_back ("Control " + std::to_string (k + 1));
                 for (const auto& n : names)
                     i.params.push_back ({ n.c_str(), 0.0f });
@@ -2972,6 +2975,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, 
         return mixsuite::ridge::k4ParamText (param, v);
     if (kind == EffectKind::ridgeStrip && mixsuite::ridge::eVoicing (context)) // round 123: the console's own scales
         return mixsuite::ridge::eParamText (param, v);
+    if (kind == EffectKind::ridgeStrip && (param == mixsuite::ridge::lfGain || param == mixsuite::ridge::lmfGain
+                                           || param == mixsuite::ridge::hmfGain || param == mixsuite::ridge::hfGain))
+    {
+        // round 165: Ridge's own engine shows the gain of the curve in use (it showed both: "+6.0 dB / +7.2")
+        char text[32];
+        std::snprintf (text, sizeof text, "%+.1f dB", mixsuite::ridge::bandGainDb (v, context[(std::size_t) mixsuite::ridge::curve] > 0.5f));
+        return text;
+    }
     if (kind == EffectKind::glowLeveler && mixsuite::glow::classic (context))
         return mixsuite::glow::classicParamText (param, v);
     if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))

@@ -20,6 +20,7 @@
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
 #include "core/RtStats.h"
+#include "core/ScoreLog.h"
 #include "core/FlpImport.h"
 #include "core/History.h"
 #include "core/NativeEngines.h"
@@ -171,6 +172,12 @@ public:
     // The keys held right now on MIDI inputs and the typing piano (as played, before the scale snap), ascending; for
     // the Piano Roll's chord readout (any thread).
     std::vector<int> heldInputKeys() const;
+
+    // FL's score logger (REA round 165f): every note played on a MIDI input or the typing keyboard, recording or
+    // not, for Tools › Dump score log to selected pattern. Any thread (a short spin lock; never the audio thread).
+    std::vector<scorelog::Entry> scoreLogSnapshot() const;
+    bool scoreLogEmpty() const;
+    void clearScoreLog();
 
     // Scale snap for played notes (MIDI input and the PC keyboard): scale index into notetools::scales()
     // (0 = off) and its root (0..11). Any thread.
@@ -615,6 +622,9 @@ private:
     prefs::MidiPrefs midiPrefs;                      // UI thread
     juce::SpinLock midiPrefsLock;                    // guards midiPrefsShared (UI writes, MIDI thread reads)
     prefs::MidiPrefs midiPrefsShared;
+    void logPlayedNote (int channel, int key, float velocity, bool on);
+    mutable juce::SpinLock scoreLogLock;             // MIDI thread and UI thread write, the UI reads
+    scorelog::Log scoreLog;
     std::map<std::tuple<int, int, int, int, int, int>, prefs::PickupState> pickups; // (cc, channel, target) -> takeover
     struct DeviceStateSaver;
     std::unique_ptr<DeviceStateSaver> deviceStateSaver;

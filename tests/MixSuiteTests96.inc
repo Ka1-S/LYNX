@@ -508,7 +508,7 @@ TEST (mixsuite_panels_place_every_parameter)
                     CHECK (false);
                 }
             }
-        CHECK (meters == (kind == EffectKind::ridgeStrip ? 4 // round 145: + the Vocal strip voicing's two
+        CHECK (meters == (kind == EffectKind::ridgeStrip ? 2 // round 145: the Vocal strip voicing's two (round 165: the E strip's are LED ladders, displays)
                           : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser || kind == EffectKind::crestCompressor
                              || kind == EffectKind::sentryGate || kind == EffectKind::quellDenoiser || kind == EffectKind::compressor
                              || kind == EffectKind::ember) ? 1 : 0)); // round 165: Ember's Classic VU

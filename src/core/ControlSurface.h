@@ -25,8 +25,11 @@ class Instrument;
 
 namespace lynx::surface
 {
-// A panel publishes at most this many outputs (an XY pad counts two).
-constexpr int maxOutputs = 32;
+// A panel publishes at most this many outputs (an XY pad counts two): a Dashboard up to FL's 1024 (round 165;
+// REA_rodada164a §5), a Control Surface one effect parameter per output (round 165: up to maxEffectParams).
+constexpr int maxOutputs = 1024;
+constexpr int maxSurfaceOutputs = maxEffectParams;
+inline int maxOutputsOf (bool controlSurface) noexcept { return controlSurface ? maxSurfaceOutputs : maxOutputs; }
 
 // The output index of control `index`'s first value (an XY pad has two: X, then Y).
 int firstOutput (const std::vector<SurfaceControl>& controls, int index) noexcept;
@@ -44,6 +47,37 @@ void syncParams (EffectSlot& slot) noexcept;
 
 std::unique_ptr<Effect> makeEffect();
 std::unique_ptr<Instrument> makeDashboard();
+
+// A Dashboard's MIDI side (round 165, REA_rodada165c-dash165 §2 [DECOMP Dashboard_x64.dll 0x7b79b0, 0x7b8100,
+// 0x7b82e0, 0x7b7d40, 0x7b7d70, 0x7b50a0]): FL's Dashboard sends on its MIDI port and channel — the patch selector as a
+// program change (with the bank select before it) and each control whose record is not a controller output as a
+// MIDI message (SurfaceControl::midi) — when it loads and whenever the value changes. Its notes go to that port too.
+struct DashboardMidi
+{
+    int channel = 0;   // MIDI channel 0…15 (FL's header word 0)
+    int port = 0;      // MIDI port 0…255 (FL's header word 5)
+    int program = 0;   // the patch selector: 1…128 sends program − 1; 0 = none (FL's parameter 0)
+    int bankMsb = -1;  // CC 0 before the program (−1 = none; FL's header word 2)
+    int bankLsb = -1;  // CC 32 (FL's header word 3)
+    bool operator== (const DashboardMidi&) const = default;
+};
+// A Dashboard channel's settings from its state (FL's Dashboard state, or the short one LYNX writes for a new one);
+// FL's defaults when the state is empty or does not parse.
+DashboardMidi dashboardMidi (const std::vector<std::uint8_t>& state) noexcept;
+// Writes the settings into the state (FL's layout; a short state of LYNX's when it holds none).
+void writeDashboardMidi (std::vector<std::uint8_t>& state, const DashboardMidi& settings);
+// The MIDI messages (status, data 1, data 2; size 2 or 3) control `c` sends for its value 0..1, as FL's Dashboard does:
+// CC (14-bit when the range passes 127: the high 7 bits, then the low ones on the same CC), RPN / NRPN (parameter
+// number select, then data entry CC 6 (+ 38)), channel pressure, note on (velocity = value; 0 = note off).
+// Returns how many were written (≤ 6); 0 for a controller output.
+struct MidiBytes
+{
+    std::uint8_t bytes[3] {};
+    std::uint8_t size = 0;
+};
+int midiOf (const SurfaceControl& c, float value, int channel, MidiBytes out[6]) noexcept;
+// The raw value FL's Dashboard sends for a control's value 0..1 (its range low…high, rounded).
+int midiValueOf (const SurfaceControl& c, float value) noexcept;
 
 // A new panel with a few controls to start from (FL's default Control Surface is empty; LYNX's new one has two knobs).
 std::vector<SurfaceControl> starterControls();

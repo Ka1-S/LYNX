@@ -417,8 +417,15 @@ juce::var patcherToVar (const PatcherDoc& doc)
         for (const auto& c : doc.surface)
         {
             juce::Array<juce::var> control { (int) c.kind, juce::String::fromUTF8 (c.name.c_str()), c.value, c.valueY, c.x, c.y };
-            if (c.size != 1.0f)
+            if (c.size != 1.0f || c.midi != SurfaceControl::Midi::none)
                 control.add (c.size);
+            if (c.midi != SurfaceControl::Midi::none) // a Dashboard control's MIDI (round 165): type, number, low, high
+            {
+                control.add ((int) c.midi);
+                control.add (c.midiNumber);
+                control.add (c.midiLow);
+                control.add (c.midiHigh);
+            }
             controls.add (control);
         }
         o->setProperty ("surface", controls);
@@ -521,6 +528,17 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
                 s.y = (float) (double) c[5];
                 if (c.size() >= 7)
                     s.size = juce::jlimit (0.5f, 3.0f, (float) (double) c[6]);
+                if (c.size() >= 11)
+                {
+                    const auto type = (int) c[7];
+                    if (type == 0 || type == 1 || type == 2 || type == 3 || type == 5)
+                    {
+                        s.midi = (SurfaceControl::Midi) type;
+                        s.midiNumber = juce::jlimit (0, 16383, (int) c[8]);
+                        s.midiLow = juce::jlimit (0, 16383, (int) c[9]);
+                        s.midiHigh = juce::jlimit (0, 16383, (int) c[10]);
+                    }
+                }
                 doc.surface.push_back (std::move (s));
             }
     if (const auto& at = v["surfaceAt"]; at.isArray() && at.size() == 2)
