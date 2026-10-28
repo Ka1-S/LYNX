@@ -221,7 +221,7 @@ TEST (waves_vocal_states_translated_round113)
         int n = 0;
         const auto s = slotFor ("SSLChannel", "-1.3 1.8 1 0.35 * -30 0 0 0 0.2 * 0 0 0 -6 60 0 0.5 2.5 3 3.5 1.5 0 4.8 10.16 0 0 116 30 1 0 0 * * 1 * * 7 -18 0 0 * * * * * * -18 -18 -18 -18 -18 -18 -18 -18 0 0", n);
         namespace r = mixsuite::ridge;
-        CHECK (n == 31 && s.kind == EffectKind::ridgeStrip && s.params[r::voicing] == 1.0f);
+        CHECK (n == 32 && s.kind == EffectKind::ridgeStrip && s.params[r::voicing] == 1.0f);
         CHECK (std::abs (r::hfHz (s.params[r::hfFreq]) - 10160.0) < 1.0 && std::abs (r::bandGainDb (s.params[r::hfGain], false) - 4.8) < 0.01);
         CHECK (s.params[r::order] == 1.0f && s.params[r::compFastAttack] == 1.0f && s.params[r::eqOn] == 1.0f && s.params[r::dynOn] == 1.0f);
     }
