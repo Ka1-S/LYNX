@@ -5,6 +5,11 @@ on:
     branches: [main, 'wip/**']
   pull_request:
 
+# A newer push to the same branch cancels the older run (work branches are pushed often); main keeps every run.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   JUCE_VERSION: 8.0.4
   JUCE_SHA256: 0effe9823a6fd8a4f98e5c08be7d308350e417b2d15dcf34011e778fefbbf005

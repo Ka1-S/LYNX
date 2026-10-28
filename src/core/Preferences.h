@@ -214,4 +214,14 @@ std::vector<int> visiblePlugins (const std::vector<PluginRow>& rows, const std::
 // Favourite plugins: one identifier per line.
 std::set<std::string> parseFavourites (const std::string& text);
 std::string formatFavourites (const std::set<std::string>& ids);
+
+// Plugin names the user gave (FL's renamed Plugin database entries, issue #11): "key<TAB>name" per line. The key is
+// the plugin's identifier string, or "lynx:fx:<name>" / "lynx:gen:<name>" for LYNX's built-in ones. A name that
+// starts with a character no other entry starts with ("1_Limiter") is picked by typing it in the slot menus.
+std::map<std::string, std::string> parsePluginNames (const std::string& text);
+std::string formatPluginNames (const std::map<std::string, std::string>& names);
+
+// Type-ahead in a menu of `labels` (FL's menus): the one label starting with `typed` (case-insensitive, a renamed
+// plugin's "1_" digit or letter); -1 when none or several do.
+int uniqueTypeAhead (const std::vector<std::string>& labels, char typed);
 } // namespace lynx::prefs
