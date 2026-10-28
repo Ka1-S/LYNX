@@ -751,9 +751,11 @@ const EffectInfo& geminiInfo()
 {
     static const EffectInfo info { "Gemini Doubler",
                                    { { "Output", 1.0f }, { "Direct", 1.0f }, { "Direct gain", 1.0f }, { "Direct pan", 0.5f },
-                                     { "Align", 1.0f }, { "Low shelf", 0.0f }, { "Low gain", 30.0f / 42.0f },
-                                     { "Low freq", gemini::freqValue (100.0) }, { "High shelf", 0.0f }, { "High gain", 30.0f / 42.0f },
-                                     { "High freq", gemini::freqValue (5000.0) }, { "Feedback cut", 0.0f }, { "Range", 0.0f },
+                                     // round 165 [EXEC]: the 17.1 trials' fresh instance — Align off, both shelves on (low 0 dB at
+                                     // 101 Hz, high +4.1 dB at 1306 Hz); only new instances change (projects keep their values)
+                                     { "Align", 0.0f }, { "Low shelf", 1.0f }, { "Low gain", 30.0f / 42.0f },
+                                     { "Low freq", gemini::freqValue (101.0) }, { "High shelf", 1.0f }, { "High gain", 34.1f / 42.0f },
+                                     { "High freq", gemini::freqValue (1306.0) }, { "Feedback cut", 0.0f }, { "Range", 0.0f },
                                      // voice 1 (left) and voice 2 (right): a classic double, 9.4 / 23.7 ms, ±6 cents, −6 dB
                                      { "V1 on", 1.0f }, { "V1 gain", 0.875f }, { "V1 pan", 0.0f }, { "V1 delay", 0.094f },
                                      { "V1 feedback", 0.0f }, { "V1 detune", 0.53f }, { "V1 depth", 0.5f }, { "V1 rate", 0.2776f },

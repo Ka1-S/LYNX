@@ -101,3 +101,22 @@ TEST (hush_classic_deesser_bandpass_and_floor_round165)
     fx->process (l.data(), r.data(), 512, deep.params, 120.0);
     CHECK (fx->latencySamples() == 0);
 }
+
+// round 165h §3: Gemini Doubler's fresh instance = the Doubler2 / Doubler4 17.1 trials' (Align off, shelves on: low 0 dB
+// at 101 Hz, high +4.1 dB at 1306 Hz)
+TEST (gemini_doubler_reference_defaults_round165)
+{
+    using namespace lynx;
+    const auto s = makeEffectSlot (EffectKind::geminiDoubler);
+    const auto& info = effectInfo (EffectKind::geminiDoubler);
+    auto at = [&] (const char* name) {
+        for (std::size_t i = 0; i < info.params.size(); ++i)
+            if (std::string (info.params[i].name) == name)
+                return s.params[i];
+        CHECK (false);
+        return -1.0f;
+    };
+    CHECK (at ("Align") == 0.0f && at ("Low shelf") == 1.0f && at ("High shelf") == 1.0f);
+    CHECK (std::abs (voicetools::gemini::shelfDb (at ("High gain")) - 4.1) < 0.01 && std::abs (voicetools::gemini::shelfDb (at ("Low gain"))) < 0.01);
+    CHECK (std::abs (voicetools::gemini::freqHz (at ("Low freq")) - 101.0) < 0.5 && std::abs (voicetools::gemini::freqHz (at ("High freq")) - 1306.0) < 2.0);
+}
