@@ -147,6 +147,7 @@ add_library(lynx_core STATIC
     src/core/NativeEngines.cpp
     src/core/Layer.cpp
     src/core/XyController.cpp
+    src/core/FlCurve.cpp
     src/core/ControlSurface.cpp
     src/core/VoltageController.cpp
     src/core/FabFilterStates.cpp
@@ -175,6 +176,7 @@ target_sources(lynx_core PRIVATE
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
     src/core/AudioEdit.cpp
+    src/core/FlAutoSlicer.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp
@@ -194,7 +196,8 @@ target_sources(lynx_core PRIVATE
     src/core/PluginMonitor.cpp
     src/core/ProjectContents.cpp
     src/core/PlaylistOps.cpp
-    src/core/TempoDetect.cpp)
+    src/core/TempoDetect.cpp
+    src/core/ScoreLog.cpp)
 
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 target_sources(lynx_core PRIVATE

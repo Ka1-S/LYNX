@@ -373,6 +373,13 @@ struct SurfaceControl
     float value = 0.0f, valueY = 0.0f; // 0..1 (an XY pad has two)
     float x = 40.0f, y = 40.0f;        // place on the Surface tab
     float size = 1.0f;                 // a Control Surface / Dashboard control's scale (round 164; 0.5…3)
+    // A Dashboard control that sends MIDI on the Dashboard's port (round 165, FL's record types): none = a controller
+    // output only; cc, rpn, nrpn (parameter number midiNumber), channel pressure, note (key midiNumber). The value
+    // 0..1 maps to midiLow…midiHigh (high > 127: 14-bit).
+    enum class Midi : std::int8_t { none = -1, cc = 0, rpn = 1, nrpn = 2, pressure = 3, note = 5 };
+    Midi midi = Midi::none;
+    int midiNumber = 0;
+    int midiLow = 0, midiHigh = 127;
     // control outputs: one each, an XY pad two (X then Y)
     int outputs() const noexcept { return kind == Kind::xy ? 2 : 1; }
     bool operator== (const SurfaceControl&) const = default;

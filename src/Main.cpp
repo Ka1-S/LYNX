@@ -50,6 +50,7 @@
 #include "core/RackOps.h"
 #include "core/Layer.h"
 #include "core/XyController.h"
+#include "core/FlCurve.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "ui/Controllers164.h"
@@ -122,6 +123,7 @@ struct StartupTrace
     }
 };
 StartupTrace startupTrace;
+void startupMarkHook (const char* step) { startupTrace.mark (step); }
 
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
 void onCrash (void* exceptionPointers)
@@ -954,6 +956,8 @@ public:
         startHangWatch();
 
         startupTrace.mark ("initialise (normal start)");
+        if (startupTrace.on)
+            lynx::startupMark = startupMarkHook;
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         lynx::themeui::loadSaved(); // the user's theme (Options › Theme, round 162d)
         startupOptions = lynx::StartupOptions::load();
@@ -992,7 +996,9 @@ public:
         // the splash first, so it is on screen while the audio device opens; the main window is built
         // once the pepper has landed (the scene is still for a moment then) and shown when the splash ends
         splash = std::make_unique<lynx::SplashScreen>();
+        startupTrace.mark ("splash made");
         splash->showOnDesktop();
+        startupTrace.mark ("splash on the desktop");
 
         juce::Timer::callAfterDelay (40, [this] {
             startEngine();
@@ -3417,7 +3423,7 @@ private:
             int frame = -1;
             std::vector<double> times, rendered; // whole frames (event + paint + blit, when this timer paints) / the window's paints
             double setupMs = 0.0, wallStart = 0.0;
-            std::clock_t cpuStart = 0;
+            double cpuStart = 0.0; // process CPU seconds (std::clock is wall time on Windows)
 
             UiPerf (LynxApplication& a, juce::File r) : app (a), report (std::move (r)) {}
 
@@ -3450,7 +3456,7 @@ private:
                     times.clear();
                     rendered.clear();
                     wallStart = juce::Time::getMillisecondCounterHiRes();
-                    cpuStart = std::clock();
+                    cpuStart = lynx::processCpuSeconds();
                     frame = 0;
                     return;
                 }
@@ -3463,7 +3469,7 @@ private:
                     return;
 
                 const auto wall = juce::Time::getMillisecondCounterHiRes() - wallStart;
-                const auto cpu = 1000.0 * (double) (std::clock() - cpuStart) / CLOCKS_PER_SEC;
+                const auto cpu = 1000.0 * (lynx::processCpuSeconds() - cpuStart);
                 text << s.name << ": show " << juce::String (setupMs, 1) << " ms\n"
                      << "    painted frames: " << stats (rendered) << "\n"
                      << "    timed here (event + paint + blit): " << stats (times)
@@ -4472,6 +4478,7 @@ private:
                 kinds.push_back (own);
             kinds.push_back (lynx::EffectKind::apexLimiter); // round 114: display-first editor
             kinds.push_back (lynx::EffectKind::ridgeStrip); // round 145: the second pass shows the Vocal strip voicing
+            kinds.push_back (lynx::EffectKind::ridgeStrip); // round 165: the third pass shows the E console voicing
             kinds.push_back (lynx::EffectKind::compressor); // round 152: the RComp role's panel (vintage voicing, RComp ranges)
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
@@ -4528,6 +4535,14 @@ private:
                                                         { "Process order", 0.4783f }, { "De-esser", 1.0f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
                     name = "Ridge Strip (Vocal strip)";
+                }
+                else if (kind == lynx::EffectKind::ridgeStrip && ridgePasses == 3) // round 165: the E console, EQ to the side chain
+                {
+                    for (const auto& [param, value] : { std::pair<const char*, float> { "Voicing", 1.0f }, { "HPF", 0.3f }, { "HF gain", 0.8f },
+                                                        { "HF bell", 1.0f }, { "Ratio", 0.5f }, { "Comp. threshold", 0.4f }, { "EQ to SC", 1.0f },
+                                                        { "Filter split", 1.0f }, { "Expander", 1.0f } })
+                        fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                    name = "Ridge Strip (E console)";
                 }
                 else if (kind == lynx::EffectKind::ridgeStrip) // a vocal setting, so the graphs show something
                     for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },
@@ -4940,6 +4955,12 @@ private:
             auto xyzFx = lynx::makeEffectSlot (lynx::EffectKind::xyzController);
             xyzFx.params[(std::size_t) lynx::xy::level (2)] = 0.8f;
             song.mixer[1].effects.push_back (xyzFx);
+            // round 165: an X-Y-Z whose X curve is FL's "Stairs" (tension +40 %) and Y a bent single curve
+            xyzFx.params[(std::size_t) lynx::xy::curveMode (0)] = lynx::xy::curveModeValue (lynx::flcurve::stairs);
+            xyzFx.params[(std::size_t) lynx::xy::tension (0)] = 0.7f;
+            xyzFx.params[(std::size_t) lynx::xy::level (0)] = 0.62f;
+            xyzFx.params[(std::size_t) lynx::xy::tension (1)] = 0.825f;
+            song.mixer[1].effects.push_back (xyzFx);
             auto panel = lynx::makeEffectSlot (lynx::EffectKind::controlSurface);
             lynx::SurfaceControl c;
             for (const auto& [kind, name, v, x, y] : std::vector<std::tuple<lynx::SurfaceControl::Kind, const char*, float, float, float>> {
@@ -5040,7 +5061,8 @@ private:
             const lynx::AutomationTarget target { lynx::AutomationTargetKind::effectParam, 1, 1, 0 };
             shoot (lynx::makeXyControllerEditor (offline, slotOf (1), nullptr, target), "-xy-controller.png");
             shoot (lynx::makeXyControllerEditor (offline, slotOf (2), nullptr, target), "-xyz-controller.png");
-            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (3), target), "-control-surface.png");
+            shoot (lynx::makeXyControllerEditor (offline, slotOf (3), nullptr, target), "-xyz-controller-stairs.png");
+            shoot (lynx::makeControlSurfaceEditor (offline, slotOf (4), target), "-control-surface.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard.png");
             shoot (lynx::makeChannelSettingsPanel (offline, 7), "-voltage-controller.png");
         }
@@ -5058,9 +5080,25 @@ private:
                 offline.editSong ([&] (lynx::Song& s) {
                     s.channels[6].name = file.getFileNameWithoutExtension().toStdString();
                     s.channels[6].patcher.surface = dash->controls;
+                    s.channels[6].pluginState = preset.channels[0].pluginState; // (its MIDI port, channel, program)
                 });
                 offline.dispatchPendingMessages();
-                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + file.getFileNameWithoutExtension().replaceCharacter (' ', '-') + ".png");
+                const auto name = file.getFileNameWithoutExtension().replaceCharacter (' ', '-');
+                shoot (lynx::makeChannelSettingsPanel (offline, 6), "-dashboard-fl-" + name + ".png");
+                // edit mode (round 165): each control's output number and the MIDI it sends ("1 CC74")
+                if (auto panel = lynx::makeChannelSettingsPanel (offline, 6))
+                {
+                    std::function<void (juce::Component&)> pressEdit = [&] (juce::Component& c) {
+                        for (auto* child : c.getChildren())
+                        {
+                            if (auto* b = dynamic_cast<juce::TextButton*> (child); b != nullptr && b->getButtonText() == lynx::tr ("Edit"))
+                                b->setToggleState (true, juce::sendNotificationSync);
+                            pressEdit (*child);
+                        }
+                    };
+                    pressEdit (*panel);
+                    shoot (std::move (panel), "-dashboard-fl-" + name + "-edit.png");
+                }
             }
         // the Envelope Controller's pages (issue #7): one PNG per part of the dropdown
         if (auto ec = lynx::makeEnvelopeControllerEditor (offline, 0))
