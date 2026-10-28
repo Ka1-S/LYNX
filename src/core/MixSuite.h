@@ -122,6 +122,10 @@ enum Param
     // (core/VoiceMatch.h, echannel model 1: its EQ colours, filters, compressor, gate, mic pre and VCA). It takes the E
     // voicing's controls (and Auto make-up, Analog = the Analogue VCA, Comp. mix) plus these
     console4k, k4Colour, k4Pre, k4Mic, k4MakeupOffset,
+    // round 165 (appended, off = the old sound): the reference console's "Dyn S.C." — the filters and the EQ feed only the
+    // dynamics' side chain (de-essing / frequency-conscious compression); the audio keeps neither (the filters stay at the
+    // input when split). Ridge's own engine and the E voicing
+    eqToSidechain,
     count
 };
 // round 147b: the auto make-up (dB) for Ridge's own compressor: the console's for the same threshold (dBFS + 18 = the

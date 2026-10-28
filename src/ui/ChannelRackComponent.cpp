@@ -1,3 +1,4 @@
+#include "core/FruityDance.h"
 #include "ui/ColourPicker.h"
 #include "ui/PatcherEditor.h"
 #include "ui/UiTrace.h"
@@ -2156,6 +2157,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         c.name = "Voltage Controller";
         c.instrument = InstrumentKind::voltage;
         c.pluginState = voltage::write (voltage::Settings {});
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    // FL's Fruity Dance (round 165e): LYNX's own dancer over the workspace, its notes pick the moves (no sound)
+    menu.addItem ("Fruity Dance", [this, add] {
+        ChannelDef c;
+        c.name = "Fruity Dance";
+        c.instrument = InstrumentKind::fruitydance;
+        c.pluginState = dance::toState (dance::Settings {});
         const auto added = add (c);
         openChannelSettings (engine, added);
     });

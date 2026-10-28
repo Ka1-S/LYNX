@@ -89,6 +89,7 @@ add_library(lynx_core STATIC
     src/core/FreqShifterFl.cpp
     src/core/LowLifterFl.cpp
     src/core/VisualFx.cpp
+    src/core/FruityDance.cpp
     src/core/Reeverb2.cpp
     src/core/LuxeVerb.cpp
     src/core/IldspMath.cpp
@@ -317,6 +318,8 @@ if(LYNX_BUILD_APP)
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
         src/ui/VisualEditors.cpp
+        src/ui/VisualGl.cpp
+        src/ui/DanceView.cpp
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
         src/ui/LayerEditor.cpp
@@ -406,6 +409,7 @@ if(LYNX_BUILD_APP)
             juce::juce_audio_utils
             juce::juce_audio_processors
             juce::juce_dsp
+            juce::juce_opengl
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags)

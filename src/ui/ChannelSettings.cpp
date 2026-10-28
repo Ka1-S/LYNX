@@ -1,6 +1,7 @@
 #include "ui/WindowOwner.h"
 #include "ui/ChannelSettings.h"
 #include "ui/LayerEditor.h"
+#include "ui/DanceView.h"
 #include "ui/Controllers164.h"
 #include "ui/VoltageEditor.h"
 
@@ -3283,6 +3284,8 @@ std::unique_ptr<juce::Component> makeInstrumentPage (AudioEngine& engine, const 
     if (def == nullptr)
         return nullptr;
     const auto kind = def->instrument;
+    if (kind == InstrumentKind::fruitydance && ref.index >= 0)
+        return makeDanceEditor (engine, ref.index); // round 165e
     if (kind == InstrumentKind::synth)
         return std::make_unique<SynthPanel> (engine, ref);
     if (isModelKind (kind))
@@ -3487,6 +3490,8 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
         return makeVoltageControllerEditor (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::vfx)
         return makeVfxEditor (engine, channel);
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::fruitydance)
+        return makeDanceEditor (engine, channel); // round 165e
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
