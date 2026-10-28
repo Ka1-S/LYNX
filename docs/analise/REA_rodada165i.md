@@ -93,4 +93,51 @@ and FL's "no start-up rescans" behaviour for the plugin list (§4.3).
 
 ## 4. Changes in LYNX, measured
 
-(to be filled)
+### 4.1 Task-graph mixer scheduling (`src/core/RackRenderer.{h,cpp}`)
+
+Channels and mixer inserts form one dependency graph (`RackState::buildTaskGraph`) run on the `WorkerPool` with
+readiness counters (`RackRenderer::runTaskGraph`): an insert starts as soon as its own channels and sources are done,
+with no barrier per layer. Each insert sums its channels in channel order, then live input, then runs its effects, the
+same order as the layers, so the result is bit-exact. Fallback to the layers when something is pinned to the audio
+thread, the routing has a cycle, or an instrument has aux outputs. `LYNX_TASKGRAPH=0` switches it off.
+
+- [EXEC] null test (Linux `renderwav`): sequential, layers and graph renders are byte-identical (SHINE md5
+  `e6be7b9a893b…`, Thief `67a4184bf5ec…`).
+- [EXEC] CPU (Linux, machine under load): Thief layers 5.45 s → graph 4.31 s CPU; block load mean 10 → 7 %,
+  p50 9 → 5 %, p99 32 → 26 %. SHINE mean 15 → 13 %, p50 12 → 10 %.
+- Test `rea165i_task_graph_matches_layers_with_sidechain_and_cycle`.
+
+### 4.2 Floating-point mode kept after plugin code (`src/core/Denormals.h`, `PluginHost.cpp`)
+
+`KeepFloatMode` restores MXCSR (and the x87 control word on x86-64 GCC/Clang) after each hosted plugin block call,
+only when the plugin changed it — FL's re-assert pattern (§3). A plugin that clears FTZ/DAZ can no longer make the
+rest of the mix fall into denormals. Test `rea165i_keep_float_mode_restores_ftz_after_foreign_code`.
+
+### 4.3 No plugin rescans at every start (`src/engine/PluginHost.{h,cpp}`)
+
+`listedInside()` treats a VST3 bundle as up to date when the modules listed inside it are current (22 bundles on this
+PC are listed by their inner module path and were rescanned on every launch, spawning `--scan-one` children of up to
+900 MB). `PluginHost::sameModule()` for `forgetFile`; the scan list is saved every 5 s during a scan, so a LYNX
+closed mid-scan keeps what it already found.
+
+### 4.4 Time-stretch disk cache (`src/engine/SampleLibrary.cpp`)
+
+Stretched samples are kept as `.str` files in the cache folder, keyed by path | size | mtime | ratio | method |
+`stretchFingerprint` (a test signal stretched once per method, so a changed algorithm never reuses old files); LRU
+prune to 3/4 when over 1 GB. The in-memory stretch cache now evicts only lengths nothing uses, and the project
+preload keeps the stretched results. [EXEC] Thief's `load.log` before: stretch_wall 1 981 ms (×23) and
+rack_stretch 754 ms (×29, misses from the old eviction) on every open.
+
+### 4.5 Test profile, test mode and `--opentime` (`src/core/TestProfile.h`, `src/platform/Paths.cpp`, `Main.cpp`)
+
+`LYNX_PROFILE_DIR` moves settings, caches and Documents/LYNX into a throw-away folder; `LYNX_TEST_MODE=1` skips (and
+logs to `test-mode.log`) the unclean-session notice, crash-report retry, setup wizard, Missing files, project info and
+the start-up plugin scan. `--opentime <project|-> <report> [idleS]` opens through the normal start-up, waits for the
+title, settles, measures idle CPU and RAM, writes the report and quits cleanly. Benchmarks no longer touch the real
+`%APPDATA%\LYNX` or leave dialogs on the desktop. Test `rea165i_test_profile_and_test_mode_parsing`.
+
+### 4.6 Tracing
+
+`lynx::startupMark` steps inside the audio engine and the splash for `LYNX_TRACE_STARTUP`; `--uiperf` CPU from
+`processCpuSeconds()`.
+
