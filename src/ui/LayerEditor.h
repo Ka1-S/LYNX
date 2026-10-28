@@ -9,4 +9,8 @@
 namespace lynx
 {
 std::unique_ptr<juce::Component> makeLayerEditor (AudioEngine& engine, int channel);
+// The same on a Layer node inside a Patcher (round 165c): `locate` finds the node's channel, `children` its children (the
+// nodes on its Children pin, in order); Set / Show / Group / Delete children are left out, Level / Pan / Pitch knobs added.
+std::unique_ptr<juce::Component> makeLayerEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate,
+                                                  std::function<std::vector<ChannelDef*> (Song&)> children);
 } // namespace lynx

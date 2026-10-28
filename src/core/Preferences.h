@@ -149,6 +149,9 @@ struct MidiPrefs
     std::vector<GlobalLink> globalLinks;
     VelocityCurve velocity = VelocityCurve::linear;
     bool pickup = false;                // a controller takes over a parameter only once it reaches its value
+    // FL's "MIDI channel used for playlist live mode" (round 165m): notes on this channel (1…16, 0 = off) launch the
+    // Playlist's performance clips while Performance mode is on (core/Performance.h, perf::MidiMapping)
+    int performanceChannel = 0;
 
     // The settings of a device (the defaults when it was never changed).
     MidiInputPrefs input (const std::string& name) const;

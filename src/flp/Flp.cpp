@@ -37,6 +37,7 @@ enum : std::uint32_t
     evNewPattern = 0x41,
     evTempoCoarse = 0x42,       // legacy: integer BPM
     evArrangement = 0x63,
+    evPerformanceMode = 0x1F,   // u8: Playlist › Options › Performance mode on (round 165m, all 6 demos in "Performance mode" = 1)
     evChannelMixerTrack = 0x68,    // u16
     evPatternColour = 0x96,     // u32 0x00BBGGRR; 0x565148 = default gray
     evTempo = 0x9C,             // BPM * 1000
@@ -458,6 +459,10 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
             case evVersion:
                 project.version = decodeAnsi (e.data); // always ASCII: comes before we know the version
                 project.versionNumber = parseVersionNumber (project.version);
+                break;
+
+            case evPerformanceMode:
+                project.performanceMode = e.value != 0;
                 break;
 
             case evTempo:
@@ -948,6 +953,15 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                         const auto h = readLE<float> (e.data, 13);
                         if (std::isfinite (h) && h > 0.05f && h < 10.0f)
                             t.heightScale = h;
+                    }
+                    if (e.data.size() >= 46)
+                    {
+                        t.motion = (int) readLE<std::uint32_t> (e.data, 22);
+                        t.press = (int) readLE<std::uint32_t> (e.data, 26);
+                        t.triggerSync = (int) readLE<std::uint32_t> (e.data, 30);
+                        t.queue = readLE<std::uint32_t> (e.data, 34) != 0;
+                        t.tolerant = readLE<std::uint32_t> (e.data, 38) != 0;
+                        t.positionSync = (int) readLE<std::uint32_t> (e.data, 42);
                     }
                     if (e.data.size() >= 62)
                     {

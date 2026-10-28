@@ -292,6 +292,10 @@ struct PlaylistTrackInfo
     // track mode (REA round 146a): u32 at 49 (0 none, 1 audio track, 3 instrument track), i32 mixer track at 53, i32
     // FL channel index at 57 (-1 = none)
     int mode = 0, mixerTrack = -1, channel = -1;
+    // Performance settings (round 165m, bytes 22…45, FL's menu numbers): u32 motion, press, trigger sync, queue,
+    // tolerant, position sync. FL's defaults: Stay, Retrigger, 4 beats, no queue, tolerant, position sync off.
+    int motion = 0, press = 0, triggerSync = 5, positionSync = 0;
+    bool queue = false, tolerant = true;
 };
 
 // Playlist time marker: 0x94 (u32: type << 24 | position in ticks), followed by
@@ -348,6 +352,7 @@ struct Project
     double tempo = 140.0;
     int beatsPerBar = 4; // event 0x11 (the first one, the project's)
     int swing = 0;       // event 0x0B: 0..128
+    bool performanceMode = false; // event 0x1F (round 165m)
     int panLaw = 0;      // event 0x17: 0 = FL's circular (sin/cos) pan law, 2 = triangular (REA_rodada76 §9)
     std::uint32_t flagsA9 = 0;
     std::string title, artist, genre, url;

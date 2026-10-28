@@ -36,6 +36,9 @@ public:
     AudioCapture capture;
     // the audio logger's tap (REA round 153): the Master, while Tools > Audio logger is on
     AudioCapture logTap;
+    // the real-time bounce's tap (round 165c): the Master while the song plays, during Export › "Render through the
+    // hardware in real time"
+    AudioCapture bounceTap;
 
 private:
     static void raise (std::atomic<float>& slot, float value) noexcept

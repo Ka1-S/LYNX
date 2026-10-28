@@ -23,6 +23,7 @@
 #include "core/LiveInput.h"
 #include "core/Meters.h"
 #include "core/Pdc.h"
+#include "core/Performance.h"
 #include "core/Scheduler.h"
 #include "core/Vfx.h"
 #include "core/Song.h"
@@ -42,6 +43,7 @@ struct RackState
     // Indices into song.automations, or -1 = no automation.
     static constexpr int maxAutomations = 1024;
     std::vector<std::vector<int>> automationClips; // per automation: clips in the Playlist
+    std::vector<char> zoneAutomations;             // per automation: it has clips in the performance zone
     std::vector<int> channelVolumeAuto, channelPanAuto;
     std::vector<int> mixerVolumeAuto, mixerPanAuto;
     std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [track][slot][param] (built-in)
@@ -66,6 +68,7 @@ struct RackState
     std::vector<PluginParamBinding> pluginParams;
     bool hasAutomation = false;
     ScheduleIndex schedule; // index to schedule the Playlist without scanning every note
+    std::vector<int> performanceZone; // Performance mode: the zone's clips (perf::zoneClips), empty when off
     int tempoAutomation = -1; // tempo automation, if any
 
     // PDC: per-edge delays (nullptr = no delay) and the latencies used to build the plan.
@@ -269,6 +272,8 @@ public:
     // Hardware output targets of the inserts (REA round 156): their post-fader output is added into `out`'s buses
     // while `out->active`. Set before playback.
     void setHardwareOutput (HardwareOutput* out) noexcept { hwOut = out; }
+    // Performance mode (round 165m): the launch commands / what plays, shared with the UI. Set before playback.
+    void setPerformance (perf::Live* live) noexcept { perfLive = live; }
 
     // Allocates the mixer buffers: call off the audio thread.
     // Blocks larger than maxBlockSize are processed in pieces.
@@ -390,6 +395,10 @@ private:
     WorkerPool* workers = nullptr;
     LiveInput* liveInput = nullptr;
     HardwareOutput* hwOut = nullptr;
+    perf::Live* perfLive = nullptr;
+    perf::Player perfPlayer;
+    double perfClock = 0.0;      // the Player's steady clock (ticks): the transport's position, never wrapping
+    bool perfRunning = false;
     std::vector<float> hwScratch; // 2 × blockCapacity
     void mixHardwareOutputs (const RackState& state, int n) noexcept;
     int liveInputOffset = 0; // of the chunk within the process() block

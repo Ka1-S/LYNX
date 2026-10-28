@@ -48,9 +48,11 @@ public:
         else if (ok && reveal)
             file.revealToUser(); // "Show the file(s) when complete"
         else if (ok)
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Export complete"),
+            juce::AlertWindow::showMessageBoxAsync (job->getNotice().isEmpty() ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon,
+                                                    tr ("Export complete"),
                                                     file.getFullPathName() + "\n\n"
-                                                        + tr ("Peak: {0} dBFS", { juce::String (juce::Decibels::gainToDecibels (job->getPeak()), 1) }));
+                                                        + tr ("Peak: {0} dBFS", { juce::String (juce::Decibels::gainToDecibels (job->getPeak()), 1) })
+                                                        + (job->getNotice().isEmpty() ? juce::String() : "\n\n" + job->getNotice()));
         else if (! userPressedCancel)
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not export"), error);
 
@@ -321,7 +323,7 @@ public:
         combo (ditherLabel, tr ("Dither"), ditherBox, { tr ("Off"), tr ("TPDF"), tr ("TPDF + noise shaping") },
                tr ("Hides the rounding noise of 16 and 24 bit files (noise shaping moves it where the ear is least sensitive)"));
 
-        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle, &hqToggle, &showToggle, &polyToggle, &warmUpToggle })
+        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle, &hqToggle, &showToggle, &polyToggle, &warmUpToggle, &realtimeToggle })
         {
             t->onClick = [this] { readControls(); };
             addAndMakeVisible (t);
@@ -339,6 +341,13 @@ public:
         warmUpToggle.setTooltip (tr ("Before the export starts, third-party plugins process a moment of silence until they have "
                                      "finished loading their settings (bridged plugins, samplers that load in the background), "
                                      "so the file does not start with half-loaded effects"));
+        // round 165c: only offered when the song has an active hardware insert (outboard gear can't run faster than real time)
+        realtimeToggle.setButtonText (tr ("Render through the hardware in real time"));
+        realtimeToggle.setTooltip (tr ("The song plays through the audio device while it is recorded, so the hardware inserts' gear is "
+                                       "in the file (the export takes as long as the song). At the device's sample rate, played once, "
+                                       "with the playback quality: what you hear"));
+        // (not for a list of tracks: the real-time pass records the full mix only)
+        realtimeToggle.setVisible (onlyTracks.empty() && hwinsert::countActive (engine.getSong()) > 0);
         polyToggle.setTooltip (tr ("The channels' Max polyphony is lifted for the export, so no note is cut by the voice limit"));
         showToggle.setTooltip (tr ("Opens the file manager on the exported file when the export is done"));
         hqToggle.setTooltip (tr ("Plugins with a separate render quality use it, and HQ switches are turned on for the export. "
@@ -349,6 +358,8 @@ public:
         addAndMakeVisible (infoLabel);
         warningLabel.setFont (theme::font (theme::type::small));
         warningLabel.setColour (juce::Label::textColourId, theme::colour::warning);
+        infoLabel.setMinimumHorizontalScale (0.7f); // (round 165c: the real-time line is longer)
+        warningLabel.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (warningLabel);
 
         exportButton.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
@@ -403,7 +414,11 @@ public:
             showToggle.setBounds (row2);
         }
         mix.removeFromTop (2);
-        warmUpToggle.setBounds (mix.removeFromTop (24).removeFromLeft (200));
+        {
+            auto row3 = mix.removeFromTop (24);
+            warmUpToggle.setBounds (row3.removeFromLeft (200));
+            realtimeToggle.setBounds (row3);
+        }
         area.removeFromBottom (6);
 
         auto left = area.removeFromLeft ((area.getWidth() - 24) / 2);
@@ -518,6 +533,7 @@ private:
         warmUpToggle.setToggleState (options.pluginWarmUp, n);
         showToggle.setToggleState (options.showWhenDone, n);
         polyToggle.setToggleState (options.disableMaxPolyphony, n);
+        realtimeToggle.setToggleState (realtime, n);
         for (int i = 0; i < 4; ++i)
             alsoToggles[(std::size_t) i].setToggleState (i == (int) options.format || (options.moreFormats & (1u << i)) != 0, n);
         refresh();
@@ -546,16 +562,21 @@ private:
         options.mp3Kbps = mp3Bitrates()[(std::size_t) juce::jlimit (0, (int) mp3Bitrates().size() - 1, mp3Box.getSelectedItemIndex())];
         options.oggKbps = oggBitrates()[(std::size_t) juce::jlimit (0, (int) oggBitrates().size() - 1, oggBox.getSelectedItemIndex())];
         options.flacLevel = juce::jlimit (0, 8, flacLevelBox.getSelectedItemIndex());
-        options.sampleRate = sampleRates()[(std::size_t) juce::jlimit (0, (int) sampleRates().size() - 1, rateBox.getSelectedItemIndex())];
+        if (! realtime) // (real time shows the device's rate)
+            options.sampleRate = sampleRates()[(std::size_t) juce::jlimit (0, (int) sampleRates().size() - 1, rateBox.getSelectedItemIndex())];
         options.channels = (Channels) juce::jmax (0, channelsBox.getSelectedItemIndex());
         options.dither = (DitherMode) juce::jmax (0, ditherBox.getSelectedItemIndex());
         options.normalize = normalizeToggle.getToggleState();
-        options.masterEffects = masterFxToggle.getToggleState();
         options.trimPdc = trimToggle.getToggleState();
-        options.hqAllPlugins = hqToggle.getToggleState();
-        options.pluginWarmUp = warmUpToggle.getToggleState();
         options.showWhenDone = showToggle.getToggleState();
-        options.disableMaxPolyphony = polyToggle.getToggleState();
+        if (! realtime) // (while real time is ticked these show what it uses: the offline choices stay as they were)
+        {
+            options.masterEffects = masterFxToggle.getToggleState();
+            options.hqAllPlugins = hqToggle.getToggleState();
+            options.pluginWarmUp = warmUpToggle.getToggleState();
+            options.disableMaxPolyphony = polyToggle.getToggleState();
+        }
+        realtime = realtimeToggle.isVisible() && realtimeToggle.getToggleState();
         options.moreFormats = 0;
         for (int i = 0; i < 4; ++i) // (the previous main format's box was only shown ticked)
             if (i != (int) previousFormat && alsoToggles[(std::size_t) i].getToggleState())
@@ -575,7 +596,24 @@ private:
         depthBox.setItemEnabled (3, options.format == Format::wav);
         tailLengthBox.setEnabled (options.tail != TailMode::cut);
         stemsMaster.setEnabled (options.stems != Stems::none);
-        loopsBox.setEnabled (true);
+        loopsBox.setEnabled (! realtime);
+        // a real-time bounce (round 165c): the device's rate, the song or the selection once, the Master's effects, the
+        // playback quality, no stems — the controls it doesn't use are off
+        for (auto* c : std::initializer_list<juce::Component*> { &rateBox, &stemsBox, &masterFxToggle, &hqToggle, &polyToggle, &warmUpToggle })
+            c->setEnabled (! realtime);
+        rangeBox.setItemEnabled (2, ! realtime);
+        {
+            // the boxes show what the export will use: real time = the Master's effects, the playback quality
+            const auto used = realtime ? ExportJob::realtimeOptions (options, engine.getTransport().sampleRate.load()) : options;
+            masterFxToggle.setToggleState (used.masterEffects, juce::dontSendNotification);
+            hqToggle.setToggleState (used.hqAllPlugins, juce::dontSendNotification);
+            warmUpToggle.setToggleState (used.pluginWarmUp, juce::dontSendNotification);
+            polyToggle.setToggleState (used.disableMaxPolyphony, juce::dontSendNotification);
+            for (int i = 0; i < (int) sampleRates().size(); ++i)
+                if (sampleRates()[(std::size_t) i] == used.sampleRate)
+                    rateBox.setSelectedItemIndex (i, juce::dontSendNotification);
+        }
+        stemsMaster.setEnabled (! realtime && options.stems != Stems::none);
         const auto ditherable = (options.format == Format::wav && options.wavBits != 32) || options.format == Format::flac;
         ditherBox.setEnabled (ditherable);
         ditherLabel.setEnabled (ditherable);
@@ -591,7 +629,8 @@ private:
         flacLevelBox.setVisible (f == Format::flac);
 
         const auto& song = engine.getSong();
-        const auto seconds = exportMusicSeconds (song, options);
+        const auto shown = realtime ? ExportJob::realtimeOptions (options, engine.getTransport().sampleRate.load()) : options;
+        const auto seconds = exportMusicSeconds (song, shown);
         // FL's line: "Length: 144 bars  Total time: 3'57''  Disk space: 38.76 MB" (REA round 134)
         const auto bars = lengthInBars (seconds, song.bpm, song.beatsPerBar);
         auto info = tr ("Length: {0} bars", { juce::String ((int) std::ceil (bars - 0.01)) }) + "  ·  " // whole bars, as FL
@@ -604,8 +643,10 @@ private:
             info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemTracks (song, onlyTracks).size() + (options.stemsIncludeMaster ? 1 : 0)) });
         else if (options.stems == Stems::channels)
             info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemChannels (song, options.range).size() + (options.stemsIncludeMaster ? 1 : 0)) });
-        if (options.stems == Stems::none)
-            info << "  ·  " << tr ("Disk space: {0}", { juce::File::descriptionOfSizeInBytes (estimatedBytes (options, seconds)) });
+        if (options.stems == Stems::none || realtime)
+            info << "  ·  " << tr ("Disk space: {0}", { juce::File::descriptionOfSizeInBytes (estimatedBytes (shown, seconds)) });
+        if (realtime)
+            info << "  ·  " << tr ("{0} Hz (device)", { juce::String ((int) shown.sampleRate) });
         infoLabel.setText (info, juce::dontSendNotification);
 
         juce::String warning;
@@ -613,8 +654,13 @@ private:
             warning = tr ("The Master insert is muted: the file will be silent");
         else if (options.range == Range::selection && ! hasSelection (song))
             warning = tr ("There is no Playlist selection: the whole song is rendered");
+        else if (realtime && engine.getDeviceManager().getCurrentAudioDevice() == nullptr)
+            warning = tr ("No audio device is open: a real-time export needs one");
+        else if (realtime)
+            warning = tr ("Real time ({0}): leave the transport alone while it records",
+                          { juce::String (formatDuration (seconds)) });
         else if (hwinsert::countActive (song) > 0) // round 164d: outboard gear can't run faster than real time
-            warning = tr ("Hardware inserts pass their dry signal in an export (record their return to keep it)");
+            warning = tr ("Hardware inserts pass their dry signal in an export (tick \"Render through the hardware in real time\" to keep their return)");
         warningLabel.setText (warning, juce::dontSendNotification);
         resized();
         repaint();
@@ -644,7 +690,7 @@ private:
         auto& engineRef = engine;
 
         chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                              [this, o, extension, &engineRef, tracks = onlyTracks] (const juce::FileChooser& fc) {
+                              [this, o, extension, &engineRef, tracks = onlyTracks, realtime = realtime] (const juce::FileChooser& fc) {
                                   auto file = fc.getResult();
 
                                   if (file == juce::File())
@@ -656,6 +702,15 @@ private:
                                   lastFolder = file.getParentDirectory();
                                   engineRef.capturePluginStates(); // the copy carries the current plugin state
 
+                                  if (realtime) // round 165c: through the device, in real time
+                                  {
+                                      auto job = std::make_unique<ExportJob> (engineRef, o, file);
+                                      close(); // deletes this panel: no `this` after this point
+                                      auto* thread = new ExportThread (std::move (job), file, {}, tr ("Exporting in real time..."));
+                                      thread->reveal = o.showWhenDone;
+                                      thread->launchThread();
+                                      return;
+                                  }
                                   if (o.stems != exportopts::Stems::none)
                                   {
                                       close();
@@ -688,7 +743,8 @@ private:
     Segmented formatButtons { { "WAV", "MP3", "OGG", "FLAC" } };
     juce::Label depthLabel, bitrateLabel, compressionLabel, rateLabel, channelsLabel, ditherLabel;
     juce::ComboBox depthBox, mp3Box, oggBox, flacLevelBox, rateBox, channelsBox, ditherBox;
-    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle, hqToggle, showToggle, polyToggle, warmUpToggle;
+    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle, hqToggle, showToggle, polyToggle, warmUpToggle, realtimeToggle;
+    bool realtime = false; // "Render through the hardware in real time" (round 165c; not remembered: it takes the song's length)
     juce::Label alsoLabel;
     std::array<juce::ToggleButton, 4> alsoToggles;
     juce::Label infoLabel, warningLabel;
