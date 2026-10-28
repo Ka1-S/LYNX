@@ -4030,7 +4030,8 @@ void EffectsPanel::openPluginWindow (int slot)
             return;
         }
         const auto& s = engine.getSong().mixer[(std::size_t) track].effects[(std::size_t) slot];
-        PluginWindows::open (effect, plugin->getInstance(), juce::String::fromUTF8 (s.plugin.name.c_str()),
+        PluginWindows::open (effect, plugin->getInstance(), quickpick::slotName (engine, s), // (its Plugin database name, round 165c)
+                            
                              { &engine, [t = track, slot] (Song& song) -> PluginRef* {
                                   if (t >= (int) song.mixer.size() || slot >= (int) song.mixer[(std::size_t) t].effects.size())
                                       return nullptr;

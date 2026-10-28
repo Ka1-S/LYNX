@@ -23,6 +23,9 @@ struct Entry
     std::string format;   // VST3, VST, CLAP, AU, LV2
     std::string category; // what the plugin declares (may be empty)
     bool instrument = false;
+    std::string renamed = {}; // its name in the Plugin database when the user renamed it ("1_EQ"; empty = not renamed)
+
+    const std::string& shownName() const noexcept { return renamed.empty() ? name : renamed; }
 };
 
 // The picker's category of one plugin: one of categories (entry.instrument).
