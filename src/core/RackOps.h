@@ -82,6 +82,11 @@ void fillEverySteps (Pattern& pattern, int channel, int every, int steps, int of
 // `rhythm`, repeated to fill them. Notes that are off the step grid are left alone.
 void setStepRhythm (Pattern& pattern, int channel, const std::vector<bool>& rhythm, int steps);
 
+// FL's ghost steps (issue #11): a step turned on at `step` (0-based, `ticksPerStep` long) after the end of a pattern
+// with a set length makes the pattern long enough for it, rounded up to whole bars of `barTicks`. An automatic length
+// (0) follows the notes by itself and stays 0.
+std::int64_t lengthWithStep (std::int64_t lengthTicks, int step, std::int64_t ticksPerStep, std::int64_t barTicks) noexcept;
+
 // Moves every note of `channel` by `delta` steps, wrapping inside the first `steps` steps.
 void rotateSteps (Pattern& pattern, int channel, int delta, int steps);
 

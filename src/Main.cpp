@@ -81,6 +81,7 @@
 #include "ui/ThemeSettings.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
+#include "ui/Toolbar.h"
 #include "ui/ToolWindow.h"
 #include "platform/CrashGuard.h"
 #include "ui/CrashReporter.h"
@@ -950,6 +951,18 @@ public:
         // Double-clicking a .lynx/.flp opens LYNX with the file as an argument.
         if (args.size() > 0 && juce::File::isAbsolutePath (args[0].unquoted()))
             fileToOpen = juce::File (args[0].unquoted());
+        // LYNX --opentime project.(flp|lynx)|- report.txt [idle seconds] (round 165i): the normal start-up (splash, audio
+        // device, window) opens the project, waits until it is loaded and LYNX has gone quiet, measures the idle CPU and
+        // memory, writes the times and quits normally (a benchmark that killed LYNX left "closed unexpectedly" behind)
+        if (args.contains ("--opentime"))
+        {
+            const auto i = args.indexOf ("--opentime");
+            const auto project = args[i + 1].unquoted();
+            fileToOpen = project != "-" && juce::File::isAbsolutePath (project) ? juce::File (project) : juce::File();
+            openTimeReport = juce::File (args[i + 2].unquoted());
+            if (args.size() > i + 3 && ! args[i + 3].startsWith ("--"))
+                openTimeIdleSeconds = juce::jlimit (1, 120, args[i + 3].getIntValue());
+        }
 
         if (! startupOptions.splash)
         {
@@ -960,6 +973,7 @@ public:
             startupTrace.mark ("window revealed");
             openStartupFile();
             startupTrace.mark ("startup file opened");
+            startOpenTimeProbe();
             juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
             return;
         }
@@ -999,9 +1013,12 @@ public:
                     showUncleanNotice();
                     openStartupFile();
                     startupTrace.mark ("startup file opened");
+                    startOpenTimeProbe();
                     juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
                     // first run: language, audio, plugin folders (FL Studio's included) and a background scan
-                    if (! lynx::setupWizardDone())
+                    if (! lynx::setupWizardDone() && lynx::platform::testMode())
+                        lynx::platform::testModeLog ("setup wizard");
+                    else if (! lynx::setupWizardDone())
                         mainWindow->showSetupWizard();
                 });
             });
@@ -1048,6 +1065,12 @@ public:
     // Settings › General › "Crash reports" says (round 159), ask whether to send a report, send it unasked, or not
     void showUncleanNotice()
     {
+        if (lynx::platform::testMode()) // LYNX_TEST_MODE: no prompt, no report sent (written to test-mode.log)
+        {
+            if (uncleanLastStep.isNotEmpty())
+                lynx::platform::testModeLog ("\"closed unexpectedly\" notice (last step: " + uncleanLastStep + ")");
+            return;
+        }
         if (uncleanLastStep.isEmpty())
         {
             lynx::crashreporter::retryPending(); // (reports an earlier run could not send: once more)
@@ -1110,6 +1133,105 @@ public:
             return;
         }
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"), message);
+    }
+
+    // --opentime: after the start-up file was handed to the window
+    void startOpenTimeProbe()
+    {
+        if (openTimeReport == juce::File())
+            return;
+
+        struct Probe final : juce::Timer
+        {
+            LynxApplication& app;
+            juce::File report, project;
+            int idleSeconds;
+            int phase = 0; // 0 loading, 1 settling, 2 idle measurement
+            double revealedS = 0.0, loadedS = -1.0, settledS = -1.0, cpuAtLoaded = 0.0;
+            double lastCpu = 0.0, lastT = 0.0, quietSince = -1.0, idleCpu0 = 0.0, idleT0 = 0.0;
+
+            Probe (LynxApplication& a, juce::File r, juce::File p, int idle)
+                : app (a), report (std::move (r)), project (std::move (p)), idleSeconds (idle)
+            {
+                revealedS = startupTrace.seconds();
+                startTimer (250);
+            }
+
+            bool loaded() const
+            {
+                if (project == juce::File())
+                    return true;
+                return app.mainWindow != nullptr
+                    && app.mainWindow->getName().containsIgnoreCase (project.getFileNameWithoutExtension());
+            }
+
+            void finish (const juce::String& result)
+            {
+                stopTimer();
+                const auto now = startupTrace.seconds();
+                const auto cpu = lynx::processCpuSeconds();
+                juce::String text;
+                text << "project=" << (project == juce::File() ? juce::String ("-") : project.getFullPathName()) << "\n"
+                     << "window_s=" << juce::String (revealedS, 3) << "\n"
+                     << "loaded_s=" << juce::String (loadedS, 3) << "\n"
+                     << "settled_s=" << juce::String (settledS, 3) << "\n"
+                     << "cpu_at_loaded_s=" << juce::String (cpuAtLoaded, 3) << "\n"
+                     << "idle_s=" << juce::String (now - idleT0, 2) << "\n"
+                     << "idle_cpu_pct=" << juce::String (phase == 2 && now > idleT0 ? 100.0 * (cpu - idleCpu0) / (now - idleT0) : -1.0, 1) << "\n"
+                     << "working_set_mb=" << juce::String ((double) lynx::toolbar::PerformanceMeter::processMemoryBytes() / 1048576.0, 0) << "\n"
+                     << "cpu_total_s=" << juce::String (cpu, 3) << "\n"
+                     << "result=" << result << "\n";
+                report.replaceWithText (text);
+                app.setApplicationReturnValue (result == "OK" ? 0 : 1);
+                app.quit();
+            }
+
+            void timerCallback() override
+            {
+                const auto now = startupTrace.seconds();
+                const auto cpu = lynx::processCpuSeconds();
+                if (phase == 0)
+                {
+                    if (loaded())
+                    {
+                        loadedS = now;
+                        cpuAtLoaded = cpu;
+                        phase = 1;
+                        lastCpu = cpu;
+                        lastT = now;
+                    }
+                    else if (now - revealedS > 240.0)
+                        finish ("TIMEOUT loading");
+                    return;
+                }
+                if (phase == 1)
+                {
+                    // quiet = under 10 % of one core for 1.5 s (the harness's rule), at most 30 s after loading
+                    const auto use = now > lastT ? 100.0 * (cpu - lastCpu) / (now - lastT) : 0.0;
+                    lastCpu = cpu;
+                    lastT = now;
+                    if (use < 10.0)
+                    {
+                        if (quietSince < 0.0)
+                            quietSince = now - 0.25;
+                        if (now - quietSince >= 1.5)
+                            settledS = quietSince;
+                    }
+                    else
+                        quietSince = -1.0;
+                    if (settledS >= 0.0 || now - loadedS > 30.0)
+                    {
+                        phase = 2;
+                        idleCpu0 = cpu;
+                        idleT0 = now;
+                    }
+                    return;
+                }
+                if (now - idleT0 >= (double) idleSeconds)
+                    finish ("OK");
+            }
+        };
+        perf = std::make_unique<Probe> (*this, openTimeReport, fileToOpen, openTimeIdleSeconds);
     }
 
     void openStartupFile()
@@ -6469,6 +6591,8 @@ private:
     double splashDuration = lynx::SplashScreen::minimumDuration; // seconds of its clock (round 121: from the process start)
     lynx::StartupOptions startupOptions;
     juce::File fileToOpen;
+    juce::File openTimeReport; // --opentime
+    int openTimeIdleSeconds = 10;
 };
 
 START_JUCE_APPLICATION (LynxApplication)
