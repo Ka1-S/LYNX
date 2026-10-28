@@ -50,7 +50,14 @@ Evidence markers: **[DOC]** Microsoft Learn (MSIX docs), **[CODE]** LYNX source,
   first start copied 13 preference entries (plugins.xml, favourites, Presets, ui-options, audio-device...) and skipped
   wavecache / autosave / flp-embedded / crash reports / logs, result=OK. Simulated folder deleted afterwards.
   Follow-up: the probe file is deleted when not packaged and never migrated.
-- Pending: the Release run's Windows job (MSIX pack + real install test) — still queued on GitHub's runners.
+- 04:20 **Release run 40592904988 green on every job** [TEST, CI, windows-latest, Windows SDK 10.0.26100]: makepri +
+  `makeappx pack` → `LYNX-0.1.19-973cde6-store.msix` (14.1 MB, 103 files, "Package creation succeeded"); the test
+  identity package installed with `Add-AppxPackage -AllowUnsigned`
+  (`C:\Program Files\WindowsApps\LYNX.DAW_0.1.19.0_x64__dmy9vrm0dn9mt`); LYNX run through the `lynx.exe` alias:
+  `packaged=yes`, settings `…\Packages\LYNX.DAW_dmy9vrm0dn9mt\LocalCache\Roaming\LYNX`, `settingsIsPackageFolder=yes`,
+  result=OK; the probe file seen from outside the package; `--selftest` inside the package result=OK; package removed.
+  (That run was queued before the repository variables existed, so it still used the placeholder identity; the
+  layout script now defaults to KA1WARE.LYNXSHARE and the variables hold it too.)
 
 ## 1. Facts that shaped the design
 
