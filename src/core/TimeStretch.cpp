@@ -156,7 +156,9 @@ Planar resampleTo (const Planar& in, long outFrames)
 Planar spectralStretch (const Planar& in, long outFrames, double sampleRate, double blockSeconds, double intervalSeconds)
 {
     const auto channels = (int) in.ch.size();
-    signalsmith::stretch::SignalsmithStretch<float> stretch;
+    // a fixed seed (round 165i): beyond 2× the stretcher randomises each bin's time step, and with the default seed from
+    // std::random_device the same sample stretched twice — two exports, two opens — came out different
+    signalsmith::stretch::SignalsmithStretch<float> stretch { 1651L };
     stretch.configure (channels, (int) std::lround (sampleRate * blockSeconds), (int) std::lround (sampleRate * intervalSeconds));
 
     // exact() needs at least one block (plus an interval) of input: short sounds are padded with silence and the

@@ -1,6 +1,9 @@
 #include "engine/SampleLibrary.h"
 #include "platform/Paths.h"
 
+#include <array>
+#include <cmath>
+#include <cstdlib>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -10,6 +13,7 @@
 #include "core/OggVorbis.h"
 #include "core/Mp3Decoder.h"
 #include "core/TimeStretch.h"
+#include "core/LoadTrace.h"
 #include "engine/Mp3Format.h"
 #include "engine/WavPackFormat.h"
 
@@ -187,6 +191,153 @@ std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce
     return nullptr;
 }
 
+namespace
+{
+// Time-stretched copies on disk (round 165i): opening a project stretched every "keep pitch" sample again (FL's Thief:
+// 23 vocal chops, 2.0 s of the 4.4 s open). The copy is kept in the cache folder, keyed by the source file (path, size,
+// date), the ratio, the method and the stretcher's own fingerprint — a short test signal stretched by this build — so
+// a changed algorithm never reuses an old copy. The floats are stored as computed: what plays is bit for bit the same.
+constexpr char stretchMagic[8] = { 'L', 'Y', 'N', 'X', 'S', 'T', 'R', '1' };
+constexpr int stretchHeader = 32;
+constexpr juce::int64 stretchCacheLimit = 1024LL * 1024 * 1024; // pruned (oldest first) to 3/4 of it when exceeded
+
+std::uint64_t fnv (const void* data, std::size_t bytes, std::uint64_t h = 1469598103934665603ULL) noexcept
+{
+    const auto* b = static_cast<const unsigned char*> (data);
+    for (std::size_t i = 0; i < bytes; ++i)
+        h = (h ^ b[i]) * 1099511628211ULL;
+    return h;
+}
+
+std::uint64_t stretchFingerprint (StretchMethod method)
+{
+    static std::array<std::once_flag, 3> once;
+    static std::array<std::uint64_t, 3> prints {};
+    const auto m = (std::size_t) juce::jlimit (0, 2, (int) method);
+    std::call_once (once[m], [m] {
+        SampleData test;
+        test.sampleRate = 44100.0;
+        std::uint32_t noise = 12345;
+        for (int i = 0; i < 6000; ++i)
+        {
+            noise = noise * 1664525u + 1013904223u;
+            const auto n = (float) (noise >> 8) / 16777216.0f - 0.5f;
+            const auto t = (double) i / test.sampleRate;
+            test.left.push_back ((float) (0.5 * std::sin (2.0 * 3.14159265358979 * 220.0 * t)) + 0.1f * n + (i % 1500 == 0 ? 0.8f : 0.0f));
+            test.right.push_back ((float) (0.4 * std::sin (2.0 * 3.14159265358979 * 331.0 * t)) - 0.1f * n);
+        }
+        const auto out = timeStretch (test, 2.6, (StretchMethod) m); // (beyond 2x: the seeded randomised steps count too)
+        auto h = fnv (out->left.data(), out->left.size() * sizeof (float));
+        prints[m] = fnv (out->right.data(), out->right.size() * sizeof (float), h);
+    });
+    return prints[m];
+}
+
+juce::File stretchCacheFile (const juce::String& path, double ratio, StretchMethod method)
+{
+    const auto source = platform::localFile (path);
+    if (! source.existsAsFile())
+        return {};
+    const auto key = source.getFullPathName() + "|" + juce::String (source.getSize()) + "|" + juce::String (source.getLastModificationTime().toMilliseconds())
+                   + "|" + juce::String (ratio, 10) + "|" + juce::String ((int) method) + "|" + juce::String::toHexString ((juce::int64) stretchFingerprint (method));
+    return SampleLibrary::cacheFolder().getChildFile (juce::String::toHexString (key.hashCode64()) + ".str");
+}
+
+std::shared_ptr<SampleData> readStretched (const juce::File& file)
+{
+    juce::MemoryBlock block;
+    if (file == juce::File() || ! file.existsAsFile() || ! file.loadFileAsData (block) || block.getSize() < (std::size_t) stretchHeader)
+        return nullptr;
+    const auto* d = static_cast<const char*> (block.getData());
+    if (std::memcmp (d, stretchMagic, 8) != 0)
+        return nullptr;
+    double rate = 0.0;
+    juce::int64 frames = 0;
+    std::int32_t channels = 0;
+    std::memcpy (&rate, d + 8, 8);
+    std::memcpy (&frames, d + 16, 8);
+    std::memcpy (&channels, d + 24, 4);
+    if (frames <= 0 || (channels != 1 && channels != 2) || ! (rate > 0.0)
+        || (juce::int64) block.getSize() != stretchHeader + frames * channels * (juce::int64) sizeof (float))
+        return nullptr;
+    auto out = std::make_shared<SampleData>();
+    out->sampleRate = rate;
+    const auto* samples = reinterpret_cast<const float*> (d + stretchHeader);
+    out->left.assign (samples, samples + frames);
+    if (channels == 2)
+        out->right.assign (samples + frames, samples + 2 * frames);
+    file.setLastModificationTime (juce::Time::getCurrentTime()); // (recently used: pruned last)
+    return out;
+}
+
+void pruneStretchCache()
+{
+    // writes cut short by quitting (an hour old: not one another LYNX is writing now)
+    for (const auto& t : SampleLibrary::cacheFolder().findChildFiles (juce::File::findFiles, false, "*.str.*.tmp"))
+        if (t.getLastModificationTime() < juce::Time::getCurrentTime() - juce::RelativeTime::hours (1))
+            t.deleteFile();
+    auto files = SampleLibrary::cacheFolder().findChildFiles (juce::File::findFiles, false, "*.str");
+    juce::int64 total = 0;
+    for (const auto& f : files)
+        total += f.getSize();
+    if (total <= stretchCacheLimit)
+        return;
+    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
+    for (const auto& f : files)
+    {
+        if (total <= stretchCacheLimit * 3 / 4)
+            break;
+        total -= f.getSize();
+        f.deleteFile();
+    }
+}
+
+void writeStretched (const juce::File& file, const SampleData& data)
+{
+    if (file == juce::File() || data.isMapped() || data.left.empty() || (! data.right.empty() && data.right.size() != data.left.size()))
+        return;
+    static std::once_flag pruned;
+    std::call_once (pruned, pruneStretchCache);
+    const auto temp = file.getSiblingFile (file.getFileName() + "." + juce::String::toHexString (juce::Random::getSystemRandom().nextInt64()) + ".tmp");
+    auto ok = false;
+    {
+        juce::FileOutputStream out (temp);
+        if (out.failedToOpen())
+            return;
+        const auto frames = (juce::int64) data.left.size();
+        const std::int32_t channels = data.right.empty() ? 1 : 2;
+        char header[stretchHeader] {};
+        std::memcpy (header, stretchMagic, 8);
+        std::memcpy (header + 8, &data.sampleRate, 8);
+        std::memcpy (header + 16, &frames, 8);
+        std::memcpy (header + 24, &channels, 4);
+        ok = out.write (header, stretchHeader) && out.write (data.left.data(), data.left.size() * sizeof (float));
+        if (ok && channels == 2)
+            ok = out.write (data.right.data(), data.right.size() * sizeof (float));
+        out.flush();
+        ok = ok && out.getStatus().wasOk();
+    }
+    if (! ok)
+    {
+        temp.deleteFile();
+        return;
+    }
+    if (! temp.moveFileTo (file)) // (another LYNX wrote it meanwhile: keep that one)
+        temp.deleteFile();
+}
+// The disk copy is written in the background, off the project open (round 165i: on Windows the 23 stretched copies of
+// Thief, 229 MB, took 14.7 s of the threads' time to write, the open waited 7 s more than without the cache). One
+// low-priority thread, never destroyed: a write cut short by quitting leaves a .tmp, which the next prune removes.
+void writeStretchedLater (const juce::File& file, std::shared_ptr<const SampleData> data)
+{
+    static auto* writer = new juce::ThreadPool (juce::ThreadPoolOptions{}
+                                                    .withThreadName ("LYNX stretch cache")
+                                                    .withNumberOfThreads (1)
+                                                    .withDesiredThreadPriority (juce::Thread::Priority::background));
+    writer->addJob ([file, data = std::move (data)] { writeStretched (file, *data); });
+}
+} // namespace
+
 std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::String& path, double ratio, StretchMethod method)
 {
     // 10 significant digits: ratios within 0.1 % of 1 are resampled to the exact length, so 4 decimals were too coarse
@@ -199,17 +350,37 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
             return it->second;
     }
 
-    auto original = load (path);
+    static const bool useDisk = [] { const auto* e = std::getenv ("LYNX_STRETCH_DISK"); return e == nullptr || e[0] != '0'; }();
+    const auto onDisk = useDisk ? stretchCacheFile (path, ratio, method) : juce::File();
+    std::shared_ptr<const SampleData> stretched;
+    {
+        const loadtrace::Scope timing ("stretch_disk_read");
+        stretched = readStretched (onDisk);
+    }
+    if (stretched == nullptr)
+    {
+        auto original = load (path);
 
-    if (original == nullptr)
-        return nullptr;
+        if (original == nullptr)
+            return nullptr;
 
-    std::shared_ptr<const SampleData> stretched = timeStretch (*original, ratio, method);
+        std::shared_ptr<SampleData> made;
+        {
+            const loadtrace::Scope timing ("stretch_compute");
+            made = timeStretch (*original, ratio, method);
+        }
+        stretched = std::move (made);
+        if (stretched != nullptr && onDisk != juce::File())
+            writeStretchedLater (onDisk, stretched);
+    }
 
-    // only one length per file is kept (changing the BPM replaces the stretched one)
+    // the other lengths of this file go when nothing uses them any more (changing the BPM replaces the stretched one).
+    // Round 165i: every other length was dropped, also the ones the song being opened still needed — two channels
+    // stretching one sample to different lengths (Thief's vocal chops) were stretched again on the message thread
+    // while building the rack (rack_stretch 754 ms), each evicting the other
     const std::scoped_lock l (shared.stretchLock);
     for (auto it = shared.stretched.begin(); it != shared.stretched.end();)
-        it = it->first.startsWith (path + "|") ? shared.stretched.erase (it) : std::next (it);
+        it = it->first.startsWith (path + "|") && it->second.use_count() == 1 ? shared.stretched.erase (it) : std::next (it);
 
     shared.stretched[key] = stretched;
     return stretched;

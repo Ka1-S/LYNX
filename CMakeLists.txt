@@ -275,6 +275,7 @@ if(LYNX_BUILD_APP)
         src/platform/FileTypes.cpp
         src/platform/CrashGuard.cpp
         src/platform/Paths.cpp
+        src/platform/Package.cpp
         src/platform/NativeEmbed.cpp
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
