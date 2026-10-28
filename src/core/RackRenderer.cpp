@@ -691,7 +691,7 @@ void RackState::buildPdc (const RackState* previous)
         for (std::size_t s = 0; s < effects[t].size(); ++s)
             slotLatency[t].push_back (*next++);
 
-    pdc = computePdc (song, channelLatency, slotLatency);
+    pdc = computePdc (song, channelLatency, slotLatency, sampleRate);
 
     // reuses lines of the same length: editing the song must not click the audio
     auto line = [] (int length, const std::shared_ptr<DelayLine>* old) -> std::shared_ptr<DelayLine> {
@@ -732,7 +732,9 @@ void RackState::buildPdc (const RackState* previous)
         const auto& track = song.mixer[t];
         if (track.outputChannel < 0 || track.outputChannel >= HardwareOutput::maxChannels)
             continue;
-        const auto length = t < pdc.outLat.size() ? std::max (0, pdc.total - pdc.outLat[t]) : 0;
+        // FL (FUN_010ffca0): only with "Compensate for master latency" on and the track not bypassed
+        const auto compensated = track.compensateMasterLatency && track.latencyBypass != LatencyBypass::always;
+        const auto length = compensated && t < pdc.outLat.size() ? std::max (0, pdc.total - pdc.outLat[t]) : 0;
         const std::shared_ptr<DelayLine>* old = nullptr;
         if (previous != nullptr)
             for (const auto& r : previous->hwRoutes)
@@ -740,6 +742,12 @@ void RackState::buildPdc (const RackState* previous)
                     old = &r.delay;
         hwRoutes.push_back ({ (int) t, track.outputChannel, track.outputMode, line (length, old) });
     }
+
+    bypassWhenIdle.assign (song.mixer.size(), 0);
+    anyBypassWhenIdle = false;
+    for (std::size_t t = 1; t < song.mixer.size(); ++t)
+        if (song.mixer[t].latencyBypass == LatencyBypass::whenRecordingOrStopped)
+            anyBypassWhenIdle = bypassWhenIdle[t] = 1;
 }
 
 void RackState::buildMidiRoutes()
@@ -2479,6 +2487,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 {
     chunkTick = startTick;
     chunkPlaying = playing;
+    updatePdcBypass (state, playing);
     const auto& song = state.song;
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
 
@@ -2794,8 +2803,9 @@ void RackRenderer::mixHardwareOutputs (const RackState& state, int n) noexcept
 
         const float* l = trackActive[(std::size_t) t] ? trackBuffer (t, 0) : nullptr;
         const float* r = trackActive[(std::size_t) t] ? trackBuffer (t, 1) : nullptr;
+        const auto bypassed = pdcBypassNow && (std::size_t) t < state.bypassWhenIdle.size() && state.bypassWhenIdle[(std::size_t) t] != 0;
 
-        if (route.delay != nullptr)
+        if (route.delay != nullptr && ! bypassed)
         {
             if (l != nullptr)
             {
@@ -2915,6 +2925,30 @@ void RackRenderer::sumChannelsInto (const RackState& state, int t, int channels,
     }
 }
 
+// FL's FUN_012c19f0: "When recording or not playing" bypasses while the transport is stopped or recording. Back to
+// compensated, those tracks' lines are emptied: they start from silence instead of replaying what they held.
+void RackRenderer::updatePdcBypass (const RackState& state, bool playing) noexcept
+{
+    const auto recording = liveInput != nullptr && liveInput->recording.load (std::memory_order_relaxed);
+    pdcBypassNow = state.anyBypassWhenIdle && (! playing || recording);
+
+    if (pdcBypassBefore && ! pdcBypassNow)
+    {
+        for (std::size_t t = 0; t < state.bypassWhenIdle.size() && t < state.sendDelays.size(); ++t)
+            if (state.bypassWhenIdle[t] != 0)
+            {
+                const auto plain = std::min (state.sendDelays[t].size(), 1 + state.song.mixer[t].sends.size()); // not the Fruity Send taps
+                for (std::size_t k = 0; k < plain; ++k)
+                    if (state.sendDelays[t][k] != nullptr)
+                        state.sendDelays[t][k]->clear();
+            }
+        for (const auto& route : state.hwRoutes)
+            if (route.delay != nullptr && (std::size_t) route.track < state.bypassWhenIdle.size() && state.bypassWhenIdle[(std::size_t) route.track] != 0)
+                route.delay->clear();
+    }
+    pdcBypassBefore = pdcBypassNow;
+}
+
 bool RackRenderer::runTaskGraph (const RackState& state, bool playing, int channels, int n, MeterBank* meters) noexcept
 {
     // LYNX_TASKGRAPH=0: the layers only (A/B measurements)
@@ -3004,6 +3038,8 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
         const auto active = tap >= 0 ? tapActive[(std::size_t) tap] : trackActive[(std::size_t) in.source];
         const auto& delays = state.sendDelays[(std::size_t) in.source];
         auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
+        if (pdcBypassNow && tap < 0 && state.bypassWhenIdle[(std::size_t) in.source] != 0)
+            delay = nullptr; // FL's "When recording or not playing": no compensation now
         auto* sl = tap >= 0 ? tapBuffer (tap, 0) : trackBuffer (in.source, 0);
         auto* sr = tap >= 0 ? tapBuffer (tap, 1) : trackBuffer (in.source, 1);
 
