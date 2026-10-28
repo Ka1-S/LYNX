@@ -30,6 +30,10 @@
   Test build with FL Data: 334 checks, 0 failures; 89/89 FL factory scripts run. FL renders of the 12 cases done
   (D:\lynx-work\vfxscript165\fl). Next: JUCE Linux build of the editor (queued in buildslot), LYNX renders of the
   cases (tmp/vfxscript165/lxrender.sh) + compare.py, --vfxshot screenshots, build-local + Windows, notes, land.
+- 21:xx: Linux JUCE build of the editor OK (one compile fix); LYNX renders of the 12 cases compared with FL (§3):
+  two fixes (stopped onTick before the first block; a cut-group cut keeps a Patcher's VFX voices), combo boxes of
+  the editor had a zero width (seen in the --vfxshot screenshots, fixed). Merged origin/main. Running: build-local
+  with FL Data + Windows build, then land.
 
 ## 1. What FL's VFX Script is
 
