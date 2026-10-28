@@ -136,3 +136,18 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
   are also covered by tests/Sampler162Tests.inc.
 - F4 (cosmetic, fixed here): Quick-add palette — long names ran under the right-hand source label; the source is now
   laid out first and the name is cut with "...".
+
+## Follow-up audit165b (coordinator, 2026-10-28)
+
+- F12 (fixed): after recording in the Audio editor, Windows kept its microphone-in-use icon until LYNX quit. The
+  editor opened the device input on demand (`openAudioInput`) and never closed it. Now it remembers that it opened
+  the input and calls the new `AudioEngine::releaseAudioInputIfUnused()` when the recording stops or the editor
+  closes. That closes the input channels only if nothing else uses them: no mixer track with an input, no armed
+  recording or armed insert, no hardware insert returning from the input. On Windows Audio (WASAPI) the input
+  *device* has to go as well, because JUCE opens the input device whenever its name is set, even with zero channels.
+  Its name is remembered so the next recording reopens the same device. FL behaves the same way: it holds the input
+  only while something uses it.
+- F5 (fixed): clicking a built-in drum channel's name (Kick, Clap, Hat, Snare) or an audio clip channel's name now
+  opens and closes its channel window, like FL's channel button. The window has the channel header and the Misc tab
+  (SettingsWindow already built it for kinds without an instrument page). The hint's "[LMB] open/close the editor"
+  is now true for every channel.
