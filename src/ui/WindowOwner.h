@@ -25,7 +25,8 @@ void setSecondaryWindowKeyHandler (std::function<bool (const juce::KeyPress&)> h
 // window comes first after any click in it, while the windows kept above it (channel settings, a plugin...) are on top
 // on the screen. This puts those windows back above the main window in that list, in their screen order, so a drop on
 // one of them lands there and not on the panel under it (issue #12: a sample dropped on the Sampler's waveform
-// replaced the sample of the Channel Rack row under the window).
+// replaced the sample of the Channel Rack row under the window). Runs whenever the main window comes to the front
+// (setMainWindowForOwnership listens), so also when the drag image hides at the drop and Windows activates the main window.
 void matchWindowOrderToScreen();
 
 // Makes the main window the active one (round 165q): a closing secondary window that is active calls it first, so

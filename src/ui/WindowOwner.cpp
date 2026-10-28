@@ -39,9 +39,29 @@ void* mainWindowHandle()
     return main != nullptr && main->getPeer() != nullptr ? main->getWindowHandle() : nullptr;
 }
 
+namespace
+{
+// Every time the main window comes to the front (a click in it, the drag image hiding at a drop...), JUCE moves it to
+// the top of its list; the windows kept above it go back above it there (matchWindowOrderToScreen, issue #12)
+struct OrderKeeper final : juce::ComponentListener
+{
+    void componentBroughtToFront (juce::Component&) override { matchWindowOrderToScreen(); }
+};
+
+OrderKeeper& orderKeeper()
+{
+    static OrderKeeper keeper;
+    return keeper;
+}
+} // namespace
+
 void setMainWindowForOwnership (juce::Component* window)
 {
+    if (auto* before = mainWindow().getComponent())
+        before->removeComponentListener (&orderKeeper());
     mainWindow() = window;
+    if (window != nullptr)
+        window->addComponentListener (&orderKeeper());
 }
 
 void activateMainWindow()
@@ -664,7 +684,20 @@ void matchWindowOrderToScreen()
     std::stable_sort (above.begin(), above.end(), [&] (juce::Component* a, juce::Component* b) { return depthOf (a) > depthOf (b); });
    #endif
 
+    // JUCE's list already in that order after the main window: nothing to do (no window is touched)
+    auto inOrder = true;
+    auto last = desktop.getComponents().indexOf (owner);
+    for (auto* c : above)
+    {
+        const auto at = desktop.getComponents().indexOf (c);
+        inOrder = inOrder && at > last;
+        last = at;
+    }
+    if (inOrder)
+        return;
+
     for (auto* c : above)
         c->toFront (false);
 }
+
 } // namespace lynx
