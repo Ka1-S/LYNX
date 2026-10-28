@@ -1,3 +1,4 @@
+#include "core/FruityDance.h"
 #include "core/Instruments.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
@@ -3019,8 +3020,10 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeTransistorBassInstrument();
     if (kind == InstrumentKind::simsynth)
         return makeSimSynthInstrument();
-    if (kind == InstrumentKind::wasp || kind == InstrumentKind::fruitydance)
-        return makeWaspInstrument(); // both make no sound and keep their state
+    if (kind == InstrumentKind::wasp)
+        return makeWaspInstrument(); // makes no sound and keeps its state
+    if (kind == InstrumentKind::fruitydance)
+        return dance::makeInstrument(); // silent: its notes pick the dancer's moves (round 165e)
     if (kind == InstrumentKind::plucked)
         return makePluckedInstrument();
     if (kind == InstrumentKind::beepmap)

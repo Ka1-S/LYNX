@@ -401,7 +401,7 @@ private:
     juce::String idleHint() const;
 
     ChannelRackComponent rack;
-    juce::Viewport rackViewport;
+    ChannelRackViewport rackViewport { rack };
     PianoRollComponent pianoRoll;
     PlaylistComponent playlist;
     PatternPicker picker { engine, playlist };
@@ -409,6 +409,7 @@ private:
     MixerComponent mixer;
     BrowserComponent browser;
     Workspace workspace; // after the panels' contents: it is destroyed first
+    std::unique_ptr<juce::Component> danceStage; // the dance channels' dancers over the workspace (ui/DanceView.h, round 165e)
 
     std::unique_ptr<juce::FileChooser> fileChooser;
     juce::File currentFile;

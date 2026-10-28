@@ -55,6 +55,9 @@ public:
     // moves the scene's animated layers (particles, rings) on to `frame` — once per frame
     void advance (const visualfx::scene::Scene& scene, const visualfx::Frame& frame, float aspect);
     void draw (juce::Graphics& g, juce::Rectangle<float> area, const visualfx::scene::Scene& scene, const visualfx::Frame& frame);
+    // one layer alone, without the scene's zoom and brightness (the GPU renderer composes the layers itself)
+    void drawLayer (juce::Graphics& g, juce::Rectangle<float> area, const visualfx::scene::Scene& scene, std::size_t index,
+                    const visualfx::Frame& frame);
     void reset();
 
 private:

@@ -270,6 +270,14 @@ void fillEverySteps (Pattern& pattern, int channel, int every, int steps, int of
             pattern.toggleStep (channel, s);
 }
 
+std::int64_t lengthWithStep (std::int64_t lengthTicks, int step, std::int64_t ticksPerStep, std::int64_t barTicks) noexcept
+{
+    const auto end = (std::int64_t) (step + 1) * ticksPerStep;
+    if (lengthTicks <= 0 || step < 0 || end <= lengthTicks || barTicks <= 0)
+        return lengthTicks;
+    return (end + barTicks - 1) / barTicks * barTicks;
+}
+
 void setStepRhythm (Pattern& pattern, int channel, const std::vector<bool>& rhythm, int steps)
 {
     const auto end = (std::int64_t) steps * ticksPerStep;
