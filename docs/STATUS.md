@@ -244,6 +244,11 @@ accordingly. Highlights of what is **confirmed and applied**:
   CPU: AVX bank kernel (8 partials per pass), running sine pairs across frequency changes (steps by complex rotation
   along the harmonic series), fast per-partial exp/log, cached k^m, idle records/channels skipped; "Square a Saw —
   Oxygen" (23 Harmor channels, 260 s) exports in 50 s, "JuiceBass — Menagerie" (8, 474 s) in 78 s.
+  **REA round 165g (flbeta165h):** the note start delay (part parameter 2), the part attack fade, velocity →
+  volume-envelope speed (part parameter 15), and precision "Average" with IPP's 11-bit Exp/Ln as FL's DLL computes
+  them: 298 of the 325 factory presets null within −60 dB of the DLL, 21 more match their spectrum (STFT < −40 dB),
+  6 still audible (was 262 / 44 / 19) — see
+  REA_rodada165g-flbeta165h.md §4; Harmor stays beta.
   **REA round 165g (flbeta165s):** the 88 old (version 11…15) factory presets, Default.fst included, are upgraded
   the way FL's loader does (byte-identical to the DLL's own re-save; a new Harmor starts from Default.fst), filter
   shapes 8, 10…13, 15 and 16, images of any size (Labyrinth's 16 × 12), portamento time following the velocity.

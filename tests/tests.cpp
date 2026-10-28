@@ -8711,11 +8711,15 @@ TEST (harmor_engine)
     };
     {
         // reference model (REA round 34 hmodel.py; C5 at FL velocity 100, Final.Vol 1, centre, released at 6144, the
-        // Mersenne Twister seeded like LYNX's)
+        // Mersenne Twister seeded like LYNX's; since flbeta165h LYNX's own values: the test state plays at precision
+        // "Average", whose IPP 11-bit Exp/Ln — REA_rodada165g-flbeta165h §3 — the model computes exactly)
         auto [l, r, inst] = render (c, 8192, 1.0f, 1.0f, 6144);
+        if (std::getenv ("LYNX_PRINT_HARMOR_ENGINE") != nullptr)
+            for (int i : { 0, 100, 1000, 3000, 6000, 7000, 8191 })
+                std::printf ("harmor engine %d %.8g %.8g\n", i, (double) l[(std::size_t) i], (double) r[(std::size_t) i]);
         const std::tuple<int, float, float> golden[] {
-            { 0, 0.0f, 0.0f }, { 100, 0.00947693f, 0.04249846f }, { 1000, 0.08140575f, -0.03251422f }, { 3000, 0.05928446f, -0.00247572f },
-            { 6000, 0.02997839f, 0.14549091f }, { 7000, -0.01121871f, 0.04197952f }, { 8191, 0.00314545f, 0.03857505f } };
+            { 0, 0.0f, 0.0f }, { 100, 0.0094771842f, 0.042498328f }, { 1000, 0.081412978f, -0.032517102f }, { 3000, 0.059289735f, -0.0024759346f },
+            { 6000, 0.029978603f, 0.14549156f }, { 7000, -0.011218854f, 0.041979425f }, { 8191, 0.0031455588f, 0.03857585f } };
         for (const auto& [i, gl, gr] : golden)
             CHECK (std::abs (l[(std::size_t) i] - gl) < 2e-6f && std::abs (r[(std::size_t) i] - gr) < 2e-6f);
         // after the release the volume envelope ends, the record declicks and the instrument goes idle
@@ -11966,7 +11970,9 @@ TEST (harmor_installation_presets)
 TEST (harmor_image)
 {
     // REA_rodada75: image synthesis — a looping 6-column image (gain + frequency planes) read at a speed, cubic gain and
-    // linear frequency interpolation, Hz frequency mode, formant shift — against our reference model (r75 imgm.py)
+    // linear frequency interpolation, Hz frequency mode, formant shift — against our reference model (r75 imgm.py);
+    // since flbeta165h LYNX's own values: the test state plays at precision "Average" (global misc +28 = 0), whose
+    // IPP 11-bit Exp/Ln (REA_rodada165g-flbeta165h §3) the model computes exactly
     const auto blob = harmorTestState (false, true);
     if (const char* dump = std::getenv ("LYNX_DUMP_HARMOR_IMAGE"))
         std::ofstream (dump, std::ios::binary).write ((const char*) blob.data(), (std::streamsize) blob.size());
@@ -11978,9 +11984,9 @@ TEST (harmor_image)
         for (int i : { 100, 1000, 2500, 3000, 5000, 6500, 8191 })
             std::printf ("harmor image %d %.8g %.8g\n", i, (double) ref[2 * (std::size_t) i], (double) ref[2 * (std::size_t) i + 1]);
     const std::tuple<int, float, float> golden[] {
-        { 100, 0.0022269291f, 0.018017211f }, { 1000, 0.013962966f, -0.028602127f }, { 2500, 0.016781429f, -0.028931717f },
-        { 3000, -0.010532441f, -0.0061010128f }, { 5000, -0.017426063f, 0.016474312f }, { 6500, 0.1689423f, 0.078417062f },
-        { 8191, -0.045403875f, -0.049045475f } };
+        { 100, 0.0022266121f, 0.018016478f }, { 1000, 0.013964245f, -0.028604792f }, { 2500, 0.016782919f, -0.028934296f },
+        { 3000, -0.010533399f, -0.0061015566f }, { 5000, -0.017427528f, 0.016475817f }, { 6500, 0.16895676f, 0.078423217f },
+        { 8191, -0.045406573f, -0.049047086f } };
     for (const auto& [i, gl, gr] : golden)
         CHECK (std::abs (ref[2 * (std::size_t) i] - gl) < 2e-6f && std::abs (ref[2 * (std::size_t) i + 1] - gr) < 2e-6f);
     // the image changes the sound: without it (gain mix 0, frequency scale 0) the same notes render differently
@@ -12011,17 +12017,19 @@ TEST (harmor_image)
 TEST (harmor_round75_features)
 {
     // REA_rodada75: arpeggio markers, noise resonance, pluck blur mode, pluck blend, harmonic randomness, phaser and
-    // harmonizer masks — LYNX's engine against our reference model (r75 hmodel.py, the Mersenne Twister seeded like LYNX's)
+    // harmonizer masks — LYNX's engine against our reference model (r75 hmodel.py, the Mersenne Twister seeded like LYNX's);
+    // since flbeta165h LYNX's own values: the test state plays at precision "Average", whose IPP 11-bit Exp/Ln
+    // (REA_rodada165g-flbeta165h §3) the model computes exactly
     const std::vector<lynx::harmor::RefNote> chord { { 0, 60, 0.8, 1.0, 0.0, 9000 }, { 1500, 64, 0.7, 1.0, 0.0, 9500 }, { 3000, 67, 0.9, 1.0, 0.0, 10000 } };
     struct Case { int features; std::array<std::tuple<int, float, float>, 4> golden; };
     const Case cases[] {
-        { 1, { { { 2000, 0.00326227601f, -0.00143631078f }, { 4500, 0.104633873f, 0.0262026641f }, { 7000, -0.00242280135f, 0.00364600495f }, { 11000, -0.0029983636f, -0.00308720154f } } } },
-        { 2, { { { 2000, 0.294110536f, -0.229805974f }, { 4500, -0.00492941859f, -0.00132748827f }, { 7000, 0.0132401136f, 0.00544014934f }, { 11000, -0.00105760543f, -0.00210882883f } } } },
-        { 4, { { { 2000, 0.0720629904f, -0.0296807697f }, { 4500, -0.10764533f, 0.113311439f }, { 7000, -0.229827746f, -0.101087983f }, { 11000, -0.0519010639f, -0.0665841137f } } } },
-        { 8, { { { 2000, 0.0720039901f, -0.0297230242f }, { 4500, -0.107470558f, 0.113653905f }, { 7000, -0.228478677f, -0.152556434f }, { 11000, -0.0412466244f, -0.0504480202f } } } },
-        { 16, { { { 2000, 0.0634379551f, -0.0309438618f }, { 4500, -0.112099687f, 0.112784195f }, { 7000, -0.231666087f, -0.167064955f }, { 11000, -0.0411841346f, -0.0503804788f } } } },
-        { 32, { { { 2000, 0.0862953135f, -0.0358822417f }, { 4500, 0.0694009664f, 0.141198453f }, { 7000, -0.158969622f, -0.103794064f }, { 11000, -0.0294273162f, -0.0417808629f } } } },
-        { 63, { { { 2000, 0.0172010472f, -0.0106831535f }, { 4500, 0.556600683f, 0.0811084217f }, { 7000, -0.00255421684f, 0.020610704f }, { 11000, -0.00318711501f, 0.000247763831f } } } } };
+        { 1, { { { 2000, 0.0032625794f, -0.0014364491f }, { 4500, 0.10464316f, 0.026205163f }, { 7000, -0.0024230368f, 0.0036458215f }, { 11000, -0.0029985344f, -0.0030873856f } } } },
+        { 2, { { { 2000, 0.29411051f, -0.22980602f }, { 4500, -0.004929353f, -0.0013274907f }, { 7000, 0.013239861f, 0.0054404787f }, { 11000, -0.0010576053f, -0.0021088289f } } } },
+        { 4, { { { 2000, 0.072069392f, -0.029683406f }, { 4500, -0.10765476f, 0.11332012f }, { 7000, -0.22984716f, -0.10102195f }, { 11000, -0.051904719f, -0.066571109f } } } },
+        { 8, { { { 2000, 0.072010428f, -0.029725688f }, { 4500, -0.10748001f, 0.1136639f }, { 7000, -0.22849904f, -0.15257275f }, { 11000, -0.041248851f, -0.050450616f } } } },
+        { 16, { { { 2000, 0.063442282f, -0.030946331f }, { 4500, -0.11211193f, 0.11279358f }, { 7000, -0.23168804f, -0.1670858f }, { 11000, -0.041186355f, -0.050383076f } } } },
+        { 32, { { { 2000, 0.086303107f, -0.035885293f }, { 4500, 0.069407858f, 0.14133474f }, { 7000, -0.15907738f, -0.10380846f }, { 11000, -0.029428774f, -0.041782599f } } } },
+        { 63, { { { 2000, 0.017201126f, -0.010683246f }, { 4500, 0.55659908f, 0.08110752f }, { 7000, -0.0025542902f, 0.020610567f }, { 11000, -0.0031871174f, 0.00024673535f } } } } };
     for (const auto& c : cases)
     {
         const auto blob = harmorTestState (false, false, c.features);
@@ -16234,6 +16242,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "PerfMode165Tests.inc"
 #include "Patch165Tests.inc"
 #include "FlPlugins165Tests.inc"
+#include "VideoPlayer165Tests.inc"
 #include "Dash165Tests.inc"
 #include "LinuxMouse165Tests.inc"
 #include "Fl165Tests.inc"
@@ -16244,3 +16253,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "MixerLatency165Tests.inc"
 #include "Audit165Tests.inc"
 #include "Vfx165cTests.inc"
+#include "HarmorBeta165hTests.inc"
