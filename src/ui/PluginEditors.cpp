@@ -255,7 +255,7 @@ public:
                                                                     || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"
                                                                     || juce::String (item.display) == "prismbands" || juce::String (item.display) == "emberbands"
                                                                     || juce::String (item.display) == "tunekeys" || juce::String (item.display) == "tuneautokey"
-                                                                    || juce::String (item.display) == "pitchring"
+                                                                    || juce::String (item.display) == "pitchring" || juce::String (item.display) == "waveshaper"
                                                                     || isBars (item) || isRhythmEdit (item) || isRhythmPatterns (item)))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
@@ -2032,24 +2032,32 @@ public:
             g.drawHorizontalLine ((int) y, inner.getX(), inner.getRight());
             g.fillEllipse (juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ x, y }));
         }
-        else if (id == "waveshaper") // the saved shaping curve (FL's point editor is not reproduced)
+        else if (id == "waveshaper") // round 165: FL's point editor (the map: input across, level up)
         {
             grid (8, 8);
-            std::vector<std::int16_t> table;
-            auto unipolar = false;
-            if (const auto st = flshape::parseWaveShaper (fx.state))
+            g.setColour (colour::gridBar);
+            g.drawLine ({ inner.getBottomLeft(), inner.getTopRight() }, 1.0f); // the identity, for reference
+            const auto ws = wsState();
+            const auto& table = wsTable (ws.points, wsUnipolar());
+            strokeCurve ([&table, uni = wsUnipolar()] (float x) { return flshape::waveShaperLevelAt (table, uni, x); }, inner, false);
+            const auto times = flshape::waveShaperTimes (ws.points);
+            // tension handles (hollow, between the points), then the points
+            for (std::size_t i = 1; i < ws.points.size(); ++i)
+                if (const auto h = wsHandlePos (inner, ws, times, (int) i); h.x > -1.0f)
+                {
+                    const auto hot = (int) i == wsHoverHandle || (int) i == wsTension;
+                    g.setColour (hot ? colour::textPrimary : curveColour.withAlpha (0.85f));
+                    g.drawEllipse (juce::Rectangle<float> (8.0f * s, 8.0f * s).withCentre (h), juce::jmax (1.0f, 1.3f * s));
+                }
+            for (std::size_t i = 0; i < ws.points.size(); ++i)
             {
-                unipolar = st->unipolar;
-                table = flshape::shaperTable (st->points, st->unipolar);
+                const auto at = wsPos (inner, times[i], ws.points[i].y);
+                const auto hot = (int) i == wsHoverPoint || (int) i == wsPoint;
+                g.setColour (colour::bg0);
+                g.fillEllipse (juce::Rectangle<float> (11.0f * s, 11.0f * s).withCentre (at));
+                g.setColour (hot ? colour::textPrimary : curveColour);
+                g.fillEllipse (juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre (at));
             }
-            if (table.size() > 4)
-                strokeCurve ([&table, unipolar] (float x) {
-                    const auto i = juce::jlimit<std::size_t> (1, table.size() - 2, (std::size_t) (1.0f + x * (float) (table.size() - 3)));
-                    const auto v = (float) table[i] / 32767.0f;
-                    return unipolar ? v : 0.5f + 0.5f * v;
-                }, inner, false);
-            else
-                strokeCurve ([] (float x) { return x; }, inner, false);
         }
         else if (id == "room") // nested walls: the room size and the decay
         {
@@ -3150,6 +3158,307 @@ public:
         ui::showValueTip (*this, rectOf (item).toNearestInt(), valueText (px, x) + " / " + valueText (py, y));
     }
 
+    // --- Fruity WaveShaper's curve (round 165: FL's point editor) ---------------------------------------
+    // FL's gestures: right-click adds a point (hold and drag to place it), left-drag moves one (Shift keeps its
+    // level, Ctrl its position), Alt+click or right-click › Delete removes it, the hollow handle between two points
+    // bends the segment (Ctrl: fine; right-click: straight again); right-click a point for its shape and value.
+    static bool isWaveShaperGraph (const LayoutItem& item) { return item.type == Item::display && juce::String (item.display) == "waveshaper"; }
+
+    bool wsUnipolar() const { return valueOf (plugui::paramIndex (kind, "Unipolar")) >= 0.5f; }
+
+    flshape::WaveShaperState wsState() const
+    {
+        const auto* fx = current();
+        if (fx == nullptr)
+            return flshape::waveShaperForEditing ({});
+        auto s = flshape::waveShaperForEditing (fx->state, fx->params.data());
+        if (wsDragState)
+            s.points = wsDragPoints; // shown at once while the edit travels to the engine
+        return s;
+    }
+
+    const std::vector<std::int16_t>& wsTable (const std::vector<flshape::WsPoint>& points, bool unipolar) const
+    {
+        // the curve as the engine shapes it (one table per change of the points)
+        auto same = wsCacheUni == unipolar && wsCachePoints.size() == points.size();
+        for (std::size_t i = 0; same && i < points.size(); ++i)
+            same = wsCachePoints[i].dt == points[i].dt && wsCachePoints[i].y == points[i].y && wsCachePoints[i].tension == points[i].tension
+                   && wsCachePoints[i].mode == points[i].mode;
+        if (! same || wsCacheTable.empty())
+        {
+            wsCachePoints = points;
+            wsCacheUni = unipolar;
+            wsCacheTable = flshape::shaperTable (points, unipolar);
+        }
+        return wsCacheTable;
+    }
+
+    juce::Rectangle<float> wsArea (const LayoutItem& item) const { return rectOf (item).reduced (6.0f * scale()); }
+
+    static juce::Point<float> wsPos (juce::Rectangle<float> area, float x, float y)
+    {
+        return { area.getX() + area.getWidth() * x, area.getBottom() - area.getHeight() * y };
+    }
+
+    // the tension handle of the segment that ends at point i (x < 0: none — a hold, or too narrow to grab)
+    juce::Point<float> wsHandlePos (juce::Rectangle<float> area, const flshape::WaveShaperState& ws, const std::vector<float>& times, int i) const
+    {
+        if (i < 1 || i >= (int) ws.points.size() || ws.points[(std::size_t) i].mode == 2)
+            return { -2.0f, -2.0f };
+        const auto x0 = times[(std::size_t) i - 1], x1 = times[(std::size_t) i];
+        if ((x1 - x0) * area.getWidth() < 16.0f * scale())
+            return { -2.0f, -2.0f };
+        const auto xm = 0.5f * (x0 + x1);
+        return wsPos (area, xm, flshape::waveShaperLevelAt (wsTable (ws.points, wsUnipolar()), wsUnipolar(), xm));
+    }
+
+    int wsPointAt (const LayoutItem& item, juce::Point<float> p) const
+    {
+        const auto ws = wsState();
+        const auto times = flshape::waveShaperTimes (ws.points);
+        const auto area = wsArea (item);
+        int best = -1;
+        auto bestD = 8.0f * scale();
+        for (std::size_t i = 0; i < ws.points.size(); ++i)
+            if (const auto d = wsPos (area, times[i], ws.points[i].y).getDistanceFrom (p); d <= bestD)
+                best = (int) i, bestD = d;
+        return best;
+    }
+
+    int wsHandleAt (const LayoutItem& item, juce::Point<float> p) const
+    {
+        const auto ws = wsState();
+        const auto times = flshape::waveShaperTimes (ws.points);
+        const auto area = wsArea (item);
+        for (int i = 1; i < (int) ws.points.size(); ++i)
+            if (const auto h = wsHandlePos (area, ws, times, i); h.x > -1.0f && h.getDistanceFrom (p) <= 7.0f * scale())
+                return i;
+        return -1;
+    }
+
+    juce::Point<float> wsMouseValue (const LayoutItem& item, juce::Point<float> p) const
+    {
+        const auto area = wsArea (item);
+        return { juce::jlimit (0.0f, 1.0f, (p.x - area.getX()) / juce::jmax (1.0f, area.getWidth())),
+                 juce::jlimit (0.0f, 1.0f, (area.getBottom() - p.y) / juce::jmax (1.0f, area.getHeight())) };
+    }
+
+    void wsWrite (std::vector<flshape::WsPoint> points)
+    {
+        const auto* fx = current();
+        if (fx == nullptr)
+            return;
+        auto s = flshape::waveShaperForEditing (fx->state, fx->params.data());
+        s.points = std::move (points);
+        s.unipolar = wsUnipolar();
+        if (usesBar())
+            bar.willEdit();
+        engine.editSong ([t = track, sl = slot, bytes = flshape::writeWaveShaper (s, fx->state)] (Song& song) {
+            song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
+        });
+        repaint();
+    }
+
+    juce::String wsValueText (float y) const
+    {
+        // the level as FL's hint shows it: percent of the map (bipolar 0…100 %, unipolar −100…100 %)
+        return wsUnipolar() ? juce::String (juce::roundToInt ((y * 2.0f - 1.0f) * 100.0f)) + "%" : juce::String (juce::roundToInt (y * 100.0f)) + "%";
+    }
+
+    void wsShowTip (const LayoutItem& item, float x, float y)
+    {
+        ui::showValueTip (*this, rectOf (item).toNearestInt(), tr ("In") + " " + juce::String (juce::roundToInt (x * 100.0f)) + "%  " + tr ("Out") + " " + wsValueText (y));
+    }
+
+    // mouse down on the graph; true = a drag follows
+    bool wsMouseDown (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        auto points = wsState().points;
+        const auto point = wsPointAt (item, e.position);
+        const auto handle = point < 0 ? wsHandleAt (item, e.position) : -1;
+        const auto v = wsMouseValue (item, e.position);
+        wsDownMods = e.mods;
+
+        if (e.mods.isPopupMenu())
+        {
+            if (point >= 0)
+                wsPointMenu (point);
+            else if (handle >= 0) // straight again
+            {
+                points[(std::size_t) handle].tension = 0.0f;
+                wsWrite (points);
+            }
+            else // FL: a new point at the mouse, dragged while the button is held
+            {
+                wsPoint = flshape::addWaveShaperPoint (points, v.x, v.y);
+                wsDragPoints = points;
+                wsDragState = true;
+                wsWrite (points);
+                wsShowTip (item, v.x, v.y);
+                return true;
+            }
+            return false;
+        }
+        if (point >= 0 && e.mods.isAltDown()) // FL: Alt+click deletes
+        {
+            if (flshape::removeWaveShaperPoint (points, point))
+                wsWrite (points);
+            return false;
+        }
+        if (point >= 0)
+        {
+            wsPoint = point;
+            wsDragPoints = points;
+            wsDragState = true;
+            const auto t = flshape::waveShaperTimes (points);
+            wsShowTip (item, t[(std::size_t) point], points[(std::size_t) point].y);
+            return true;
+        }
+        if (handle >= 0)
+        {
+            // which way the tension bends this segment: the handle follows the mouse up and down
+            wsTension = handle;
+            wsTensionStart = points[(std::size_t) handle].tension;
+            auto bent = points;
+            bent[(std::size_t) handle].tension = juce::jlimit (-1.0f, 1.0f, wsTensionStart + (wsTensionStart > 0.8f ? -0.1f : 0.1f));
+            const auto times = flshape::waveShaperTimes (points);
+            const auto xm = 0.5f * (times[(std::size_t) handle - 1] + times[(std::size_t) handle]);
+            const auto uni = wsUnipolar();
+            const auto a = flshape::waveShaperLevelAt (flshape::shaperTable (points, uni), uni, xm);
+            const auto b = flshape::waveShaperLevelAt (flshape::shaperTable (bent, uni), uni, xm);
+            const auto up = (b - a) * (bent[(std::size_t) handle].tension - wsTensionStart);
+            wsTensionSign = up < 0.0f ? -1.0f : 1.0f;
+            wsDragPoints = points;
+            wsDragState = true;
+            return true;
+        }
+        return false;
+    }
+
+    void wsMouseDrag (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        if (! wsDragState)
+            return;
+        auto points = wsDragPoints;
+        if (wsTension >= 0 && wsTension < (int) points.size())
+        {
+            const auto dy = -(float) e.getDistanceFromDragStartY() / ((e.mods.isCtrlDown() ? 600.0f : 150.0f) * scale());
+            points[(std::size_t) wsTension].tension = juce::jlimit (-1.0f, 1.0f, wsTensionStart + wsTensionSign * dy);
+            ui::showValueTip (*this, rectOf (item).toNearestInt(), tr ("Tension") + " " + juce::String (juce::roundToInt (points[(std::size_t) wsTension].tension * 100.0f)) + "%");
+        }
+        else if (wsPoint >= 0 && wsPoint < (int) points.size())
+        {
+            const auto t = flshape::waveShaperTimes (points);
+            auto v = wsMouseValue (item, e.position);
+            // FL: Shift keeps the level, Ctrl keeps the position
+            if (e.mods.isShiftDown() && ! wsDownMods.isShiftDown())
+                v.y = points[(std::size_t) wsPoint].y;
+            if (e.mods.isCtrlDown())
+                v.x = t[(std::size_t) wsPoint];
+            flshape::moveWaveShaperPoint (points, wsPoint, v.x, v.y);
+            const auto moved = flshape::waveShaperTimes (points);
+            wsShowTip (item, moved[(std::size_t) wsPoint], points[(std::size_t) wsPoint].y);
+        }
+        else
+            return;
+        wsDragPoints = points;
+        wsWrite (points);
+    }
+
+    void wsMouseUp()
+    {
+        wsDragState = false;
+        wsPoint = wsTension = -1;
+        ui::hideValueTip();
+        repaint();
+    }
+
+    void wsPointMenu (int point)
+    {
+        const auto ws = wsState();
+        if (point < 0 || point >= (int) ws.points.size())
+            return;
+        const auto& p = ws.points[(std::size_t) point];
+        juce::PopupMenu menu;
+        menu.addSectionHeader (tr ("Out") + " " + wsValueText (p.y));
+        const auto inner = point > 0 && point + 1 < (int) ws.points.size();
+        menu.addItem (tr ("Delete"), inner, false, [this, point] {
+            auto pts = wsState().points;
+            if (flshape::removeWaveShaperPoint (pts, point))
+                wsWrite (pts);
+        });
+        if (point > 0) // the shape of the segment that ends here (FL's modes)
+        {
+            menu.addSectionHeader (tr ("Mode"));
+            for (const auto& m : flshape::waveShaperModes())
+                menu.addItem (tr (m.name), true, p.mode == m.mode, [this, point, mode = m.mode] {
+                    auto pts = wsState().points;
+                    if (point < (int) pts.size())
+                    {
+                        pts[(std::size_t) point].mode = mode;
+                        wsWrite (pts);
+                    }
+                });
+        }
+        menu.addSeparator();
+        menu.addItem (tr ("Copy value"), [y = p.y] { wsCopiedValue = y; });
+        menu.addItem (tr ("Paste value"), wsCopiedValue >= 0.0f, false, [this, point] {
+            auto pts = wsState().points;
+            if (point < (int) pts.size())
+            {
+                pts[(std::size_t) point].y = wsCopiedValue;
+                wsWrite (pts);
+            }
+        });
+        menu.addItem (tr ("Type in value..."), [this, point] { wsTypeValue (point); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void wsTypeValue (int point)
+    {
+        const auto ws = wsState();
+        if (point < 0 || point >= (int) ws.points.size())
+            return;
+        const auto uni = wsUnipolar();
+        const auto y = ws.points[(std::size_t) point].y;
+        auto* window = new juce::AlertWindow (tr ("Point value"), uni ? tr ("Percent (-100 to 100)") : tr ("Percent (0 to 100)"), juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("value", juce::String (uni ? (y * 2.0f - 1.0f) * 100.0f : y * 100.0f, 1));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        juce::Component::SafePointer<NativeEffectEditor> self (this);
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([self, window, point, uni] (int result) {
+                                     if (result != 1 || self == nullptr)
+                                         return;
+                                     const auto typed = window->getTextEditorContents ("value").getFloatValue() / 100.0f;
+                                     auto pts = self->wsState().points;
+                                     if (point < (int) pts.size())
+                                     {
+                                         pts[(std::size_t) point].y = juce::jlimit (0.0f, 1.0f, uni ? (typed + 1.0f) * 0.5f : typed);
+                                         self->wsWrite (pts);
+                                     }
+                                 }),
+                                 true);
+    }
+
+    juce::String wsHint (const LayoutItem& item, juce::Point<float> p) const
+    {
+        if (wsPointAt (item, p) >= 0)
+            return tr ("Point: [LMB] drag moves ([Shift] keeps the level, [Ctrl] the position)  [Alt][LMB] delete  [RMB] shape, value, delete");
+        if (wsHandleAt (item, p) >= 0)
+            return tr ("Tension: [LMB] drag up / down bends the segment ([Ctrl] fine)  [RMB] straight");
+        return tr ("Shaping curve: [RMB] add a point (hold and drag to place it)  [LMB] drag a point  [Alt][LMB] delete a point");
+    }
+
+    int wsPoint = -1, wsTension = -1, wsHoverPoint = -1, wsHoverHandle = -1;
+    float wsTensionStart = 0.0f, wsTensionSign = 1.0f;
+    bool wsDragState = false;
+    std::vector<flshape::WsPoint> wsDragPoints;
+    juce::ModifierKeys wsDownMods;
+    mutable std::vector<flshape::WsPoint> wsCachePoints;
+    mutable std::vector<std::int16_t> wsCacheTable;
+    mutable bool wsCacheUni = false;
+    static inline float wsCopiedValue = -1.0f;
+
     // --- mouse -----------------------------------------------------------------------------------------
 
     int headerItemAt (juce::Point<float> p) const
@@ -3186,6 +3495,25 @@ public:
             hoverHeader = h;
             hoverItem = i;
             anim.setHot (i);
+            repaint();
+        }
+        if (i >= 0 && isWaveShaperGraph (activeLayout().items[(std::size_t) i])) // round 165: points and handles light up
+        {
+            const auto& item = activeLayout().items[(std::size_t) i];
+            const auto point = wsPointAt (item, p), handle = point < 0 ? wsHandleAt (item, p) : -1;
+            if (point != wsHoverPoint || handle != wsHoverHandle)
+            {
+                wsHoverPoint = point;
+                wsHoverHandle = handle;
+                repaint();
+            }
+            setMouseCursor (point >= 0 ? juce::MouseCursor::DraggingHandCursor
+                                       : handle >= 0 ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::CrosshairCursor);
+            return;
+        }
+        if (wsHoverPoint >= 0 || wsHoverHandle >= 0)
+        {
+            wsHoverPoint = wsHoverHandle = -1;
             repaint();
         }
         setMouseCursor (i >= 0 || h > 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
@@ -3251,6 +3579,12 @@ public:
             return;
         }
 
+        if (isWaveShaperGraph (item)) // round 165: FL's point editor
+        {
+            if (wsMouseDown (e, item))
+                dragItem = index;
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "tunekeys")
         {
             tuneKeyClick (rectOf (item), e.position);
@@ -3548,6 +3882,11 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (wsDragState && dragItem >= 0) // round 165: the WaveShaper's curve
+        {
+            wsMouseDrag (e, activeLayout().items[(std::size_t) dragItem]);
+            return;
+        }
         if (crossoverDrag >= 0 && dragItem >= 0)
         {
             const auto r = rectOf (activeLayout().items[(std::size_t) dragItem]);
@@ -3615,6 +3954,11 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
+        if (wsDragState) // round 165
+        {
+            wsMouseUp();
+            dragItem = -1;
+        }
         tuneKeyRelease(); // LYNX Tune's keyboard without LATCH: the edit lasts while the key is held
         if (crossoverDrag >= 0)
         {
@@ -3662,7 +4006,7 @@ public:
             rhythmDoubleClick (e, item);
             return;
         }
-        if (isRhythmPatterns (item))
+        if (isRhythmPatterns (item) || isWaveShaperGraph (item))
             return;
         if (isGeminiGraph (item)) // round 137: an EQ marker = its shelf on / off
         {
@@ -3693,6 +4037,8 @@ public:
         if (index < 0)
             return;
         const auto& item = activeLayout().items[(std::size_t) index];
+        if (isWaveShaperGraph (item))
+            return;
         if (item.type == Item::display) // EQ graph: Q / bandwidth of the band under the mouse (or the selected one)
         {
             const auto* fx = current();
@@ -3778,6 +4124,8 @@ public:
             return { tr ("Rhythm taps: drag up / down = level, sideways = time; double-click = add or remove a tap; right-click = patterns"), {}, false, false };
         if (isRhythmPatterns (item))
             return { tr ("Load a tap pattern (LYNX's own), or go back to even spacing"), {}, false, false };
+        if (isWaveShaperGraph (item)) // round 165
+            return { wsHint (item, p), {}, false, true };
         if (item.type == Item::display)
             return { tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"), {}, false, true };
         if (hasStyle (item, plugui::pageTabs))

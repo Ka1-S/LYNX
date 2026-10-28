@@ -10,6 +10,8 @@ Windows, macOS and Linux.</p>
 
 <p align="center">
   <a href="https://github.com/Ka1-S/LYNX/releases"><img src="https://img.shields.io/badge/Download-0.1.19%20alpha-d9534f?style=for-the-badge" alt="Download LYNX"></a>
+  <a href="https://github.com/Ka1-S/LYNX/releases"><img src="https://img.shields.io/github/downloads/Ka1-S/LYNX/total?style=for-the-badge&label=downloads&color=24292f" alt="Total downloads"></a>
+  <a href="https://github.com/Ka1-S/LYNX/stargazers"><img src="https://img.shields.io/github/stars/Ka1-S/LYNX?style=for-the-badge&color=24292f" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
