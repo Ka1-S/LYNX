@@ -200,10 +200,30 @@ bool fromFl (const std::vector<std::uint8_t>& state, EffectSlot& slot);
 // ---------------------------------------------------------------------------------------------------------------
 namespace scene
 {
-enum class LayerType { background, bars, circle, waveform, particles, rings, image, text, flash };
-constexpr int layerTypeCount = 9;
+// The first nine draw with the 2D renderer (and on the GPU through it); the last five are GPU shader layers (round
+// 165e, ZGameEditor's categories): Canvas (full-frame procedural pictures), Terrain (a 3D landscape of the spectrum),
+// 3D objects (ray-marched shapes), Feedback (the previous frame moved and faded under the new one) and Post-process
+// (an effect on everything below it). Without OpenGL the 2D renderer approximates Canvas and Terrain and skips the rest.
+enum class LayerType { background, bars, circle, waveform, particles, rings, image, text, flash,
+                       canvas, terrain, object3d, feedback, postprocess };
+constexpr int layerTypeCount = 14;
 const char* typeId (LayerType t) noexcept;   // saved name
 const char* typeName (LayerType t) noexcept; // shown name (English; the UI translates)
+bool isShaderType (LayerType t) noexcept;    // canvas … postprocess
+bool readsBelow (LayerType t) noexcept;      // feedback, postprocess: they change what the layers under them drew
+
+// A shader layer's effect (its variant within the type): ids are saved, names shown (English; the UI translates)
+int effectCount (LayerType t) noexcept;      // 0 for the 2D types
+const char* effectId (LayerType t, int effect) noexcept;
+const char* effectName (LayerType t, int effect) noexcept;
+const char* effectHint (LayerType t, int effect) noexcept; // what Size / Amount / Speed / Count do for it
+int effectIndex (LayerType t, const std::string& id) noexcept; // -1 = unknown
+
+// How a layer is put over the ones below it (GPU; the 2D renderer draws every layer normally)
+enum class Blend { normal, add, screen, multiply, overlay, difference, lighten, darken };
+constexpr int blendCount = 8;
+const char* blendId (Blend b) noexcept;
+const char* blendName (Blend b) noexcept;
 
 enum class Band { level, bass, mid, high, beat };
 constexpr int bandCount = 5;
@@ -226,6 +246,8 @@ struct Layer
     bool additive = false;    // light blending
     std::string text;         // text layer (several lines with \n)
     std::string path;         // image / background image file
+    int effect = 0;           // shader layers: the effect (effectId)
+    Blend blend = Blend::normal;
 
     bool operator== (const Layer&) const = default;
 };
@@ -244,6 +266,8 @@ std::optional<Scene> parse (const std::string& text);
 std::vector<std::uint8_t> toState (const Scene& s);
 std::optional<Scene> fromState (const std::vector<std::uint8_t>& state);
 Scene defaultScene();
+// a shader layer with the settings that suit its effect (the editor's Add menu, the built-in scenes, the ZGE import)
+Layer shaderLayer (LayerType type, int effect);
 // LYNX's built-in scenes (name, scene)
 const std::vector<Scene>& presets();
 
