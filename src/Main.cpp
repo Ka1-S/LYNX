@@ -1826,8 +1826,11 @@ private:
         }
         const auto nativesOk = nativesResult == "OK";
 
+        // Settings › Audio "Driver settings…" with a fake driver panel (issue #13's crash, the panel's buffer kept)
+        const auto driverPanel = lynx::AudioEngine::driverPanelSelfTest();
+
         const auto ok = audioOk && projectOk && richOk && hwOutOk && latencyOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
-                        && wavpack != "ERROR" && effectsOk;
+                        && wavpack != "ERROR" && effectsOk && driverPanel == "OK";
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
@@ -1845,6 +1848,7 @@ private:
                << "package=" << (packageOk ? "OK" : "ERROR") << "\n"
                << "wavpack=" << wavpack << "\n"
                << "effects=" << (effectsOk ? "OK" : "NONFINITE") << "\n"
+               << "driver_panel=" << driverPanel << "\n"
                << "result=" << (ok ? "OK" : "FAILED") << "\n";
 
         if (reportPath.isNotEmpty())
