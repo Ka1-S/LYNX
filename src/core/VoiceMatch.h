@@ -180,6 +180,9 @@ struct Settings
     // chain, the cell's deepest reduction) and AUTO MAKEUP (a make-up that follows the peak reduction dial); off = the
     // round-123 Limit [model] and no auto make-up
     bool measured = false, autoMakeup = false;
+    // round 165w (REA_rodada165w §2) [EXEC]: the measured release (the trial's gain recovery after bursts of 0.1 … 10 s,
+    // −24 … 0 dBFS); off = round 123's (its slow conductance left ≈ 0.8 dB of reduction for many seconds)
+    bool measuredRelease = false;
 };
 double autoMakeupDb (double peakReduction) noexcept; // round 152: AUTO MAKEUP's gain (dB) at a peak reduction dial
 double makeupDb (double gainKnob) noexcept;              // the gain dial's level (dB) below the threshold

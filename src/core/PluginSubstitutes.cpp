@@ -1418,6 +1418,7 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
     const auto analog = std::lround (wavesValue (rw, 140).value_or (2.0));
     slot.params[g::analog] = analog == 0 ? 0.5f : analog == 1 ? 1.0f : 0.0f;
     slot.params[g::optoLaw] = 1.0f;
+    slot.params[g::releaseLaw] = 1.0f; // round 165w: the measured release
     return 8;
 }
 
@@ -1781,10 +1782,12 @@ int translateWavesDoubler (const std::vector<std::uint8_t>& state, EffectSlot& s
     p[g::directPan] = linNorm (at (3, 0.0), -45.0, 45.0);
     p[g::align] = flag (4, 1.0);
     p[g::lowOn] = flag (9, 0.0);
-    p[g::lowGain] = linNorm (at (10, 0.0), -30.0, 12.0);
+    // round 165w: the measured shelves take the reference's whole range (−88 … +12 dB: the deep cuts too) one to one
+    p[g::eqLaw] = 1.0f;
+    p[g::lowGain] = g::shelfValue (at (10, 0.0));
     p[g::lowFreq] = g::freqValue (at (11, 100.0));
     p[g::highFreq] = g::freqValue (at (12, 5000.0));
-    p[g::highGain] = linNorm (at (13, 0.0), -30.0, 12.0);
+    p[g::highGain] = g::shelfValue (at (13, 0.0));
     p[g::highOn] = flag (14, 0.0);
     p[g::feedbackCut] = g::freqValue (at (15, 16.0));
     p[g::range] = flag (18, 0.0);
