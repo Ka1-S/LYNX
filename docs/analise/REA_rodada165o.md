@@ -5,6 +5,14 @@ natural musician-facing translations, one glossary per language (docs/i18n/<lang
 coverage test, CJK/Cyrillic fonts on all 3 OS, no cut text, OS-language default, Settings › Language.
 
 ## Where I stopped
+- 2026-10-28 15:40 — VERIFIED, landing. Linux textfit after the fit fixes: en 0, de/ru/pl 0 (pt-BR only the
+  pre-existing main items: export summary line, sample-pitch hint, "Ligado" 52 px, "1 compasso"); en/pt-BR shots
+  pixel-identical to before except the fixed rows (Event editor tool row: baseline was 40 px short, English moves
+  ≤ 4 px; pt-BR Export "Salvar também" and Settings MIDI offset caption now on their own line instead of cut).
+  Windows: ja and zh-Hans CRASHED at start-up (dangling std::initializer_list in theme::uiFontForLanguage — Linux
+  survived by luck); fixed with a std::vector; then ja/ko/zh-Hans/zh-Hant/ru/en shots clean on Windows (Yu Gothic UI,
+  Malgun Gothic, YaHei UI, JhengHei UI, Segoe UI Cyrillic), desktop clean. build-local 1 781 888 checks, 0 failures.
+  Branch squashed to one commit (+ fixes); unsquashed history in origin/backup/i18n165-unsquashed.
 - 2026-10-28 13:00 (resumed after the 2nd BSOD) — all 13 language branches are merged into feature/i18n165 (checked).
   Store: listings say the interface has 15 languages (the EN/PT-only note is gone), MSIX manifest + makepri /dq declare
   the 15 languages, docs/STORE.md + store/CHECKLIST.pt-BR.md updated (commit fd3e8bc8). notes-0.1.20.md bullets added.
