@@ -26,6 +26,7 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const auto* state = exchange.acquire();
     const auto playing = transport.playing.load (std::memory_order_relaxed);
     const auto startTick = transport.positionTicks.load (std::memory_order_relaxed);
+    renderer.setTempoOverride (transport.externalBpm.load (std::memory_order_relaxed));
 
     if (buffer.getNumChannels() >= 2)
     {
@@ -48,7 +49,7 @@ void ChannelRackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 
     // tempo automation: the transport advances at the tempo the renderer used
-    if (state != nullptr && state->tempoAutomation >= 0)
+    if (state != nullptr && state->tempoAutomation >= 0 && transport.externalBpm.load (std::memory_order_relaxed) <= 0.0)
         transport.bpm.store (renderer.currentBpm(), std::memory_order_relaxed);
 }
 } // namespace lynx
