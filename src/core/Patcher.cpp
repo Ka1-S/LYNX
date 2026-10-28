@@ -12,6 +12,8 @@
 
 #include "core/FlSynths.h"
 #include "core/FrequencySplitter.h"
+#include "core/HardwareInsert.h"
+#include "core/Layer.h"
 #include "core/MidiControls.h"
 #include "core/Pdc.h"
 
@@ -36,6 +38,10 @@ bool sameEffectSetup (const EffectSlot& a, const EffectSlot& b)
         return a == b; // its children are built in
     if (a.kind == EffectKind::patcher)
         return sameStructure (a.patcher, b.patcher);
+    // a Hardware Insert's round trip is its latency, which the graph's delay compensation is built on (round 165c): a new
+    // ping result builds the graph again
+    if (a.kind == EffectKind::hardwareInsert)
+        return a.params[(std::size_t) hwinsert::roundTrip] == b.params[(std::size_t) hwinsert::roundTrip];
     // effects whose setup depends on parameters at creation (latency, mode) are rebuilt by the rack as well
     return true;
 }
@@ -47,6 +53,9 @@ bool sameInstrumentSetup (const ChannelDef& a, const ChannelDef& b)
         return a.instrument == b.instrument && vfx::kindOf (a) == vfx::kindOf (b);
     if (a.instrument != b.instrument)
         return false;
+    // (a Layer node's children take notes in their key regions: round 165c)
+    if (a.keyLow != b.keyLow || a.keyHigh != b.keyHigh)
+        return false;
     // the rack's own rule for a channel (RackState::build): what configure() cannot take means a new instance; the rest
     // reaches the running one (round 164f: an engine edited in its editor inside a Patcher keeps playing, as on a
     // channel, instead of starting again on each knob move)
@@ -56,6 +65,8 @@ bool sameInstrumentSetup (const ChannelDef& a, const ChannelDef& b)
             return a.plugin.id == b.plugin.id && a.plugin == b.plugin && a.pluginState == b.pluginState;
         case InstrumentKind::patcher: return sameStructure (a.patcher, b.patcher);
         case InstrumentKind::midiOut: return a.pluginState == b.pluginState; // (its MIDI channel is in the graph's routes)
+        case InstrumentKind::layer: // (its settings are in the graph's note routes: round 165c)
+            return a.layer == b.layer && a.volume == b.volume && a.pan == b.pan && a.sampler.pitch == b.sampler.pitch && a.misc.rootNote == b.misc.rootNote;
         case InstrumentKind::controller: // (a Keyboard Controller has 1 output, an Envelope Controller 8)
             return parseKeyboardController (a.controllerState).has_value() == parseKeyboardController (b.controllerState).has_value();
         case InstrumentKind::sampler:
@@ -122,7 +133,9 @@ NodePorts nodePorts (const PatchNode& node)
             p.audioOuts = 0; // (no sound of their own)
         // a MIDI Out node; a hosted plugin's notes out (round 164f: an arpeggiator / MIDI effect plugin plays the
         // nodes cabled to it, as FL's Patcher shows a plugin's MIDI output)
-        p.midiOut = node.channel.instrument == InstrumentKind::midiOut || node.channel.instrument == InstrumentKind::plugin;
+        // (a Layer node, round 165c: its Children pin)
+        p.midiOut = node.channel.instrument == InstrumentKind::midiOut || node.channel.instrument == InstrumentKind::plugin
+                    || node.channel.instrument == InstrumentKind::layer;
         p.midiOuts = p.midiOut ? 1 : 0;
         if (const auto kind = vfx::kindOf (node.channel)) // a VFX node: voices in, voices out (round 164b)
         {
@@ -197,6 +210,7 @@ struct Graph::Node
     std::shared_ptr<Effect> effect;
     std::shared_ptr<Instrument> instrument;
     bool plugin = false; // values reach it through setParameter (control cables), not the params array
+    bool hardware = false; // a Hardware Insert, or a Patcher holding one (round 165c)
     vfx::Processor* vfx = nullptr;                    // a VFX node's processor (owned by its instrument)
     std::vector<MidiTarget> midiOutTargets;           // a plugin node: what its MIDI output pin reaches
     std::vector<std::vector<MidiTarget>> vfxTargets;  // [voice output] what it reaches
@@ -239,6 +253,16 @@ struct Graph::NoteOut
 {
     int node = 0, midiChannel = -1;
     vfx::Event event;
+    float gain = 1.0f; // a Layer's level for this child (round 165c)
+};
+
+struct Graph::LayerNode
+{
+    std::vector<MidiTarget> children;    // the nodes on its Children pin, in node order (no Layers)
+    std::vector<ChannelDef> defs;        // [node] what layer::pick reads: the Layer's settings, the children's key regions
+    std::array<int, 128> picked {};      // Random / Sequential: the child each held key went to (−1: none)
+    std::uint32_t random = 0x165c165cu;
+    int turn = 0;
 };
 
 struct Graph::Values
@@ -314,6 +338,8 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
                 node->effect = factories.effect (src.effect);
             if (node->effect == nullptr)
                 node->effect = std::make_shared<PassEffect>();
+            node->hardware = src.effect.kind == EffectKind::hardwareInsert || (src.effect.kind == EffectKind::patcher && usesHardwareIo (src.effect.patcher));
+            hardwareNodes = hardwareNodes || node->hardware;
         }
 
         // extra outputs used by some cable
@@ -461,6 +487,40 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
         node.midiOutTargets = midiTargetsOf (doc, i, 0);
         if (! node.midiOutTargets.empty())
             midiSources.push_back (i);
+    }
+    // Layer nodes (round 165c): their children, and what layer::pick reads
+    layers.resize ((std::size_t) count);
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& src = doc.nodes[(std::size_t) i];
+        if (! src.generator || src.channel.instrument != InstrumentKind::layer)
+            continue;
+        auto l = std::make_unique<LayerNode>();
+        for (const auto& t : midiTargetsOf (doc, i, 0))
+            if (! t.layer && t.node != i)
+                l->children.push_back (t);
+        std::stable_sort (l->children.begin(), l->children.end(), [] (const MidiTarget& a, const MidiTarget& b) { return a.node < b.node; });
+        l->defs.resize ((std::size_t) count);
+        for (int k = 0; k < count; ++k)
+        {
+            auto& d = l->defs[(std::size_t) k];
+            d.instrument = doc.nodes[(std::size_t) k].generator ? doc.nodes[(std::size_t) k].channel.instrument : InstrumentKind::synth;
+            d.keyLow = doc.nodes[(std::size_t) k].channel.keyLow;
+            d.keyHigh = doc.nodes[(std::size_t) k].channel.keyHigh;
+            d.misc.addToKey = doc.nodes[(std::size_t) k].channel.misc.addToKey;
+            d.misc.rootNote = doc.nodes[(std::size_t) k].channel.misc.rootNote;
+        }
+        auto& self = l->defs[(std::size_t) i];
+        self.layer = src.channel.layer;
+        self.layer.children.clear();
+        for (const auto& c : l->children)
+            self.layer.children.push_back (c.node);
+        self.volume = src.channel.volume;
+        self.pan = src.channel.pan;
+        self.sampler.pitch = src.channel.sampler.pitch;
+        self.misc.rootNote = src.channel.misc.rootNote;
+        l->picked.fill (-1);
+        layers[(std::size_t) i] = std::move (l);
     }
     noteOuts.reserve (vfx::EventList::capacity);
 
@@ -694,18 +754,73 @@ std::vector<Graph::MidiTarget> Graph::midiTargetsOf (const PatcherDoc& doc, int 
             if (target.channel.instrument == InstrumentKind::midiOut)
                 todo.emplace_back (w.to, 0, midictl::parseMidiOut (target.channel.pluginState).channel);
             else
-                targets.push_back ({ w.to, channel, target.channel.instrument == InstrumentKind::vfx });
+                targets.push_back ({ w.to, channel, target.channel.instrument == InstrumentKind::vfx, target.channel.instrument == InstrumentKind::layer });
         }
     }
     return targets;
+}
+
+template <typename F>
+void Graph::forLayeredTargets (const std::vector<MidiTarget>& targets, int type, int key, F&& f) noexcept
+{
+    for (const auto& t : targets)
+    {
+        if (! t.layer)
+        {
+            f (t, key, 1.0f, 0.0f, 0.0f, false);
+            continue;
+        }
+        auto* l = (std::size_t) t.node < layers.size() ? layers[(std::size_t) t.node].get() : nullptr;
+        if (l == nullptr || l->children.empty())
+            continue;
+        const auto& self = l->defs[(std::size_t) t.node];
+        const auto pan = self.pan, cents = layer::pitchCents (self);
+        auto child = [&t] (MidiTarget c) {
+            if (c.midiChannel < 0)
+                c.midiChannel = t.midiChannel; // (a MIDI Out node before the Layer sets the channel, one after it wins)
+            return c;
+        };
+        auto childOf = [&] (int node) -> const MidiTarget* {
+            for (const auto& c : l->children)
+                if (c.node == node)
+                    return &c;
+            return nullptr;
+        };
+        const auto k = std::clamp (key, 0, 127);
+        // a child with Add to key (Split children) sounds its own pitch on its key, as on a channel (the rack's key shift)
+        auto keyOf = [&] (int node) {
+            const auto& d = l->defs[(std::size_t) node];
+            return d.misc.addToKey && d.instrument != InstrumentKind::sampler ? std::clamp (key + 60 - d.misc.rootNote, 0, 127) : key;
+        };
+        const auto one = self.layer.random || self.layer.sequential;
+        if (type == 1)
+        {
+            std::array<layer::Pick, 64> picks;
+            const auto n = layer::pick (self, l->defs, k, l->random, l->turn, picks.data(), (int) picks.size());
+            if (one)
+                l->picked[(std::size_t) k] = n > 0 ? picks[0].child : -1;
+            const auto level = layer::levelGain (self);
+            for (int p = 0; p < n; ++p)
+                if (const auto* c = childOf (picks[(std::size_t) p].child))
+                    f (child (*c), keyOf (c->node), level * picks[(std::size_t) p].gain, pan, cents, true);
+        }
+        else if (type == 0 && one && l->picked[(std::size_t) k] >= 0)
+        {
+            if (const auto* c = childOf (l->picked[(std::size_t) k]))
+                f (child (*c), keyOf (c->node), 1.0f, pan, cents, true);
+            l->picked[(std::size_t) k] = -1;
+        }
+        else // (a note off of every child — also when the Layer was rebuilt while the note was held — or a CC / bend)
+            for (const auto& c : l->children)
+                f (child (c), keyOf (c.node), 1.0f, pan, cents, true);
+    }
 }
 
 void Graph::deliver (int pin, bool on, int key, float velocity, int midiChannel) noexcept
 {
     if (pin < 0 || pin >= (int) pinTargets.size())
         return;
-    for (const auto& t : pinTargets[(std::size_t) pin])
-    {
+    forLayeredTargets (pinTargets[(std::size_t) pin], on ? 1 : 0, key, [&] (const MidiTarget& t, int k, float gain, float pan, float cents, bool viaLayer) {
         if (t.vfx)
         {
             // into the VFX node's processor at the next piece's start, with the note's properties
@@ -713,30 +828,37 @@ void Graph::deliver (int pin, bool on, int key, float velocity, int midiChannel)
             {
                 vfx::Event e;
                 e.type = on ? vfx::Event::Type::on : vfx::Event::Type::off;
-                e.voice.key = key;
-                e.voice.velocity = velocity;
-                e.voice.pan = nextVoice.pan;
-                e.voice.cents = nextVoice.cents;
+                e.voice.key = k;
+                e.voice.velocity = on ? std::max (1.0e-6f, velocity * gain) : velocity;
+                e.voice.pan = std::clamp (nextVoice.pan + pan, -1.0f, 1.0f);
+                e.voice.cents = nextVoice.cents + cents;
                 e.voice.modX = nextVoice.modX;
                 e.voice.modY = nextVoice.modY;
                 e.voice.release = nextVoice.release;
                 e.voice.porta = nextVoice.porta;
                 const auto channel = t.midiChannel >= 0 ? t.midiChannel : midiChannel;
                 e.voice.colour = channel >= 0 ? (channel & 15) : nextVoice.colour;
-                e.id = vfx::inputId (key, e.voice.colour);
+                e.id = vfx::inputId (k, e.voice.colour);
                 q->in.add (e);
             }
-            continue;
+            return;
         }
         if (auto& i = nodes[(std::size_t) t.node]->instrument)
         {
             const auto channel = t.midiChannel >= 0 ? t.midiChannel : midiChannel;
+            auto v = velocity;
+            if (on && viaLayer) // a Layer's child (round 165c): the Layer's pan, pitch and level on top of the note's
+            {
+                i->setNextNoteExpression (std::clamp (nextVoice.pan + pan, -1.0f, 1.0f), nextVoice.cents + cents, nextVoice.porta);
+                if (gain != 1.0f && ! i->setNextNoteGain (gain))
+                    v = std::max (1.0e-6f, v * gain);
+            }
             if (channel < 0)
-                on ? i->noteOn (key, velocity) : i->noteOff (key);
+                on ? i->noteOn (k, v) : i->noteOff (k);
             else
-                on ? i->noteOnMidi (key, velocity, channel) : i->noteOffMidi (key, channel);
+                on ? i->noteOnMidi (k, v, channel) : i->noteOffMidi (k, channel);
         }
-    }
+    });
     if (! on)
         nextVoice.release = 0.5f;
     else
@@ -776,26 +898,31 @@ void Graph::queueNoteOffPort (int port, int key, int midiChannel, int offset) no
 
 void Graph::routeNote (const std::vector<MidiTarget>& targets, int sourceNode, bool on, int key, float velocity, int midiChannel, int offset) noexcept
 {
-    for (const auto& t : targets)
-    {
+    forLayeredTargets (targets, on ? 1 : 0, key, [&] (const MidiTarget& t, int k, float gain, float pan, float cents, bool) {
         const auto channel = t.midiChannel >= 0 ? t.midiChannel : midiChannel;
         vfx::Event e;
         e.type = on ? vfx::Event::Type::on : vfx::Event::Type::off;
         e.offset = offset;
-        e.voice.key = key;
+        e.voice.key = k;
         e.voice.velocity = velocity;
+        e.voice.pan = pan;
+        e.voice.cents = cents;
         e.voice.colour = channel >= 0 ? (channel & 15) : 0;
-        e.id = vfx::inputId (key, e.voice.colour);
+        e.id = vfx::inputId (k, e.voice.colour);
         if (sourceNode >= 0)
             e.id += (sourceNode + 1) * (1 << 20); // (ids of different sources never meet)
         if (t.vfx)
         {
             if (auto& q = vfxQueues[(std::size_t) t.node])
+            {
+                if (on)
+                    e.voice.velocity = std::max (1.0e-6f, velocity * gain);
                 q->in.add (e);
+            }
         }
         else if (noteOuts.size() < noteOuts.capacity())
-            noteOuts.push_back ({ t.node, channel, e });
-    }
+            noteOuts.push_back ({ t.node, channel, e, gain });
+    });
 }
 
 template <typename F>
@@ -803,9 +930,10 @@ void Graph::forNoteTargets (F&& f) noexcept
 {
     if (pinTargets.empty())
         return;
-    for (const auto& t : pinTargets[0])
+    forLayeredTargets (pinTargets[0], 2, 60, [&] (const MidiTarget& t, int, float, float, float, bool) { // (a Layer's children too)
         if (auto& i = nodes[(std::size_t) t.node]->instrument)
             f (*i);
+    });
 }
 
 void Graph::midiMessage (const std::uint8_t* bytes, int size) noexcept
@@ -846,8 +974,14 @@ void Graph::allNotesOff() noexcept
 void Graph::slideTo (int key, float cents, float samples) noexcept
 {
     for (const auto t : noteTargets)
+    {
+        if ((std::size_t) t < layers.size() && layers[(std::size_t) t] != nullptr) // (a Layer: its children slide, round 165c)
+            for (const auto& c : layers[(std::size_t) t]->children)
+                if (auto& i = nodes[(std::size_t) c.node]->instrument)
+                    i->slideTo (key, cents, samples);
         if (auto& i = nodes[(std::size_t) t]->instrument)
             i->slideTo (key, cents, samples);
+    }
 }
 
 void Graph::setNextNoteModulation (float modX, float modY) noexcept
@@ -924,6 +1058,7 @@ void Graph::process (const float* inL, const float* inR, const float* scL, const
     for (int done = 0; done < n; done += capacity)
     {
         const auto piece = std::min (capacity, n - done);
+        pieceOffset = hwOffset + done;
         processPiece (inL + done, inR + done, scL != nullptr ? scL + done : nullptr, scR != nullptr ? scR + done : nullptr, outL + done,
                       outR + done, piece, bpm);
     }
@@ -1054,13 +1189,22 @@ void Graph::routeVfxOutput (int node, const vfx::Event& e) noexcept
     const auto& targets = nodes[(std::size_t) node]->vfxTargets;
     if (e.output < 0 || e.output >= (int) targets.size())
         return;
-    for (const auto& t : targets[(std::size_t) e.output])
-    {
+    const auto type = e.type == vfx::Event::Type::on ? 1 : e.type == vfx::Event::Type::off ? 0 : 2;
+    forLayeredTargets (targets[(std::size_t) e.output], type, e.voice.key, [&] (const MidiTarget& t, int k, float gain, float pan, float cents, bool viaLayer) {
+        auto ev = e;
+        ev.voice.key = k;
+        if (viaLayer) // a Layer's child (round 165c)
+        {
+            ev.voice.pan = std::clamp (ev.voice.pan + pan, -1.0f, 1.0f);
+            ev.voice.cents += cents;
+        }
         if (t.vfx)
         {
             if (auto& q = vfxQueues[(std::size_t) t.node])
             {
-                auto in = e;
+                auto in = ev;
+                if (in.type == vfx::Event::Type::on)
+                    in.voice.velocity = std::max (1.0e-6f, in.voice.velocity * gain);
                 in.output = 0;
                 in.id = (node + 1) * (1 << 20) + (e.id & ((1 << 20) - 1)); // (ids of different sources never meet)
                 if (t.midiChannel >= 0)
@@ -1069,8 +1213,8 @@ void Graph::routeVfxOutput (int node, const vfx::Event& e) noexcept
             }
         }
         else if (noteOuts.size() < noteOuts.capacity())
-            noteOuts.push_back ({ t.node, t.midiChannel, e });
-    }
+            noteOuts.push_back ({ t.node, t.midiChannel, ev, gain });
+    });
 }
 
 void Graph::playNoteOut (const NoteOut& o) noexcept
@@ -1087,10 +1231,15 @@ void Graph::playNoteOut (const NoteOut& o) noexcept
             i->setNextNoteExpression (v.pan, v.cents, v.porta);
             i->setNextNoteModulation (v.modX, v.modY);
             i->setNextNoteColour (v.colour);
-            if (channel > 0)
-                i->noteOnMidi (v.key, v.velocity, channel);
-            else
-                i->noteOn (v.key, v.velocity);
+            {
+                auto velocity = v.velocity;
+                if (o.gain != 1.0f && ! i->setNextNoteGain (o.gain)) // (a Layer's level, round 165c)
+                    velocity = std::max (1.0e-6f, velocity * o.gain);
+                if (channel > 0)
+                    i->noteOnMidi (v.key, velocity, channel);
+                else
+                    i->noteOn (v.key, velocity);
+            }
             break;
         case vfx::Event::Type::off:
             i->setNextNoteRelease (v.release);
@@ -1175,6 +1324,8 @@ void Graph::renderNodes (const float* inL, const float* inR, const float* scL, c
                 gather (node.sideInputs, scBufL, scBufR);
                 node.effect->setSidechain (scBufL, scBufR);
             }
+            if (node.hardware) // a Hardware Insert (or a Patcher holding one): this part's device buses (round 165c)
+                node.effect->setHardwareIo (hwIn, hwOut, pieceOffset + start);
             node.effect->process (oL, oR, n, v.params, bpm);
             if (v.mix < 0.999f)
                 for (int k = 0; k < n; ++k)
@@ -1223,11 +1374,18 @@ public:
 
     void prepare (double sampleRate) noexcept override { graph.prepare (sampleRate); }
     void reset() noexcept override { graph.reset(); }
+    void setHardwareIo (const LiveInput* in, HardwareOutput* out, int offset) noexcept override
+    {
+        hwIn = in;
+        hwOut = out;
+        hwOffset = offset;
+    }
     void process (float* l, float* r, int n, const EffectParams&, double bpm) noexcept override
     {
         for (int done = 0; done < n; done += Graph::capacity)
         {
             const auto piece = std::min (Graph::capacity, n - done);
+            graph.setHardwareIo (hwIn, hwOut, hwOffset + done);
             graph.process (l + done, r + done, side ? sideL + done : nullptr, side ? sideR + done : nullptr, l + done, r + done, piece, bpm);
             // the first extra output goes to its insert like a Fruity Send (the rack pulls it from there)
             if (sendL != nullptr && sendR != nullptr && graph.auxOutputs() > 0)
@@ -1268,6 +1426,9 @@ private:
     bool side = false;
     float* sendL = nullptr;
     float* sendR = nullptr;
+    const LiveInput* hwIn = nullptr;
+    HardwareOutput* hwOut = nullptr;
+    int hwOffset = 0;
 };
 
 class PatcherInstrument final : public Instrument
@@ -1326,6 +1487,7 @@ public:
         for (int done = 0; done < n; done += Graph::capacity)
         {
             const auto piece = std::min (Graph::capacity, n - done);
+            graph.setHardwareIo (hwIn, hwOut, hwOffset + cursor); // (cursor: where this piece starts in the chunk)
             graph.process (silence.data(), silence.data(), nullptr, nullptr, buffer[0].data(), buffer[1].data(), piece,
                           tempo.load (std::memory_order_relaxed));
             for (int i = 0; i < piece; ++i)
@@ -1355,6 +1517,12 @@ public:
             for (auto& side : a)
                 std::fill (side.begin(), side.begin() + std::min<std::ptrdiff_t> (n, (std::ptrdiff_t) side.size()), 0.0f);
     }
+    void setHardwareIo (const LiveInput* in, HardwareOutput* out, int offset) noexcept override
+    {
+        hwIn = in;
+        hwOut = out;
+        hwOffset = offset;
+    }
     int auxOutputCount() const noexcept override { return (int) accumulated.size(); }
     int auxOutputTrack (int k) const noexcept override
     {
@@ -1373,10 +1541,52 @@ private:
     std::vector<std::array<std::vector<float>, 2>> accumulated;
     std::unique_ptr<std::atomic<int>[]> tracks; // [extra output] its insert
     int cursor = 0;
+    const LiveInput* hwIn = nullptr;
+    HardwareOutput* hwOut = nullptr;
+    int hwOffset = 0;
     std::atomic<bool> idleWhenQuiet { true };
     std::atomic<double> tempo { 140.0 };
 };
 } // namespace
+
+std::vector<int> layerChildren (const PatcherDoc& doc, int node)
+{
+    std::vector<int> out;
+    const auto count = (int) doc.nodes.size();
+    if (node < 0 || node >= count)
+        return out;
+    std::vector<char> seen ((std::size_t) count, 0);
+    seen[(std::size_t) node] = 1;
+    std::vector<int> todo { node };
+    while (! todo.empty())
+    {
+        const auto source = todo.back();
+        todo.pop_back();
+        for (const auto& w : doc.wires)
+        {
+            if (w.kind != PatchWire::Kind::midi || ! w.enabled || w.from != source || w.fromPort != 0 || w.to < 0 || w.to >= count || seen[(std::size_t) w.to])
+                continue;
+            seen[(std::size_t) w.to] = 1;
+            const auto& target = doc.nodes[(std::size_t) w.to];
+            if (! target.generator || target.channel.instrument == InstrumentKind::layer)
+                continue;
+            if (target.channel.instrument == InstrumentKind::midiOut)
+                todo.push_back (w.to);
+            else
+                out.push_back (w.to);
+        }
+    }
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+bool usesHardwareIo (const PatcherDoc& doc) noexcept
+{
+    for (const auto& n : doc.nodes)
+        if (! n.generator && (n.effect.kind == EffectKind::hardwareInsert || (n.effect.kind == EffectKind::patcher && usesHardwareIo (n.effect.patcher))))
+            return true;
+    return false;
+}
 
 std::unique_ptr<Effect> makeEffect (const EffectSlot& slot, double sampleRate, const Factories& factories, const Effect* previous)
 {

@@ -72,6 +72,23 @@ inline float channelValue (int channel) noexcept { return channel < 0 ? 0.0f : (
 inline int roundTripOf (float v) noexcept { return std::clamp ((int) std::lround (v * 65536.0f), 0, maxRoundTrip); }
 inline float roundTripValue (int samples) noexcept { return (float) std::clamp (samples, 0, maxRoundTrip) / 65536.0f; }
 
+// Routed both ways (an output and an input chosen)
+inline bool isRouted (const EffectParams& p) noexcept { return channelOf (p[output]) >= 0 && channelOf (p[input]) >= 0; }
+
+// The device setup (AudioEngine::currentSetupKey: driver, devices, rate, buffer size) its round trip was measured for,
+// kept in the slot's state (round 165c; empty: not known, e.g. a 0.1.19 project). Another setup has another round trip.
+inline std::string measuredSetup (const EffectSlot& slot)
+{
+    static constexpr char prefix[] = "setup=";
+    const std::string text (slot.state.begin(), slot.state.end());
+    return text.rfind (prefix, 0) == 0 ? text.substr (sizeof (prefix) - 1) : std::string();
+}
+inline void setMeasuredSetup (EffectSlot& slot, const std::string& key)
+{
+    const auto text = "setup=" + key;
+    slot.state.assign (text.begin(), text.end());
+}
+
 inline OutputMode outputModeOf (const EffectParams& p) noexcept { return p[outputMono] >= 0.5f ? OutputMode::monoSum : OutputMode::stereo; }
 
 inline std::string paramText (int param, float v)
@@ -99,24 +116,55 @@ inline std::string paramText (int param, float v)
     }
 }
 
-// The song's hardware insert slots that are on (the Master and the inserts; `effects` of every track), and whether one of
-// them returns from a device input.
+// Every hardware insert slot of the song (round 165c): the mixer's, and those inside Patchers (mixer-slot and Channel Rack
+// generator Patchers, nested ones too). `active` = on (the slot, and the Patcher slot that holds it).
+template <typename F>
+void forEachHardwareInsert (const PatcherDoc& doc, bool active, F&& f)
+{
+    for (const auto& n : doc.nodes)
+    {
+        if (n.generator)
+        {
+            if (n.channel.instrument == InstrumentKind::patcher)
+                forEachHardwareInsert (n.channel.patcher, active, f);
+            continue;
+        }
+        if (n.effect.kind == EffectKind::hardwareInsert)
+            f (n.effect, active && n.effect.enabled);
+        else if (n.effect.kind == EffectKind::patcher)
+            forEachHardwareInsert (n.effect.patcher, active && n.effect.enabled, f);
+    }
+}
+
+template <typename F>
+void forEachHardwareInsert (const Song& song, F&& f)
+{
+    for (const auto& t : song.mixer)
+        for (const auto& fx : t.effects)
+        {
+            if (fx.kind == EffectKind::hardwareInsert)
+                f (fx, fx.enabled);
+            else if (fx.kind == EffectKind::patcher)
+                forEachHardwareInsert (fx.patcher, fx.enabled, f);
+        }
+    for (const auto& c : song.channels)
+        if (c.instrument == InstrumentKind::patcher)
+            forEachHardwareInsert (c.patcher, true, f);
+}
+
+// The song's hardware inserts that are on, and whether one of them returns from a device input.
 inline int countActive (const Song& song)
 {
     auto n = 0;
-    for (const auto& t : song.mixer)
-        for (const auto& fx : t.effects)
-            n += fx.kind == EffectKind::hardwareInsert && fx.enabled ? 1 : 0;
+    forEachHardwareInsert (song, [&n] (const EffectSlot&, bool active) { n += active ? 1 : 0; });
     return n;
 }
 
 inline bool returnsFromInput (const Song& song)
 {
-    for (const auto& t : song.mixer)
-        for (const auto& fx : t.effects)
-            if (fx.kind == EffectKind::hardwareInsert && channelOf (fx.params[input]) >= 0)
-                return true;
-    return false;
+    auto any = false;
+    forEachHardwareInsert (song, [&any] (const EffectSlot& fx, bool) { any = any || channelOf (fx.params[input]) >= 0; });
+    return any;
 }
 
 class HardwareInsertFx final : public Effect
