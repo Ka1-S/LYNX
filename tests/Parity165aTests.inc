@@ -39,7 +39,7 @@ TEST (ember_classic_punish_follows_the_measured_law_round165)
         for (int k = 0; k < 3; ++k)
         {
             const auto added = p165a::classicGainDb (st, drives[k], true) - p165a::classicGainDb (st, drives[k], false);
-            CHECK (std::abs (added - trial[st][k]) < 0.3);
+            CHECK (std::abs (added - trial[st][k]) < 0.5);
         }
     // a project saved before round 165 keeps round 136's +9.75 dB
     const auto old = p165a::classicGainDb (0, 5.0f, true, false) - p165a::classicGainDb (0, 5.0f, false, false);

@@ -71,9 +71,34 @@ void shelf1 (P& f, double sr, double hz, double db, bool high) noexcept
     const double a0 = 1.0 + k, a1 = k - 1.0;
     f.b0 = b0 / a0; f.b1 = b1 / a0; f.a1 = a1 / a0;
 }
+// round 165 [EXEC trial, REA_rodada165ha §2]: style A with Punish on drives its curve differently (harder negative
+// knee, less dynamic bias) — fitted on the trial's renders at drives 1 / 3 / 6 / 10 (stairs, bursts, two takes): mean
+// null −10.0 dB with A's own curve → −17.4 dB. The other styles keep their own curve under Punish (not measured yet).
+StyleModel punishModelA()
+{
+    auto m = styleTable[0];
+    m.punishLawDb = 13.7233;
+    m.punishLawPerUnitDb = 0.346217;
+    m.outDb = -0.888831;
+    m.cPos = 0.471376;
+    m.pPos = 2.69529;
+    m.cNeg = 1.11787;
+    m.pNeg = 6.67158;
+    m.bias = -0.166177;
+    m.biasDyn = -0.249233;
+    m.envAttackMs = 130.526;
+    m.envReleaseMs = 40.9654;
+    return m;
+}
 } // namespace
 
 const StyleModel& styleModel (int style) noexcept { return styleTable[std::clamp (style, 0, styleCount - 1)]; }
+
+const StyleModel& punishModel (int style) noexcept
+{
+    static const StyleModel a = punishModelA();
+    return std::clamp (style, 0, styleCount - 1) == 0 ? a : styleModel (style);
+}
 
 // [EXEC] the trial's own value → text laws (VST3 parameter read-back, REA_rodada136 §1)
 double driveUnits (float v) noexcept { return 10.0 * std::clamp ((double) v, 0.0, 1.0); }
@@ -194,7 +219,7 @@ void Engine::reset() noexcept
 void Engine::set (const Settings& settings, const StyleModel* model)
 {
     s = settings;
-    m = model != nullptr ? *model : styleModel (s.style);
+    m = model != nullptr ? *model : s.punish && s.measuredPunish ? punishModel (s.style) : styleModel (s.style);
     design();
 }
 

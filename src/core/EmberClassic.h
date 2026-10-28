@@ -42,6 +42,8 @@ struct StyleModel
 
 constexpr int styleCount = 5;                   // A, E, N, T, P
 const StyleModel& styleModel (int style) noexcept;
+// round 165: the constants with Punish on (its measured law; style A also its own fitted curve)
+const StyleModel& punishModel (int style) noexcept;
 
 // control laws of the original (normalised 0 … 1 values as its parameters use them)
 double driveUnits (float v) noexcept;           // 0 … 10
