@@ -2869,6 +2869,23 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 target.kind = AutomationTargetKind::none;
         }
 
+        // round 165: FL's Dashboard parameter p ≥ 1 = record p − 1 = LYNX's control p − 1 (its output); 0 is the patch
+        // selector (not a LYNX target). The Voltage Controller's 0…15 (offsets, scales) are LYNX's own numbers.
+        if (target.kind == AutomationTargetKind::channelParam && target.index >= 0 && target.index < (int) song.channels.size())
+        {
+            const auto& channel = song.channels[(std::size_t) target.index];
+            if (channel.instrument == InstrumentKind::dashboard)
+            {
+                const auto k = target.param - 1;
+                if (k >= 0 && k < (int) channel.patcher.surface.size())
+                    target.param = surface::firstOutput (channel.patcher.surface, k);
+                else
+                    target.kind = AutomationTargetKind::none;
+            }
+            else if (channel.instrument == InstrumentKind::voltage && (target.param < 0 || target.param >= voltage::paramCount))
+                target.kind = AutomationTargetKind::none;
+        }
+
         if (target.kind == AutomationTargetKind::effectParam || target.kind == AutomationTargetKind::effectMix)
         {
             const auto found = effectSlotMap.find ({ target.index, target.slot });

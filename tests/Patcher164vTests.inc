@@ -68,12 +68,12 @@ TEST (dashboard164f_fl_presets)
         if (d && d->controls.size() == 13)
             CHECK (d->controls[6].kind == Kind::slider && d->controls[6].name == "Slider1" && d->controls[7].kind == Kind::knob && d->controls[7].name == "Wheel7");
     }
-    // Peavey: 36 value controls (sliders, switches, wheels) — LYNX's panel keeps the first 32 outputs; switches are
+    // Peavey: 36 value controls (sliders, switches, wheels) — all kept since round 165 (FL allows 1024); switches are
     // check boxes; its records publish outputs 19, 27, 0, 9… (FL's numbers, bit 31 = deactivated)
     if (const auto st = dash164f::presetState ("Peavey.fst"); ! st.empty())
     {
         const auto d = lynx::surface::parseFlDashboard (st);
-        CHECK (d && d->controls.size() == (std::size_t) lynx::surface::maxOutputs);
+        CHECK (d && d->controls.size() == 36);
         if (d && ! d->controls.empty())
         {
             CHECK (d->controls[0].kind == Kind::slider && d->controls[1].kind == Kind::checkBox && d->controls[2].kind == Kind::knob);
