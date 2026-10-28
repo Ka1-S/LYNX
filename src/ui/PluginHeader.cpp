@@ -12,6 +12,7 @@
 #include "ui/I18n.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
+#include "ui/ValueControl.h"
 
 namespace lynx::pluginheader
 {
@@ -254,8 +255,7 @@ void PresetBar::paint (juce::Graphics& g, juce::Colour accent) const
     const auto label = presetLabel();
     const auto named = fx->presetName.size() > 0;
     g.setColour (named ? colour::textPrimary : colour::textSecondary);
-    g.setFont (font (type::small, named));
-    g.drawText (label, rPreset.reduced (8.0f, 0.0f), juce::Justification::centred, true);
+    ui::drawFittingText (g, label, rPreset.reduced (6.0f, 0.0f), juce::Justification::centred, font (type::small, named), 7.5f, 0.0f, 0.7f); // (round 165)
     drawArrow (g, rPrev, true, hovered == Part::prev ? accent : colour::textSecondary);
     drawArrow (g, rNext, false, hovered == Part::next ? accent : colour::textSecondary);
 }

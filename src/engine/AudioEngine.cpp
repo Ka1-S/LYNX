@@ -830,6 +830,36 @@ void AudioEngine::markHeldKey (int key, bool on) noexcept
         heldKeyBits[key >> 6].fetch_and (~bit);
 }
 
+void AudioEngine::logPlayedNote (int channel, int key, float velocity, bool on)
+{
+    if (channel < 0)
+        return;
+    const auto ms = juce::Time::getMillisecondCounterHiRes();
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    if (on)
+        scoreLog.noteOn (ms, channel, key, velocity);
+    else
+        scoreLog.noteOff (ms, channel, key);
+}
+
+std::vector<scorelog::Entry> AudioEngine::scoreLogSnapshot() const
+{
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    return scoreLog.snapshot();
+}
+
+bool AudioEngine::scoreLogEmpty() const
+{
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    return scoreLog.size() == 0;
+}
+
+void AudioEngine::clearScoreLog()
+{
+    const juce::SpinLock::ScopedLockType lock (scoreLogLock);
+    scoreLog.clear();
+}
+
 std::vector<int> AudioEngine::heldInputKeys() const
 {
     std::vector<int> keys;
@@ -866,6 +896,8 @@ void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, b
     e.key = key;
     e.velocity = velocity;
     liveEvents.push (e);
+    if (record)
+        logPlayedNote (channel, key, velocity, on);
 
     if (record && transport.recording.load() && transport.playing.load())
         uiRecorded.push_back ({ estimatedPositionNow(), channel, key, velocity, on });
@@ -1675,6 +1707,7 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
         e.key = t.key;
         e.velocity = velocity;
         midiEvents.push (e);
+        logPlayedNote (e.channel, e.key, e.velocity, noteOn);
 
         if (transport.recording.load() && transport.playing.load())
             midiRecordQueue.push ({ estimatedPositionNow(), e.channel, e.key, e.velocity, noteOn });
