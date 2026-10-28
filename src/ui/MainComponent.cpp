@@ -118,6 +118,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         if (safe != nullptr)
             safe->mixer.getStripsForSnapshot().setShowUsedOnly (on);
     };
+    mixeroptions::renderTracks = [safe = juce::Component::SafePointer<MainComponent> (this)] (std::vector<int> tracks) {
+        if (safe != nullptr)
+            showExportDialogForTracks (safe->engine, safe->currentFile.getParentDirectory(), safe->projectName, tracks);
+    };
     if (persistent)
     {
         loadUiSettings();

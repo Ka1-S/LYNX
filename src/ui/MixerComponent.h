@@ -61,6 +61,9 @@ namespace mixeroptions
 extern std::function<void()> changed;
 // Shows or hides the unused inserts in the mixer (the main window points it at its mixer).
 extern std::function<void (bool)> setShowUsedOnly;
+// Opens the Export window for these inserts only (FL's "Render armed / selected tracks to wave file(s)"; the main
+// window sets it, with the project's folder and name).
+extern std::function<void (std::vector<int>)> renderTracks;
 // The items: this project's clean mixer, show only used inserts, remove unused inserts at the end and — with
 // `newProjects` — the new-project choices (inserts, Master chain, clean mixer, Playlist tracks).
 void addItems (juce::PopupMenu& menu, AudioEngine& engine, bool newProjects);

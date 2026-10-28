@@ -71,7 +71,9 @@ enum : std::uint32_t
     evPlaylistTrack = 0xEE,     // u32 index (1..500), u32 colour, u32 icon, u8 enabled, ...
     evPlaylistTrackName = 0xEF,
     evPlaylistItems = 0xE9,
-    evMixerInsertParams = 0xEC, // opens a new mixer insert
+    evMixerInsertParams = 0xEC, // opens a new mixer insert: f32 manual latency (ms), u32 flags, f32 input latency (ms)
+    evMixerInsertLatencyBypass = 0x31, // u8 "Bypass track latency compensation" of the insert opened by the last 0xEC (REA round 165f-mixer)
+    evMixerInsertRecordSource = 0xA5,  // u32 record source point 0..5 of the insert opened by the last 0xEC (REA round 165f-mixer)
     evArrangementName = 0xF1,
     evTimeMarker = 0x94,          // u32 type << 24 | position
     evTimeMarkerNumerator = 0x21, // u8
@@ -1062,6 +1064,16 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     project.mixer.back().output = (int) (std::int32_t) e.value;
                 break;
 
+            case evMixerInsertLatencyBypass:
+                if (section == Section::mixer && ! project.mixer.empty())
+                    project.mixer.back().latencyBypass = (int) std::min<std::uint32_t> (e.value, 2);
+                break;
+
+            case evMixerInsertRecordSource:
+                if (section == Section::mixer && ! project.mixer.empty())
+                    project.mixer.back().recordSource = (int) std::min<std::uint32_t> (e.value, 5);
+                break;
+
             case evMixerInsertInput:
                 if (section == Section::mixer && ! project.mixer.empty())
                     project.mixer.back().input = std::max (-1, (int) (std::int32_t) e.value);
@@ -1091,6 +1103,13 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 
                 if (e.data.size() >= 8)
                     insert.flags = readLE<std::uint32_t> (e.data, 4);
+                if (e.data.size() >= 4) // FL's writer FUN_00f3d620: the track's manual latency in ms (REA round 165f-mixer)
+                {
+                    const auto bits = readLE<std::uint32_t> (e.data, 0);
+                    float ms = 0.0f;
+                    std::memcpy (&ms, &bits, sizeof ms);
+                    insert.latencyMs = std::isfinite (ms) ? ms : 0.0f;
+                }
                 break;
             }
 

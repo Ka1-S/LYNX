@@ -16148,3 +16148,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Dash165Tests.inc"
 #include "LinuxMouse165Tests.inc"
 #include "Fl165Tests.inc"
+#include "MixerLatency165Tests.inc"

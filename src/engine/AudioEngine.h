@@ -511,6 +511,8 @@ public:
 
     // Total latency compensated by PDC (at the Master output), in samples.
     int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
+    // The last published PDC plan (per-track latencies: outLat, inAlign). Message thread.
+    const PdcPlan& getPdcPlan() const noexcept { return lastPublishedShape.pdc; }
 
 private:
     void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
