@@ -532,10 +532,135 @@ std::string unescape (const std::string& t)
 }
 
 const char* bandIds[] = { "level", "bass", "mid", "high", "beat" };
-const char* typeIds[] = { "background", "bars", "circle", "waveform", "particles", "rings", "image", "text", "flash" };
+const char* typeIds[] = { "background", "bars", "circle", "waveform", "particles", "rings", "image", "text", "flash",
+                          "canvas", "terrain", "object3d", "feedback", "postprocess" };
+const char* blendIds[] = { "normal", "add", "screen", "multiply", "overlay", "difference", "lighten", "darken" };
+
+struct EffectDef
+{
+    const char* id;
+    const char* name;
+    const char* hint;
+};
+// (the knobs every shader reads: Size = scale, Amount = strength, Speed = motion, React = how much the band moves it,
+// Count = detail, X / Y = centre, the two colours = its palette)
+const EffectDef canvasFx[] = {
+    { "plasma", "Plasma", "Size: scale, Amount: colour bands, Count: layers of waves" },
+    { "tunnel", "Tunnel", "Size: ring spacing, Amount: twist, Speed: flight speed" },
+    { "cells", "Cells", "Size: cell size, Amount: border glow, Count: detail" },
+    { "kaleido", "Kaleidoscope", "Size: zoom, Amount: folds, Count: iterations" },
+    { "clouds", "Clouds", "Size: scale, Amount: density, Speed: drift" },
+    { "warp", "Warp stars", "Size: star size, Amount: streaks, Count: density" },
+    { "electric", "Electric", "Size: thickness, Amount: jitter, Count: bolts" },
+    { "rays", "Sun rays", "Size: sun size, Amount: ray strength, Count: rays" },
+};
+const EffectDef terrainFx[] = {
+    { "mountains", "Spectrum mountains", "The spectrum's history as a wire landscape. Size: height, Amount: line glow, Count: rows" },
+    { "hills", "Shaded hills", "A lit landscape shaped by the spectrum. Size: height, Amount: fog, Speed: flight speed" },
+    { "road", "Retro road", "A neon grid and a sun. Size: sun size, Amount: grid glow, Speed: flight speed" },
+};
+const EffectDef objectFx[] = {
+    { "blob", "Reactive sphere", "A sphere the bass deforms. Size: radius, Amount: deformation, Speed: spin" },
+    { "torus", "Torus", "Size: radius, Amount: thickness, Speed: spin" },
+    { "cubes", "Cube grid", "Columns that follow the spectrum. Size: height, Amount: spacing, Count: columns" },
+    { "rings", "Ring tunnel", "Rings flying past. Size: radius, Amount: thickness, Speed: flight speed" },
+};
+const EffectDef feedbackFx[] = {
+    { "zoom", "Zoom trails", "Size: zoom per frame, Amount: how long trails last" },
+    { "spin", "Spin tunnel", "Size: zoom per frame, Speed: rotation, Amount: trail length" },
+    { "kaleido", "Kaleido feedback", "Size: zoom, Amount: trail length, Count: mirror folds" },
+    { "warp", "Warp", "Size: warp scale, Amount: trail length, Speed: flow" },
+    { "echo", "Echo", "Amount: how long the picture stays" },
+    { "drift", "Smoke drift", "Speed: rise, Amount: trail length, Size: spread" },
+};
+const EffectDef postFx[] = {
+    { "bloom", "Bloom", "Glow around bright parts. Amount: strength, Size: radius, Count: threshold" },
+    { "blur", "Blur", "Size: radius, React: the band blurs it more" },
+    { "rgbshift", "RGB shift", "Amount: colour split, React: the band pushes it" },
+    { "pixelate", "Pixelate", "Size: pixel size" },
+    { "dots", "Dot matrix", "Size: dot size, Amount: dot sharpness" },
+    { "scanlines", "Scan lines", "Size: line spacing, Amount: darkness, Speed: roll" },
+    { "vignette", "Vignette", "Size: radius, Amount: darkness" },
+    { "color", "Colour correction", "Size: saturation, Amount: contrast, Speed: hue drift, colour A: tint" },
+    { "kaleido", "Kaleidoscope", "Count: folds, Speed: rotation" },
+    { "mirror", "Mirror", "Count: 1 left-right, 2 top-bottom, 3 both" },
+    { "edges", "Edge detect", "Amount: edge strength, colour A: edge colour" },
+    { "shake", "Shake", "Amount: how far the beat shakes the picture" },
+    { "glitch", "Glitch", "Amount: how often slices jump, React: the band triggers it" },
+    { "grain", "Film grain", "Amount: grain strength" },
+    { "invert", "Invert on beat", "React: how much the band inverts the colours" },
+};
+
+struct EffectList
+{
+    const EffectDef* list = nullptr;
+    int count = 0;
+};
+EffectList effectsOf (LayerType t) noexcept
+{
+    switch (t)
+    {
+        case LayerType::canvas: return { canvasFx, (int) std::size (canvasFx) };
+        case LayerType::terrain: return { terrainFx, (int) std::size (terrainFx) };
+        case LayerType::object3d: return { objectFx, (int) std::size (objectFx) };
+        case LayerType::feedback: return { feedbackFx, (int) std::size (feedbackFx) };
+        case LayerType::postprocess: return { postFx, (int) std::size (postFx) };
+        default: return {};
+    }
+}
 } // namespace
 
 const char* typeId (LayerType t) noexcept { return typeIds[(int) t]; }
+
+bool isShaderType (LayerType t) noexcept { return (int) t >= (int) LayerType::canvas; }
+bool readsBelow (LayerType t) noexcept { return t == LayerType::feedback || t == LayerType::postprocess; }
+
+int effectCount (LayerType t) noexcept { return effectsOf (t).count; }
+
+const char* effectId (LayerType t, int effect) noexcept
+{
+    const auto e = effectsOf (t);
+    return e.count == 0 ? "" : e.list[std::clamp (effect, 0, e.count - 1)].id;
+}
+
+const char* effectName (LayerType t, int effect) noexcept
+{
+    const auto e = effectsOf (t);
+    return e.count == 0 ? "" : e.list[std::clamp (effect, 0, e.count - 1)].name;
+}
+
+const char* effectHint (LayerType t, int effect) noexcept
+{
+    const auto e = effectsOf (t);
+    return e.count == 0 ? "" : e.list[std::clamp (effect, 0, e.count - 1)].hint;
+}
+
+int effectIndex (LayerType t, const std::string& id) noexcept
+{
+    const auto e = effectsOf (t);
+    for (int i = 0; i < e.count; ++i)
+        if (id == e.list[i].id)
+            return i;
+    return -1;
+}
+
+const char* blendId (Blend b) noexcept { return blendIds[(int) b]; }
+
+const char* blendName (Blend b) noexcept
+{
+    switch (b)
+    {
+        case Blend::normal: return "Normal";
+        case Blend::add: return "Add";
+        case Blend::screen: return "Screen";
+        case Blend::multiply: return "Multiply";
+        case Blend::overlay: return "Overlay";
+        case Blend::difference: return "Difference";
+        case Blend::lighten: return "Lighten";
+        case Blend::darken: return "Darken";
+    }
+    return "Normal";
+}
 
 const char* typeName (LayerType t) noexcept
 {
@@ -550,6 +675,11 @@ const char* typeName (LayerType t) noexcept
         case LayerType::image: return "Image";
         case LayerType::text: return "Text";
         case LayerType::flash: return "Beat flash";
+        case LayerType::canvas: return "Canvas (GPU)";
+        case LayerType::terrain: return "Terrain 3D (GPU)";
+        case LayerType::object3d: return "3D object (GPU)";
+        case LayerType::feedback: return "Feedback (GPU)";
+        case LayerType::postprocess: return "Post-process (GPU)";
     }
     return "Layer";
 }
@@ -590,6 +720,10 @@ std::string write (const Scene& s)
             o << "text=" << escape (l.text) << "\n";
         if (! l.path.empty())
             o << "path=" << escape (l.path) << "\n";
+        if (isShaderType (l.type))
+            o << "effect=" << effectId (l.type, l.effect) << "\n";
+        if (l.blend != Blend::normal)
+            o << "blend=" << blendId (l.blend) << "\n";
     }
     return o.str();
 }
@@ -682,6 +816,14 @@ std::optional<Scene> parse (const std::string& text)
             l->text = unescape (value);
         else if (key == "path")
             l->path = unescape (value);
+        else if (key == "effect")
+            l->effect = std::max (0, effectIndex (l->type, value));
+        else if (key == "blend")
+        {
+            for (int b = 0; b < blendCount; ++b)
+                if (value == blendIds[b])
+                    l->blend = (Blend) b;
+        }
     }
     return s;
 }
@@ -699,6 +841,29 @@ std::optional<Scene> fromState (const std::vector<std::uint8_t>& state)
 
 namespace
 {
+// HSV (0..1 each) to ARGB
+std::uint32_t hsvArgb (float h, float s, float v, float alpha)
+{
+    h = h - std::floor (h);
+    s = std::clamp (s, 0.0f, 1.0f);
+    v = std::clamp (v, 0.0f, 1.0f);
+    const auto i = (int) (h * 6.0f) % 6;
+    const auto f = h * 6.0f - std::floor (h * 6.0f);
+    const auto pp = v * (1.0f - s), q = v * (1.0f - f * s), t = v * (1.0f - (1.0f - f) * s);
+    float r = v, g = t, b = pp;
+    switch (i)
+    {
+        case 0: r = v; g = t; b = pp; break;
+        case 1: r = q; g = v; b = pp; break;
+        case 2: r = pp; g = v; b = t; break;
+        case 3: r = pp; g = q; b = v; break;
+        case 4: r = t; g = pp; b = v; break;
+        default: r = v; g = pp; b = q; break;
+    }
+    auto byte = [] (float x) { return (std::uint32_t) std::lround (std::clamp (x, 0.0f, 1.0f) * 255.0f); };
+    return (byte (alpha) << 24) | (byte (r) << 16) | (byte (g) << 8) | byte (b);
+}
+
 Layer make (LayerType type, std::uint32_t a, std::uint32_t b, float x, float y, float size, Band band, float react)
 {
     Layer l;
@@ -713,6 +878,71 @@ Layer make (LayerType type, std::uint32_t a, std::uint32_t b, float x, float y, 
     return l;
 }
 } // namespace
+
+Layer shaderLayer (LayerType type, int effect)
+{
+    Layer l;
+    l.type = type;
+    l.effect = std::clamp (effect, 0, std::max (0, effectCount (type) - 1));
+    l.band = Band::bass;
+    l.react = 0.5f;
+    l.size = 0.5f;
+    l.amount = 0.5f;
+    l.speed = 0.3f;
+    l.count = 48;
+    const std::string id = effectId (type, l.effect);
+    auto colours = [&l] (std::uint32_t a, std::uint32_t b) {
+        l.colourA = a;
+        l.colourB = b;
+    };
+    switch (type)
+    {
+        case LayerType::canvas:
+            if (id == "plasma") colours (0xff2a0a6a, 0xffff3070);
+            else if (id == "tunnel") { colours (0xff101030, 0xffff3048); l.speed = 0.4f; l.amount = 0.3f; }
+            else if (id == "cells") colours (0xff0a1830, 0xff40c0ff);
+            else if (id == "kaleido") { colours (0xffff3048, 0xff3060ff); l.amount = 0.4f; }
+            else if (id == "clouds") { colours (0xff20307a, 0xffc060ff); l.speed = 0.2f; }
+            else if (id == "warp") { colours (0xffffffff, 0xff6aa8ff); l.blend = Blend::add; l.size = 0.3f; l.speed = 0.5f; }
+            else if (id == "electric") { colours (0xffffffff, 0xff40a0ff); l.blend = Blend::add; l.size = 0.3f; l.count = 36; l.band = Band::beat; }
+            else if (id == "rays") { colours (0xffffb030, 0xffff3048); l.blend = Blend::add; l.size = 0.3f; }
+            break;
+        case LayerType::terrain:
+            if (id == "mountains") { colours (0xffff3048, 0xff6a2cff); l.count = 40; l.amount = 0.4f; l.react = 0.6f; }
+            else if (id == "hills") { colours (0xff406080, 0xffd08060); l.size = 0.4f; l.amount = 0.3f; }
+            else { colours (0xffff2d95, 0xff6a2cff); l.size = 0.35f; l.amount = 0.4f; l.speed = 0.4f; }
+            break;
+        case LayerType::object3d:
+            if (id == "blob") { colours (0xff3060ff, 0xffff3048); l.size = 0.4f; }
+            else if (id == "torus") { colours (0xffff3048, 0xffffb000); l.size = 0.35f; l.amount = 0.3f; }
+            else if (id == "cubes") { colours (0xff20c0ff, 0xffff3048); l.amount = 0.3f; l.react = 0.6f; l.speed = 0.2f; }
+            else { colours (0xffff3048, 0xff40c0ff); l.size = 0.3f; l.amount = 0.2f; l.band = Band::level; }
+            break;
+        case LayerType::feedback:
+            colours (0xffffffff, 0xffffffff);
+            l.size = 0.3f;
+            l.amount = 0.6f;
+            if (id == "spin") l.speed = 0.6f;
+            if (id == "kaleido") l.count = 24;
+            break;
+        case LayerType::postprocess:
+            colours (0xffffffff, 0xffffffff);
+            if (id == "bloom") { l.amount = 0.35f; l.count = 128; }
+            else if (id == "blur") { l.size = 0.3f; l.react = 0.0f; }
+            else if (id == "rgbshift") { l.amount = 0.2f; l.react = 0.6f; l.band = Band::beat; }
+            else if (id == "pixelate") l.size = 0.2f;
+            else if (id == "dots") { l.size = 0.3f; l.amount = 0.6f; }
+            else if (id == "scanlines") { l.size = 0.3f; l.amount = 0.4f; }
+            else if (id == "vignette") { l.amount = 0.7f; }
+            else if (id == "color") { l.amount = 0.33f; l.speed = 0.0f; }
+            else if (id == "mirror") l.count = 1;
+            else if (id == "shake" || id == "glitch" || id == "invert") { l.band = Band::beat; l.react = 0.7f; l.amount = id == "glitch" ? 0.3f : 0.5f; }
+            else if (id == "grain") l.amount = 0.3f;
+            break;
+        default: break;
+    }
+    return l;
+}
 
 const std::vector<Scene>& presets()
 {
@@ -800,6 +1030,118 @@ const std::vector<Scene>& presets()
             wave.amount = 0.35f;
             wave.additive = true;
             s.layers.push_back (wave);
+            out.push_back (s);
+        }
+        // GPU scenes (round 165e): shader layers; without OpenGL they are drawn simplified
+        auto fx = [] (LayerType t, const char* id) { return shaderLayer (t, std::max (0, effectIndex (t, id))); };
+        auto black = [] { return make (LayerType::background, 0xff000000, 0xff000000, 0.5f, 0.5f, 0.5f, Band::bass, 0.0f); };
+        {
+            Scene s;
+            s.name = "Retro road";
+            s.layers.push_back (black());
+            s.layers.push_back (fx (LayerType::terrain, "road"));
+            auto title = make (LayerType::text, 0xffffffff, 0xffff2d95, 0.5f, 0.87f, 0.11f, Band::beat, 0.3f);
+            title.text = "LYNX";
+            title.amount = 0.7f;
+            s.layers.push_back (title);
+            s.layers.push_back (fx (LayerType::postprocess, "bloom"));
+            auto lines = fx (LayerType::postprocess, "scanlines");
+            lines.amount = 0.25f;
+            s.layers.push_back (lines);
+            out.push_back (s);
+        }
+        {
+            Scene s;
+            s.name = "Spectrum mountains";
+            s.layers.push_back (black());
+            s.layers.push_back (fx (LayerType::terrain, "mountains"));
+            s.layers.push_back (fx (LayerType::postprocess, "bloom"));
+            s.layers.push_back (fx (LayerType::postprocess, "vignette"));
+            out.push_back (s);
+        }
+        {
+            Scene s;
+            s.name = "Reactive sphere";
+            s.layers.push_back (black());
+            auto clouds = fx (LayerType::canvas, "clouds");
+            clouds.colourA = 0xff0a0c30;
+            clouds.colourB = 0xff3a1060;
+            clouds.opacity = 0.8f;
+            s.layers.push_back (clouds);
+            auto rings = make (LayerType::rings, 0xffff3048, 0x00ff3048, 0.5f, 0.5f, 0.7f, Band::beat, 0.8f);
+            rings.count = 6;
+            rings.additive = true;
+            s.layers.push_back (rings);
+            s.layers.push_back (fx (LayerType::object3d, "blob"));
+            s.layers.push_back (fx (LayerType::postprocess, "bloom"));
+            s.layers.push_back (fx (LayerType::postprocess, "vignette"));
+            out.push_back (s);
+        }
+        {
+            Scene s;
+            s.name = "Kaleido feedback";
+            s.layers.push_back (black());
+            auto bars = make (LayerType::bars, 0xffff2d55, 0xff7a3cff, 0.5f, 0.75f, 0.45f, Band::level, 0.8f);
+            bars.count = 48;
+            bars.mirror = true;
+            s.layers.push_back (bars);
+            s.layers.push_back (fx (LayerType::feedback, "kaleido"));
+            s.layers.push_back (fx (LayerType::postprocess, "rgbshift"));
+            s.layers.push_back (fx (LayerType::postprocess, "bloom"));
+            out.push_back (s);
+        }
+        {
+            Scene s;
+            s.name = "Plasma tunnel";
+            s.layers.push_back (black());
+            s.layers.push_back (fx (LayerType::canvas, "tunnel"));
+            auto circle = make (LayerType::circle, 0xffffffff, 0xffff3048, 0.5f, 0.5f, 0.22f, Band::level, 0.8f);
+            circle.count = 120;
+            circle.additive = true;
+            s.layers.push_back (circle);
+            s.layers.push_back (fx (LayerType::feedback, "zoom"));
+            s.layers.push_back (fx (LayerType::postprocess, "bloom"));
+            out.push_back (s);
+        }
+        {
+            Scene s;
+            s.name = "Cube city";
+            auto sky = fx (LayerType::canvas, "clouds");
+            sky.colourA = 0xff050818;
+            sky.colourB = 0xff1a2a50;
+            s.layers.push_back (black());
+            s.layers.push_back (sky);
+            s.layers.push_back (fx (LayerType::object3d, "cubes"));
+            s.layers.push_back (fx (LayerType::postprocess, "bloom"));
+            s.layers.push_back (fx (LayerType::postprocess, "vignette"));
+            out.push_back (s);
+        }
+        {
+            Scene s;
+            s.name = "Electric storm";
+            s.layers.push_back (make (LayerType::background, 0xff02030a, 0xff0a0820, 0.5f, 0.5f, 0.5f, Band::bass, 0.2f));
+            s.layers.push_back (fx (LayerType::canvas, "electric"));
+            s.layers.push_back (fx (LayerType::feedback, "drift"));
+            auto flash = make (LayerType::flash, 0xff80c0ff, 0xff80c0ff, 0.5f, 0.5f, 0.5f, Band::beat, 0.3f);
+            flash.opacity = 0.3f;
+            s.layers.push_back (flash);
+            s.layers.push_back (fx (LayerType::postprocess, "bloom"));
+            out.push_back (s);
+        }
+        {
+            Scene s;
+            s.name = "Neon CRT";
+            s.layers.push_back (make (LayerType::background, 0xff0d0716, 0xff2a0a26, 0.5f, 0.5f, 0.5f, Band::bass, 0.25f));
+            auto bars = make (LayerType::bars, 0xffff2d55, 0xff7a3cff, 0.5f, 0.85f, 0.5f, Band::level, 0.8f);
+            bars.count = 64;
+            s.layers.push_back (bars);
+            auto wave = make (LayerType::waveform, 0xccffffff, 0x00ffffff, 0.5f, 0.4f, 0.22f, Band::level, 0.5f);
+            wave.amount = 0.25f;
+            s.layers.push_back (wave);
+            s.layers.push_back (fx (LayerType::postprocess, "rgbshift"));
+            s.layers.push_back (fx (LayerType::postprocess, "scanlines"));
+            s.layers.push_back (fx (LayerType::postprocess, "vignette"));
+            s.layers.push_back (fx (LayerType::postprocess, "grain"));
             out.push_back (s);
         }
         return out;
@@ -914,25 +1256,86 @@ std::optional<Scene> fromZge (const std::vector<std::uint8_t>& state, std::vecto
         const auto app = it->second["App"];
         if (app.empty() || app == "(none)" || it->second["Enabled"] == "0")
             continue;
+        // the effect's parameters (0..1)
+        std::vector<float> p;
+        {
+            std::istringstream values (it->second["FParamValues"]);
+            std::string v;
+            while (std::getline (values, v, ','))
+                p.push_back ((float) std::atof (v.c_str()));
+        }
+        auto param = [&p] (std::size_t i, float fallback) { return i < p.size() && std::isfinite (p[i]) ? p[i] : fallback; };
+        // most ZGE effects start with Alpha, Hue, Saturation, Lightness: HSV (hue, saturation, 1 − lightness), alpha 1 − Alpha
+        auto zgeColour = [&param] (std::size_t at = 0) {
+            const auto alpha = 1.0f - std::clamp (param (at, 0.0f), 0.0f, 1.0f);
+            return hsvArgb (param (at + 1, 0.0f), param (at + 2, 0.0f), 1.0f - std::clamp (param (at + 3, 0.0f), 0.0f, 1.0f), alpha);
+        };
+        auto shader = [] (LayerType t, const char* id) { return shaderLayer (t, std::max (0, effectIndex (t, id))); };
+        const auto name = app.substr (app.find_last_of ("\\.") == std::string::npos ? 0 : app.find_last_of ("\\.") + 1);
+        auto named = [&name] (std::initializer_list<const char*> words) {
+            for (const auto* w : words)
+                if (name.find (w) != std::string::npos)
+                    return true;
+            return false;
+        };
         Layer l;
         bool ok = true;
-        if (has (app, "Background\\SolidColor") || has (app, "SolidColor"))
-            l = make (LayerType::background, 0xff101018, 0xff101018, 0.5f, 0.5f, 0.5f, Band::bass, 0.0f);
-        else if (has (app, "Background\\") )
+        if (has (app, "SolidColor"))
+        {
+            const auto c = zgeColour();
+            if ((c >> 24) < 8)
+                continue; // a transparent colour draws nothing
+            l = make (LayerType::background, c | 0xff000000u, c | 0xff000000u, 0.5f, 0.5f, 0.5f, Band::bass, 0.0f);
+            l.opacity = (float) (c >> 24) / 255.0f;
+        }
+        else if (has (app, "FourCornerGradient"))
+        {
+            // the top-left and bottom-right corners (hue, saturation, value)
+            l = make (LayerType::background, hsvArgb (param (2, 0.0f), param (3, 0.0f), param (4, 0.2f), 1.0f),
+                      hsvArgb (param (11, 0.0f), param (12, 0.0f), param (13, 0.1f), 1.0f), 0.5f, 0.5f, 0.5f, Band::bass, 0.1f);
+            l.opacity = std::clamp (param (1, 1.0f), 0.0f, 1.0f);
+        }
+        else if (has (app, "ItsFullOfStars"))
+            l = shader (LayerType::canvas, "warp");
+        else if (has (app, "FogMachine"))
+            l = shader (LayerType::canvas, "clouds");
+        else if (has (app, "Retro Road") || has (app, "Background\\Grid"))
+            l = shader (LayerType::terrain, "road");
+        else if (has (app, "Background\\"))
             l = make (LayerType::background, 0xff0d0716, 0xff2a0a26, 0.5f, 0.5f, 0.5f, Band::bass, 0.25f);
         else if (has (app, "Peak Effects\\Polar") || has (app, "FreqRing") || has (app, "HUD Graph Polar") || has (app, "HUD Meter Radial"))
         {
             l = make (LayerType::circle, 0xffff3048, 0xffffb000, 0.5f, 0.5f, 0.3f, Band::level, 0.8f);
             l.count = 96;
+            if (has (app, "Peak Effects\\Polar") && p.size() >= 7)
+            {
+                l.colourA = zgeColour();
+                l.size = std::clamp (param (4, 0.3f), 0.05f, 1.0f);
+                l.x = param (5, 0.5f);
+                l.y = 1.0f - param (6, 0.5f);
+            }
         }
-        else if (has (app, "WaveSimple") || has (app, "StereoWaveForm") || has (app, "JoyDividers"))
+        else if (has (app, "Reactive Sphere"))
+            l = shader (LayerType::object3d, "blob");
+        else if (has (app, "Audio Plane") || has (app, "Peakmap"))
+            l = shader (LayerType::terrain, "mountains");
+        else if (has (app, "WaveSimple") || has (app, "StereoWaveForm") || has (app, "JoyDividers") || has (app, "Oscilloscope")
+                 || has (app, "Youlean Waveform") || has (app, "VectorScope"))
             l = make (LayerType::waveform, 0xffffffff, 0xffffffff, 0.5f, 0.5f, 0.3f, Band::level, 0.5f);
         else if (has (app, "Peak Effects\\") || has (app, "HUD Graph Linear"))
         {
             l = make (LayerType::bars, 0xffff2d55, 0xff7a3cff, 0.5f, 0.85f, 0.5f, Band::level, 0.8f);
             l.count = 64;
+            if (has (app, "Peak Effects\\Linear") && p.size() >= 8)
+            {
+                l.colourA = zgeColour() | 0xff000000u;
+                l.opacity = (float) (zgeColour() >> 24) / 255.0f;
+                l.size = std::clamp (param (4, 0.5f), 0.05f, 1.0f);
+                l.y = 1.0f - param (6, 0.15f);
+                l.count = std::clamp ((int) std::lround (8.0f + param (7, 0.25f) * 120.0f), 8, 256);
+            }
         }
-        else if (has (app, "Particles\\") || has (app, "ItsFullOfStars") || has (app, "ReactiveMob") || has (app, "fLuids"))
+        else if (has (app, "Particles\\") || has (app, "ReactiveMob") || has (app, "fLuids") || has (app, "ReactiveFlow"))
         {
             l = make (LayerType::particles, 0xffffffff, 0xff6aa8ff, 0.5f, 0.5f, 0.15f, Band::bass, 0.7f);
             l.count = 200;
@@ -942,6 +1345,14 @@ std::optional<Scene> fromZge (const std::vector<std::uint8_t>& state, std::vecto
         {
             l = make (LayerType::text, 0xffffffff, 0xffff3048, 0.5f, 0.5f, 0.2f, Band::beat, 0.3f);
             l.text = text.empty() ? std::string ("LYNX") : text;
+            if (has (app, "TextTrueType") && p.size() >= 7)
+            {
+                const auto c = zgeColour();
+                l.colourA = c | 0xff000000u;
+                l.opacity = std::max (0.05f, (float) (c >> 24) / 255.0f);
+                l.x = param (5, 0.5f);
+                l.y = 1.0f - param (6, 0.5f);
+            }
         }
         else if (has (app, "Image effects\\") || has (app, "HUD Image"))
         {
@@ -951,12 +1362,106 @@ std::optional<Scene> fromZge (const std::vector<std::uint8_t>& state, std::vecto
                 l.path = images[(std::size_t) imageIndex];
             else
                 ok = false; // one of FL's own pictures: not ours to copy
+            if (ok && has (app, "Image effects\\Image") && p.size() >= 7)
+            {
+                l.size = std::clamp (param (4, 0.6f), 0.05f, 1.0f);
+                l.x = param (5, 0.5f);
+                l.y = 1.0f - param (6, 0.5f);
+                l.opacity = 1.0f - std::clamp (param (0, 0.0f), 0.0f, 1.0f);
+            }
         }
-        else if (has (app, "Blooming") || has (app, "Bloom") || has (app, "AudioShake") || has (app, "ParameterShake"))
+        // ---- the GPU layers (round 165e) ----
+        else if (has (app, "Feedback\\"))
+            l = shader (LayerType::feedback, named ({ "Kaleido" }) ? "kaleido" : named ({ "WormHole" }) ? "spin" : named ({ "WarpBack" }) ? "warp"
+                                                : named ({ "BoxedIn" }) ? "echo" : "zoom");
+        else if (has (app, "FrameBlur"))
+            l = shader (LayerType::feedback, "echo");
+        else if (has (app, "Bloom") || has (app, "Blooming") || has (app, "Starburst") || has (app, "Whitehole"))
         {
-            l = make (LayerType::flash, 0xffffffff, 0xffffffff, 0.5f, 0.5f, 0.5f, Band::beat, 0.3f);
-            l.opacity = 0.25f;
+            l = shader (LayerType::postprocess, "bloom");
+            if (has (app, "Youlean Bloom") && p.size() >= 5)
+            {
+                l.amount = std::clamp (param (0, 0.35f), 0.0f, 1.0f);
+                l.count = std::clamp ((int) std::lround ((0.85f - std::clamp (param (1, 0.3f), 0.0f, 0.95f)) / 0.8f * 512.0f), 1, 512);
+                l.size = std::clamp (param (2, 0.5f), 0.0f, 1.0f);
+                l.opacity = std::clamp (param (4, 1.0f), 0.0f, 1.0f);
+            }
+            else if (has (app, "Blooming") && p.size() >= 8)
+                l.amount = std::clamp (param (7, 0.35f), 0.0f, 1.0f);
         }
+        else if (has (app, "AudioShake") || has (app, "Audio Shake") || has (app, "Handheld"))
+            l = shader (LayerType::postprocess, "shake");
+        else if (has (app, "Youlean Blur") || has (app, "Motion Blur") || has (app, "Postprocess\\Blur") || has (app, "Linear Blur") || has (app, "Smudge")
+                 || has (app, "Watercolor") || has (app, "Raindrops"))
+        {
+            l = shader (LayerType::postprocess, "blur");
+            if (p.size() >= 1)
+                l.size = std::clamp (param (0, 0.3f), 0.0f, 1.0f);
+        }
+        else if (has (app, "Color Correction") || has (app, "Color Shaper") || has (app, "Fast HSV") || has (app, "Luminosity") || has (app, "ColorCyclePalette"))
+        {
+            l = shader (LayerType::postprocess, "color");
+            if (has (app, "Youlean Color Correction") && p.size() >= 5)
+            {
+                l.amount = std::clamp ((param (2, 0.5f) * 2.0f - 0.5f) / 1.5f, 0.0f, 1.0f); // contrast (0.5 = as is)
+                l.size = std::clamp (param (4, 0.5f), 0.0f, 1.0f);                          // saturation
+            }
+            if (has (app, "ColorCyclePalette"))
+                l.speed = 0.5f;
+        }
+        else if (has (app, "Dot Matrix") || has (app, "Point Cloud") || has (app, "Postprocess\\Ascii"))
+            l = shader (LayerType::postprocess, "dots");
+        else if (has (app, "Dither") || has (app, "Fast Static"))
+            l = shader (LayerType::postprocess, "grain");
+        else if (has (app, "Inverter"))
+            l = shader (LayerType::postprocess, "invert");
+        else if (has (app, "Glitch"))
+            l = shader (LayerType::postprocess, "glitch");
+        else if (has (app, "Edge Detect") || has (app, "Notebook Drawings"))
+            l = shader (LayerType::postprocess, "edges");
+        else if (has (app, "RGB Shift"))
+            l = shader (LayerType::postprocess, "rgbshift");
+        else if (has (app, "ScanLines"))
+            l = shader (LayerType::postprocess, "scanlines");
+        else if (has (app, "Vignette"))
+        {
+            l = shader (LayerType::postprocess, "vignette");
+            if (p.size() >= 5)
+            {
+                l.amount = 1.0f - std::clamp (param (0, 0.3f), 0.0f, 1.0f);
+                l.size = std::clamp (param (4, 0.5f), 0.0f, 1.0f);
+            }
+        }
+        else if (has (app, "Kaleidoscope"))
+            l = shader (LayerType::postprocess, "kaleido");
+        else if (has (app, "Pixelate"))
+            l = shader (LayerType::postprocess, "pixelate");
+        else if (has (app, "Terrain\\") || has (app, "Physics\\Heightfield"))
+            l = named ({ "CubesAndSpheres" }) ? shader (LayerType::object3d, "cubes")
+              : named ({ "Perturbed Grid", "Terrain Lattice", "Heightfield" }) ? shader (LayerType::terrain, "mountains")
+                                                                              : shader (LayerType::terrain, "hills");
+        else if (has (app, "Object Arrays\\") || has (app, "Physics\\") || has (app, "MatCap"))
+            l = named ({ "Rings", "Mobius Weave", "Filaments" }) ? shader (LayerType::object3d, "rings")
+              : named ({ "Cube", "Block", "Cubic", "Columns", "Cage", "8x8x8" }) ? shader (LayerType::object3d, "cubes")
+                                                                                 : shader (LayerType::object3d, "blob");
+        else if (has (app, "Scenes\\"))
+            l = named ({ "Mandelbulb", "Polyhedra", "Musicball", "Jewels", "Rhodium", "Mobius", "Gears", "Lantern" }) ? shader (LayerType::object3d, "blob")
+              : named ({ "Alps", "Wasteland", "Postcard", "Terrain", "Debris" }) ? shader (LayerType::terrain, "hills")
+              : named ({ "Cloud", "Balloon" }) ? shader (LayerType::canvas, "clouds")
+              : named ({ "Hex", "Industrial" }) ? shader (LayerType::object3d, "cubes")
+                                                : shader (LayerType::canvas, "tunnel");
+        else if (has (app, "Clouds\\"))
+            l = shader (LayerType::canvas, "clouds");
+        else if (has (app, "Tunnel\\"))
+            l = named ({ "Torus", "Tube" }) ? shader (LayerType::object3d, "rings") : shader (LayerType::canvas, "tunnel");
+        else if (has (app, "Canvas effects\\"))
+            l = named ({ "Voronoi", "Cellular", "Hexagonal", "Rounded", "Contours" }) ? shader (LayerType::canvas, "cells")
+              : named ({ "Electric", "DarkSpark", "Flaring", "StarTaser" }) ? shader (LayerType::canvas, "electric")
+              : named ({ "Rain" }) ? shader (LayerType::canvas, "warp")
+              : named ({ "Digital Brain", "Stack Trace", "ShimeringCage", "Lattice", "N-gon", "BitPad", "Blocks" }) ? shader (LayerType::canvas, "kaleido")
+                                                                                                                      : shader (LayerType::canvas, "plasma");
+        else if (has (app, "Patterns\\"))
+            l = named ({ "Truchet", "Weave", "Maze", "Pipe" }) ? shader (LayerType::canvas, "kaleido") : shader (LayerType::canvas, "cells");
         else
             ok = false;
         if (! ok)
@@ -968,7 +1473,9 @@ std::optional<Scene> fromZge (const std::vector<std::uint8_t>& state, std::vecto
         s.layers.push_back (l);
     }
     // nothing that draws (only effects without a counterpart): LYNX's default scene, so the slot still shows the music
-    const auto draws = std::any_of (s.layers.begin(), s.layers.end(), [] (const Layer& l) { return l.type != LayerType::background; });
+    const auto draws = std::any_of (s.layers.begin(), s.layers.end(), [] (const Layer& l) {
+        return l.type != LayerType::background && ! readsBelow (l.type); // (bloom alone over a colour shows no music)
+    });
     if (! draws)
     {
         auto fallback = defaultScene();
@@ -976,6 +1483,10 @@ std::optional<Scene> fromZge (const std::vector<std::uint8_t>& state, std::vecto
         fallback.height = s.height;
         fallback.fps = s.fps;
         fallback.name = s.name;
+        // (the project's feedback / post-process layers stay, over LYNX's scene)
+        for (const auto& l : s.layers)
+            if (readsBelow (l.type))
+                fallback.layers.push_back (l);
         return fallback;
     }
     if (s.layers.front().type != LayerType::background)
