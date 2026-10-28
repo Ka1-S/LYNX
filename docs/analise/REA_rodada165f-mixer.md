@@ -62,5 +62,37 @@ selected tracks for the render and restores every track's arm state afterwards.
 level and panning, 5 Post track (.flp 0xA5); "External input only" without an input warns "won't record anything unless
 you select an input!".
 
+## 5. LYNX [CODE]
+- Model: `MixerTrack::latencyMs` (±5000 ms), `latencyBypass` (`LatencyBypass::never / always / whenRecordingOrStopped`),
+  `compensateMasterLatency` (default on, as FL). .lynx: `latencyMs`, `latencyBypass` ("always" / "whenIdle"),
+  `compensateMaster: false`, each written only when not the default (old projects load unchanged). .flp: 0xEC f32 at +0,
+  flag 0x4000, event 0x31 (and 0xA5 record source, parsed for later). Undo label "Track latency: <track>".
+- Planner (`core/Pdc.cpp computePdc (song, channels, slots, sampleRate)`): outLat[T] += round(ms × rate / 1000) (the
+  Master's adds to the total only); a track bypassed *Always* gets no delay on its route to the Master nor on its sends
+  (its outLat still counts at the destination; Fruity Send taps keep theirs, as FL's slot links do). *When recording or
+  not playing* is planned like Never.
+- Renderer (`RackRenderer::updatePdcBypass`, once per chunk on the audio thread): while the transport is stopped or
+  recording (`LiveInput::recording`), the routes and hardware output of the *When recording…* tracks skip their delay
+  line; back to compensated, those lines are emptied (`DelayLine::clear`, a memset only when the line holds sound), so
+  nothing that was in them plays late. No allocation, no lock.
+- Hardware output (round 156's `hwRoutes`): delayed only when *Compensate for master latency* is on and the track is
+  not bypassed *Always* (the *When recording…* ones skip it like their routes).
+- UI: mixer track menu › *Track latency: <value>* (FL's label text "(none)" / "+x ms / n smp"): a header with the
+  track's latency (auto / manual), Reset, Set in ms / samples / beats..., Set from › (tracks with latency, FL's rule and
+  warning), Compensate for master latency (enabled with a hardware output), Bypass track latency compensation (Never /
+  Always / When recording or not playing; not on the Master). The strip's hint shows a manual latency and the bypass.
+  *Selected tracks ⇄ this track* submenu = FL's Routing columns + Create submix... (FL's rename-and-colour dialog).
+  Mixer section: *Disk recording* › Render armed / selected tracks to wave file(s)..., *Plugin delay compensation* ›
+  Reset manual latency on all tracks (FL's warning).
+- Export (`exportopts::stemTracks (song, only)`, `showExportDialogForTracks`): the Export window, one file per insert of
+  the list (the stem choice locked and not remembered; a "Tracks" row lists them; the Master in the list = the full mix
+  too).
+- Not built: FL's *Ping...* (an empty handler in FL 2026), the input latency (+0x1C8, no file uses it), the
+  *Auto-unarm* / *Auto-create audio clip* of FL's track render (LYNX renders to files only), the label's mouse wheel
+  (FL: 10 ms per notch).
+
 ## Where I stopped
-- REA done for §1–§4. Building §1 (Song fields, PDC planner, renderer bypass, .flp import, .lynx, menu).
+- REA done for §1–§4; §1–§3 built (model, planner, renderer bypass, .flp/.lynx, menus, render tracks, routing/submix),
+  WIP commit 37824e23 + later UI/snapshot edits. Fixing the latency165 unit tests (test setup: slot latencies need
+  effect slots; impulse sample at 48 kHz). Next: Linux GUI build + --snapshot look, null render vs main, land.
+- §4 (record source point) deferred: needs renderer taps feeding the takes (takes come from raw live input today).

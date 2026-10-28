@@ -33,6 +33,7 @@ inline lynx::RackState::Factories factories (int fxLatency)
     lynx::RackState::Factories f;
     f.samples = [] (const std::string&) {
         auto d = std::make_shared<lynx::SampleData>();
+        d->sampleRate = 48000.0;
         d->left.assign (64, 0.0f);
         d->left[0] = 1.0f;
         return std::shared_ptr<const lynx::SampleData> (d);
@@ -41,7 +42,7 @@ inline lynx::RackState::Factories factories (int fxLatency)
     return f;
 }
 
-// plays a note on `channels` channels at once and returns the sample index of each impulse at the Master (−1 = none)
+// plays a note on `channel` and returns the sample index of each impulse onset at the Master
 inline std::vector<int> arrivals (lynx::RackRenderer& renderer, const lynx::RackState& state, bool playing, int channel, int blocks = 2)
 {
     lynx::LiveEventQueue live;
@@ -51,13 +52,18 @@ inline std::vector<int> arrivals (lynx::RackRenderer& renderer, const lynx::Rack
     on.velocity = 1.0f;
     live.push (on);
     std::vector<float> l (256), r (256);
-    std::vector<int> hits;
+    std::vector<int> hits; // the onsets (the sampler's interpolation spreads an impulse over a few samples)
+    bool before = false;
     for (int b = 0; b < blocks; ++b)
     {
         renderer.process (&state, playing, 0.0, 256, l.data(), r.data(), b == 0 ? &live : nullptr);
         for (int i = 0; i < 256; ++i)
-            if (std::abs (l[(std::size_t) i]) > 0.01f)
+        {
+            const auto hit = std::abs (l[(std::size_t) i]) > 0.01f;
+            if (hit && ! before)
                 hits.push_back (b * 256 + i);
+            before = hit;
+        }
     }
     return hits;
 }
@@ -86,6 +92,7 @@ TEST (latency165_manual_track_latency_in_the_plan)
 
     // on top of an effect's latency, through a send (insert 1 → insert 2 → Master)
     s.mixer[1].latencyMs = ms100;
+    s.mixer[1].effects.push_back (makeEffectSlot (EffectKind::eq));
     s.mixer[1].toMaster = false;
     s.setRoute (1, 2, true);
     plan = computePdc (s, { 0, 0, 0 }, { {}, { 30 } }, 48000.0);
@@ -128,6 +135,7 @@ TEST (latency165_bypass_always_in_the_plan)
     using namespace lynx;
     // insert 1 has a 100-sample plugin; insert 2 is the "mic" track
     Song s = latency165::impulses (2, false);
+    s.mixer[1].effects.push_back (makeEffectSlot (EffectKind::eq));
     auto plan = computePdc (s, { 0, 0 }, { {}, { 100 } }, 48000.0);
     CHECK (plan.sendDelay[2][0] == 100);
     s.mixer[2].latencyBypass = LatencyBypass::always;
@@ -145,7 +153,8 @@ TEST (latency165_bypass_always_in_the_plan)
     t.mixer[3].latencyBypass = LatencyBypass::always;
     t.mixer[3].toMaster = false;
     t.setRoute (3, 2, true);
-    plan = computePdc (t, { 0, 0, 0 }, { {}, {}, { 40 } }, 48000.0);
+    t.mixer[3].effects.push_back (makeEffectSlot (EffectKind::eq));
+    plan = computePdc (t, { 0, 0, 0 }, { {}, {}, {}, { 40 } }, 48000.0);
     CHECK (plan.inAlign[2] == 40 && plan.sendDelay[3][1] == 0);      // 3 → 2 bypassed: not delayed
     CHECK (plan.channelDelay[1] == 40 && plan.channelDelay[2] == 0);  // insert 2's own channel still lines up inside it
 }

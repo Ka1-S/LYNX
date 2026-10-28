@@ -58,6 +58,7 @@ public:
 
     juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
     Transport& getTransport() noexcept { return transport; }
+    const Transport& getTransport() const noexcept { return transport; }
     SampleLibrary& getSampleLibrary() noexcept { return samples; }
     MeterBank& getMeters() noexcept { return meters; }
     // Tools > Audio logger (REA round 153): records everything the Master plays to a WAV in the background.
