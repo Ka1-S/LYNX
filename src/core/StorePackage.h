@@ -43,7 +43,7 @@ inline std::string appsFolderTarget (std::string_view familyName)
 // First start of the Store build on a PC that already ran the installer / zip build: which top-level entries of the
 // old %APPDATA%\LYNX are copied into the packaged settings folder. Preferences, the plugin list, favourites, presets,
 // themes, layouts and the user's own plugin folder come along; caches (rebuilt on demand), autosaves, crash reports,
-// session markers and logs of the other build stay where they are (a copied "session running" marker would even
+// session markers, logs and --packageinfo's probe file of the other build stay where they are (a copied "session running" marker would even
 // report a crash that never happened).
 inline bool migratesFromUnpackaged (std::string_view name, bool isDirectory)
 {
@@ -56,7 +56,7 @@ inline bool migratesFromUnpackaged (std::string_view name, bool isDirectory)
     };
     if (endsWith (".log") || endsWith (".tmp"))
         return false;
-    return name != "session-running.txt" && name != "migrated-from-appdata.txt";
+    return name != "session-running.txt" && name != "migrated-from-appdata.txt" && name != "package-probe.txt";
 }
 
 // The marker written once the copy is done (it is never copied itself, see above).
