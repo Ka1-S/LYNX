@@ -70,3 +70,21 @@ TEST (perf165_parallel_key_shifters_render_the_same)
     perf165::setEnv ("LYNX_PARALLEL_KEYSHIFT", "1");
     CHECK (serialFtz == perf165::renderTransposed (6));
 }
+
+TEST (perf165_long_stretches_repeat_exactly)
+{
+    // beyond 2× Signalsmith randomises the bins' time steps: with a random seed every open/export differed
+    const auto sample = s162::sine (330.0, 0.5);
+    for (const auto method : { lynx::StretchMethod::general, lynx::StretchMethod::transients, lynx::StretchMethod::mono })
+    {
+        const auto a = lynx::timeStretch (*sample, 3.1, method);
+        const auto b = lynx::timeStretch (*sample, 3.1, method);
+        CHECK (a != nullptr && b != nullptr);
+        if (a != nullptr && b != nullptr)
+        {
+            CHECK (a->left == b->left);
+            CHECK (a->right == b->right);
+            CHECK (std::abs ((double) a->frames() - 3.1 * (double) sample->frames()) < 2.0);
+        }
+    }
+}
