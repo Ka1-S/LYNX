@@ -1,5 +1,7 @@
 #include "core/XyController.h"
 
+#include "core/FlCurve.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -17,7 +19,12 @@ int axesOf (EffectKind kind) noexcept
 
 int paramCount (EffectKind kind) noexcept
 {
-    return axesOf (kind) * 4 + 2;
+    return kind == EffectKind::xyzController ? curveMode (2) + 1 : axesOf (kind) * 4 + 2;
+}
+
+int curveModeOf (float value) noexcept
+{
+    return std::clamp ((int) std::lround (std::isfinite (value) ? value * 12.0f : 0.0f), 0, flcurve::modeCount - 1);
 }
 
 EffectParams defaults (EffectKind kind) noexcept
@@ -48,10 +55,14 @@ double shape (double p, float tension01) noexcept
     return t > 0.0 ? 1.0 - (std::pow (k + 1.0, 1.0 - p) - 1.0) / k : (std::pow (k + 1.0, p) - 1.0) / k;
 }
 
-float output (const EffectParams& params, int axis, double position) noexcept
+float output (EffectKind kind, const EffectParams& params, int axis, double position) noexcept
 {
     const auto lo = (double) params[(std::size_t) minimum (axis)], hi = (double) params[(std::size_t) maximum (axis)];
-    return (float) std::clamp (lo + (hi - lo) * shape (position, params[(std::size_t) tension (axis)]), 0.0, 1.0);
+    const auto f = kind == EffectKind::xyzController
+                       ? flcurve::shape (curveModeOf (params[(std::size_t) curveMode (axis)]), params[(std::size_t) tension (axis)] * 2.0f - 1.0f,
+                                         std::clamp (position, 0.0, 1.0))
+                       : shape (position, params[(std::size_t) tension (axis)]);
+    return (float) std::clamp (lo + (hi - lo) * f, 0.0, 1.0);
 }
 
 namespace
@@ -161,7 +172,7 @@ public:
     {
         mover.step (params, kind, (double) n / rate, bpm);
         for (int a = 0; a < axesOf (kind); ++a)
-            outputs[(std::size_t) a].store (output (params, a, mover.position[(std::size_t) a]), std::memory_order_relaxed);
+            outputs[(std::size_t) a].store (output (kind, params, a, mover.position[(std::size_t) a]), std::memory_order_relaxed);
         for (int a = 0; a < axesOf (kind); ++a)
             positions[(std::size_t) a].store ((float) mover.position[(std::size_t) a], std::memory_order_relaxed);
     }
@@ -235,7 +246,9 @@ std::optional<EffectSlot> fromFl (const std::string& pluginName, const std::vect
             slot.params[(std::size_t) level (a)] = std::clamp (raw (a) / 65536.0f, 0.0f, 1.0f);
         slot.params[(std::size_t) speed (slot.kind)] = std::clamp (1.0f - raw (9) / 4096.0f, 0.0f, 1.0f);
         slot.params[(std::size_t) acceleration (slot.kind)] = std::clamp ((raw (6) / 1024.0f - 1.0f) / 4.0f, 0.0f, 1.0f);
-        // each axis' output curve: its ends become Min / Max
+        // each axis' output curve (2 points: f64 x, f64 y, f32 tension, u8 mode, 2 bytes, i8 sign): its ends become
+        // Min / Max, the second point's mode and tension the axis' curve (FL's point law, core/FlCurve.h). The input
+        // curves are identity in every FL file seen [DATA]: not mapped.
         for (int a = 0; a < 3; ++a)
         {
             const auto curve = (std::size_t) 56 + (std::size_t) a * (8 + 160) + 8 + 80;
@@ -243,12 +256,21 @@ std::optional<EffectSlot> fromFl (const std::string& pluginName, const std::vect
                 continue;
             const auto points = (std::size_t) std::min (i32At (d, curve + 8), 2);
             double y0 = 0.0, y1 = 1.0;
+            float tension = 0.0f;
+            const auto last = curve + 12 + 24 * (points - 1);
             std::memcpy (&y0, d.data() + curve + 12 + 8, 8);
-            std::memcpy (&y1, d.data() + curve + 12 + 24 * (points - 1) + 8, 8);
+            std::memcpy (&y1, d.data() + last + 8, 8);
+            std::memcpy (&tension, d.data() + last + 16, 4);
+            const auto mode = (int) d[last + 20];
             if (std::isfinite (y0) && std::isfinite (y1))
             {
                 slot.params[(std::size_t) minimum (a)] = (float) std::clamp (y0, 0.0, 1.0);
                 slot.params[(std::size_t) maximum (a)] = (float) std::clamp (y1, 0.0, 1.0);
+            }
+            if (std::isfinite (tension) && mode < flcurve::modeCount)
+            {
+                slot.params[(std::size_t) xy::tension (a)] = std::clamp (tension, -1.0f, 1.0f) * 0.5f + 0.5f;
+                slot.params[(std::size_t) curveMode (a)] = curveModeValue (mode);
             }
         }
         slot.state = d;
@@ -261,9 +283,13 @@ std::string paramText (EffectKind kind, int param, float v)
 {
     char text[48];
     const auto axes = axesOf (kind);
+    if (kind == EffectKind::xyzController && param >= curveMode (0) && param <= curveMode (2))
+        return flcurve::modeName (curveModeOf (v));
     if (param >= 0 && param < axes * 4)
     {
-        if (param % 4 == 3)
+        if (param % 4 == 3 && kind == EffectKind::xyzController) // FL's point tension −1…1 as ±100 %
+            std::snprintf (text, sizeof (text), "%+d%%", (int) std::lround ((v - 0.5f) * 200.0f));
+        else if (param % 4 == 3)
             std::snprintf (text, sizeof (text), "%+d", (int) std::lround ((v - 0.5f) * 256.0f));
         else
             std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);

@@ -1,0 +1,122 @@
+// round 165h (REA_rodada165h): Ridge Strip ← SSL E-Channel — the console's ∞ : 1 (state value 100) and its law, the
+// EQ to the dynamics' side chain (Dyn S.C.), measured black-box on the official trial
+
+TEST (ridge_e_channel_infinite_ratio_round165)
+{
+    using namespace lynx;
+    namespace r = mixsuite::ridge;
+    // her state with the ratio at ∞ (the trial stores it as 100), threshold 0, fast attack, EQ / filters off
+    int n = 0;
+    auto s = vm123::wavesSlot ("SSLChannel", "0 100 1 0.4 * -30 0 0 0 0.2 * 0 0 0 0 60 0 0.5 2.5 0 3.5 1.5 0 0 8 1 0 0 30 1 0 0 * * 1 * * 7 -18 0 0 * * * * * * -18 -18 -18 -18 -18 -18 -18 -18 0 0", n);
+    CHECK (s.kind == EffectKind::ridgeStrip && s.params[r::compRatio] == 1.0f);
+    // [EXEC] the trial's stairs (1 kHz, −60 … 0 dBFS in 2 dB steps of 0.5 s, peak level over each step's second half):
+    // the gain at −60 / −30 / −12 / 0 dBFS
+    static constexpr double want[][2] = { { -60, 1.98 }, { -30, 2.38 }, { -12, -9.66 }, { 0, -21.87 } };
+    const auto step = (std::size_t) (0.5 * vm123::sr);
+    std::vector<float> l (step * 31), rr;
+    for (std::size_t i = 0; i < l.size(); ++i)
+        l[i] = (float) (std::pow (10.0, (-60.0 + 2.0 * (double) (i / step)) / 20.0) * std::sin (2.0 * 3.141592653589793 * 1000.0 * (double) i / vm123::sr));
+    const auto x = l;
+    rr = l;
+    auto fx = makeEffect (s);
+    fx->prepare (vm123::sr);
+    fx->reset();
+    for (std::size_t off = 0; off < l.size(); off += 256)
+        fx->process (l.data() + off, rr.data() + off, (int) std::min<std::size_t> (256, l.size() - off), s.params, 120.0);
+    for (const auto& w : want)
+    {
+        const auto k = (std::size_t) ((w[0] + 60.0) / 2.0);
+        double ey = 0.0, ex = 0.0;
+        for (auto i = k * step + step / 2; i < (k + 1) * step; ++i)
+        {
+            ey += (double) l[i] * l[i];
+            ex += (double) x[i] * x[i];
+        }
+        const auto got = 10.0 * std::log10 (ey / ex);
+        std::printf ("  E-Channel inf:1 at %.0f dBFS: %.2f dB (trial %.2f)\n", w[0], got, w[1]);
+        CHECK (std::abs (got - w[1]) < (w[0] > -1.0 ? 2.0 : 0.6)); // 1.4 dB at 0 dBFS (round 123's fit: about 8 dB)
+    }
+}
+
+TEST (ridge_e_channel_eq_to_sidechain_round165)
+{
+    using namespace lynx;
+    namespace r = mixsuite::ridge;
+    // HF shelf +15 dB at 8 kHz, compressor 1 : 1 (off): with Dyn S.C. on the EQ leaves the audio, so the 8 kHz tone
+    // passes flat; with it off it gets the boost
+    const char* off = "0 1 1 0.35 * -30 0 0 0 0.2 * 0 0 0 0 60 0 0.5 2.5 0 3.5 1.5 0 15 8 0 0 0 30 1 0 0 * * 1 * * 7 -18 0 0 * * * * * * -18 -18 -18 -18 -18 -18 -18 -18 0 0";
+    const char* on = "0 1 1 0.35 * -30 0 0 0 0.2 * 0 0 0 0 60 0 0.5 2.5 0 3.5 1.5 0 15 8 0 1 0 30 1 0 0 * * 1 * * 7 -18 0 0 * * * * * * -18 -18 -18 -18 -18 -18 -18 -18 0 0";
+    int n = 0;
+    auto a = vm123::wavesSlot ("SSLChannel", off, n);
+    auto b = vm123::wavesSlot ("SSLChannel", on, n);
+    CHECK (a.params[r::eqToSidechain] == 0.0f && b.params[r::eqToSidechain] == 1.0f);
+    const auto ga = vm123::sineGainDb (a, 8000.0, -30.0), gb = vm123::sineGainDb (b, 8000.0, -30.0);
+    std::printf ("  E-Channel EQ to SC: 8 kHz gain %.2f dB (EQ in the audio) / %.2f dB (EQ to the side chain)\n", ga, gb);
+    CHECK (ga > 10.0 && std::abs (gb) < 0.3);
+
+    // de-essing: ∞ : 1 at −10 with the HF shelf in the side chain turns an 8 kHz tone down more than a 200 Hz one
+    // of the same level
+    const char* dess = "-10 100 1 0.35 * -30 0 0 0 0.2 * 0 0 0 0 60 0 0.5 2.5 0 3.5 1.5 0 15 8 0 1 0 30 1 0 0 * * 1 * * 7 -18 0 0 * * * * * * -18 -18 -18 -18 -18 -18 -18 -18 0 0";
+    auto c = vm123::wavesSlot ("SSLChannel", dess, n);
+    const auto hi = vm123::sineGainDb (c, 8000.0, -12.0), lo = vm123::sineGainDb (c, 200.0, -12.0);
+    std::printf ("  E-Channel de-essing: 8 kHz %.2f dB, 200 Hz %.2f dB\n", hi, lo);
+    CHECK (hi < lo - 6.0);
+
+    // Ridge's own engine: the same switch keeps the EQ out of the audio
+    auto own = makeEffectSlot (EffectKind::ridgeStrip);
+    own.params[r::hfGain] = 1.0f;
+    own.params[r::eqToSidechain] = 1.0f;
+    CHECK (std::abs (vm123::sineGainDb (own, 8000.0, -30.0)) < 0.3);
+}
+
+// round 165h §2: Hush De-esser's classic voicing ← Waves DeEsser (17.1 trial, black-box): BandPass states translated
+// (17.1 stores HighPass 1 / BandPass 0), BandPass = the high-pass side chain + a 4th-order low-pass, the wide-band
+// reduction stops at 25.6 dB, no latency
+TEST (hush_classic_deesser_bandpass_and_floor_round165)
+{
+    using namespace lynx;
+    namespace h = mixsuite::hush;
+    int n = 0;
+    auto bp = vm123::wavesSlot ("DeEsser", "5506 2 -30 7 0.5 10 * * * * 0 3.98 32 0 1", n);
+    auto hp = vm123::wavesSlot ("DeEsser", "5506 2 -30 7 0.5 10 * * * * 0 3.98 32 1 1", n);
+    CHECK (bp.params[h::detector] == 1.0f && hp.params[h::detector] == 0.0f && bp.params[h::mode] == 1.0f);
+    // [EXEC] the trial at 9 kHz (wide band, threshold −30): −20 / −10 / 0 dBFS in → BandPass −3.93 / −12.52 / −21.09 dB,
+    // HighPass −7.70 / −16.29 / −24.87 dB
+    static constexpr double want[][3] = { { -20, -3.93, -7.70 }, { -10, -12.52, -16.29 }, { 0, -21.09, -24.87 } };
+    for (const auto& w : want)
+    {
+        const auto gb = vm123::sineGainDb (bp, 9000.0, w[0]), gh = vm123::sineGainDb (hp, 9000.0, w[0]);
+        std::printf ("  DeEsser 9 kHz at %.0f dBFS: band-pass %.2f (trial %.2f), high-pass %.2f (trial %.2f)\n", w[0], gb, w[1], gh, w[2]);
+        CHECK (std::abs (gb - w[1]) < 0.7 && std::abs (gh - w[2]) < 0.7);
+    }
+    // the wide-band floor: threshold −60, 7 kHz at −10 dBFS → −25.57 dB on the trial (round 123's model: −40 dB)
+    auto deep = vm123::wavesSlot ("DeEsser", "5506 2 -60 7 0.5 10 * * * * 0 3.98 32 0 1", n);
+    const auto g = vm123::sineGainDb (deep, 7000.0, -10.0);
+    std::printf ("  DeEsser floor: %.2f dB (trial -25.57)\n", g);
+    CHECK (std::abs (g + 25.57) < 0.3);
+    // no latency, as the reference
+    auto fx = makeEffect (deep);
+    fx->prepare (48000.0);
+    std::vector<float> l (512, 0.0f), r (512, 0.0f);
+    fx->process (l.data(), r.data(), 512, deep.params, 120.0);
+    CHECK (fx->latencySamples() == 0);
+}
+
+// round 165h §3: Gemini Doubler's fresh instance = the Doubler2 / Doubler4 17.1 trials' (Align off, shelves on: low 0 dB
+// at 101 Hz, high +4.1 dB at 1306 Hz)
+TEST (gemini_doubler_reference_defaults_round165)
+{
+    using namespace lynx;
+    const auto s = makeEffectSlot (EffectKind::geminiDoubler);
+    const auto& info = effectInfo (EffectKind::geminiDoubler);
+    auto at = [&] (const char* name) {
+        for (std::size_t i = 0; i < info.params.size(); ++i)
+            if (std::string (info.params[i].name) == name)
+                return s.params[i];
+        CHECK (false);
+        return -1.0f;
+    };
+    CHECK (at ("Align") == 0.0f && at ("Low shelf") == 1.0f && at ("High shelf") == 1.0f);
+    CHECK (std::abs (voicetools::gemini::shelfDb (at ("High gain")) - 4.1) < 0.01 && std::abs (voicetools::gemini::shelfDb (at ("Low gain"))) < 0.01);
+    CHECK (std::abs (voicetools::gemini::freqHz (at ("Low freq")) - 101.0) < 0.5 && std::abs (voicetools::gemini::freqHz (at ("High freq")) - 1306.0) < 2.0);
+}

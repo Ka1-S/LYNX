@@ -2,6 +2,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include "core/Timecode.h"
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
@@ -177,10 +178,12 @@ juce::String TimeDisplay::text() const
     const auto& song = engine.getSong();
     const auto ticks = playheadTicks (engine);
 
-    if (! clockMode)
+    if (mode == Mode::bars)
         return barBeatStep (song, ticks, engine.getTransport().beatsPerBar.load());
 
     const auto seconds = song.secondsForTicks ((std::int64_t) ticks);
+    if (mode == Mode::smpte)
+        return juce::String (timecode::format (seconds, smpteRate));
     const auto whole = (int) seconds;
     return juce::String::formatted ("%d : %02d : %02d", whole / 60, whole % 60, (int) ((seconds - whole) * 100.0));
 }
@@ -212,26 +215,54 @@ void TimeDisplay::paint (juce::Graphics& g)
     g.drawText (shown.isEmpty() ? text() : shown, area.withTrimmedBottom (11), juce::Justification::centred, false);
     g.setColour (colour::textDisabled);
     g.setFont (font (type::caption - 1.0f));
-    g.drawText (clockMode ? tr ("MIN : SEC : CS") : tr ("BAR : BEAT : STEP"), area.withTrimmedTop (area.getHeight() - 14).withTrimmedBottom (2),
+    g.drawText (mode == Mode::clock   ? tr ("MIN : SEC : CS")
+                : mode == Mode::smpte ? "SMPTE " + juce::String (timecode::rates[smpteRate].name)
+                                      : tr ("BAR : BEAT : STEP"), area.withTrimmedTop (area.getHeight() - 14).withTrimmedBottom (2),
                 juce::Justification::centred, false);
 }
 
 void TimeDisplay::mouseUp (const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu() || ! getLocalBounds().contains (e.getPosition()))
+    if (! getLocalBounds().contains (e.getPosition()))
         return;
+    if (e.mods.isPopupMenu())
+    {
+        showMenu();
+        return;
+    }
 
-    clockMode = ! clockMode;
+    mode = mode == Mode::bars ? Mode::clock : mode == Mode::clock ? Mode::smpte : Mode::bars;
     shown = {};
     update();
     repaint();
 }
 
+void TimeDisplay::showMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Mode"));
+    auto set = [this] (Mode m, int rate) {
+        mode = m;
+        if (rate >= 0)
+            smpteRate = rate;
+        shown = {};
+        update();
+        repaint();
+    };
+    menu.addItem (tr ("Bar : Beat : Step"), true, mode == Mode::bars, [set] { set (Mode::bars, -1); });
+    menu.addItem (tr ("Minute : Second : Centisecond"), true, mode == Mode::clock, [set] { set (Mode::clock, -1); });
+    for (int i = 0; i < timecode::rateCount; ++i)
+        menu.addItem ("SMPTE " + juce::String (timecode::rates[i].name) + " fps", true, mode == Mode::smpte && smpteRate == i, [set, i] { set (Mode::smpte, i); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+}
+
 ui::Hint TimeDisplay::hintAt (juce::Point<int>)
 {
     ui::Hint h;
-    h.text = (clockMode ? tr ("Time: minutes : seconds : hundredths") : tr ("Time: bar : beat : step"))
-             + "  " + tr ("[LMB] switch between bars and minutes");
+    h.text = (mode == Mode::clock   ? tr ("Time: minutes : seconds : hundredths")
+              : mode == Mode::smpte ? tr ("Time: SMPTE time code (hours : minutes : seconds : frames)")
+                                    : tr ("Time: bar : beat : step"))
+             + "  " + tr ("[LMB] next mode (bars, minutes, SMPTE)  [RMB] mode and frame rate");
     h.value = text();
     return h;
 }

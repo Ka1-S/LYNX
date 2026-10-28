@@ -1,3 +1,4 @@
+#include "core/FruityDance.h"
 #include "core/Instruments.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
@@ -2929,12 +2930,22 @@ public:
             {
                 processor = vfx::makeProcessor (state->kind, state->fl);
                 processor->prepare (rate);
+                processor->setTag (state->tag);
+                lastState = state->fl;
             }
             return;
         }
+        processor->setTag (state->tag);
         if (state->fl != lastState)
             processor->configure (state->fl);
         lastState = state->fl;
+    }
+    // a VFX Script's output controllers and controls (round 165d)
+    float controlOutput (int output) const noexcept override { return processor != nullptr ? processor->controlOutput (output) : 0.0f; }
+    void setParameter (int index, float value) noexcept override
+    {
+        if (processor != nullptr)
+            processor->setParameter (index, value);
     }
 
 private:
@@ -3019,8 +3030,10 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeTransistorBassInstrument();
     if (kind == InstrumentKind::simsynth)
         return makeSimSynthInstrument();
-    if (kind == InstrumentKind::wasp || kind == InstrumentKind::fruitydance)
-        return makeWaspInstrument(); // both make no sound and keep their state
+    if (kind == InstrumentKind::wasp)
+        return makeWaspInstrument(); // makes no sound and keeps its state
+    if (kind == InstrumentKind::fruitydance)
+        return dance::makeInstrument(); // silent: its notes pick the dancer's moves (round 165e)
     if (kind == InstrumentKind::plucked)
         return makePluckedInstrument();
     if (kind == InstrumentKind::beepmap)

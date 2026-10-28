@@ -1,4 +1,5 @@
 #include "platform/FileTypes.h"
+#include "platform/Package.h"
 
 #include <juce_core/juce_core.h>
 
@@ -137,6 +138,10 @@ void registerFileTypes()
    #endif
 
    #if JUCE_WINDOWS
+    // the Microsoft Store build: its manifest declares the file types (and HKCU writes would only reach the package's
+    // private copy of the registry)
+    if (platform::runningPackaged())
+        return;
     using juce::WindowsRegistry;
     const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName();
     const juce::String classes = "HKEY_CURRENT_USER\\Software\\Classes\\";

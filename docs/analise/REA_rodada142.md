@@ -41,7 +41,7 @@ the same contract as an imported project.
 | Engine | New instance on this PC | Sound of a note / signal | Notes |
 |---|---|---|---|
 | 3x Osc, Sytrus, Harmless, PoiZone, SimSynth, Fruity DX10, Plucked!, Fruit Kick, Drumpad | Default.fst | ✅ | |
-| Harmor (beta), Ogun | first preset the engine reads | ✅ | Default.fst not readable by the engine |
+| Harmor (beta), Ogun | Harmor: Default.fst (old states upgraded, REA_rodada165g-flbeta165s); Ogun: first preset the engine reads | ✅ | |
 | GMS, Morphine | first `.gmsynth` / `.mrp` | ✅ | no Default preset in FL |
 | Toxic Biohazard | `Default.tbio` + the DLL's spectra | ✅ | |
 | Kepler (beta), Transistor Bass, Sawer, MiniSynth, FL Slayer, BassDrum, BooBass | Default + the FL data file | ✅ | |

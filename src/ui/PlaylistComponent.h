@@ -91,6 +91,8 @@ public:
 
     // Ripple editing: resizing a clip's end moves the later clips on its track, deleting closes the gap.
     bool isRippleOn() const noexcept { return ripple; }
+    bool clipProgressShown() const noexcept { return showClipProgress; }
+    bool trackProgressShown() const noexcept { return showTrackProgress; }
     void setRipple (bool on);
     void rippleDeleteSelection();
 
@@ -134,8 +136,16 @@ public:
     void showSongAfterOpen();
 
 private:
-    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint,
-                      trackResize, preview };
+    enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint, autoTension,
+                      trackResize, preview, trackZoom, perfLaunch };
+    // Performance mode (round 165m): the clip a click launched (its release goes with the mouse button)
+    int perfTrack = -1;
+    std::int64_t perfClip = -1;
+    std::array<std::int64_t, 64> perfShown {}; // the zone's playing / pending state last painted, to repaint on change
+    void paintPerformance (juce::Graphics& g, juce::Rectangle<int> grid);
+    void togglePerformanceMode();
+    void zoomOnPerformanceClips();
+    bool showClipProgress = true, showTrackProgress = true; // FL's View › Performance clip / track progress
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -151,6 +161,15 @@ private:
     std::vector<int> trackTops;          // top of each track from the first one, plus the total at the end
     void refreshTrackLayout();
     int heightOf (int track) const;
+    // FL's vertical zoom (issue #11): scales every track's height; Alt+wheel, or drag the handle at the top of the
+    // vertical scroll bar (up = taller), double-click it: back to 100%
+    double trackZoom = 1.0;
+    int scaledHeight (int storedHeight) const { return juce::jlimit (8, 640, (int) std::lround (storedHeight * trackZoom)); }
+    int defaultRowHeight() const { return scaledHeight (trackHeight); }
+    juce::Rectangle<int> trackZoomHandle() const;
+    void setTrackZoom (double zoom, int anchorY);
+    double trackZoomStart = 1.0;
+    bool trackZoomHover = false;
     int tracksHeight() const;            // all tracks, top to bottom
     int dividerAt (juce::Point<int> p) const; // the track whose bottom edge (in the headers) is under p, or -1
     void setTrackHeights (std::vector<int> tracks, int height);
@@ -254,11 +273,21 @@ private:
     bool timeMoveCopy = false;
     juce::uint32 lastClipEraseTime = 0;  // double right-click on a clip: mute instead of delete
     juce::Point<int> lastClipErasePos;
+    juce::uint32 lastRightClickTime = 0; // FL: a double right-click (held) is the Mute tool, on clips or empty space
+    juce::Point<int> lastRightClickPos;
+    bool muteTargetPending = false;      // the mute drag takes its target (mute / unmute) from the first clip crossed
     // inline automation editing: points of automation clips are dragged, added on the curve, deleted by right-click
     int autoClip = -1, autoPoint = -1;
     juce::Rectangle<float> automationBody (const Clip& clip) const;
     int automationPointAt (int clip, juce::Point<int> p) const;
     bool isOnAutomationCurve (int clip, juce::Point<int> p) const;
+    // round 165: FL's in-Playlist automation editing — clips tall and wide enough to edit, the tension handles between
+    // points (hollow circles; index = the point on the left, whose tension shapes the segment), the point menu
+    bool automationEditable (int clip) const;
+    juce::Point<float> automationHandlePos (int clip, int point) const; // x < 0: no handle
+    int automationHandleAt (int clip, juce::Point<int> p) const;
+    void showAutomationPointMenu (int clip, int point);
+    float tensionStart = 0.0f, tensionSign = 1.0f;
     // hover: what a click would hit (drives the cursor, the highlight and the hint)
     struct Hover
     {

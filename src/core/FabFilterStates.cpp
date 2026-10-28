@@ -609,7 +609,8 @@ int fromProQ4 (const State& s, EffectSlot& slot)
 // parameter API, round 148): 0 mode (0 single vocal, 1 allround), 1 threshold (norm: -60 + 60 v dB), 2 range dB,
 // 3 band processing (0 wide band, 1 split band), 4 stereo link, 5 link mode (0 mid, 1 side), 6 look-ahead ms,
 // 7 look-ahead enabled, 8 audition triggering, 9 side-chain input, 10 / 11 high-pass / low-pass (norm: 2000 x 10^v Hz),
-// 12 audition side chain, 13 MIDI, 14 oversampling, 15 / 16 input level / pan, 17 / 18 output level / pan, 19 bypass.
+// 12 audition side chain, 13 MIDI, 14 oversampling (0 off, 1 2x, 2 4x), 15 / 16 input level (2 v − 1: 36 dB per unit) / pan (−1 … +1),
+// 17 / 18 output level / pan, 19 bypass.
 // Single Vocal runs Hush's measured vocal voicing (core/VoiceMatch.h vocalds, fitted to her two states); Allround
 // keeps Hush's own engine in its allround mode.
 int fromProDS (const State& s, EffectSlot& slot)
@@ -635,8 +636,15 @@ int fromProDS (const State& s, EffectSlot& slot)
     const auto lpHz = 2000.0 * std::pow (10.0, std::clamp ((double) s.at (11), 0.0, 1.0));
     p[frequency] = (float) std::clamp (std::log (std::clamp (hpHz, 2000.0, 16000.0) / 2000.0) / std::log (8.0), 0.0, 1.0);
     p[lowPass] = lpHz >= 19999.0 ? 1.0f : (float) std::clamp (std::log (lpHz / 2000.0) / std::log (10.0), 0.0, 0.998);
-    if (std::abs (s.at (17)) <= 12.0f)
-        p[output] = linValue (s.at (17), -12.0, 12.0);
+    // round 165w [EXEC] (a state saved by the trial at +7.2 dB input, pans −0.5 / +0.75, 2x): the levels are stored as
+    // 2 v − 1 of the parameter (0 dB = 0, +36 dB = 1), i.e. 36 dB per unit above −18 dB (the old reading took them as
+    // dB, so +7.2 dB came back as +0.2); Hush's input / output reach ±12 dB (beyond: clamped). The input / output pans
+    // (−1 … +1, a balance in both) and the oversampling (Off / 2x / 4x; Hush's own engine, i.e. Allround)
+    p[output] = linValue (std::clamp (36.0 * s.at (17), -12.0, 12.0), -12.0, 12.0);
+    p[input] = linValue (std::clamp (36.0 * s.at (15), -12.0, 12.0), -12.0, 12.0);
+    p[inputPan] = linValue (std::clamp ((double) s.at (16), -1.0, 1.0), -1.0, 1.0);
+    p[outputPan] = linValue (std::clamp ((double) s.at (18), -1.0, 1.0), -1.0, 1.0);
+    p[oversampling] = (float) std::clamp (roundIndex (s.at (14)), 0, 2) / 3.0f;
     if (s.at (19) >= 0.5f)
         slot.enabled = false;
     return 20;

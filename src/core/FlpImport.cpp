@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/FlExtraFx.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "core/XyController.h"
@@ -203,6 +204,8 @@ const std::pair<const char*, EffectKind> flEffectTable[] = {
         { "Multiband Delay", EffectKind::delay },
         { "Emphasizer", EffectKind::emphasizer },
         { "Wave Candy", EffectKind::waveCandy },     { "ZGameEditor Visualizer", EffectKind::visualizer },
+        { "Fruity Mute 2", EffectKind::fruityMute2 }, { "Fruity Big Clock", EffectKind::bigClock }, // round 165g
+        { "Tuner", EffectKind::tuner },              { "Fruity HTML NoteBook", EffectKind::htmlNotebook },
 };
 } // namespace
 
@@ -769,6 +772,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
     Song song;
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
+    song.performanceMode = project.performanceMode; // (round 165m)
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
     song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
     song.channelGroups = project.filterGroups;
@@ -1481,7 +1485,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 if (harmorStateUsable (c.pluginState))
                 {
                     def.instrument = InstrumentKind::harmor;
-                    def.pluginState = c.pluginState;
+                    // an old (version 11…15) state is stored in the current layout, as FL re-saves it (REA_rodada165g-flbeta165s §1)
+                    def.pluginState = harmorUpgradeState (c.pluginState).value_or (c.pluginState);
                     adoptedFromPlugin = true;
                     // rack compressor: Harmor's own preset System\Compression\<n>.fst from the user's installation
                     // (REA_rodada38); its Maximus state goes into modelParams (size, bytes…)
@@ -1936,7 +1941,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
-                ++r.unsupported[c.pluginName]; // (Keyboard Controller only sends notes to other channels)
+            {
+                const auto note = flextra::inertPluginNote (c.pluginName); // round 165g: ReWired, Video Player, FL Studio Mobile
+                if (c.pluginName == "ReWired" || c.pluginName == "Fruity Video Player")
+                    def.muted = true; // no sound of their own in LYNX: the stand-in synth must not play their notes
+                ++r.unsupported[note.empty() ? c.pluginName : note]; // (Keyboard Controller only sends notes to other channels)
+            }
         }
 
         song.channels.push_back (std::move (def));
@@ -2625,6 +2635,13 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                                     "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
                     const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
 
+                    // FL plugins with nothing to reproduce here (vendor lighting, discontinued bridges): the note says why (round 165g)
+                    if (const auto note = flextra::inertPluginNote (slot.plugin); ! note.empty())
+                    {
+                        if (options.report != nullptr)
+                            ++options.report->droppedEffects[note];
+                        continue;
+                    }
                     if (options.report != nullptr && ! harmless)
                         ++options.report->droppedEffects[slot.plugin == "Fruity Wrapper" ? std::string ("Fruity Wrapper (plugin state not readable)")
                                                                                           : slot.plugin];
@@ -2871,6 +2888,23 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 valueMap = [flIndex] (float v) { const auto m = sf::automationFromFl (flIndex, v); return m ? m->second : 0.0f; };
             }
             else
+                target.kind = AutomationTargetKind::none;
+        }
+
+        // round 165: FL's Dashboard parameter p ≥ 1 = record p − 1 = LYNX's control p − 1 (its output); 0 is the patch
+        // selector (not a LYNX target). The Voltage Controller's 0…15 (offsets, scales) are LYNX's own numbers.
+        if (target.kind == AutomationTargetKind::channelParam && target.index >= 0 && target.index < (int) song.channels.size())
+        {
+            const auto& channel = song.channels[(std::size_t) target.index];
+            if (channel.instrument == InstrumentKind::dashboard)
+            {
+                const auto k = target.param - 1;
+                if (k >= 0 && k < (int) channel.patcher.surface.size())
+                    target.param = surface::firstOutput (channel.patcher.surface, k);
+                else
+                    target.kind = AutomationTargetKind::none;
+            }
+            else if (channel.instrument == InstrumentKind::voltage && (target.param < 0 || target.param >= voltage::paramCount))
                 target.kind = AutomationTargetKind::none;
         }
 
@@ -3363,7 +3397,16 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 const auto sized = std::abs (t.heightScale - 1.0f) > 0.01f;
 
-                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized || t.mode != 0))
+                TrackPerformance performance;
+                performance.motion = (TrackPerformance::Motion) std::clamp (t.motion, 0, 6);
+                performance.press = (TrackPerformance::Press) std::clamp (t.press, 0, 3);
+                performance.triggerSync = (TrackPerformance::Sync) std::clamp (t.triggerSync, 0, 6);
+                performance.queue = t.queue;
+                performance.tolerant = t.tolerant;
+                performance.positionSync = (TrackPerformance::Sync) std::clamp (t.positionSync, 0, 6);
+
+                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized || t.mode != 0
+                                                       || ! performance.isDefault()))
                 {
                     if ((int) song.playlistTracks.size() <= t.index)
                         song.playlistTracks.resize ((std::size_t) t.index + 1);
@@ -3374,6 +3417,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     if (sized)
                         track.height = polish::clampTrackHeight ((int) std::lround (polish::defaultTrackHeight * t.heightScale));
                     track.grouped = t.index > 0 && t.grouped;
+                    track.performance = performance; // Performance mode's track settings (round 165m)
                     track.collapsed = ! t.expanded;
                     // track modes (REA round 146a): an audio track's mixer track, an instrument track's channel
                     const auto mixerOk = t.mixerTrack > 0 && t.mixerTrack < (int) song.mixer.size();

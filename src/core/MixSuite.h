@@ -122,6 +122,10 @@ enum Param
     // (core/VoiceMatch.h, echannel model 1: its EQ colours, filters, compressor, gate, mic pre and VCA). It takes the E
     // voicing's controls (and Auto make-up, Analog = the Analogue VCA, Comp. mix) plus these
     console4k, k4Colour, k4Pre, k4Mic, k4MakeupOffset,
+    // round 165 (appended, off = the old sound): the reference console's "Dyn S.C." — the filters and the EQ feed only the
+    // dynamics' side chain (de-essing / frequency-conscious compression); the audio keeps neither (the filters stay at the
+    // input when split). Ridge's own engine and the E voicing
+    eqToSidechain,
     count
 };
 // round 147b: the auto make-up (dB) for Ridge's own compressor: the console's for the same threshold (dBFS + 18 = the
@@ -176,7 +180,9 @@ namespace glow
 // peak reduction / gain / emphasis read 0 .. 100 like the original's dials (emphasis = its Hi Freq)
 // round 152 (REA_rodada152a §2): appended — the opto law (the Opto classic voicing's measured Limit and AUTO MAKEUP; a
 // project saved before keeps the round-123 law) and ANALOG (Off / 50 Hz / 60 Hz: the reference's measured hum and noise)
-enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, count };
+// round 165w (REA_rodada165w §2): appended — the opto release (the Opto classic voicing's measured gain recovery; a
+// project saved before keeps round 123's slower tail)
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, releaseLaw, count };
 int analogHz (float v) noexcept; // 0 (off), 50 or 60
 bool classic (const EffectParams& p) noexcept;
 std::string classicParamText (int param, float v);
@@ -201,7 +207,10 @@ namespace hush
 // (core/VoiceMatch.h vocalds: band detector + "stands out" test, look-ahead within a fixed 15 ms latency); uses the
 // threshold, range, frequency (the band's high-pass), low-pass, look-ahead, mode and listen controls
 enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
-             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing, count };
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing,
+             // round 165w (appended): the reference's input / output pan (a balance: the far side × (1 − |pan|), measured)
+             inputPan, outputPan, count };
+double panValue (float v) noexcept; // −1 … +1
 bool vocal (const EffectParams& p) noexcept; // round 148
 int oversamplingOf (float v) noexcept; // 1 (off), 2, 4, 8
 double hz (float v) noexcept;          // 2 .. 16 kHz
@@ -288,8 +297,15 @@ enum Param
     mod1Source, mod1Target, mod1Amount, mod2Source, mod2Target, mod2Amount,
     mod3Source, mod3Target, mod3Amount, mod4Source, mod4Target, mod4Amount,
     effectLaw,
+    // round 165 (Decapitator parity, measured black-box on the trial, REA_rodada165ha; appended): the Classic voicing's
+    // Auto (its editor moves Output −1.6 dB per Drive unit, as the reference's; no audio effect) and the Classic law
+    // (1 = Punish's measured law; projects saved before round 165 keep round 136's +9.75 dB)
+    classicAuto, classicLaw,
     count
 };
+// round 165: an editor edit of `param` with the Classic voicing's Auto on also moves Output (the reference's link);
+// returns every (parameter, value) to set — just the edit itself when nothing is linked
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value);
 // round 152: crossover k's slope (0 … 4) in dB/oct — its own, or the global Crossover slope
 int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept;
 constexpr int ownSlopes = 5;                    // 6, 12, 24, 36, 48

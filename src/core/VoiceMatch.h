@@ -48,6 +48,9 @@ struct Settings
     bool autoMakeup = true;       // the compressor's automatic make-up …
     double makeupOffsetDb = 0.0;  // … and its offset (−12 … +12 dB)
     double compMix = 1.0;         // the compressor's dry / wet mix 0 … 1
+    // round 165 (model 0): "EQ to Dyn S.C." — [EXEC] the filters (unless split) and the EQ leave the audio and feed only
+    // the dynamics' side chain; with the filter split on, the filters stay at the input of the audio path
+    bool eqToSidechain = false;
 };
 
 // Q of the mid bands as the console's dial shows it, for a 0..1 dial position (3.5 at 0 .. 0.1 at 1)
@@ -82,6 +85,9 @@ private:
     Settings designed {};
     bool designedOnce = false;
     Biquad hp1, hp2, lp, bands[4], vcaHp;
+    // round 165: the side chain's own copies of the filters / EQ (same coefficients, own state): [0] the gate's
+    // detector (it hears the input), [1] the compressor's (it hears the compressor's output: a feedback design)
+    struct ScChain { Biquad hp1, hp2, lp, bands[4]; } sc[2];
     bool hpOn = false, lpOn = false, bandOn[4] {};
     // dynamics state
     double env = 0.0, gr = 0.0, gr1 = 0.0, yl = 0.0, yr = 0.0;
@@ -117,7 +123,7 @@ private:
     double sr = 48000.0, designedHz = -1.0;
     float lastDet = -120.0f;
     bool designedBp = false;
-    Biquad sc1, sc2;
+    Biquad sc1, sc2, bp1, bp2; // round 165: bp1 / bp2 = BandPass's low-pass after the high-pass
     double lpB = 0.0, lpA = 0.0, lpX[2] {}, lpY[2] {};
     double env = 0.0, gr = 0.0;
     float last = 0.0f;
@@ -174,6 +180,9 @@ struct Settings
     // chain, the cell's deepest reduction) and AUTO MAKEUP (a make-up that follows the peak reduction dial); off = the
     // round-123 Limit [model] and no auto make-up
     bool measured = false, autoMakeup = false;
+    // round 165w (REA_rodada165w §2) [EXEC]: the measured release (the trial's gain recovery after bursts of 0.1 … 10 s,
+    // −24 … 0 dBFS); off = round 123's (its slow conductance left ≈ 0.8 dB of reduction for many seconds)
+    bool measuredRelease = false;
 };
 double autoMakeupDb (double peakReduction) noexcept; // round 152: AUTO MAKEUP's gain (dB) at a peak reduction dial
 double makeupDb (double gainKnob) noexcept;              // the gain dial's level (dB) below the threshold

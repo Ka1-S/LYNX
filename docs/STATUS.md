@@ -242,6 +242,9 @@ accordingly. Highlights of what is **confirmed and applied**:
   CPU: AVX bank kernel (8 partials per pass), running sine pairs across frequency changes (steps by complex rotation
   along the harmonic series), fast per-partial exp/log, cached k^m, idle records/channels skipped; "Square a Saw —
   Oxygen" (23 Harmor channels, 260 s) exports in 50 s, "JuiceBass — Menagerie" (8, 474 s) in 78 s.
+  **REA round 165g (flbeta165s):** the 88 old (version 11…15) factory presets, Default.fst included, are upgraded
+  the way FL's loader does (byte-identical to the DLL's own re-save; a new Harmor starts from Default.fst), filter
+  shapes 8, 10…13, 15 and 16, images of any size (Labyrinth's 16 × 12), portamento time following the velocity.
   **REA round 75:** image synthesis (the part's gain and frequency planes from the project: time position with speed,
   offset and smoothing, one-shot / loop / ping-pong / crossfade, the seven interpolation curves, gain pixel scale and
   mix, frequency modes Oct / Hz / Wide Hz / Unison with the local mask, formant shift with FL's per-column pitch track
@@ -610,9 +613,12 @@ accordingly. Highlights of what is **confirmed and applied**:
   MIDI; the hidden parameter 8 (time offset, 65536 in every state) is ignored; curve type 10 (spline) runs as a line
   (in no selected slot); FL's "playing" and position-jump messages are inferred from LYNX's transport.
 - Harmor (`harmorFallbacks()` lists what a state uses): resynthesis-mode images (a sample analysed at load time) and
-  images with a per-column gain table are ignored (the part plays its timbres; none in the demos), filter shapes
-  8/10–13/15/16 and unknown resonance/phaser types switch that stage off, clip modes > 4 switch the clip off, blend
-  modes > 5 play as mode 0. At precision "Average" FL computes `exp`/`expm1`/division with IPP's 11-bit routines
+  images with a per-column gain table are ignored (the part plays its timbres; none in the demos), unknown
+  resonance/phaser types switch that stage off, clip modes > 4 switch the clip off, blend modes > 5 play as mode 0;
+  the part's note start delay (parameter 2: Rotochip, Resynthesis/Harmony) and the part filter set by its misc
+  field +4 (Morning) are not modelled (REA_rodada165g-flbeta165s §3). Against the DLL on all 325 installation
+  presets: 264 null below −60 dB, 304 with the same spectrum (STFT magnitude below −40 dB); the frequency phaser
+  (type 209) at a high mix drifts in phase at precision "Average" for the IPP reason below. At precision "Average" FL computes `exp`/`expm1`/division with IPP's 11-bit routines
   (`*_A11`); LYNX computes them exactly — demos 74 and 78 (per-partial unison curve) stay at −57/−55 dB for that reason
   (−77.5/−84.5 dB at precision 1, REA_rodada75 §5). In the
   rack, the distortion's shapers are exact functions where FL uses IPP's 11-bit `Tanh/Exp/Ln/Sqrt/Cbrt` at precision 0

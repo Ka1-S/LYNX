@@ -464,7 +464,19 @@ public:
         dragged = hit (c, e.position);
         if (e.mods.isPopupMenu())
         {
+            if (dragged < 0) // round 165, FL: right-click adds a point there, dragged while the button is held
+            {
+                dragged = addPointAt (e.position);
+                if (dragged >= 0)
+                    return;
+            }
             pointMenu (dragged);
+            dragged = -1;
+            return;
+        }
+        if (e.mods.isAltDown() && dragged >= 0) // FL: Alt+click deletes the point
+        {
+            deletePoint (dragged);
             dragged = -1;
             return;
         }
@@ -503,11 +515,18 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (hit (get(), e.position) < 0)
+            addPointAt (e.position);
+    }
+
+    // a new point at the mouse; its index (−1: the curve is full)
+    int addPointAt (juce::Point<float> position)
+    {
         auto c = get();
-        if (hit (c, e.position) >= 0 || c.count >= (int) c.time.size())
-            return;
+        if (c.count >= (int) c.time.size())
+            return -1;
         const auto limit = axis == Axis::time ? 1.0e6f : 1.0f;
-        const auto t = juce::jlimit (0.0f, limit, fromX (c, e.position.x));
+        const auto t = juce::jlimit (0.0f, limit, fromX (c, position.x));
         int at = c.count;
         for (int i = 0; i < c.count; ++i)
             if (t < c.time[(std::size_t) i])
@@ -522,12 +541,34 @@ public:
             c.tension[(std::size_t) i] = c.tension[(std::size_t) i - 1];
         }
         c.time[(std::size_t) at] = c.count == 0 && axis == Axis::time ? 0.0f : t;
-        c.level[(std::size_t) at] = juce::jlimit (0.0f, 1.0f, fromY (e.position.y));
+        c.level[(std::size_t) at] = juce::jlimit (0.0f, 1.0f, fromY (position.y));
         c.tension[(std::size_t) at] = 0.0f;
         ++c.count;
         if (c.sustain >= at)
             ++c.sustain;
         set (c);
+        return at;
+    }
+
+    void deletePoint (int index)
+    {
+        auto v = get();
+        if (index < 0 || index >= v.count || v.count <= 1)
+            return;
+        for (int i = index; i + 1 < v.count; ++i)
+        {
+            v.time[(std::size_t) i] = v.time[(std::size_t) i + 1];
+            v.level[(std::size_t) i] = v.level[(std::size_t) i + 1];
+            v.tension[(std::size_t) i] = v.tension[(std::size_t) i + 1];
+        }
+        --v.count;
+        if (v.sustain == index)
+            v.sustain = -1;
+        else if (v.sustain > index)
+            --v.sustain;
+        if (v.count > 0 && axis == Axis::time)
+            v.time[0] = 0.0f;
+        set (v);
     }
 
 private:
@@ -575,23 +616,7 @@ private:
         const auto c = get();
         if (index >= 0)
         {
-            menu.addItem (tr ("Delete point"), c.count > 1, false, [this, index] {
-                auto v = get();
-                for (int i = index; i + 1 < v.count; ++i)
-                {
-                    v.time[(std::size_t) i] = v.time[(std::size_t) i + 1];
-                    v.level[(std::size_t) i] = v.level[(std::size_t) i + 1];
-                    v.tension[(std::size_t) i] = v.tension[(std::size_t) i + 1];
-                }
-                --v.count;
-                if (v.sustain == index)
-                    v.sustain = -1;
-                else if (v.sustain > index)
-                    --v.sustain;
-                if (v.count > 0 && axis == Axis::time)
-                    v.time[0] = 0.0f;
-                set (v);
-            });
+            menu.addItem (tr ("Delete point"), c.count > 1, false, [this, index] { deletePoint (index); });
             if (sustainable)
                 menu.addItem (tr ("Sustain point (holds while the key is down)"), true, c.sustain == index, [this, index] {
                     auto v = get();
@@ -605,7 +630,7 @@ private:
             });
             menu.addSeparator();
         }
-        menu.addItem (tr ("Double-click adds a point, drag moves it, Alt+drag bends a segment"), false, false, [] {});
+        menu.addItem (tr ("Right-click or double-click adds a point, drag moves it, Alt+click deletes it, Alt+drag bends a segment"), false, false, [] {});
         menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
     }
 
@@ -1445,6 +1470,248 @@ private:
     juce::Label channelLabel, portLabel, programLabel, listeners;
     juce::TextButton connect, automate;
 };
+// ===================================================================================================
+// Keyboard Controller (round 165c): FL's Fruity Keyboard Controller — the last key played sets output 0 to that key's
+// value (auto release: the note-off value when no key is held). The values are drawn with the mouse over the keyboard.
+// ===================================================================================================
+
+class KeyValues final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    static constexpr int keys = 132;
+    std::function<std::optional<KeyboardControllerData>()> get;
+    std::function<void (const KeyboardControllerData&)> set;
+    std::function<float()> output; // the running output (may be empty)
+
+    KeyValues() { setTooltip (tr ("Drag to draw each key's value; right-drag draws a straight line")); }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto data = get ? get() : std::nullopt;
+        const auto area = getLocalBounds().toFloat();
+        const auto bars = area.withTrimmedBottom (keyboardHeight);
+        g.setColour (theme::colour::bg0);
+        g.fillRoundedRectangle (area, 3.0f);
+        g.setColour (theme::colour::border);
+        for (auto y : { 0.25f, 0.5f, 0.75f })
+            g.drawHorizontalLine ((int) (bars.getY() + bars.getHeight() * y), bars.getX(), bars.getRight());
+        const auto w = bars.getWidth() / (float) keys;
+        for (int k = 0; k < keys; ++k)
+        {
+            const auto x = bars.getX() + (float) k * w;
+            if (k % 12 == 0)
+            {
+                g.setColour (theme::colour::border.withAlpha (0.6f));
+                g.drawVerticalLine ((int) x, bars.getY(), bars.getBottom());
+            }
+            if (data)
+            {
+                const auto v = data->keys[(std::size_t) k];
+                g.setColour (theme::colour::automation.withAlpha (k == hover ? 1.0f : 0.8f));
+                g.fillRect (juce::Rectangle<float> (x + 0.5f, bars.getBottom() - bars.getHeight() * v, juce::jmax (1.0f, w - 1.0f), bars.getHeight() * v));
+            }
+            const auto key = juce::Rectangle<float> (x, bars.getBottom() + 2.0f, w, keyboardHeight - 2.0f);
+            g.setColour (juce::MidiMessage::isMidiNoteBlack (k % 128) ? theme::colour::keyBlack : theme::colour::keyWhite);
+            g.fillRect (key.reduced (w > 3.0f ? 0.5f : 0.0f, 0.0f));
+            if (k % 12 == 0)
+            {
+                g.setColour (theme::colour::textSecondary);
+                g.setFont (theme::font (theme::type::caption));
+                g.drawText (juce::MidiMessage::getMidiNoteName (k, true, true, 4), juce::Rectangle<float> (x + 2.0f, bars.getY() + 2.0f, 40.0f, 12.0f),
+                            juce::Justification::centredLeft);
+            }
+        }
+        if (output)
+        {
+            const auto y = bars.getBottom() - bars.getHeight() * juce::jlimit (0.0f, 1.0f, output());
+            g.setColour (theme::colour::accent);
+            g.drawHorizontalLine ((int) y, bars.getX(), bars.getRight());
+        }
+        if (data && hover >= 0)
+        {
+            g.setColour (theme::colour::textPrimary);
+            g.setFont (theme::font (theme::type::caption));
+            g.drawText (juce::MidiMessage::getMidiNoteName (hover, true, true, 4) + "  " + juce::String (data->keys[(std::size_t) hover], 3),
+                        bars.reduced (6.0f, 3.0f), juce::Justification::topRight);
+        }
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override { setHover (keyAt (e.position.x)); }
+    void mouseExit (const juce::MouseEvent&) override { setHover (-1); }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto data = get ? get() : std::nullopt;
+        if (! data)
+            return;
+        start = *data;
+        line = e.mods.isPopupMenu();
+        from = { keyAt (e.position.x), valueAt (e.position.y) };
+        last = from;
+        paintTo (e);
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override { paintTo (e); }
+
+private:
+    static constexpr float keyboardHeight = 18.0f;
+    KeyboardControllerData start;
+    std::pair<int, float> from, last;
+    bool line = false;
+    int hover = -1;
+
+    int keyAt (float x) const
+    {
+        const auto w = (float) getWidth() / (float) keys;
+        return juce::jlimit (0, keys - 1, (int) (x / w));
+    }
+    float valueAt (float y) const
+    {
+        const auto h = (float) getHeight() - keyboardHeight;
+        return juce::jlimit (0.0f, 1.0f, (h - y) / juce::jmax (1.0f, h));
+    }
+    void setHover (int k)
+    {
+        if (k != hover)
+        {
+            hover = k;
+            repaint();
+        }
+    }
+    void paintTo (const juce::MouseEvent& e)
+    {
+        const std::pair<int, float> now { keyAt (e.position.x), valueAt (e.position.y) };
+        auto data = line ? start : (get ? get().value_or (start) : start);
+        // draw: every key between the last point and this one (a fast drag skips none); line: from the press to here
+        const auto a = line ? from : last;
+        const auto lo = std::min (a.first, now.first), hi = std::max (a.first, now.first);
+        for (int k = lo; k <= hi; ++k)
+        {
+            const auto t = hi == lo ? 1.0f : (float) (k - a.first) / (float) (now.first - a.first);
+            data.keys[(std::size_t) k] = a.second + (now.second - a.second) * t;
+        }
+        last = now;
+        hover = now.first;
+        if (set)
+            set (data);
+        repaint();
+    }
+};
+
+class KeyboardControllerEditor final : public juce::Component,
+                                       private juce::Timer
+{
+public:
+    KeyboardControllerEditor (AudioEngine& e, std::function<ChannelDef* (Song&)> l, std::function<float()> out)
+        : engine (e), locate (std::move (l)), output (std::move (out)),
+          noteOff (&e, ctlui::unitSpec (tr ("Note off value"), 0.0, std::nullopt),
+                   [this] { return (double) current().value_or (KeyboardControllerData {}).noteOffValue; },
+                   [this] (double v) { edit ([v] (KeyboardControllerData& d) { d.noteOffValue = (float) v; }); })
+    {
+        title.setText (tr ("Keyboard Controller: the last key played sets the output to that key's value"), juce::dontSendNotification);
+        title.setFont (theme::font (theme::type::body, true));
+        addAndMakeVisible (title);
+        values.get = [this] { return current(); };
+        values.set = [this] (const KeyboardControllerData& d) { edit ([d] (KeyboardControllerData& x) { x = d; }); };
+        values.output = output;
+        addAndMakeVisible (values);
+        noteOff.shortName = tr ("Note off");
+        addAndMakeVisible (noteOff);
+        autoRelease.setButtonText (tr ("Auto release"));
+        ui::setHint (autoRelease, tr ("When no key is held, the output goes to the note-off value"));
+        autoRelease.onClick = [this] { edit ([on = autoRelease.getToggleState()] (KeyboardControllerData& d) { d.autoRelease = on; }); };
+        addAndMakeVisible (autoRelease);
+        const std::pair<juce::TextButton*, juce::String> buttons[] { { &ramp, tr ("Ramp") }, { &invert, tr ("Invert") }, { &flat, tr ("Clear") } };
+        for (auto [b, text] : buttons)
+        {
+            b->setButtonText (text);
+            addAndMakeVisible (*b);
+        }
+        ui::setHint (ramp, tr ("Every key's value rising from 0 (lowest key) to 1 (C10)"));
+        ui::setHint (invert, tr ("Every value turned upside down (1 − value)"));
+        ui::setHint (flat, tr ("Every key's value 0"));
+        ramp.onClick = [this] { edit ([] (KeyboardControllerData& d) { for (std::size_t k = 0; k < d.keys.size(); ++k) d.keys[k] = (float) std::min (1.0, (double) k / 127.0); }); };
+        invert.onClick = [this] { edit ([] (KeyboardControllerData& d) { for (auto& v : d.keys) v = 1.0f - v; }); };
+        flat.onClick = [this] { edit ([] (KeyboardControllerData& d) { d.keys.fill (0.0f); }); };
+        setSize (760, 300);
+        refresh();
+        startTimerHz (20);
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg2); }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (10);
+        title.setBounds (r.removeFromTop (22));
+        r.removeFromTop (4);
+        auto bottom = r.removeFromBottom (64);
+        values.setBounds (r);
+        bottom.removeFromTop (6);
+        noteOff.setBounds (bottom.removeFromLeft (70));
+        bottom.removeFromLeft (8);
+        autoRelease.setBounds (bottom.removeFromLeft (130).withSizeKeepingCentre (130, 24));
+        for (auto* b : { &flat, &invert, &ramp })
+        {
+            b->setBounds (bottom.removeFromRight (80).withSizeKeepingCentre (76, 26));
+            bottom.removeFromRight (6);
+        }
+    }
+
+private:
+    std::optional<KeyboardControllerData> current() const
+    {
+        const auto* c = locate (const_cast<Song&> (engine.getSong()));
+        return c != nullptr && c->instrument == InstrumentKind::controller ? parseKeyboardController (c->controllerState) : std::nullopt;
+    }
+
+    void edit (std::function<void (KeyboardControllerData&)> change)
+    {
+        engine.editSong ([l = locate, change = std::move (change)] (Song& s) {
+            auto* c = l (s);
+            if (c == nullptr || c->instrument != InstrumentKind::controller)
+                return;
+            auto d = parseKeyboardController (c->controllerState);
+            if (! d)
+                return;
+            change (*d);
+            writeKeyboardController (*d, c->controllerState);
+        });
+        refresh();
+    }
+
+    void refresh()
+    {
+        const auto d = current();
+        autoRelease.setToggleState (d && d->autoRelease, juce::dontSendNotification);
+        values.repaint();
+        noteOff.repaint();
+    }
+
+    void timerCallback() override
+    {
+        if (! isShowing())
+            return;
+        const auto d = current();
+        const auto out = output ? output() : 0.0f;
+        const auto stamp = (d ? d->noteOffValue + (d->autoRelease ? 2.0f : 0.0f) : -1.0f) + out * 7.0f;
+        if (stamp != lastStamp) // (only when something changed: no repaint while idle)
+        {
+            lastStamp = stamp;
+            refresh();
+        }
+    }
+
+    AudioEngine& engine;
+    std::function<ChannelDef* (Song&)> locate;
+    std::function<float()> output;
+    juce::Label title;
+    KeyValues values;
+    Knob noteOff;
+    juce::ToggleButton autoRelease;
+    juce::TextButton ramp, invert, flat;
+    float lastStamp = -100.0f;
+};
 } // namespace
 
 namespace FormulaControllerWindows
@@ -1489,6 +1756,24 @@ std::unique_ptr<juce::Component> makeEnvelopeControllerEditor (AudioEngine& engi
         [&engine, channel] (int k) {
             const auto instrument = engine.getChannelInstrument (channel);
             return instrument != nullptr ? instrument->controlOutput (k) : 0.0f;
+        });
+}
+
+std::unique_ptr<juce::Component> makeKeyboardControllerEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, std::function<float()> output)
+{
+    return std::make_unique<KeyboardControllerEditor> (engine, std::move (locate), std::move (output));
+}
+
+std::unique_ptr<juce::Component> makeKeyboardControllerEditor (AudioEngine& engine, int channel)
+{
+    return makeKeyboardControllerEditor (
+        engine,
+        [channel] (Song& song) -> ChannelDef* {
+            return channel >= 0 && channel < (int) song.channels.size() ? &song.channels[(std::size_t) channel] : nullptr;
+        },
+        [&engine, channel] {
+            const auto instrument = engine.getChannelInstrument (channel);
+            return instrument != nullptr ? instrument->controlOutput (0) : 0.0f;
         });
 }
 

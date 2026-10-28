@@ -4,6 +4,7 @@
 #include "ui/Controllers164.h"
 #include "ui/NewtoneEditor.h"
 #include "ui/VisualEditors.h"
+#include "ui/FlExtraEditors.h"
 #include "ui/PluginEditors.h"
 
 #include <cstring>
@@ -74,15 +75,30 @@ class NativeEffectEditor final : public juce::Component,
                                  private juce::Timer
 {
 public:
-    NativeEffectEditor (AudioEngine& e, int t, int s, float initialScale, int initialPage)
+    // `node` (round 165c): the editor of an effect node inside a Patcher instead of a mixer slot — `node.locate` finds its
+    // slot in the song, `node.running` its running instance (the live meters); no presets bar, no automation targets
+    struct NodeTarget
+    {
+        std::function<EffectSlot* (Song&)> locate;
+        std::function<std::shared_ptr<Effect>()> running;
+        juce::String name;
+    };
+
+    NativeEffectEditor (AudioEngine& e, int t, int s, float initialScale, int initialPage, NodeTarget nodeTarget = {})
         : engine (e),
           track (t),
-          slot (s)
+          slot (s),
+          node (std::move (nodeTarget))
     {
         if (const auto* fx = current())
         {
             kind = fx->kind;
             layout = &plugui::layoutFor (kind);
+            if (kind == EffectKind::ember) // round 165: this window only opens for the Classic voicing — its one-screen
+            {                              // panel, not the 1110-unit multiband page around it
+                static const auto classic = [] { auto l = plugui::layoutFor (EffectKind::ember); l.height = 440; return l; }();
+                layout = &classic;
+            }
             if (kind == EffectKind::maximus) // Soundgoodizer runs on the Maximus engine: its own page
                 if (const auto blob = maximusfx::unpack (fx->state); blob && blob->build == hlfx::MaximusBuild::soundgoodizer)
                     layout = &plugui::soundgoodizerLayout();
@@ -94,6 +110,8 @@ public:
         }
 
         accent = skin::accentFor (sgApprox ? EffectKind::maximus : kind);
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's VU shows the output level, as the reference's
+            vuMode = 2;
         anim.onFrame = [this] { repaint(); };
         page = initialPage;
         if (kind == EffectKind::equo && initialPage == 0)
@@ -105,7 +123,7 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "grleds") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
                     || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0 || std::strcmp (item.display, "hwping") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
@@ -127,6 +145,11 @@ public:
 
     const EffectSlot* current() const
     {
+        if (node.locate)
+        {
+            const auto* fx = node.locate (const_cast<Song&> (engine.getSong()));
+            return fx != nullptr && (layout == nullptr || fx->kind == kind) ? fx : nullptr;
+        }
         const auto& mixer = engine.getSong().mixer;
 
         if (track < 0 || track >= (int) mixer.size() || slot < 0 || slot >= (int) mixer[(std::size_t) track].effects.size())
@@ -255,7 +278,7 @@ public:
                                                                     || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"
                                                                     || juce::String (item.display) == "prismbands" || juce::String (item.display) == "emberbands"
                                                                     || juce::String (item.display) == "tunekeys" || juce::String (item.display) == "tuneautokey"
-                                                                    || juce::String (item.display) == "pitchring"
+                                                                    || juce::String (item.display) == "pitchring" || juce::String (item.display) == "waveshaper"
                                                                     || isBars (item) || isRhythmEdit (item) || isRhythmPatterns (item)))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
@@ -273,7 +296,24 @@ public:
     // Controls stored in the slot's state (core/StateParams.h: Maximus' bands, Delay Bank's banks, band tables...)
     // edit those bytes instead of EffectSlot::params
     // the header's undo / A-B / preset bar (round 129): every editor whose setting is its parameters
-    bool usesBar() const { return ! stateBacked() && layout != &plugui::soundgoodizerLayout() && layout != nullptr; }
+    bool usesBar() const { return ! node.locate && ! stateBacked() && layout != &plugui::soundgoodizerLayout() && layout != nullptr; }
+
+    // an edit of this editor's slot (a mixer slot or a Patcher node's)
+    void editSlot (std::function<void (EffectSlot&)> change)
+    {
+        if (node.locate)
+        {
+            engine.editSong ([l = node.locate, change = std::move (change)] (Song& song) {
+                if (auto* fx = l (song))
+                    change (*fx);
+            });
+            return;
+        }
+        engine.editSong ([t = track, sl = slot, change = std::move (change)] (Song& song) {
+            if (t >= 0 && t < (int) song.mixer.size() && sl >= 0 && sl < (int) song.mixer[(std::size_t) t].effects.size())
+                change (song.mixer[(std::size_t) t].effects[(std::size_t) sl]);
+        });
+    }
 
     bool stateBacked() const { return plugui::usesStateParams (kind) && layout != &plugui::soundgoodizerLayout(); }
     bool isStateParam (int param) const { return stateBacked() && plugui::stateIndex (kind, param) >= 0; }
@@ -298,9 +338,7 @@ public:
             const auto raw = plugui::stateRaw (kind, param, value);
             if (stateTable().get (fx->state, s) == raw)
                 return;
-            engine.editSong ([t = track, sl = slot, bytes = stateTable().with (fx->state, s, raw)] (Song& song) {
-                song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
-            });
+            editSlot ([bytes = stateTable().with (fx->state, s, raw)] (EffectSlot& target) { target.state = bytes; });
             return;
         }
         if (current() == nullptr || param < 0 || param >= maxEffectParams)
@@ -311,11 +349,15 @@ public:
                 setParams (edits);
                 return;
             }
+        if (kind == EffectKind::ember) // round 165: the Classic voicing's Auto moves Output with Drive
+            if (const auto edits = mixsuite::ember::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
         if (usesBar())
             bar.willEdit();
-        engine.editSong ([t = track, s = slot, param, v = juce::jlimit (0.0f, 1.0f, value)] (Song& song) {
-            song.mixer[(std::size_t) t].effects[(std::size_t) s].params[(std::size_t) param] = v;
-        });
+        editSlot ([param, v = juce::jlimit (0.0f, 1.0f, value)] (EffectSlot& target) { target.params[(std::size_t) param] = v; });
     }
 
     juce::String valueText (int param, float value) const
@@ -408,6 +450,8 @@ public:
 
     juce::String trackName() const
     {
+        if (node.locate)
+            return node.name;
         const auto& mixer = engine.getSong().mixer;
         if (track == 0)
             return tr ("Master");
@@ -451,7 +495,8 @@ public:
             spec.interval = 1.0 / item.steps;
         spec.toText = [this, param] (double v) { return valueText (param, (float) v); };
         spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
-        spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
+        if (! node.locate)
+            spec.target = AutomationTarget { AutomationTargetKind::effectParam, track, slot, param };
         return spec;
     }
 
@@ -534,8 +579,8 @@ public:
             g.drawRoundedRectangle (box.reduced (0.5f), radius::md, 1.0f);
         }
         g.setColour (presetName.isNotEmpty() ? colour::textPrimary : colour::textSecondary);
-        g.setFont (font (type::small, presetName.isNotEmpty()));
-        g.drawText (presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight, true);
+        ui::drawFittingText (g, presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight,
+                             font (type::small, presetName.isNotEmpty()), 8.0f, 0.0f, 0.75f);
         drawArrow (g, prevButton(), juce::MathConstants<float>::pi, hoverHeader == 3 ? accent : colour::textSecondary);
         drawArrow (g, nextButton(), 0.0f, hoverHeader == 4 ? accent : colour::textSecondary);
     }
@@ -571,8 +616,7 @@ public:
             g.drawRoundedRectangle (r.withSizeKeepingCentre (w, r.getHeight()), 3.0f, 1.0f);
         }
         g.setColour (locked ? theme::colour::textPrimary : hasStyle (item, plugui::dim) ? colour::textDisabled : skin::captionColour());
-        g.setFont (font (juce::jmax (8.0f, 9.5f * scale()), true));
-        g.drawFittedText (caps (tr (item.label)), r.toNearestInt(), j, 1, 0.7f);
+        ui::drawFittingText (g, caps (tr (item.label)), r, j, font (juce::jmax (8.0f, 9.5f * scale()), true), 7.0f); // (round 165: fit, no "...")
     }
 
     void paintItem (juce::Graphics& g, const LayoutItem& item, int index, const EffectSlot& fx)
@@ -600,9 +644,8 @@ public:
                 {
                     // the plugin's name, big and quiet (FL's logos are not reproduced)
                     g.setColour (colour::bg4);
-                    g.setFont (font (r.getHeight() * 0.62f, true));
-                    g.drawFittedText (item.label, r.toNearestInt(),
-                                      hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight, 1, 0.8f);
+                    ui::drawFittingText (g, item.label, r, hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centredRight,
+                                         font (r.getHeight() * 0.62f, true), r.getHeight() * 0.25f, 0.0f, 0.8f); // (smaller, never "Wav...")
                     break;
                 }
                 if (hasStyle (item, plugui::boxed))
@@ -779,18 +822,16 @@ public:
                     else
                         skin::button (g, r, false, hot, accent, radius::sm);
                     g.setColour (on ? colour::onAccent : colour::textSecondary);
-                    g.setFont (font (juce::jmax (8.0f, r.getHeight() * 0.8f), true));
                     if (item.label != nullptr)
-                        g.drawText (caps (tr (item.label)), r, juce::Justification::centred, false);
+                        ui::drawFittingText (g, caps (tr (item.label)), r, juce::Justification::centred, font (juce::jmax (8.0f, r.getHeight() * 0.8f), true), 6.5f);
                     break;
                 }
                 const auto box = juce::Rectangle<float> (16.0f * s, 9.0f * s).withCentre ({ r.getX() + 9.0f * s, r.getCentreY() });
                 skin::switchPill (g, box, on, accent, fx.enabled);
                 auto text = r.withTrimmedLeft (21.0f * s);
                 g.setColour (on ? colour::textPrimary : (hot ? colour::textSecondary : colour::textDisabled));
-                g.setFont (font (juce::jmax (8.0f, 9.5f * s), true));
                 if (item.label != nullptr)
-                    g.drawFittedText (caps (tr (item.label)), text.toNearestInt(), juce::Justification::centredLeft, 1, 0.7f);
+                    ui::drawFittingText (g, caps (tr (item.label)), text, juce::Justification::centredLeft, font (juce::jmax (8.0f, 9.5f * s), true), 7.0f);
                 break;
             }
 
@@ -1631,6 +1672,8 @@ public:
             text = tr ("Ping failed: the round trip was not stable"), warn = true;
         else if (samples == 0)
             text = tr ("Not measured yet: press Ping"), warn = true;
+        else if (const auto measured = hwinsert::measuredSetup (fx); ! measured.empty() && measured != engine.currentSetupKey())
+            text = tr ("Measured for another audio setup (the device or the buffer size changed): press Ping"), warn = true; // round 165c
         else if (ping > 0.4f && ping < 0.6f)
             text = tr ("Measured: delay compensated");
         else
@@ -1640,7 +1683,7 @@ public:
         g.drawFittedText (text, area.toNearestInt(), juce::Justification::centred, 3, 0.8f);
     }
 
-    // applies a ping's result once (the round trip becomes the slot's delay: undoable, saved with the project)
+    // shows a ping's result once (AudioEngine makes it the slot's delay: undoable, saved with the project)
     void hwPingTick()
     {
         const auto serial = juce::roundToInt (liveMeter (hwinsert::pingSerial) * 1024.0f);
@@ -1654,8 +1697,8 @@ public:
         hwSerial = serial;
         if (std::abs (liveMeter (hwinsert::pingState) - 0.5f) < 0.01f)
         {
+            // (the engine applies the result to the slot, with the device setup it belongs to: round 165c)
             const auto samples = hwinsert::roundTripOf (liveMeter (hwinsert::pingSamples));
-            setValue (hwinsert::roundTrip, hwinsert::roundTripValue (samples));
             for (const auto& item : activeLayout().items)
                 if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "hwping") == 0)
                     ui::flashValueTip (*this, rectOf (item).toNearestInt(), tr ("Round trip: {0} samples", { juce::String (samples) }));
@@ -1738,6 +1781,11 @@ public:
     // the live meter `output` of this slot's effect (published by the audio thread; 0 when not playing)
     float liveMeter (int output) const
     {
+        if (node.running)
+        {
+            const auto fx = node.running();
+            return fx != nullptr ? fx->controlOutput (output) : 0.0f;
+        }
         const auto* times = engine.getProcessTimes();
         const auto key = (std::size_t) (track * maxEffectSlots + slot) * ProcessTimes::meterOutputs + (std::size_t) juce::jlimit (0, ProcessTimes::meterOutputs - 1, output);
         return times != nullptr && key < times->effectMeters.size() ? times->effectMeters[key].load (std::memory_order_relaxed) : 0.0f;
@@ -1970,14 +2018,15 @@ public:
             using namespace voicetools::gemini;
             grid (4, 4);
             const bool lo = param01 ("Low shelf") >= 0.5f, hi = param01 ("High shelf") >= 0.5f;
-            const auto lg = lo ? shelfDb (param01 ("Low gain")) : 0.0, hg = hi ? shelfDb (param01 ("High gain")) : 0.0;
+            // round 165w: the law's range over the height (measured: −88 … +12 dB; round 124's: −30 … +12) and its shapes
+            const bool measured = param01 ("EQ law") >= 0.5f;
+            const auto floorDb = measured ? -88.0 : -30.0, spanDb = measured ? 100.0 : 42.0;
+            const auto lg = lo ? shelfDb (param01 ("Low gain"), measured) : 0.0, hg = hi ? shelfDb (param01 ("High gain"), measured) : 0.0;
             const auto lf = freqHz (param01 ("Low freq")), hf = freqHz (param01 ("High freq"));
-            // first-order shelf shapes (display only): −30 … +12 dB over the height
             strokeCurve ([=] (float x) {
                 const auto f = 20.0 * std::pow (1000.0, (double) x);
-                const auto l = lg / (1.0 + std::pow (f / lf, 2.0));
-                const auto h = hg / (1.0 + std::pow (hf / f, 2.0));
-                return (float) ((l + h + 30.0) / 42.0);
+                const auto db = shelfResponseDb (f, lf, lg, false, measured) + shelfResponseDb (f, hf, hg, true, measured);
+                return (float) std::clamp ((db - floorDb) / spanDb, 0.0, 1.0);
             }, inner, true);
             // round 137: the L / H markers (drag: frequency / gain; double-click: on / off) and the frequency labels
             g.setFont (font (8.5f * s));
@@ -1988,7 +2037,7 @@ public:
                 const auto x = inner.getX() + inner.getWidth() * (float) (std::log (hz / 20.0) / std::log (1000.0));
                 g.drawText (text, juce::Rectangle<float> (x - 12.0f * s, inner.getBottom() - 11.0f * s, 24.0f * s, 10.0f * s), juce::Justification::centred, false);
             }
-            const auto zero = inner.getBottom() - inner.getHeight() * 30.0f / 42.0f;
+            const auto zero = inner.getBottom() - inner.getHeight() * (float) (-floorDb / spanDb);
             g.drawText ("0", juce::Rectangle<float> (inner.getX() + 1.0f * s, zero - 5.0f * s, 14.0f * s, 10.0f * s), juce::Justification::centredLeft, false);
             for (const auto& h : geminiHandles (item))
             {
@@ -2032,24 +2081,32 @@ public:
             g.drawHorizontalLine ((int) y, inner.getX(), inner.getRight());
             g.fillEllipse (juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ x, y }));
         }
-        else if (id == "waveshaper") // the saved shaping curve (FL's point editor is not reproduced)
+        else if (id == "waveshaper") // round 165: FL's point editor (the map: input across, level up)
         {
             grid (8, 8);
-            std::vector<std::int16_t> table;
-            auto unipolar = false;
-            if (const auto st = flshape::parseWaveShaper (fx.state))
+            g.setColour (colour::gridBar);
+            g.drawLine ({ inner.getBottomLeft(), inner.getTopRight() }, 1.0f); // the identity, for reference
+            const auto ws = wsState();
+            const auto& table = wsTable (ws.points, wsUnipolar());
+            strokeCurve ([&table, uni = wsUnipolar()] (float x) { return flshape::waveShaperLevelAt (table, uni, x); }, inner, false);
+            const auto times = flshape::waveShaperTimes (ws.points);
+            // tension handles (hollow, between the points), then the points
+            for (std::size_t i = 1; i < ws.points.size(); ++i)
+                if (const auto h = wsHandlePos (inner, ws, times, (int) i); h.x > -1.0f)
+                {
+                    const auto hot = (int) i == wsHoverHandle || (int) i == wsTension;
+                    g.setColour (hot ? colour::textPrimary : curveColour.withAlpha (0.85f));
+                    g.drawEllipse (juce::Rectangle<float> (8.0f * s, 8.0f * s).withCentre (h), juce::jmax (1.0f, 1.3f * s));
+                }
+            for (std::size_t i = 0; i < ws.points.size(); ++i)
             {
-                unipolar = st->unipolar;
-                table = flshape::shaperTable (st->points, st->unipolar);
+                const auto at = wsPos (inner, times[i], ws.points[i].y);
+                const auto hot = (int) i == wsHoverPoint || (int) i == wsPoint;
+                g.setColour (colour::bg0);
+                g.fillEllipse (juce::Rectangle<float> (11.0f * s, 11.0f * s).withCentre (at));
+                g.setColour (hot ? colour::textPrimary : curveColour);
+                g.fillEllipse (juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre (at));
             }
-            if (table.size() > 4)
-                strokeCurve ([&table, unipolar] (float x) {
-                    const auto i = juce::jlimit<std::size_t> (1, table.size() - 2, (std::size_t) (1.0f + x * (float) (table.size() - 3)));
-                    const auto v = (float) table[i] / 32767.0f;
-                    return unipolar ? v : 0.5f + 0.5f * v;
-                }, inner, false);
-            else
-                strokeCurve ([] (float x) { return x; }, inner, false);
         }
         else if (id == "room") // nested walls: the room size and the decay
         {
@@ -2200,6 +2257,37 @@ public:
         else if (id == "hwping") // the hardware insert (round 164d): the round trip, the ping's state, what is missing
         {
             paintHwPing (g, r, fx);
+            return;
+        }
+        else if (id == "grleds") // round 165: a ladder of reduction LEDs (Ridge Strip: the console's 3 / 6 / 10 / 14 / 20 dB)
+        {
+            const auto db = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
+            auto area = r.reduced (1.0f * s);
+            const auto caption = area.removeFromBottom (14.0f * s);
+            static const int steps[] { 20, 14, 10, 6, 3 };
+            const auto h = area.getHeight() / 5.0f;
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            for (int k = 0; k < 5; ++k)
+            {
+                const auto cell = juce::Rectangle<float> (area.getX(), area.getY() + h * (float) k, area.getWidth(), h);
+                const auto led = cell.withWidth (cell.getHeight() * 0.62f).withSizeKeepingCentre (cell.getHeight() * 0.5f, cell.getHeight() * 0.5f)
+                                     .withX (cell.getX() + 2.0f * s);
+                const bool lit = fx.enabled && db >= (float) steps[k] - 0.05f;
+                g.setColour (lit ? accent : colour::gridBeat);
+                g.fillEllipse (led);
+                if (lit)
+                {
+                    g.setColour (accent.withAlpha (0.35f));
+                    g.drawEllipse (led.expanded (1.5f * s), 1.0f * s);
+                }
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (steps[k]), cell.withTrimmedLeft (led.getRight() - cell.getX() + 2.0f * s), juce::Justification::centredLeft, false);
+            }
+            if (item.label != nullptr && *item.label != 0)
+            {
+                g.setColour (colour::textSecondary);
+                g.drawText (caps (tr (item.label)), caption, juce::Justification::centred, false);
+            }
             return;
         }
         else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
@@ -2826,11 +2914,10 @@ public:
             return;
         if (usesBar())
             bar.willEdit();
-        engine.editSong ([t = track, sl = slot, changes] (Song& song) {
-            auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) sl].params;
+        editSlot ([changes] (EffectSlot& target) {
             for (auto [p, v] : changes)
                 if (p >= 0 && p < maxEffectParams)
-                    params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
+                    target.params[(std::size_t) p] = juce::jlimit (0.0f, 1.0f, v);
         });
     }
 
@@ -3050,8 +3137,9 @@ public:
             auto add = [&] (int freqP, int gainP, int onP) {
                 const auto hz = freqHz (valueOf (freqP));
                 const auto x = (float) (std::log (juce::jlimit (20.0, 20000.0, hz) / 20.0) / std::log (1000.0));
-                const auto db = valueOf (onP) >= 0.5f ? shelfDb (valueOf (gainP)) : 0.0;
-                out.push_back ({ freqP, gainP, onP, { inner.getX() + inner.getWidth() * x, inner.getBottom() - inner.getHeight() * (float) ((db + 30.0) / 42.0) } });
+                const bool measured = valueOf (eqLaw) >= 0.5f; // round 165w: the height is the gain's own scale
+                const auto y = valueOf (onP) >= 0.5f ? valueOf (gainP) : shelfValue (0.0, measured);
+                out.push_back ({ freqP, gainP, onP, { inner.getX() + inner.getWidth() * x, inner.getBottom() - inner.getHeight() * y } });
             };
             add (lowFreq, lowGain, lowOn);
             add (highFreq, highGain, highOn);
@@ -3119,6 +3207,307 @@ public:
         ui::showValueTip (*this, rectOf (item).toNearestInt(), valueText (px, x) + " / " + valueText (py, y));
     }
 
+    // --- Fruity WaveShaper's curve (round 165: FL's point editor) ---------------------------------------
+    // FL's gestures: right-click adds a point (hold and drag to place it), left-drag moves one (Shift keeps its
+    // level, Ctrl its position), Alt+click or right-click › Delete removes it, the hollow handle between two points
+    // bends the segment (Ctrl: fine; right-click: straight again); right-click a point for its shape and value.
+    static bool isWaveShaperGraph (const LayoutItem& item) { return item.type == Item::display && juce::String (item.display) == "waveshaper"; }
+
+    bool wsUnipolar() const { return valueOf (plugui::paramIndex (kind, "Unipolar")) >= 0.5f; }
+
+    flshape::WaveShaperState wsState() const
+    {
+        const auto* fx = current();
+        if (fx == nullptr)
+            return flshape::waveShaperForEditing ({});
+        auto s = flshape::waveShaperForEditing (fx->state, fx->params.data());
+        if (wsDragState)
+            s.points = wsDragPoints; // shown at once while the edit travels to the engine
+        return s;
+    }
+
+    const std::vector<std::int16_t>& wsTable (const std::vector<flshape::WsPoint>& points, bool unipolar) const
+    {
+        // the curve as the engine shapes it (one table per change of the points)
+        auto same = wsCacheUni == unipolar && wsCachePoints.size() == points.size();
+        for (std::size_t i = 0; same && i < points.size(); ++i)
+            same = wsCachePoints[i].dt == points[i].dt && wsCachePoints[i].y == points[i].y && wsCachePoints[i].tension == points[i].tension
+                   && wsCachePoints[i].mode == points[i].mode;
+        if (! same || wsCacheTable.empty())
+        {
+            wsCachePoints = points;
+            wsCacheUni = unipolar;
+            wsCacheTable = flshape::shaperTable (points, unipolar);
+        }
+        return wsCacheTable;
+    }
+
+    juce::Rectangle<float> wsArea (const LayoutItem& item) const { return rectOf (item).reduced (6.0f * scale()); }
+
+    static juce::Point<float> wsPos (juce::Rectangle<float> area, float x, float y)
+    {
+        return { area.getX() + area.getWidth() * x, area.getBottom() - area.getHeight() * y };
+    }
+
+    // the tension handle of the segment that ends at point i (x < 0: none — a hold, or too narrow to grab)
+    juce::Point<float> wsHandlePos (juce::Rectangle<float> area, const flshape::WaveShaperState& ws, const std::vector<float>& times, int i) const
+    {
+        if (i < 1 || i >= (int) ws.points.size() || ws.points[(std::size_t) i].mode == 2)
+            return { -2.0f, -2.0f };
+        const auto x0 = times[(std::size_t) i - 1], x1 = times[(std::size_t) i];
+        if ((x1 - x0) * area.getWidth() < 16.0f * scale())
+            return { -2.0f, -2.0f };
+        const auto xm = 0.5f * (x0 + x1);
+        return wsPos (area, xm, flshape::waveShaperLevelAt (wsTable (ws.points, wsUnipolar()), wsUnipolar(), xm));
+    }
+
+    int wsPointAt (const LayoutItem& item, juce::Point<float> p) const
+    {
+        const auto ws = wsState();
+        const auto times = flshape::waveShaperTimes (ws.points);
+        const auto area = wsArea (item);
+        int best = -1;
+        auto bestD = 8.0f * scale();
+        for (std::size_t i = 0; i < ws.points.size(); ++i)
+            if (const auto d = wsPos (area, times[i], ws.points[i].y).getDistanceFrom (p); d <= bestD)
+                best = (int) i, bestD = d;
+        return best;
+    }
+
+    int wsHandleAt (const LayoutItem& item, juce::Point<float> p) const
+    {
+        const auto ws = wsState();
+        const auto times = flshape::waveShaperTimes (ws.points);
+        const auto area = wsArea (item);
+        for (int i = 1; i < (int) ws.points.size(); ++i)
+            if (const auto h = wsHandlePos (area, ws, times, i); h.x > -1.0f && h.getDistanceFrom (p) <= 7.0f * scale())
+                return i;
+        return -1;
+    }
+
+    juce::Point<float> wsMouseValue (const LayoutItem& item, juce::Point<float> p) const
+    {
+        const auto area = wsArea (item);
+        return { juce::jlimit (0.0f, 1.0f, (p.x - area.getX()) / juce::jmax (1.0f, area.getWidth())),
+                 juce::jlimit (0.0f, 1.0f, (area.getBottom() - p.y) / juce::jmax (1.0f, area.getHeight())) };
+    }
+
+    void wsWrite (std::vector<flshape::WsPoint> points)
+    {
+        const auto* fx = current();
+        if (fx == nullptr)
+            return;
+        auto s = flshape::waveShaperForEditing (fx->state, fx->params.data());
+        s.points = std::move (points);
+        s.unipolar = wsUnipolar();
+        if (usesBar())
+            bar.willEdit();
+        engine.editSong ([t = track, sl = slot, bytes = flshape::writeWaveShaper (s, fx->state)] (Song& song) {
+            song.mixer[(std::size_t) t].effects[(std::size_t) sl].state = bytes;
+        });
+        repaint();
+    }
+
+    juce::String wsValueText (float y) const
+    {
+        // the level as FL's hint shows it: percent of the map (bipolar 0…100 %, unipolar −100…100 %)
+        return wsUnipolar() ? juce::String (juce::roundToInt ((y * 2.0f - 1.0f) * 100.0f)) + "%" : juce::String (juce::roundToInt (y * 100.0f)) + "%";
+    }
+
+    void wsShowTip (const LayoutItem& item, float x, float y)
+    {
+        ui::showValueTip (*this, rectOf (item).toNearestInt(), tr ("In") + " " + juce::String (juce::roundToInt (x * 100.0f)) + "%  " + tr ("Out") + " " + wsValueText (y));
+    }
+
+    // mouse down on the graph; true = a drag follows
+    bool wsMouseDown (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        auto points = wsState().points;
+        const auto point = wsPointAt (item, e.position);
+        const auto handle = point < 0 ? wsHandleAt (item, e.position) : -1;
+        const auto v = wsMouseValue (item, e.position);
+        wsDownMods = e.mods;
+
+        if (e.mods.isPopupMenu())
+        {
+            if (point >= 0)
+                wsPointMenu (point);
+            else if (handle >= 0) // straight again
+            {
+                points[(std::size_t) handle].tension = 0.0f;
+                wsWrite (points);
+            }
+            else // FL: a new point at the mouse, dragged while the button is held
+            {
+                wsPoint = flshape::addWaveShaperPoint (points, v.x, v.y);
+                wsDragPoints = points;
+                wsDragState = true;
+                wsWrite (points);
+                wsShowTip (item, v.x, v.y);
+                return true;
+            }
+            return false;
+        }
+        if (point >= 0 && e.mods.isAltDown()) // FL: Alt+click deletes
+        {
+            if (flshape::removeWaveShaperPoint (points, point))
+                wsWrite (points);
+            return false;
+        }
+        if (point >= 0)
+        {
+            wsPoint = point;
+            wsDragPoints = points;
+            wsDragState = true;
+            const auto t = flshape::waveShaperTimes (points);
+            wsShowTip (item, t[(std::size_t) point], points[(std::size_t) point].y);
+            return true;
+        }
+        if (handle >= 0)
+        {
+            // which way the tension bends this segment: the handle follows the mouse up and down
+            wsTension = handle;
+            wsTensionStart = points[(std::size_t) handle].tension;
+            auto bent = points;
+            bent[(std::size_t) handle].tension = juce::jlimit (-1.0f, 1.0f, wsTensionStart + (wsTensionStart > 0.8f ? -0.1f : 0.1f));
+            const auto times = flshape::waveShaperTimes (points);
+            const auto xm = 0.5f * (times[(std::size_t) handle - 1] + times[(std::size_t) handle]);
+            const auto uni = wsUnipolar();
+            const auto a = flshape::waveShaperLevelAt (flshape::shaperTable (points, uni), uni, xm);
+            const auto b = flshape::waveShaperLevelAt (flshape::shaperTable (bent, uni), uni, xm);
+            const auto up = (b - a) * (bent[(std::size_t) handle].tension - wsTensionStart);
+            wsTensionSign = up < 0.0f ? -1.0f : 1.0f;
+            wsDragPoints = points;
+            wsDragState = true;
+            return true;
+        }
+        return false;
+    }
+
+    void wsMouseDrag (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        if (! wsDragState)
+            return;
+        auto points = wsDragPoints;
+        if (wsTension >= 0 && wsTension < (int) points.size())
+        {
+            const auto dy = -(float) e.getDistanceFromDragStartY() / ((e.mods.isCtrlDown() ? 600.0f : 150.0f) * scale());
+            points[(std::size_t) wsTension].tension = juce::jlimit (-1.0f, 1.0f, wsTensionStart + wsTensionSign * dy);
+            ui::showValueTip (*this, rectOf (item).toNearestInt(), tr ("Tension") + " " + juce::String (juce::roundToInt (points[(std::size_t) wsTension].tension * 100.0f)) + "%");
+        }
+        else if (wsPoint >= 0 && wsPoint < (int) points.size())
+        {
+            const auto t = flshape::waveShaperTimes (points);
+            auto v = wsMouseValue (item, e.position);
+            // FL: Shift keeps the level, Ctrl keeps the position
+            if (e.mods.isShiftDown() && ! wsDownMods.isShiftDown())
+                v.y = points[(std::size_t) wsPoint].y;
+            if (e.mods.isCtrlDown())
+                v.x = t[(std::size_t) wsPoint];
+            flshape::moveWaveShaperPoint (points, wsPoint, v.x, v.y);
+            const auto moved = flshape::waveShaperTimes (points);
+            wsShowTip (item, moved[(std::size_t) wsPoint], points[(std::size_t) wsPoint].y);
+        }
+        else
+            return;
+        wsDragPoints = points;
+        wsWrite (points);
+    }
+
+    void wsMouseUp()
+    {
+        wsDragState = false;
+        wsPoint = wsTension = -1;
+        ui::hideValueTip();
+        repaint();
+    }
+
+    void wsPointMenu (int point)
+    {
+        const auto ws = wsState();
+        if (point < 0 || point >= (int) ws.points.size())
+            return;
+        const auto& p = ws.points[(std::size_t) point];
+        juce::PopupMenu menu;
+        menu.addSectionHeader (tr ("Out") + " " + wsValueText (p.y));
+        const auto inner = point > 0 && point + 1 < (int) ws.points.size();
+        menu.addItem (tr ("Delete"), inner, false, [this, point] {
+            auto pts = wsState().points;
+            if (flshape::removeWaveShaperPoint (pts, point))
+                wsWrite (pts);
+        });
+        if (point > 0) // the shape of the segment that ends here (FL's modes)
+        {
+            menu.addSectionHeader (tr ("Mode"));
+            for (const auto& m : flshape::waveShaperModes())
+                menu.addItem (tr (m.name), true, p.mode == m.mode, [this, point, mode = m.mode] {
+                    auto pts = wsState().points;
+                    if (point < (int) pts.size())
+                    {
+                        pts[(std::size_t) point].mode = mode;
+                        wsWrite (pts);
+                    }
+                });
+        }
+        menu.addSeparator();
+        menu.addItem (tr ("Copy value"), [y = p.y] { wsCopiedValue = y; });
+        menu.addItem (tr ("Paste value"), wsCopiedValue >= 0.0f, false, [this, point] {
+            auto pts = wsState().points;
+            if (point < (int) pts.size())
+            {
+                pts[(std::size_t) point].y = wsCopiedValue;
+                wsWrite (pts);
+            }
+        });
+        menu.addItem (tr ("Type in value..."), [this, point] { wsTypeValue (point); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void wsTypeValue (int point)
+    {
+        const auto ws = wsState();
+        if (point < 0 || point >= (int) ws.points.size())
+            return;
+        const auto uni = wsUnipolar();
+        const auto y = ws.points[(std::size_t) point].y;
+        auto* window = new juce::AlertWindow (tr ("Point value"), uni ? tr ("Percent (-100 to 100)") : tr ("Percent (0 to 100)"), juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("value", juce::String (uni ? (y * 2.0f - 1.0f) * 100.0f : y * 100.0f, 1));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        juce::Component::SafePointer<NativeEffectEditor> self (this);
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([self, window, point, uni] (int result) {
+                                     if (result != 1 || self == nullptr)
+                                         return;
+                                     const auto typed = window->getTextEditorContents ("value").getFloatValue() / 100.0f;
+                                     auto pts = self->wsState().points;
+                                     if (point < (int) pts.size())
+                                     {
+                                         pts[(std::size_t) point].y = juce::jlimit (0.0f, 1.0f, uni ? (typed + 1.0f) * 0.5f : typed);
+                                         self->wsWrite (pts);
+                                     }
+                                 }),
+                                 true);
+    }
+
+    juce::String wsHint (const LayoutItem& item, juce::Point<float> p) const
+    {
+        if (wsPointAt (item, p) >= 0)
+            return tr ("Point: [LMB] drag moves ([Shift] keeps the level, [Ctrl] the position)  [Alt][LMB] delete  [RMB] shape, value, delete");
+        if (wsHandleAt (item, p) >= 0)
+            return tr ("Tension: [LMB] drag up / down bends the segment ([Ctrl] fine)  [RMB] straight");
+        return tr ("Shaping curve: [RMB] add a point (hold and drag to place it)  [LMB] drag a point  [Alt][LMB] delete a point");
+    }
+
+    int wsPoint = -1, wsTension = -1, wsHoverPoint = -1, wsHoverHandle = -1;
+    float wsTensionStart = 0.0f, wsTensionSign = 1.0f;
+    bool wsDragState = false;
+    std::vector<flshape::WsPoint> wsDragPoints;
+    juce::ModifierKeys wsDownMods;
+    mutable std::vector<flshape::WsPoint> wsCachePoints;
+    mutable std::vector<std::int16_t> wsCacheTable;
+    mutable bool wsCacheUni = false;
+    static inline float wsCopiedValue = -1.0f;
+
     // --- mouse -----------------------------------------------------------------------------------------
 
     int headerItemAt (juce::Point<float> p) const
@@ -3155,6 +3544,25 @@ public:
             hoverHeader = h;
             hoverItem = i;
             anim.setHot (i);
+            repaint();
+        }
+        if (i >= 0 && isWaveShaperGraph (activeLayout().items[(std::size_t) i])) // round 165: points and handles light up
+        {
+            const auto& item = activeLayout().items[(std::size_t) i];
+            const auto point = wsPointAt (item, p), handle = point < 0 ? wsHandleAt (item, p) : -1;
+            if (point != wsHoverPoint || handle != wsHoverHandle)
+            {
+                wsHoverPoint = point;
+                wsHoverHandle = handle;
+                repaint();
+            }
+            setMouseCursor (point >= 0 ? juce::MouseCursor::DraggingHandCursor
+                                       : handle >= 0 ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::CrosshairCursor);
+            return;
+        }
+        if (wsHoverPoint >= 0 || wsHoverHandle >= 0)
+        {
+            wsHoverPoint = wsHoverHandle = -1;
             repaint();
         }
         setMouseCursor (i >= 0 || h > 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
@@ -3220,6 +3628,12 @@ public:
             return;
         }
 
+        if (isWaveShaperGraph (item)) // round 165: FL's point editor
+        {
+            if (wsMouseDown (e, item))
+                dragItem = index;
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "tunekeys")
         {
             tuneKeyClick (rectOf (item), e.position);
@@ -3517,6 +3931,11 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (wsDragState && dragItem >= 0) // round 165: the WaveShaper's curve
+        {
+            wsMouseDrag (e, activeLayout().items[(std::size_t) dragItem]);
+            return;
+        }
         if (crossoverDrag >= 0 && dragItem >= 0)
         {
             const auto r = rectOf (activeLayout().items[(std::size_t) dragItem]);
@@ -3584,6 +4003,11 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
+        if (wsDragState) // round 165
+        {
+            wsMouseUp();
+            dragItem = -1;
+        }
         tuneKeyRelease(); // LYNX Tune's keyboard without LATCH: the edit lasts while the key is held
         if (crossoverDrag >= 0)
         {
@@ -3631,7 +4055,7 @@ public:
             rhythmDoubleClick (e, item);
             return;
         }
-        if (isRhythmPatterns (item))
+        if (isRhythmPatterns (item) || isWaveShaperGraph (item))
             return;
         if (isGeminiGraph (item)) // round 137: an EQ marker = its shelf on / off
         {
@@ -3662,6 +4086,8 @@ public:
         if (index < 0)
             return;
         const auto& item = activeLayout().items[(std::size_t) index];
+        if (isWaveShaperGraph (item))
+            return;
         if (item.type == Item::display) // EQ graph: Q / bandwidth of the band under the mouse (or the selected one)
         {
             const auto* fx = current();
@@ -3747,6 +4173,8 @@ public:
             return { tr ("Rhythm taps: drag up / down = level, sideways = time; double-click = add or remove a tap; right-click = patterns"), {}, false, false };
         if (isRhythmPatterns (item))
             return { tr ("Load a tap pattern (LYNX's own), or go back to even spacing"), {}, false, false };
+        if (isWaveShaperGraph (item)) // round 165
+            return { wsHint (item, p), {}, false, true };
         if (item.type == Item::display)
             return { tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"), {}, false, true };
         if (hasStyle (item, plugui::pageTabs))
@@ -3900,10 +4328,7 @@ public:
         }
         const auto* fx = current();
         menu.addItem (tr ("Bypass"), true, fx != nullptr && ! fx->enabled, [this] {
-            engine.editSong ([t = track, s = slot] (Song& song) {
-                auto& target = song.mixer[(std::size_t) t].effects[(std::size_t) s];
-                target.enabled = ! target.enabled;
-            });
+            editSlot ([] (EffectSlot& target) { target.enabled = ! target.enabled; });
         });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (menuButton().toNearestInt())));
     }
@@ -3947,7 +4372,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "grleds") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
@@ -3959,6 +4384,7 @@ private:
 
     AudioEngine& engine;
     int track, slot;
+    NodeTarget node;
     EffectKind kind = EffectKind::eq;
     const plugui::Layout* layout = nullptr;
     int page = 0;
@@ -4071,6 +4497,12 @@ std::unique_ptr<juce::Component> makeNativeEffectEditor (AudioEngine& engine, in
     return std::make_unique<NativeEffectEditor> (engine, track, slot, scale, page);
 }
 
+std::unique_ptr<juce::Component> makeNodeEffectEditor (AudioEngine& engine, std::function<EffectSlot* (Song&)> locate,
+                                                       std::function<std::shared_ptr<Effect>()> running, const juce::String& name, float scale)
+{
+    return std::make_unique<NativeEffectEditor> (engine, -1, -1, scale, 0, NativeEffectEditor::NodeTarget { std::move (locate), std::move (running), name });
+}
+
 namespace NativeEffectWindows
 {
 bool canOpen (EffectKind kind)
@@ -4099,6 +4531,11 @@ void open (AudioEngine& engine, int track, int slot)
     if (VisualWindows::handles (kind)) // Wave Candy / Visualizer: displays fed by the slot's tap (round 164c)
     {
         VisualWindows::open (engine, track, slot);
+        return;
+    }
+    if (FlExtraWindows::handles (kind)) // Big Clock, Tuner, HTML NoteBook (round 165g)
+    {
+        FlExtraWindows::open (engine, track, slot);
         return;
     }
     if (! canOpen (fxSlot))
@@ -4160,6 +4597,7 @@ void closeAll()
     Controller164Windows::closeAll();
     NewtoneWindows::closeAll();
     VisualWindows::closeAll();
+    FlExtraWindows::closeAll();
     FacetEqWindows::closeAll();
     ProEditorWindows::closeAll();
 }
