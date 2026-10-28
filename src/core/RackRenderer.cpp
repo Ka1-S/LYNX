@@ -19,6 +19,7 @@
 #include "core/NewtoneFx.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -107,7 +108,10 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 namespace
 {
 // A channel's instrument, built new (UI thread)
-std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double sampleRate, double bpm, const RackState::Factories& factories)
+// deferKeyShift (round 165i): the pitch shifters of a keep-pitch sampler are made later by the caller, all channels at
+// once in parallel (Thief: 29 such channels × 8 shifters took most of the 860 ms of rack_instruments, one by one)
+std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double sampleRate, double bpm, const RackState::Factories& factories,
+                                             std::vector<Instrument*>* deferKeyShift = nullptr)
 {
     const auto& samples = factories.samples;
     const auto kind = channel.instrument;
@@ -197,7 +201,12 @@ std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double s
     instrument->prepare (sampleRate);
     instrument->configure (channel, bpm);
     if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip) && channel.sampler.keepPitch)
-        instrument->prepareKeyShift (sampleRate); // transpositions keep the length (rounds 162, 163)
+    {
+        if (deferKeyShift != nullptr)
+            deferKeyShift->push_back (instrument.get());
+        else
+            instrument->prepareKeyShift (sampleRate); // transpositions keep the length (rounds 162, 163)
+    }
     return instrument;
 }
 
@@ -258,6 +267,43 @@ patcher::Factories patcherFactories (double sampleRate, double bpm, const RackSt
     return f;
 }
 
+// The keep-pitch samplers' shifters, in parallel: each instrument only touches its own pool, and each shifter's
+// set-up is deterministic (a fixed seed and a silent priming run), so the result is the same as one by one
+void prepareKeyShifts (const std::vector<Instrument*>& list, double sampleRate)
+{
+    if (list.empty())
+        return;
+    const loadtrace::Scope timing ("rack_keyshift");
+    const auto threads = (std::size_t) std::clamp ((int) std::thread::hardware_concurrency() - 1, 1, 6);
+    const char* off = std::getenv ("LYNX_PARALLEL_KEYSHIFT"); // "0": one by one (A/B and the null test)
+    if (list.size() < 2 || threads < 2 || (off != nullptr && off[0] == '0'))
+    {
+        for (auto* i : list)
+            i->prepareKeyShift (sampleRate);
+        return;
+    }
+    std::atomic<std::size_t> next { 0 };
+    auto work = [&] {
+        for (auto k = next.fetch_add (1); k < list.size(); k = next.fetch_add (1))
+            list[k]->prepareKeyShift (sampleRate);
+    };
+    std::vector<std::thread> helpers;
+    for (std::size_t t = 1; t < std::min (threads, list.size()); ++t)
+    {
+        try
+        {
+            helpers.emplace_back (work);
+        }
+        catch (...) // no thread: the others (and this one) do the rest
+        {
+            break;
+        }
+    }
+    work();
+    for (auto& h : helpers)
+        h.join();
+}
+
 } // namespace
 
 std::unique_ptr<const RackState> RackState::build (Song song,
@@ -269,6 +315,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
     auto state = std::make_unique<RackState>();
     state->instruments.reserve (song.channels.size());
+    std::vector<Instrument*> keyShiftLater; // new instruments only: none is visible to the audio thread yet
 
     for (std::size_t i = 0; i < song.channels.size(); ++i)
     {
@@ -316,8 +363,9 @@ std::unique_ptr<const RackState> RackState::build (Song song,
             continue;
         }
 
-        state->instruments.push_back (buildInstrument (channel, sampleRate, song.bpm, factories));
+        state->instruments.push_back (buildInstrument (channel, sampleRate, song.bpm, factories, &keyShiftLater));
     }
+    prepareKeyShifts (keyShiftLater, sampleRate);
 
     state->effects.resize (song.mixer.size());
 
