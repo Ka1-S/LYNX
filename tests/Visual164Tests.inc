@@ -246,18 +246,22 @@ TEST (visual164_zgameeditor_state)
                             "[UserContent]\r\nText=\"My song\",\"by me\"\r\nImages=\r\n";
     std::vector<std::string> unmapped;
     const auto s = fromZge ({ ini.begin(), ini.end() }, &unmapped);
-    CHECK (s && s->layers.size() == 3);
-    CHECK (s->layers[0].type == LayerType::background && s->layers[1].type == LayerType::bars && s->layers[2].type == LayerType::text);
+    // (round 165e: Terrain maps to a GPU terrain layer)
+    CHECK (s && s->layers.size() == 4);
+    CHECK (s->layers[0].type == LayerType::background && s->layers[1].type == LayerType::bars && s->layers[2].type == LayerType::text
+           && s->layers[3].type == LayerType::terrain);
     CHECK (s->layers[2].text == "My song\nby me");
     CHECK (s->width == 1280 && s->height == 720 && s->fps == 60);
-    CHECK (unmapped == std::vector<std::string> { "Terrain\\GoopFlow" });
+    CHECK (unmapped.empty());
     // only effects without a counterpart: LYNX's default scene (in the project's video size)
     const std::string only = "[General]\nLayerCount=1\n[AppSet0]\nApp=Feedback\\70sKaleido\n[Video export]\nVideoW=640\nVideoH=480\n";
     const auto fallback = fromZge ({ only.begin(), only.end() });
-    CHECK (fallback && fallback->layers.size() == defaultScene().layers.size() && fallback->width == 640);
+    // (round 165e: the feedback layer stays over the default scene)
+    CHECK (fallback && fallback->layers.size() == defaultScene().layers.size() + 1 && fallback->width == 640
+           && fallback->layers.back().type == LayerType::feedback);
     CHECK (! fromZge ({ 1, 2, 3 }));
     const auto fx = lynx::effectFromFl ("ZGameEditor Visualizer", { ini.begin(), ini.end() });
-    CHECK (fx && fx->kind == lynx::EffectKind::visualizer && fromState (fx->state) && fromState (fx->state)->layers.size() == 3);
+    CHECK (fx && fx->kind == lynx::EffectKind::visualizer && fromState (fx->state) && fromState (fx->state)->layers.size() == 4);
 
     if (! realFlpDir.empty())
     {
