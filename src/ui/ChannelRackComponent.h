@@ -110,6 +110,7 @@ public:
 
     // Width that shows the controls and at most `maxSteps` steps (the panel scrolls for longer patterns).
     int widthForSteps (int maxSteps) const { return gridLeft() + juce::jmin (numSteps(), maxSteps) * stepWidth + 8; }
+    int naturalWidth() const { return gridLeft() + numSteps() * stepWidth + 8; } // without the ghost steps
 
     // The menu of instruments and plugins to add as a new channel (also the toolbar's plugin picker).
     void showAddChannelMenu (int insertAt = -1);
@@ -144,7 +145,10 @@ private:
     Area areaAt (int x, int y, int& row) const;
     void moved() override;
     int stickyX = 0; // how far the viewport scrolled the rack sideways (the controls column stays in view)
-    int numSteps() const;
+    int numSteps() const;   // the pattern's steps
+    int shownSteps() const; // plus FL's ghost steps: the free width after the pattern's end (issue #11)
+    int ghostSteps = 0;
+    void parentSizeChanged() override { updateSize(); }
     int nameLeft() const noexcept { return muteWidth + 2 * knobWidth + routeWidth + 2; }
     int selectLeft() const noexcept { return nameLeft() + nameWidth + 4; }
     int gridLeft() const noexcept { return selectLeft() + selectWidth + 8; }
@@ -221,5 +225,37 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRackComponent)
+};
+
+// The Channel Rack panel's viewport: a sample, SoundFont or generator dropped on the free space under the channels
+// becomes a new channel too, as anywhere in FL's Channel Rack (issue #11); the drop goes to the rack.
+class ChannelRackViewport final : public juce::Viewport,
+                                  public juce::FileDragAndDropTarget,
+                                  public juce::DragAndDropTarget
+{
+public:
+    explicit ChannelRackViewport (ChannelRackComponent& r) : rack (r)
+    {
+        // juce::Viewport makes itself transparent to clicks, so drag-and-drop would skip it and the empty space under
+        // the last channel would not accept drops. Children still get their own clicks.
+        setInterceptsMouseClicks (true, true);
+    }
+
+    bool isInterestedInFileDrag (const juce::StringArray& files) override { return rack.isInterestedInFileDrag (files); }
+    void filesDropped (const juce::StringArray& files, int x, int y) override
+    {
+        const auto p = rack.getLocalPoint (this, juce::Point<int> (x, y));
+        rack.filesDropped (files, p.x, p.y);
+    }
+    bool isInterestedInDragSource (const SourceDetails& details) override { return rack.isInterestedInDragSource (details); }
+    void itemDropped (const SourceDetails& details) override
+    {
+        auto moved = details;
+        moved.localPosition = rack.getLocalPoint (this, details.localPosition);
+        rack.itemDropped (moved);
+    }
+
+private:
+    ChannelRackComponent& rack;
 };
 } // namespace lynx
