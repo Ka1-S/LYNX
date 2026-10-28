@@ -267,6 +267,8 @@ AudioEngine::AudioEngine (bool openAudioDevice)
         prefetcher = std::make_unique<StreamPrefetcher> (transport);
         prefetcher->update (song, samples);
         enableAllMidiInputs();
+        midiSync.configure (midiPrefs);
+        midiSync.sendAllNotesOff(); // FL's "Send all notes off": on init and after a render
         deviceManager.addMidiInputDeviceCallback ({}, this); // {} = all inputs enabled
         midiDevicesChanged = juce::MidiDeviceListConnection::make ([this] { enableAllMidiInputs(); });
         mark ("  engine: MIDI inputs");
@@ -1632,6 +1634,10 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
     if (! device.enabled)
         return;
 
+    // the external clock LYNX follows (round 165f): clock, start / stop / continue, song position
+    if (m.getRawDataSize() > 0 && (m.getRawData()[0] >= 0xf2) && source != nullptr && midiSync.handleInput (source->getName(), m))
+        return;
+
     midiActivity.fetch_add (1, std::memory_order_relaxed); // the toolbar's MIDI input light
 
     // FL's playlist live mode channel (round 165m): its notes launch the performance clips instead of playing
@@ -1791,7 +1797,10 @@ void AudioEngine::setMidiPrefs (const prefs::MidiPrefs& p, bool save)
     if (! p.pickup)
         pickups.clear();
     if (prefetcher != nullptr) // (only with an audio device: the real app)
+    {
         enableAllMidiInputs();
+        midiSync.configure (p);
+    }
     if (save)
         midiSettingsFile().replaceWithText (juce::String (p.toText()));
     sendChangeMessage();
@@ -3206,6 +3215,8 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::setPluginsRenderMode (bool offline)
 {
+    if (! offline)
+        midiSync.sendAllNotesOff(); // FL's "Send all notes off": after a render
     // FL's "Notify about rendering mode" off: that plugin is not told (round 149); "Reset plugin when FL Studio
     // resets": reset as the export starts (round 151)
     for (std::size_t i = 0; i < song.channels.size(); ++i)
@@ -3335,6 +3346,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
     if (const auto target = transport.seekRequest.exchange (-1.0); target >= 0.0)
         transport.positionTicks.store (target);
 
+    // an external MIDI clock moves the transport (round 165f)
+    midiSync.beginBlock (transport, callbackStart, numSamples);
+
     // With the loop region on, the block is split at the loop end and the position jumps back to
     // its start (the nodes see a jump and release their notes, as in FL).
     // the audio editor's input recording (nothing happens unless it chose the input)
@@ -3430,6 +3444,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         for (int ch = 0; ch < numOutputChannels; ++ch)
             outputs[(std::size_t) ch] = outputChannelData[ch] != nullptr ? outputChannelData[ch] + done : nullptr;
 
+        // master sync out (round 165f): this part's clock / MTC messages, time-stamped for the sender thread
+        midiSync.subBlock (transport.positionTicks.load (std::memory_order_relaxed), tps, n, done, playing);
+
         player.audioDeviceIOCallbackWithContext (inputs.data(), numInputChannels, outputs.data(), numOutputChannels, n, context);
         routeOutputs (outputs.data(), numOutputChannels, n);
 
@@ -3501,6 +3518,7 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     rtStats.deviceRestarted();
     rt::resetForNewDevice();
     transport.sampleRate.store (device->getCurrentSampleRate());
+    midiSync.deviceStarted (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples(), device->getOutputLatencyInSamples());
     // FL's fixed size buffers: 2 ms, or the device buffer with "Process maximum size buffers" (REA round 134)
     setFixedPluginBlock (device->getCurrentBufferSizeSamples(), device->getCurrentSampleRate());
 
