@@ -21,6 +21,10 @@ std::unique_ptr<juce::Component> makeEnvelopeControllerEditor (AudioEngine& engi
 // index when it has one (−1: the links list is left out), `output` reads its running output k (may be empty).
 std::unique_ptr<juce::Component> makeEnvelopeControllerEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, int channel = -1,
                                                                std::function<float (int)> output = {});
+// The Keyboard Controller's editor (round 165c): each key's value, the note-off value and auto release; on a channel or a
+// Patcher node (`locate`), `output` reads the running output 0 (may be empty).
+std::unique_ptr<juce::Component> makeKeyboardControllerEditor (AudioEngine& engine, int channel);
+std::unique_ptr<juce::Component> makeKeyboardControllerEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate, std::function<float()> output = {});
 // The editor shown inside the channel settings window of a MIDI Out channel.
 std::unique_ptr<juce::Component> makeMidiOutEditor (AudioEngine& engine, int channel);
 // The same for a MIDI Out that is not a channel (a node inside a Patcher, round 162): `locate` finds it in a song.

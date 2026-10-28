@@ -43,36 +43,62 @@ juce::String categoryText (const std::string& c)
 
 juce::Colour accentColour() { return skin::colour::azure; } // (sampler-like generators: azure)
 
-const ChannelDef* channelOf (AudioEngine& engine, int channel)
+// What the editor edits: a Channel Rack channel, or a LYNX Soundfont node inside a Patcher (round 165c: found through
+// `locate`, channel −1 — no automation target, the preview note is rendered off-line instead of played on a channel)
+struct SfTarget
 {
-    const auto& song = engine.getSong();
-    if (channel < 0 || channel >= (int) song.channels.size() || song.channels[(std::size_t) channel].instrument != InstrumentKind::soundfont)
-        return nullptr;
-    return &song.channels[(std::size_t) channel];
+    std::function<ChannelDef* (Song&)> locate;
+    int channel = -1;
+
+    static SfTarget rack (int c)
+    {
+        return { [c] (Song& s) -> ChannelDef* { return c >= 0 && c < (int) s.channels.size() ? &s.channels[(std::size_t) c] : nullptr; }, c };
+    }
+};
+
+const ChannelDef* channelOf (AudioEngine& engine, const SfTarget& target)
+{
+    const auto* c = target.locate ? target.locate (const_cast<Song&> (engine.getSong())) : nullptr;
+    return c != nullptr && c->instrument == InstrumentKind::soundfont ? c : nullptr;
 }
 
-float paramOf (AudioEngine& engine, int channel, int index)
+float paramOf (AudioEngine& engine, const SfTarget& target, int index)
 {
-    if (const auto* c = channelOf (engine, channel))
+    if (const auto* c = channelOf (engine, target))
         return sf::readParams (c->modelParams)[(std::size_t) index];
     return sf::paramInfo (index).def;
 }
 
-void setParam (AudioEngine& engine, int channel, int index, float value, bool undoable = true)
+void editTarget (AudioEngine& engine, const SfTarget& target, std::function<void (ChannelDef&)> change, bool undoable = true)
 {
-    engine.editSong ([channel, index, value] (Song& s) {
-        if (channel < 0 || channel >= (int) s.channels.size())
-            return;
-        auto& c = s.channels[(std::size_t) channel];
-        if (c.instrument != InstrumentKind::soundfont)
-            return;
+    engine.editSong ([locate = target.locate, change = std::move (change)] (Song& s) {
+        auto* c = locate ? locate (s) : nullptr;
+        if (c != nullptr && c->instrument == InstrumentKind::soundfont)
+            change (*c);
+    }, undoable);
+}
+
+void setParam (AudioEngine& engine, const SfTarget& target, int index, float value, bool undoable = true)
+{
+    editTarget (engine, target, [index, value] (ChannelDef& c) {
         auto params = sf::readParams (c.modelParams);
         params[(std::size_t) index] = value;
         c.modelParams.assign (params.begin(), params.end());
     }, undoable);
 }
 
-ui::ValueSpec specFor (int channel, int index, const juce::String& channelName)
+void loadInto (AudioEngine& engine, const SfTarget& target, const std::string& path, int bank, int program)
+{
+    editTarget (engine, target, [path, bank, program] (ChannelDef& c) {
+        c.samplePath = path;
+        auto params = sf::readParams (c.modelParams);
+        params[sf::pBank] = (float) juce::jlimit (0, 128, bank);
+        params[sf::pProgram] = (float) juce::jlimit (0, 127, program);
+        c.modelParams.assign (params.begin(), params.end());
+    });
+}
+
+ui::ValueSpec specFor (const SfTarget& target, int index, const juce::String& channelName)
 {
     const auto& info = sf::paramInfo (index);
     ui::ValueSpec spec;
@@ -84,14 +110,14 @@ ui::ValueSpec specFor (int channel, int index, const juce::String& channelName)
     spec.pixelsForRange = info.integer ? juce::jlimit (60.0, 300.0, 6.0 * (info.max - info.min)) : 150.0;
     spec.toText = [index] (double v) { return shownValue (index, (float) v); };
     spec.fromText = ui::inverseOf (spec.toText, info.min, info.max);
-    if (index != sf::pBank && index != sf::pProgram && index != sf::pReverbTrack && index != sf::pChorusTrack)
-        spec.target = AutomationTarget { AutomationTargetKind::channelParam, channel, 0, index };
+    if (target.channel >= 0 && index != sf::pBank && index != sf::pProgram && index != sf::pReverbTrack && index != sf::pChorusTrack)
+        spec.target = AutomationTarget { AutomationTargetKind::channelParam, target.channel, 0, index };
     return spec;
 }
 
-juce::String channelLabel (AudioEngine& engine, int channel)
+juce::String channelLabel (AudioEngine& engine, const SfTarget& target)
 {
-    if (const auto* c = channelOf (engine, channel); c != nullptr && ! c->name.empty())
+    if (const auto* c = channelOf (engine, target); c != nullptr && ! c->name.empty())
         return u8 (c->name);
     return "LYNX Soundfont";
 }
@@ -102,7 +128,7 @@ juce::String channelLabel (AudioEngine& engine, int channel)
 class SfKnob final : public juce::Component, public ui::HintSource
 {
 public:
-    SfKnob (AudioEngine& e, int c, int p, juce::String caption) : engine (e), channel (c), param (p), label (std::move (caption))
+    SfKnob (AudioEngine& e, SfTarget c, int p, juce::String caption) : engine (e), channel (c), param (p), label (std::move (caption))
     {
         setRepaintsOnMouseActivity (true);
     }
@@ -175,7 +201,8 @@ public:
 
 private:
     AudioEngine& engine;
-    int channel, param;
+    SfTarget channel;
+    int param;
     juce::String label;
     ui::ValueDrag drag;
 };
@@ -184,7 +211,7 @@ private:
 class SfToggle final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    SfToggle (AudioEngine& e, int c, int p, juce::String caption, juce::String tip) : engine (e), channel (c), param (p), label (std::move (caption))
+    SfToggle (AudioEngine& e, SfTarget c, int p, juce::String caption, juce::String tip) : engine (e), channel (c), param (p), label (std::move (caption))
     {
         setTooltip (tip);
         setRepaintsOnMouseActivity (true);
@@ -207,7 +234,8 @@ public:
 
 private:
     AudioEngine& engine;
-    int channel, param;
+    SfTarget channel;
+    int param;
     juce::String label;
 };
 
@@ -215,7 +243,7 @@ private:
 class SfChoice final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    SfChoice (AudioEngine& e, int c, int p, juce::String caption, std::function<juce::PopupMenu (std::function<void (int)>)> custom = {})
+    SfChoice (AudioEngine& e, SfTarget c, int p, juce::String caption, std::function<juce::PopupMenu (std::function<void (int)>)> custom = {})
         : engine (e), channel (c), param (p), label (std::move (caption)), customMenu (std::move (custom))
     {
         setRepaintsOnMouseActivity (true);
@@ -254,7 +282,8 @@ public:
 
 private:
     AudioEngine& engine;
-    int channel, param;
+    SfTarget channel;
+    int param;
     juce::String label;
     std::function<juce::PopupMenu (std::function<void (int)>)> customMenu;
 };
@@ -386,7 +415,7 @@ class SoundFontEditor final : public juce::Component,
                               private juce::Timer
 {
 public:
-    SoundFontEditor (AudioEngine& e, int c) : engine (e), channel (c)
+    SoundFontEditor (AudioEngine& e, SfTarget c) : engine (e), channel (std::move (c))
     {
         ensureSoundFontIndex();
 
@@ -516,7 +545,7 @@ public:
             if (r.path == currentPath())
             {
                 // this font: the channel takes the preset (as FL's patch selector), and a short note plays
-                loadSoundFontInto (engine, channel, r.path, r.bank, r.program);
+                loadInto (engine, channel, r.path, r.bank, r.program);
                 juce::Timer::callAfterDelay (60, [safe = juce::Component::SafePointer<SoundFontEditor> (this)] {
                     if (safe != nullptr)
                         safe->playNote();
@@ -527,13 +556,13 @@ public:
             refreshHeader();
         };
         list.onLoad = [this] (const Row& r) {
-            loadSoundFontInto (engine, channel, r.path, r.bank, r.program);
+            loadInto (engine, channel, r.path, r.bank, r.program);
             refreshAll();
         };
         list.onMenu = [this] (const Row& r) {
             juce::PopupMenu m;
-            m.addItem (tr ("Load into this channel"), [this, r] {
-                loadSoundFontInto (engine, channel, r.path, r.bank, r.program);
+            m.addItem (channel.channel >= 0 ? tr ("Load into this channel") : tr ("Load into this node"), [this, r] {
+                loadInto (engine, channel, r.path, r.bank, r.program);
                 refreshAll();
             });
             m.addItem (tr ("Load into a new channel"), [this, r] { addSoundFontChannel (engine, r.path, r.bank, r.program); });
@@ -554,7 +583,7 @@ public:
     {
         stopTimer();
         if (noteKey >= 0)
-            engine.sendLiveNote (channel, noteKey, 0.0f, false);
+            noteOff();
     }
 
     void paint (juce::Graphics& g) override
@@ -682,6 +711,12 @@ private:
         list.setBounds (r);
     }
 
+    void noteOff()
+    {
+        if (noteKey >= 0 && channel.channel >= 0)
+            engine.sendLiveNote (channel.channel, noteKey, 0.0f, false);
+    }
+
     std::string currentPath() const
     {
         if (const auto* c = channelOf (engine, channel))
@@ -705,7 +740,7 @@ private:
                                                                               tr ("This file is not a SoundFont LYNX can read."));
                                       return;
                                   }
-                                  loadSoundFontInto (safe->engine, safe->channel, path, bank, program);
+                                  loadInto (safe->engine, safe->channel, path, bank, program);
                                   sf::PresetIndex::shared().addFont (path);
                                   safe->refreshAll();
                               });
@@ -721,7 +756,7 @@ private:
             if (fontRows[i].bank == bank && fontRows[i].program == program)
                 at = (int) i;
         at = (at + delta + (int) fontRows.size()) % (int) fontRows.size();
-        loadSoundFontInto (engine, channel, currentPath(), fontRows[(std::size_t) at].bank, fontRows[(std::size_t) at].program);
+        loadInto (engine, channel, currentPath(), fontRows[(std::size_t) at].bank, fontRows[(std::size_t) at].program);
         refreshAll();
     }
 
@@ -734,7 +769,7 @@ private:
         for (const auto& r : fontRows)
             menu.addItem (juce::String::formatted ("%03d:%03d  ", r.bank, r.program) + u8 (r.name), true, r.bank == bank && r.program == program,
                           [this, r] {
-                              loadSoundFontInto (engine, channel, r.path, r.bank, r.program);
+                              loadInto (engine, channel, r.path, r.bank, r.program);
                               refreshAll();
                           });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&patch).withMaximumNumColumns (3));
@@ -780,9 +815,14 @@ private:
     {
         const auto drums = (int) paramOf (engine, channel, sf::pBank) == 128;
         if (noteKey >= 0)
-            engine.sendLiveNote (channel, noteKey, 0.0f, false);
+            noteOff();
+        if (channel.channel < 0) // a Patcher node: the note is rendered off-line (the node plays only what is cabled to it)
+        {
+            previewSoundFontPreset (engine, currentPath(), (int) paramOf (engine, channel, sf::pBank), (int) paramOf (engine, channel, sf::pProgram));
+            return;
+        }
         noteKey = drums ? 38 : 60;
-        engine.sendLiveNote (channel, noteKey, 0.8f, true);
+        engine.sendLiveNote (channel.channel, noteKey, 0.8f, true);
         noteOffAt = juce::Time::getMillisecondCounter() + 450;
     }
 
@@ -877,7 +917,7 @@ private:
     {
         if (noteKey >= 0 && juce::Time::getMillisecondCounter() >= noteOffAt)
         {
-            engine.sendLiveNote (channel, noteKey, 0.0f, false);
+            noteOff();
             noteKey = -1;
         }
         if (channelOf (engine, channel) == nullptr)
@@ -896,7 +936,7 @@ private:
     }
 
     AudioEngine& engine;
-    int channel;
+    SfTarget channel;
     juce::TextButton load, prev, next, patch, fontTab, searchTab, folders;
     juce::TextEditor search;
     juce::Label status;
@@ -925,7 +965,12 @@ private:
 
 std::unique_ptr<juce::Component> makeSoundFontEditor (AudioEngine& engine, int channel)
 {
-    return std::make_unique<SoundFontEditor> (engine, channel);
+    return std::make_unique<SoundFontEditor> (engine, SfTarget::rack (channel));
+}
+
+std::unique_ptr<juce::Component> makeSoundFontEditor (AudioEngine& engine, std::function<ChannelDef* (Song&)> locate)
+{
+    return std::make_unique<SoundFontEditor> (engine, SfTarget { std::move (locate), -1 });
 }
 
 juce::File soundFontFoldersFile()
@@ -1039,18 +1084,7 @@ int addSoundFontChannel (AudioEngine& engine, const std::string& path, int bank,
 
 void loadSoundFontInto (AudioEngine& engine, int channel, const std::string& path, int bank, int program)
 {
-    engine.editSong ([&] (Song& s) {
-        if (channel < 0 || channel >= (int) s.channels.size())
-            return;
-        auto& c = s.channels[(std::size_t) channel];
-        if (c.instrument != InstrumentKind::soundfont)
-            return;
-        c.samplePath = path;
-        auto params = sf::readParams (c.modelParams);
-        params[sf::pBank] = (float) juce::jlimit (0, 128, bank);
-        params[sf::pProgram] = (float) juce::jlimit (0, 127, program);
-        c.modelParams.assign (params.begin(), params.end());
-    });
+    loadInto (engine, SfTarget::rack (channel), path, bank, program);
 }
 
 bool firstSoundFontPreset (const std::string& path, int& bank, int& program)
@@ -1072,9 +1106,9 @@ bool openSoundFontFile (AudioEngine& engine, const juce::File& file, int channel
     int bank = 0, program = 0;
     if (! firstSoundFontPreset (path, bank, program))
         return false;
-    if (channelOf (engine, channel) != nullptr)
+    if (channelOf (engine, SfTarget::rack (channel)) != nullptr)
     {
-        loadSoundFontInto (engine, channel, path, bank, program);
+        loadInto (engine, SfTarget::rack (channel), path, bank, program);
         sf::PresetIndex::shared().addFont (path);
     }
     else

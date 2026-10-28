@@ -280,6 +280,7 @@ std::optional<Loaded> fromText (EffectKind kind, const std::string& text)
     Loaded loaded;
     loaded.params = makeEffectSlot (kind).params;
     bool sameEngine = false;
+    std::size_t saved = 0;
     while (std::getline (in, line))
     {
         const auto eq = line.find ('=');
@@ -291,10 +292,18 @@ std::optional<Loaded> fromText (EffectKind kind, const std::string& text)
         else if (key == "name")
             loaded.name = value;
         else if (const auto p = paramByName (kind, key); p >= 0)
+        {
             loaded.params[(std::size_t) p] = (float) std::clamp (std::atof (value.c_str()), 0.0, 1.0);
+            saved = std::max (saved, (std::size_t) p + 1);
+        }
     }
     if (! sameEngine)
         return std::nullopt;
+    // round 165w: a preset written before an engine's appended law loads like a project of that time (the old law)
+    EffectSlot slot = makeEffectSlot (kind);
+    slot.params = loaded.params;
+    upgradeLoadedEffectParams (slot, saved);
+    loaded.params = slot.params;
     return loaded;
 }
 

@@ -15,6 +15,12 @@
 
 namespace lynx
 {
+struct LiveInput;
+struct HardwareOutput;
+}
+
+namespace lynx
+{
 namespace vfx
 {
 class Processor;
@@ -105,6 +111,9 @@ public:
     // calls beginChunk (n) before a chunk's render() calls, which then also add each extra output's audio (gains
     // applied) into auxOutputData (k, side) from the chunk's start; auxOutputTrack (k) = the insert it feeds.
     virtual void beginChunk (int /*n*/) noexcept {}
+    // A generator Patcher holding a Hardware Insert (round 165c): the device's buses for this chunk (null: offline) and
+    // where the chunk starts in the callback piece. The rack calls it after beginChunk.
+    virtual void setHardwareIo (const LiveInput* /*in*/, HardwareOutput* /*out*/, int /*offset*/) noexcept {}
     virtual int auxOutputCount() const noexcept { return 0; }
     virtual int auxOutputTrack (int /*k*/) const noexcept { return -1; }
     virtual const float* auxOutputData (int /*k*/, int /*side*/) const noexcept { return nullptr; }

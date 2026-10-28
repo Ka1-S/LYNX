@@ -178,12 +178,14 @@ ScheduleIndex makeScheduleIndex (const Song& song)
     return index;
 }
 
-PlaybackLoop playbackLoop (bool songMode, double loopStart, double loopEnd, double songLength) noexcept
+PlaybackLoop playbackLoop (bool songMode, double loopStart, double loopEnd, double songLength, double songStart) noexcept
 {
     if (! songMode)
         return {};
     if (loopEnd > loopStart)
         return { loopStart, loopEnd };
+    if (songStart > 0.0 && songStart < songLength)
+        return { songStart, songLength };
     return { 0.0, std::max (0.0, songLength) };
 }
 
@@ -196,6 +198,130 @@ double hostPositionTick (const Song& song, double tick, std::int64_t songLength)
         return tick;
     const auto& pattern = song.patterns[(std::size_t) std::clamp (song.currentPattern, 0, (int) song.patterns.size() - 1)];
     return std::fmod (tick, (double) std::max<std::int64_t> (1, pattern.effectiveLength (song.beatsPerBar)));
+}
+
+namespace
+{
+// One clip of the Playlist (or a performance-mode launch, played as a clip of its own), its events in the block.
+// [loopStart, loopEnd) = the block within the song loop of length `loop`.
+void scheduleClip (const Song& song, const Clip& clip, std::size_t clipIndex, double startTick, double endTick, int numSamples,
+                   double tps, std::int64_t loop, double loopStart, double loopEnd, bool resume, const ScheduleIndex* index,
+                   EventBuffer& out) noexcept
+{
+    auto overlaps = [&] (double from, double to) {
+        return (from < loopEnd && to > loopStart) || (loopEnd > (double) loop && from < loopEnd - (double) loop);
+    };
+    const auto secondsPerTick = 60.0 / (std::max (song.bpm, 1.0) * ppq);
+
+    if (clip.kind == ClipKind::audio)
+    {
+        if (clip.channel < 0 || clip.channel >= (int) song.channels.size() || clip.length <= 0)
+            return;
+
+        NoteEvent e;
+        e.channel = clip.channel;
+        e.key = audioClipKey (clipIndex);
+        e.velocity = clip.gain;
+        e.pan = clip.pan;
+        e.fadeIn = (float) ((double) clip.fadeIn / tps);
+        e.fadeOut = (float) ((double) clip.fadeOut / tps);
+
+        if (resume && loopStart > (double) clip.start && loopStart < (double) clip.end())
+        {
+            e.type = NoteEvent::Type::on;
+            e.sampleOffset = 0;
+            e.startSeconds = ((double) clip.offset + (double) clip.offsetFraction + loopStart - (double) clip.start) * secondsPerTick;
+            e.clipElapsed = (float) ((loopStart - (double) clip.start) / tps);
+            e.clipRemaining = (float) (((double) clip.end() - loopStart) / tps);
+            out.add (e);
+        }
+
+        if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
+            return;
+
+        e.type = NoteEvent::Type::on;
+        e.startSeconds = std::max (0.0, ((double) clip.offset + (double) clip.offsetFraction) * secondsPerTick);
+        e.clipElapsed = 0.0f;
+        e.clipRemaining = (float) ((double) clip.length / tps);
+        emitOccurrences ((double) clip.start, loop, startTick, endTick, tps, numSamples, e, out);
+
+        e.type = NoteEvent::Type::off;
+        e.startSeconds = 0.0;
+        emitOccurrences ((double) clip.end(), loop, startTick, endTick, tps, numSamples, e, out);
+        return;
+    }
+
+    if (clip.kind != ClipKind::pattern || clip.pattern < 0 || clip.pattern >= (int) song.patterns.size() || clip.length <= 0)
+        return;
+
+    // one tick of slack to catch the "off" that falls exactly at the end of the clip
+    if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
+        return;
+
+    const auto& notes = song.patterns[(std::size_t) clip.pattern].notes;
+    auto first = notes.begin(), last = notes.end();
+
+    // with the index and without the block wrapping around the end of the song: only the notes whose "on" or "off"
+    // can fall in the block (swing delays by at most half a step)
+    if (index != nullptr && loopEnd <= (double) loop && (std::size_t) clip.pattern < index->maxNoteLength.size())
+    {
+        const auto local = (double) (clip.offset - clip.start);
+        const auto from = loopStart + local - (double) (ticksPerStep + index->maxNoteLength[(std::size_t) clip.pattern] + index->maxShift) - 1.0;
+        const auto to = loopEnd + local + 1.0;
+        first = std::lower_bound (notes.begin(), notes.end(), from, [] (const Note& n, double t) { return (double) n.start < t; });
+        last = std::upper_bound (first, notes.end(), to, [] (double t, const Note& n) { return t < (double) n.start; });
+    }
+
+    for (auto it = first; it != last; ++it)
+    {
+        const auto& note = *it;
+
+        if (note.muted || note.start < clip.offset || note.start >= clip.offset + clip.length)
+            continue;
+
+        const auto timing = noteTiming (note, song.swing, channelOf (&song.channels, note.channel));
+        const auto on = std::min (clip.start + (note.start - clip.offset) + (timing.start - note.start), clip.end() - 1);
+        const auto off = std::min (on + timing.length, clip.end());
+
+        NoteEvent e;
+        e.type = NoteEvent::Type::on;
+        e.channel = note.channel;
+        e.key = note.key;
+        e.velocity = note.velocity;
+        e.pan = note.pan;
+        e.cents = note.finePitch;
+        e.porta = note.porta;
+        e.modX = note.modX;
+        e.modY = note.modY;
+        e.release = note.release;
+        e.colour = (std::int8_t) (note.colour & 15);
+
+        if (note.slide)
+        {
+            e.type = NoteEvent::Type::slide;
+            e.slideSamples = (float) ((double) (off - on) / tps);
+            emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
+            continue;
+        }
+
+        emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
+
+        e.type = NoteEvent::Type::off;
+        e.velocity = 0.0f;
+        emitOccurrences ((double) off, loop, startTick, endTick, tps, numSamples, e, out);
+    }
+}
+} // namespace
+
+void scheduleSingleClip (const Song& song, const Clip& clip, std::size_t clipIndex, double startTick, int numSamples, double tps,
+                         EventBuffer& out, const ScheduleIndex* index) noexcept
+{
+    if (numSamples <= 0 || tps <= 0.0)
+        return;
+    const auto endTick = startTick + numSamples * tps;
+    // a "loop" longer than anything played: the clip plays once, where it is
+    const auto loop = (std::max<std::int64_t> ((std::int64_t) std::ceil (endTick), clip.end()) + 1) * 2;
+    scheduleClip (song, clip, clipIndex, startTick, endTick, numSamples, tps, loop, startTick, endTick, false, index, out);
 }
 
 void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out, bool resume,
@@ -213,11 +339,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
     const auto loopStart = std::fmod (startTick, (double) loop);
     const auto loopEnd = loopStart + (endTick - startTick);
 
-    auto overlaps = [&] (double from, double to) {
-        return (from < loopEnd && to > loopStart) || (loopEnd > (double) loop && from < loopEnd - (double) loop);
-    };
-
-    const auto secondsPerTick = 60.0 / (std::max (song.bpm, 1.0) * ppq);
+    const auto zoneEnd = song.performanceZoneEnd();
 
     for (std::size_t clipIndex = 0; clipIndex < song.playlist.size(); ++clipIndex)
     {
@@ -225,104 +347,10 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
         if (clip.muted || song.isTrackMuted (clip.track))
             continue;
-
-        if (clip.kind == ClipKind::audio)
-        {
-            if (clip.channel < 0 || clip.channel >= (int) song.channels.size() || clip.length <= 0)
-                continue;
-
-            NoteEvent e;
-            e.channel = clip.channel;
-            e.key = audioClipKey (clipIndex);
-            e.velocity = clip.gain;
-            e.pan = clip.pan;
-            e.fadeIn = (float) ((double) clip.fadeIn / tps);
-            e.fadeOut = (float) ((double) clip.fadeOut / tps);
-
-            if (resume && loopStart > (double) clip.start && loopStart < (double) clip.end())
-            {
-                e.type = NoteEvent::Type::on;
-                e.sampleOffset = 0;
-                e.startSeconds = ((double) clip.offset + (double) clip.offsetFraction + loopStart - (double) clip.start) * secondsPerTick;
-                e.clipElapsed = (float) ((loopStart - (double) clip.start) / tps);
-                e.clipRemaining = (float) (((double) clip.end() - loopStart) / tps);
-                out.add (e);
-            }
-
-            if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
-                continue;
-
-            e.type = NoteEvent::Type::on;
-            e.startSeconds = std::max (0.0, ((double) clip.offset + (double) clip.offsetFraction) * secondsPerTick);
-            e.clipElapsed = 0.0f;
-            e.clipRemaining = (float) ((double) clip.length / tps);
-            emitOccurrences ((double) clip.start, loop, startTick, endTick, tps, numSamples, e, out);
-
-            e.type = NoteEvent::Type::off;
-            e.startSeconds = 0.0;
-            emitOccurrences ((double) clip.end(), loop, startTick, endTick, tps, numSamples, e, out);
-            continue;
-        }
-
-        if (clip.kind != ClipKind::pattern || clip.pattern < 0 || clip.pattern >= (int) song.patterns.size() || clip.length <= 0)
+        if (clip.start < zoneEnd) // Performance mode: the zone's clips play only when launched (schedulePerformance)
             continue;
 
-        // one tick of slack to catch the "off" that falls exactly at the end of the clip
-        if (! overlaps ((double) clip.start, (double) clip.end() + 1.0))
-            continue;
-
-        const auto& notes = song.patterns[(std::size_t) clip.pattern].notes;
-        auto first = notes.begin(), last = notes.end();
-
-        // with the index and without the block wrapping around the end of the song: only the notes whose "on" or "off"
-        // can fall in the block (swing delays by at most half a step)
-        if (index != nullptr && loopEnd <= (double) loop && (std::size_t) clip.pattern < index->maxNoteLength.size())
-        {
-            const auto local = (double) (clip.offset - clip.start);
-            const auto from = loopStart + local - (double) (ticksPerStep + index->maxNoteLength[(std::size_t) clip.pattern] + index->maxShift) - 1.0;
-            const auto to = loopEnd + local + 1.0;
-            first = std::lower_bound (notes.begin(), notes.end(), from, [] (const Note& n, double t) { return (double) n.start < t; });
-            last = std::upper_bound (first, notes.end(), to, [] (double t, const Note& n) { return t < (double) n.start; });
-        }
-
-        for (auto it = first; it != last; ++it)
-        {
-            const auto& note = *it;
-
-            if (note.muted || note.start < clip.offset || note.start >= clip.offset + clip.length)
-                continue;
-
-            const auto timing = noteTiming (note, song.swing, channelOf (&song.channels, note.channel));
-            const auto on = std::min (clip.start + (note.start - clip.offset) + (timing.start - note.start), clip.end() - 1);
-            const auto off = std::min (on + timing.length, clip.end());
-
-            NoteEvent e;
-            e.type = NoteEvent::Type::on;
-            e.channel = note.channel;
-            e.key = note.key;
-            e.velocity = note.velocity;
-            e.pan = note.pan;
-            e.cents = note.finePitch;
-            e.porta = note.porta;
-            e.modX = note.modX;
-            e.modY = note.modY;
-            e.release = note.release;
-            e.colour = (std::int8_t) (note.colour & 15);
-
-            if (note.slide)
-            {
-                e.type = NoteEvent::Type::slide;
-                e.slideSamples = (float) ((double) (off - on) / tps);
-                emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
-                continue;
-            }
-
-            emitOccurrences ((double) on, loop, startTick, endTick, tps, numSamples, e, out);
-
-            e.type = NoteEvent::Type::off;
-            e.velocity = 0.0f;
-            emitOccurrences ((double) off, loop, startTick, endTick, tps, numSamples, e, out);
-        }
+        scheduleClip (song, clip, clipIndex, startTick, endTick, numSamples, tps, loop, loopStart, loopEnd, resume, index, out);
     }
 
     out.sortByOffset();
