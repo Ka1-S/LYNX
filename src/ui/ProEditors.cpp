@@ -581,7 +581,10 @@ private:
     // which handle of the frequency slider is being dragged: 0 = high-pass (Frequency), 1 = low-pass
     int dragHandle = 0;
     static float freqPos (double hz) { return (float) (std::log (hz / 2000.0) / std::log (10.0)); } // 2 .. 20 kHz
-    float hpPos() const { return freqPos (mixsuite::hush::hz (v (pFreq()))); }
+    // round 165x: the extended law's high-pass reaches 20 kHz (the old law and the classic voicing: 16 kHz)
+    bool ext() const { return v (P ("Range law")) >= 0.5f && v (P ("Voicing")) < 0.5f; }
+    double hpHz() const { return mixsuite::hush::hpHz (v (pFreq()), ext()); }
+    float hpPos() const { return freqPos (hpHz()); }
     float lpPos() const { return v (P ("Low-pass freq.")) >= 0.999f ? 1.0f : freqPos (mixsuite::hush::lowPassHz (v (P ("Low-pass freq.")))); }
 
     juce::String title() const override { return "Hush De-esser"; }
@@ -658,9 +661,23 @@ private:
         out.push_back (custom ({ mx + 90.0f, y0 + 148.0f, 100.0f, 26.0f }, idExternal, P ("External SC"), tr ("Side chain: detect this signal (In) or another track (Ext)")));
         // right: stereo link (with MID) and look-ahead (with its power button)
         out.push_back (knob ({ 512.0f, y0 + 2.0f, 84.0f, 90.0f }, P ("Stereo link"), tr ("Stereo link")));
-        auto mid = toggle ({ 522.0f, y0 + 96.0f, 64.0f, 18.0f }, P ("Link mid"), "MID");
-        mid.hint = tr ("Mid: detect on the middle of the stereo image only");
-        out.push_back (mid);
+        if (ext())
+        {
+            // round 165x: the reference's link — 100 % detects on the mid signal; past it a share of the processing acts
+            // on the mid (or side) signal only
+            auto ms = tabs ({ 516.0f, y0 + 96.0f, 76.0f, 18.0f }, P ("Link only side"), "Mid|Side", { 0.0f, 1.0f });
+            ms.hint = tr ("Which signal the processing past 100 % link acts on alone: the mid or the side");
+            out.push_back (ms);
+            auto only = barValue ({ mx, y0 + 148.0f, 86.0f, 26.0f }, P ("Link only"), tr ("Only"));
+            only.hint = tr ("Stereo link past 100 %: the share processed on the mid (or side) signal only");
+            out.push_back (only);
+        }
+        else
+        {
+            auto mid = toggle ({ 522.0f, y0 + 96.0f, 64.0f, 18.0f }, P ("Link mid"), "MID");
+            mid.hint = tr ("Mid: detect on the middle of the stereo image only");
+            out.push_back (mid);
+        }
         out.push_back (knob ({ 512.0f, y0 + 120.0f, 84.0f, 90.0f }, P ("Lookahead time"), tr ("Lookahead")));
         auto la = toggle ({ 522.0f, y0 + 214.0f, 64.0f, 18.0f }, P ("Lookahead"), tr ("On"));
         la.hint = tr ("Look-ahead on / off");
@@ -774,12 +791,12 @@ private:
             if (dragHandle == 1)
             {
                 const auto lp = P ("Low-pass freq.");
-                set ({ { lp, x >= 0.985 ? 1.0f : invert ([] (float y) { return mixsuite::hush::lowPassHz (y); }, juce::jmax (hz, mixsuite::hush::hz (v (pFreq())))) } });
+                set ({ { lp, x >= 0.985 ? 1.0f : invert ([] (float y) { return mixsuite::hush::lowPassHz (y); }, juce::jmax (hz, hpHz())) } });
                 ui::showValueTip (*this, tr_.toNearestInt(), tr ("Low pass") + " " + text (lp));
             }
             else
             {
-                set ({ { pFreq(), invert ([] (float y) { return mixsuite::hush::hz (y); }, juce::jmin (hz, 16000.0)) } });
+                set ({ { pFreq(), mixsuite::hush::hpValue (juce::jmin (hz, ext() ? 20000.0 : 16000.0), ext()) } });
                 ui::showValueTip (*this, tr_.toNearestInt(), tr ("Frequency") + " " + text (pFreq()));
             }
             return;

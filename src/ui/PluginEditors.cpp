@@ -349,6 +349,12 @@ public:
                 setParams (edits);
                 return;
             }
+        if (kind == EffectKind::glowLeveler) // round 165x: AUTO MAKEUP's reference point and its make-up kept when off
+            if (const auto edits = mixsuite::glow::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
         if (kind == EffectKind::ember) // round 165: the Classic voicing's Auto moves Output with Drive
             if (const auto edits = mixsuite::ember::linkedEdit (current()->params, param, value); edits.size() > 1)
             {
@@ -2591,7 +2597,7 @@ public:
         else if (id == "hushband") // the detector's filter (high-pass or band) at the frequency, 1 .. 20 kHz
         {
             grid (8, 4);
-            const auto f0 = mixsuite::hush::hz (param01 ("Frequency"));
+            const auto f0 = mixsuite::hush::hpHz (param01 ("Frequency"), param01 ("Range law") >= 0.5f && param01 ("Voicing") < 0.5f); // round 165x
             const auto band = param01 ("Band detector") >= 0.5f;
             strokeCurve ([f0, band] (float x) {
                 const auto u = 1000.0 * std::pow (20.0, (double) x) / f0;

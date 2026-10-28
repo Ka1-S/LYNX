@@ -143,6 +143,12 @@ struct Settings
     double hpHz = 7000.0, lpHz = 14000.0;      // the detection band
     double lookaheadMs = 12.0;                 // 0 .. 15 ms (within the fixed 15 ms latency)
     bool lookahead = true, wideband = true, listen = false;
+    // round 165x (REA_rodada165x §2) [EXEC]: the reference's Stereo Link — link 0 … 1 detects each channel on
+    // (1 − link/2) own + link/2 other (1 = the mid signal, as before); linkOnly 0 … 1 = its 100 … 200 % half (that share
+    // processed on the mid — linkSide: the side — signal only; Side: each channel detects on (1 − m) mid ∓ m side and
+    // processes (1 − m) itself ± m side). Off = the mid signal (her states)
+    bool proLink = false, linkSide = false;
+    double link = 1.0, linkOnly = 0.0;
 };
 
 class DeEsser
@@ -163,6 +169,11 @@ private:
     Biquad hp1, hp2, lp1, lp2, low1, low2, split1, split2;
     double eh = 0.0, qh = 0.0, ql = 0.0, sm = 0.0;
     bool open = false;
+    // round 165x: the second detector lane (the right channel's blend, or the side signal)
+    Biquad bhp1, bhp2, blp1, blp2, blow1, blow2;
+    double beh = 0.0, bqh = 0.0, bql = 0.0, bsm = 0.0;
+    bool bopen = false;
+    std::array<float, ring> blevel {}, bratio {};
     std::array<float, ring> dl {}, dr {}, level {}, ratio {};
     std::int64_t pos = 0;
     float last = 0.0f, lastDet = -120.0f;
@@ -181,10 +192,15 @@ struct Settings
     // round-123 Limit [model] and no auto make-up
     bool measured = false, autoMakeup = false;
     // round 165w (REA_rodada165w §2) [EXEC]: the measured release (the trial's gain recovery after bursts of 0.1 … 10 s,
-    // −24 … 0 dBFS); off = round 123's (its slow conductance left ≈ 0.8 dB of reduction for many seconds)
+    // −24 … 0 dBFS); off = round 123's (its slow conductance left ≈ 0.8 dB of reduction for many seconds). Round 165x
+    // (REA_rodada165x §1): with it, the measured attack (the trial's first milliseconds of a burst)
     bool measuredRelease = false;
+    // round 165x (REA_rodada165x §1) [EXEC]: the peak reduction dial where AUTO MAKEUP was switched on (its make-up is
+    // autoMakeupDb (peakReduction) − autoMakeupDb (makeupRef)); 46 = the round-152 reference
+    double makeupRef = 46.0;
 };
 double autoMakeupDb (double peakReduction) noexcept; // round 152: AUTO MAKEUP's gain (dB) at a peak reduction dial
+double gainForMakeupDb (double db) noexcept;          // round 165x: the gain dial giving makeupDb (inverse)
 double makeupDb (double gainKnob) noexcept;              // the gain dial's level (dB) below the threshold
 double sensitivityDb (double peakReduction, double hiFreq) noexcept; // side-chain level shift vs her state (dB)
 

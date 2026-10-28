@@ -16031,6 +16031,7 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity152cTests.inc"
 #include "Parity165Tests.inc"
 #include "Parity165wTests.inc"
+#include "Parity165xTests.inc"
 #include "Parity165aTests.inc"
 #include "Patcher141Tests.inc"
 #include "Patcher162Tests.inc"

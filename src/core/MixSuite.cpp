@@ -702,6 +702,22 @@ double gainDb (float v) noexcept { return lin (v, 0.0, 30.0); }
 double sidechainDb (float v) noexcept { return lin (v, -20.0, 40.0); }
 bool classic (const EffectParams& p) noexcept { return on (p[voicing]); }
 double trimDb (float v) noexcept { return lin (v, -18.0, 18.0); }
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value)
+{
+    std::vector<std::pair<int, float>> edits { { param, value } };
+    if (param != autoMakeup || ! classic (p) || ! on (p[optoLaw]) || on (value) == on (p[autoMakeup]))
+        return edits;
+    const double pr = 100.0 * std::clamp ((double) p[peakReduction], 0.0, 1.0);
+    if (on (value)) // switched on: the dial as it is now is the reference
+        edits.push_back ({ makeupRef, p[peakReduction] });
+    else // switched off: the trial keeps the make-up (its Gain knob moved); LYNX moves the Gain dial by as much
+    {
+        const double ref = 100.0 * std::clamp ((double) p[makeupRef], 0.0, 1.0);
+        const double db = vmatch::opto::makeupDb (100.0 * p[gain]) + vmatch::opto::autoMakeupDb (pr) - vmatch::opto::autoMakeupDb (ref);
+        edits.push_back ({ gain, (float) (vmatch::opto::gainForMakeupDb (db) / 100.0) });
+    }
+    return edits;
+}
 int analogHz (float v) noexcept { return v < 0.25f ? 0 : v < 0.75f ? 50 : 60; }
 
 namespace
@@ -747,6 +763,7 @@ public:
             c.measured = on (p[optoLaw]);
             c.autoMakeup = on (p[autoMakeup]);
             c.measuredRelease = on (p[releaseLaw]);
+            c.makeupRef = 100.0 * std::clamp ((double) p[makeupRef], 0.0, 1.0);
             const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
             const int hz = analogHz (p[analog]);
             const auto trimGain = (float) dbToGain (trimDb (p[trim]));
@@ -898,6 +915,72 @@ double lookaheadTimeMs (float v) noexcept { return std::round (lin (v, 0.0, 15.0
 float lookaheadTimeValue (double ms) noexcept { return (float) std::clamp (ms / 15.0, 0.0, 1.0); }
 double classicThresholdDb (float v) noexcept { return lin (v, -80.0, 0.0); }
 double panValue (float v) noexcept { return lin (v, -1.0, 1.0); }
+// round 165x [EXEC] (REA_rodada165x §2, the trial's value texts at 1000 steps): the reference's Input / Output Level reads
+// 72 dB per unit above 0.2 (0.5 = 0 dB, 1 = +36 dB) and 40 log10 (v) + 6.36 dB below (−21.6 dB at 0.2, −∞ at 0); its
+// high-pass 2000 · 10^v Hz (2 … 20 kHz)
+double levelDb (float v, bool ext) noexcept
+{
+    if (! ext)
+        return lin (v, -12.0, 12.0);
+    const double x = std::clamp ((double) v, 0.0, 1.0);
+    return x >= 0.2 ? 72.0 * x - 36.0 : x <= 0.0 ? -200.0 : 40.0 * std::log10 (x) + 6.3588;
+}
+float levelValue (double db, bool ext) noexcept
+{
+    if (! ext)
+        return (float) std::clamp ((db + 12.0) / 24.0, 0.0, 1.0);
+    if (db >= -21.6)
+        return (float) std::clamp ((db + 36.0) / 72.0, 0.0, 1.0);
+    return db <= -199.0 ? 0.0f : (float) std::clamp (std::pow (10.0, (db - 6.3588) / 40.0), 0.0, 0.2);
+}
+double hpHz (float v, bool ext) noexcept { return ext ? 2000.0 * std::pow (10.0, std::clamp ((double) v, 0.0, 1.0)) : hz (v); }
+float hpValue (double f, bool ext) noexcept
+{
+    const double x = std::max (f, 1.0) / 2000.0;
+    return (float) std::clamp (ext ? std::log10 (x) : std::log (x) / std::log (8.0), 0.0, 1.0);
+}
+bool extended (const EffectParams& p) noexcept { return on (p[rangeLaw]) && ! on (p[voicing]); }
+// round 165x [EXEC] (REA_rodada165x §2; L / R test tones, sibilance in one channel, both in phase, in anti-phase):
+// the reference's Stereo Link k (0 … 1 = 0 … 100 %) detects each channel on (1 − k/2) · own + k/2 · other — 100 % is
+// the mid signal, so side-only sibilance does not trigger; above 100 % a share m of the output is processed on the mid
+// signal only (Mid-only: the side passes) with the same gain. Side-only (the same test material, 125 / 150 / 200 %):
+// each channel detects on (1 − m) · mid ∓ m · side (L −, R +) and processes (1 − m) · itself ± m · side (L +, R −).
+struct ProLink
+{
+    double k = 1.0, m = 0.0;
+    bool side = false;
+    bool twoLanes() const noexcept { return (m <= 0.0 && k < 1.0) || (m > 0.0 && side); }
+    // the detector's input(s) for the channels' samples a / b
+    void lanes (double a, double b, double& d0, double& d1) const noexcept
+    {
+        if (m <= 0.0 && k < 1.0) { d0 = (1.0 - 0.5 * k) * a + 0.5 * k * b; d1 = 0.5 * k * a + (1.0 - 0.5 * k) * b; }
+        else if (! side) d0 = d1 = 0.5 * (a + b);
+        else { const double mid = 0.5 * (a + b), sd = 0.5 * (a - b); d0 = (1.0 - m) * mid - m * sd; d1 = (1.0 - m) * mid + m * sd; }
+    }
+    // the change to add to the channels given their band signals ba / bb and the lanes' gains
+    void delta (double g0, double g1, double ba, double bb, double& oa, double& ob) const noexcept
+    {
+        if (m <= 0.0) { oa = (g0 - 1.0) * ba; ob = ((k < 1.0 ? g1 : g0) - 1.0) * bb; return; }
+        if (! side)
+        {
+            const double mid = 0.5 * (ba + bb);
+            oa = (g0 - 1.0) * ((1.0 - m) * ba + m * mid);
+            ob = (g0 - 1.0) * ((1.0 - m) * bb + m * mid);
+            return;
+        }
+        const double sd = 0.5 * (ba - bb);
+        oa = (g0 - 1.0) * ((1.0 - m) * ba + m * sd);
+        ob = (g1 - 1.0) * ((1.0 - m) * bb - m * sd);
+    }
+};
+static ProLink proLinkOf (const EffectParams& p) noexcept
+{
+    ProLink l;
+    l.k = std::clamp ((double) p[stereoLink], 0.0, 1.0);
+    l.m = l.k >= 1.0 ? std::clamp ((double) p[linkOnly], 0.0, 1.0) : 0.0;
+    l.side = on (p[linkSide]);
+    return l;
+}
 // round 165w [EXEC] (REA_rodada165w §5): the reference's input / output pan is a balance — the far channel × (1 − |pan|),
 // the near one untouched (both 1 kHz / 1.5 kHz test tones, every quarter step)
 static void balance (float* l, float* r, int n, double pan) noexcept
@@ -994,7 +1077,8 @@ private:
         // compensation when it moves). The default 2 ms is the old fixed value.
         if (const auto ms = lookaheadTimeMs (p[lookaheadTime]); std::abs (ms - delayMs) > 1e-9)
             setDelay (ms);
-        const auto inGainDb = lin (p[input], -12.0, 12.0);
+        const bool extLaw = extended (p); // round 165x: the reference's ranges and stereo link
+        const auto inGainDb = classic (p) ? lin (p[input], -12.0, 12.0) : levelDb (p[input], extLaw);
         if (inGainDb != 0.0)
         {
             const auto gIn = (float) dbToGain (inGainDb);
@@ -1017,14 +1101,22 @@ private:
             vmatch::vocalds::Settings v;
             v.thresholdDb = thresholdDb (p[threshold]);
             v.rangeDb = rangeDb (p[hush::range]);
-            v.hpHz = hz (p[frequency]);
+            v.hpHz = hpHz (p[frequency], extLaw);
             v.lpHz = p[lowPass] < 0.999f ? lowPassHz (p[lowPass]) : 20000.0;
+            if (extLaw)
+            {
+                const auto pl = proLinkOf (p);
+                v.proLink = true;
+                v.link = pl.k;
+                v.linkOnly = pl.m;
+                v.linkSide = pl.side;
+            }
             v.lookahead = on (p[lookahead]);
             v.lookaheadMs = lookaheadTimeMs (p[lookaheadTime]);
             v.wideband = on (p[mode]);
             v.listen = on (p[listen]);
             vocalEngine.process (l, r, n, v);
-            const auto out = (float) dbToGain (lin (p[output], -12.0, 12.0));
+            const auto out = (float) dbToGain (levelDb (p[output], extLaw));
             for (int i = 0; i < n; ++i) { l[i] *= out; r[i] *= out; }
             meters.set (vocalEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
             meters.setDetector (vocalEngine.detectorDb());
@@ -1047,7 +1139,7 @@ private:
             meters.setDetector (classicEngine.detectorDb());
             return;
         }
-        const auto f = std::min (hz (p[frequency]), sr * 0.45);
+        const auto f = std::min (hpHz (p[frequency], extLaw), sr * 0.45);
         const bool band = on (p[detector]);
         if (band)
             detect.filter (sr, 2, f, 1.4);
@@ -1074,7 +1166,9 @@ private:
         const bool linked = link >= 1.0 || mid;
         const auto release = coef (releaseMs (p[hush::release]) * 0.001, sr);
         const auto attack = coef (ahead ? std::max (delayMs, 0.03) * 0.001 / 3.0 : 0.0005, sr);
-        const auto out = (float) dbToGain (lin (p[output], -12.0, 12.0));
+        const auto out = (float) dbToGain (levelDb (p[output], extLaw));
+        const auto pl = proLinkOf (p);
+        const bool pro = extLaw; // round 165x: the reference's link (detection on the blended signals)
         constexpr double knee = 3.0;
         double maxGr = 0.0, maxDet = 0.0;
 
@@ -1107,7 +1201,16 @@ private:
                 xb = ahead ? sb : dsb;
             }
             double sA, sB;
-            if (mid)
+            if (pro)
+            {
+                double d0, d1;
+                pl.lanes (xa, xb, d0, d1);
+                auto ya = detect.process ((float) d0, 0), yb = detect.process ((float) d1, 1);
+                if (lpOn) { ya = detectLp.process (ya, 0); yb = detectLp.process (yb, 1); }
+                sA = std::abs (ya);
+                sB = std::abs (yb);
+            }
+            else if (mid)
             {
                 auto m = detect.process (0.5f * (xa + xb), 0);
                 if (lpOn) m = detectLp.process (m, 0);
@@ -1128,7 +1231,23 @@ private:
                 full = fullEnv;
             }
             float gA, gB;
-            if (linked)
+            if (pro)
+            {
+                // each lane its own envelope and gain (one lane when both hear the same signal)
+                const int lanes = pl.twoLanes() ? 2 : 1;
+                const double ss[2] { sA, sB };
+                for (int c = 0; c < lanes; ++c)
+                {
+                    envCh[c] = ss[c] > envCh[c] ? ss[c] : release * envCh[c] + (1.0 - release) * ss[c];
+                    maxDet = std::max (maxDet, envCh[c]);
+                    const auto want = wanted (envCh[c], full);
+                    grCh[c] = want > grCh[c] ? attack * grCh[c] + (1.0 - attack) * want : release * grCh[c] + (1.0 - release) * want;
+                    maxGr = std::max (maxGr, grCh[c]);
+                }
+                gA = (float) dbToGain (-grCh[0]);
+                gB = (float) dbToGain (-grCh[lanes - 1]);
+            }
+            else if (linked)
             {
                 const auto s = std::max (sA, sB);
                 env = s > env ? s : release * env + (1.0 - release) * s;
@@ -1159,6 +1278,43 @@ private:
                 a = listenF.process (da, 0);
                 b = listenF.process (db, 1);
                 if (lpOn) { a = listenLp.process (a, 0); b = listenLp.process (b, 1); }
+            }
+            else if (pro)
+            {
+                // round 165x: output = the pass-through + the link's change of the band (whole signal, above the
+                // split, or between the two handles)
+                double pa = da, pb = db, ba = da, bb = db;
+                if (! wide)
+                {
+                    const auto la = split.process (da, 0), lb = split.process (db, 1);
+                    ba = da - la;
+                    bb = db - lb;
+                    if (lpOn)
+                    {
+                        const auto ma = bandLp2.process (bandLp.process ((float) ba, 0), 0), mb = bandLp2.process (bandLp.process ((float) bb, 1), 1);
+                        const auto ta = topHp2.process (topHp.process ((float) ba, 0), 0), tb = topHp2.process (topHp.process ((float) bb, 1), 1);
+                        pa = la + ma + ta;
+                        pb = lb + mb + tb;
+                        ba = ma;
+                        bb = mb;
+                    }
+                }
+                double oa, ob;
+                pl.delta (gA, gB, ba, bb, oa, ob);
+                if (over)
+                {
+                    // the change goes to the high rate as a band with a unit gain (the gain moves at the base rate)
+                    bandBuf[0][(std::size_t) i] = (float) oa;
+                    bandBuf[1][(std::size_t) i] = (float) ob;
+                    gainBuf[0][(std::size_t) i] = gainBuf[1][(std::size_t) i] = 1.0f;
+                    a = (float) pa; // (the pass-through; the oversampler adds the change)
+                    b = (float) pb;
+                }
+                else
+                {
+                    a = (float) (pa + oa);
+                    b = (float) (pb + ob);
+                }
             }
             else if (over)
             {
@@ -2875,14 +3031,17 @@ const EffectInfo& glowInfo()
                                      { "Trim", 0.5f }, { "Auto makeup", 0.0f }, { "Voicing", 1.0f },
                                      { "Opto law", 1.0f }, { "Analog", 0.0f },
                                      // round 165w: the measured release (a project saved before keeps round 123's)
-                                     { "Opto release", 1.0f } } };
+                                     { "Opto release", 1.0f },
+                                     // round 165x: the dial where Auto makeup was switched on (0.46 = round 152's)
+                                     { "Makeup ref", 0.46f } } };
     return info;
 }
 
 const EffectInfo& hushInfo()
 {
     static const EffectInfo info { "Hush De-esser",
-                                   { { "Frequency", 0.53f }, { "Threshold", 0.5f }, { "Range", 0.5f }, { "Wideband", 0.0f },
+                                   // round 165x: 6.02 kHz on the extended law's 2 … 20 kHz scale (0.53 on the old 2 … 16 kHz)
+                                   { { "Frequency", 0.4786f }, { "Threshold", 0.5f }, { "Range", 0.5f }, { "Wideband", 0.0f },
                                      { "Band detector", 0.0f }, { "Listen", 0.0f }, { "Lookahead", 1.0f }, { "Release", 0.56f },
                                      { "Output", 0.5f }, { "Voicing", 0.0f }, // round 123 (vmatch123)
                                      // round 128 (parity with the reference de-esser)
@@ -2891,7 +3050,9 @@ const EffectInfo& hushInfo()
                                      { "Display", 1.0f },
                                      { "Oversampling", 0.0f }, // round 135
                                      { "Vocal voicing", 0.0f }, // round 148
-                                     { "Input pan", 0.5f }, { "Output pan", 0.5f } } }; // round 165w
+                                     { "Input pan", 0.5f }, { "Output pan", 0.5f }, // round 165w
+                                     // round 165x: the reference's ranges and link (a project saved before: the old law)
+                                     { "Range law", 1.0f }, { "Link only", 0.0f }, { "Link only side", 0.0f } } };
     return info;
 }
 
@@ -3024,13 +3185,23 @@ namespace hush
 {
 int oversamplingOf (float v) noexcept { return 1 << std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 3.0f), 0, 3); }
 
+std::string oldLawText (int param, float v)
+{
+    switch (param)
+    {
+        case frequency: return hzText (hz (v));
+        case input: case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+        default: return paramText (EffectKind::hushDeEsser, param, v);
+    }
+}
+
 std::string classicParamText (int param, float v)
 {
     switch (param)
     {
         case threshold: return fmt ("%.1f dB", classicThresholdDb (v));
         case range: case lookahead: case release: return "-";
-        default: return paramText (EffectKind::hushDeEsser, param, v);
+        default: return oldLawText (param, v); // (the classic voicing keeps its ranges)
     }
 }
 } // namespace hush
@@ -3145,6 +3316,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case autoMakeup: return on (v) ? "on" : "off";
             case optoLaw: return on (v) ? "measured" : "round 123";
             case releaseLaw: return on (v) ? "measured" : "round 123";
+            case makeupRef: return fmt ("%.0f", v * 100.0);
             case analog: return analogHz (v) == 0 ? "off" : analogHz (v) == 50 ? "50 Hz" : "60 Hz";
             default: return fmt ("%.2f", v);
         }
@@ -3154,7 +3326,8 @@ std::string paramText (EffectKind kind, int param, float v)
         using namespace hush;
         switch (param)
         {
-            case frequency: return hzText (hz (v));
+            // round 165x: new instances use the reference's ranges (the old law's texts: oldLawText)
+            case frequency: return hzText (hpHz (v, true));
             case threshold: return fmt ("%.1f dB", thresholdDb (v));
             case range: return fmt ("%.1f dB", rangeDb (v));
             case mode: return on (v) ? "wideband" : "split";
@@ -3165,10 +3338,12 @@ std::string paramText (EffectKind kind, int param, float v)
             case stereoLink: return fmt ("%.0f%%", v * 100.0);
             case linkMid: return on (v) ? "mid" : "stereo";
             case external: return on (v) ? "external" : "internal";
-            case input: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+            case input: case output: return v <= 0.0f ? std::string ("-inf dB") : fmt ("%+.1f dB", levelDb (v, true));
             case display: return on (v) ? "shown" : "hidden";
             case release: return fmt ("%.0f ms", releaseMs (v));
-            case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+            case rangeLaw: return on (v) ? "extended" : "round 165w";
+            case linkOnly: return fmt ("%.0f%%", v * 100.0);
+            case linkSide: return on (v) ? "side" : "mid";
             case inputPan: case outputPan:
             {
                 const auto pan = panValue (v);
