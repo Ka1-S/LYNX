@@ -76,9 +76,16 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
 | 9 | Audio Editor volume knob | PASS | s5_37 (knob next to Loop) |
 | 4 | Tempo display right-click › Tempo tapper; Sync | PASS | s5_40/s5_41 |
 | 8 | Last tweaked read-out on the hint bar, click → menu | PASS | s5_49/s5_50: "Insert 2 - Pan R8", menu with automation / remote control / value (note: Stereo separation is not an automation target, so it never shows there) |
+| 8 | Plugin window Presets menu with ◀ ▶, save / load / export | PASS | s6_05-s6_08: Pro-Q 4 (VST3 trial): menu, "Save preset..." name dialog opens focused, "mine" listed under Your presets |
 | 4 | Undo history Ctrl+H; Quick-add Ctrl+A / Ctrl+Z (real scan codes) | PASS | s5_10/s5_11/s5_51 — F3 stays withdrawn |
 
 ## Findings (not in the posted claims, found on the way)
+- F10 (fixed here): closing an active third-party plugin window (its X; also F12 / Alt+F12 / removing the plugin)
+  handed the Windows activation to ANOTHER program (here a terminal on the second screen) instead of LYNX, so the
+  next Space or shortcut went to that program. Reproduced 2/2 with Pro-Q 4 (s6, `wins` shows fg = the terminal's
+  HWND after the close); LYNX's own windows (Channel settings, Audio editor, tool windows) were fine. Fix:
+  ~PluginWindow activates the main window first when it is the active window (activateMainWindow, WindowOwner).
+- F9 addendum: Space in a focused plugin window (Pro-Q 4) does not reach the transport either (s6_09) — sent to r165p.
 - F9 (handed to r165p, it is #12 bug 1's area): every global shortcut (Space, F-keys, Ctrl+…) is dead while a LYNX
   tool window has the keyboard focus (Undo history, Settings, Tempo tapper, Quick-add, Audio editor): ToolWindow::
   keyPressed only handles Esc and nothing forwards unhandled keys to MainComponent. Since #4 keeps the focus in those
