@@ -7,6 +7,8 @@ works (real windows, mouse and keyboard), with a fresh `LYNX_PROFILE_DIR` + `LYN
 (shots in /mnt/d/lynx-work/audit165/, not in git).
 
 ## Where I stopped
+- 2026-10-28 15:20: 1st landing failed in build-local (the test used SampleLibrary, which the JUCE-free test binary
+  does not link) → list moved to core/SampleFiles.h; re-landing queued behind flbeta165k (landit.sh, land3.log).
 - 2026-10-28 13:45: sessions 6-8 done; F10 (plugin window close → activation) and F11 (.wv drops) fixed and verified
   on Windows; .o cleanup committed. Landing now (merge origin/main under the merge lock, then land.sh).
 - 2026-10-28 13:05: session 5 done on the branch build: F2/F4/F6 verified with real input, --windowtest OK
@@ -86,8 +88,8 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
 ## Findings (not in the posted claims, found on the way)
 - F11 (fixed here): the Channel Rack (drop, isInterestedInFileDrag, load into selected), the Playlist's file-drag test
   and Newtone each had their own extension list without "wv", while the Browser lists and previews FL's WavPack pack
-  samples. One list now: SampleLibrary::isSampleFile (core; Browser, Channel Rack, Playlist, Newtone use it); test
-  audit165_drop_targets_take_every_sample_the_browser_lists. (r165p's new Audio editor drop code has the same old
+  samples. One list now: core/SampleFiles.h (isSampleExtension), used through SampleLibrary::isSampleFile by the
+  Browser, Channel Rack, Playlist and Newtone; test audit165_drop_targets_take_every_sample_the_browser_lists. (r165p's new Audio editor drop code has the same old
   list — told the coordinator.)
 - F10 verified: after the fix, closing Pro-Q 4's window leaves LYNX in front (3/3, then 12 fast open/close cycles,
   alive; Space right after the close plays — s7_01).
