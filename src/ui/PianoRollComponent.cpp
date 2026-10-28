@@ -3181,7 +3181,7 @@ void PianoRollComponent::paste()
 
     // as in FL: pastes at the same position, already selected for dragging
     std::vector<int> added;
-    const auto channel = engine.getSelectedChannel();
+    const auto channel = allChannels ? -1 : engine.getSelectedChannel(); // ("All": each note keeps its channel)
     editNotes ([&added, channel] (Pattern& p) {
         added = noteedit::paste (p, clipboard, 0, channel);
         notetools::regroup (p, added); // copies of grouped notes form groups of their own
