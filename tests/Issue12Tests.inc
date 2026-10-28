@@ -239,6 +239,7 @@ TEST (issue12_send_level_is_an_automation_target)
 
     mixerops::swapTracks (song, 2, 3);
     CHECK (song.patterns[(std::size_t) song.currentPattern].events.back().target == (AutomationTarget { AutomationTargetKind::mixerSend, 1, 3 }));
+}
 
 // Crash (0.1.18, the user's crash report): cycling quickly through samples crashed in WaveformCache's disk-cache pruning
 // — std::sort's comparator read each file's access time on every comparison, the times changed during the sort, and
