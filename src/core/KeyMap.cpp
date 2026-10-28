@@ -112,6 +112,7 @@ std::vector<Action> makeActions()
         { "rack.sendToInserts", TR_NOOP ("Send the selected channels to free mixer inserts"), Context::channelRack, { chord ('L', ctrl) } },
         { "rack.graphEditor", TR_NOOP ("Step graph lanes on/off"), Context::channelRack, { chord ('K', ctrl) } },
         { "rack.pianoRollView", TR_NOOP ("Piano-roll view of all channels on/off"), Context::channelRack, {} },
+        { "rack.follow", TR_NOOP ("Follow the playhead (page along with the playing step) on/off"), Context::channelRack, {} },
         { "rack.groupSelected", TR_NOOP ("Put the selected channels in a new filter group"), Context::channelRack, { chord ('G', alt) } },
         { "rack.rotateLeft", TR_NOOP ("Rotate the selected channels' steps left"), Context::channelRack, { chord (left, ctrl | shift) } },
         { "rack.rotateRight", TR_NOOP ("Rotate the selected channels' steps right"), Context::channelRack, { chord (right, ctrl | shift) } },

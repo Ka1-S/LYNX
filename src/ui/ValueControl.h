@@ -83,7 +83,9 @@ void showValueMenu (juce::Component& target, AudioEngine* engine, const ValueSpe
 // A context menu's title band in the colour of what it is about (FL tints a mixer track's menu with the track's
 // colour; LYNX draws a band in its own style): `kind` in small caps ("Mixer track"), then `name`. A transparent
 // colour draws a neutral band.
-void addItemHeader (juce::PopupMenu& menu, const juce::String& kind, const juce::String& name, juce::Colour colour);
+// `onDoubleClick` (optional): a double-click on the title closes the menu and calls it (rename, issue #12).
+void addItemHeader (juce::PopupMenu& menu, const juce::String& kind, const juce::String& name, juce::Colour colour,
+                    std::function<void()> onDoubleClick = {});
 void addValueItems (juce::PopupMenu& menu, juce::Component& target, AudioEngine* engine, const ValueSpec& spec, double current,
                     std::function<void (double)> set);
 

@@ -389,6 +389,20 @@ void EditorGlobals::setFollowing (bool pianoRoll, bool on, bool save)
     }
 }
 
+void EditorGlobals::setFollowingView (FollowView v, bool on, bool save)
+{
+    if (v == FollowView::playlist || v == FollowView::pianoRoll)
+        return setFollowing (v == FollowView::pianoRoll, on, save);
+    auto& flag = v == FollowView::channelRack ? followRack : followAudioEditor;
+    if (flag != on)
+    {
+        flag = on;
+        sendChangeMessage();
+        if (save && onOptionsChanged)
+            onOptionsChanged();
+    }
+}
+
 GlobalGridBox::GlobalGridBox() : SnapBox (false)
 {
     grid::fillGlobalBox (*this);

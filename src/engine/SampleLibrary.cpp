@@ -1,3 +1,4 @@
+#include "engine/FileSort.h"
 #include "engine/SampleLibrary.h"
 #include "platform/Paths.h"
 
@@ -282,7 +283,7 @@ void pruneStretchCache()
         total += f.getSize();
     if (total <= stretchCacheLimit)
         return;
-    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
+    filesort::byTime (files, filesort::By::modificationTime);
     for (const auto& f : files)
     {
         if (total <= stretchCacheLimit * 3 / 4)

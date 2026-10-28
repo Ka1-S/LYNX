@@ -351,6 +351,28 @@ private:
     PatternSelector rackPatternSelector;
     void showRackPatternList();
     void refreshRackPatternSelector();
+    // The current pattern's length in bars next to the swing knob (issue #12; drawn like the rack's insert number
+    // box): drag up / down or the wheel changes it, double-click = automatic (from the notes), right-click = menu.
+    struct PatternLengthBox final : public juce::Component
+    {
+        int bars = 1;         // the length shown (the effective one when automatic)
+        bool automatic = true;
+        bool hovered = false;
+        std::function<void (int bars)> onSet; // 0 = automatic
+        std::function<void()> onMenu;
+        void paint (juce::Graphics& g) override;
+        void mouseEnter (const juce::MouseEvent&) override { hovered = true; repaint(); }
+        void mouseExit (const juce::MouseEvent&) override { hovered = false; repaint(); }
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseDoubleClick (const juce::MouseEvent&) override { if (onSet) onSet (0); }
+        void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override;
+        int dragStartBars = 1;
+        static int stepBars (int bars, int delta); // 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64
+    };
+    PatternLengthBox rackLengthBox;
+    void refreshRackLengthBox();
+    void showPatternLengthMenu();
     struct RackTitleTools final : public juce::Component
     {
         std::function<void()> layout;
@@ -360,8 +382,10 @@ private:
     FilterBox rackFilterBox;
     IconButton rackGraphButton { "rackGraph", Icon::graph };
     IconButton rackPianoRollButton { "rackPianoRoll", Icon::pianoRoll };
+    IconButton rackFollowButton { "rackFollow", Icon::follow }; // Follow the playing step (issue #12)
     static constexpr int rackPatternSelectorWidth = 132;
-    static constexpr int rackTitleToolsWidth = rackPatternSelectorWidth + 6 + 96 + 4 + 26 + 4 + 24 + 4 + 24;
+    static constexpr int rackLengthBoxWidth = 40;
+    static constexpr int rackTitleToolsWidth = rackPatternSelectorWidth + 6 + 96 + 4 + 26 + 4 + rackLengthBoxWidth + 4 + 24 + 4 + 24 + 4 + 24;
     // one icon per workspace panel (F5..F9): click toggles, right-click shows it maximized
     std::array<IconButton, workspace::panelCount> panelButtons { IconButton { "playlistPanel", Icon::playlist },
                                                                  IconButton { "rackPanel", Icon::channelRack },
