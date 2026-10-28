@@ -116,6 +116,7 @@ public:
     void pitchBend (float semitones) noexcept;
     void controlChange (int cc, float value) noexcept;
     void allNotesOff() noexcept;
+    void cut() noexcept; // (a cut group's cut: the instruments stop, the VFX nodes keep their voices)
     void slideTo (int key, float cents, float samples) noexcept;
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept;
     // the next note's other properties, for the VFX nodes (round 164b)

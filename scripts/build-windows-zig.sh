@@ -43,7 +43,7 @@ cmp -s "$OUT/JuceConfig.h.new" "$OUT/JuceConfig.h" 2>/dev/null && rm "$OUT/JuceC
 
 COMMON=(-target "$TARGET" -std=c++20 -O2 -DNDEBUG=1 -fno-sanitize=undefined
         -include "$OUT/JuceConfig.h" -include cmake/mingw/mingw_compat.h
-        -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Ithird_party/clap/include -Ithird_party/wavpack/include -Ithird_party/vorbis/include -Ithird_party/lame/include -Ithird_party/asiosdk/common -Ithird_party/sse2neon -Isrc)
+        -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Ithird_party/clap/include -Ithird_party/wavpack/include -Ithird_party/vorbis/include -Ithird_party/lame/include -Ithird_party/asiosdk/common -Ithird_party/sse2neon -Ithird_party/pocketpy -Isrc)
 
 export ZIG OUT JUCE_DIR TARGET
 export COMMON_STR="${COMMON[*]}"
@@ -114,6 +114,8 @@ APP_SOURCES+=(src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp)
 # LYNX Soundfont: SF2 / SF3 player with a preset search (round 158, issue #6)
 APP_SOURCES+=(src/core/SoundFont.cpp src/core/SoundFontLoad.cpp src/core/SoundFontIndex.cpp src/ui/SoundFontEditor.cpp)
 APP_SOURCES+=(src/ui/VfxEditors.cpp)
+# the embedded Python (pocketpy) and FL's VFX Script (round 165d)
+APP_SOURCES+=(src/core/Python.cpp src/core/VfxScript.cpp)
 # FL's sampler interpolation (REA round 69)
 APP_SOURCES+=(src/core/FlResampler.cpp src/core/FlKeys.cpp)
 # FL's Hardcore (REA round 71)
@@ -177,6 +179,13 @@ for f in third_party/lame/src/*.c; do
     fi
 done
 
+echo "pocketpy (embedded Python, C)..."
+mkdir -p "$OUT/pocketpy"
+obj="$OUT/pocketpy/pocketpy.o"
+if [[ ! -f "$obj" || third_party/pocketpy/pocketpy.c -nt "$obj" || third_party/pocketpy/pocketpy.h -nt "$obj" ]]; then
+    "$ZIG" cc -target "$TARGET" -O2 -w -std=c11 -DPK_ENABLE_OS=0 -DPK_ENABLE_WATCHDOG=1 -Ithird_party/pocketpy -c third_party/pocketpy/pocketpy.c -o "$obj"
+fi
+
 # the commit the build comes from (crash reports name it)
 COMMIT="$(git rev-parse --short=10 HEAD 2>/dev/null || true)"
 [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]] && COMMIT="$COMMIT-dirty"
@@ -202,7 +211,7 @@ IFS=. read -r VMAJ VMIN VPAT <<< "$VERSION"
 ( cd resources && "$ZIG" rc /i "$OUT_ABS" /fo "$OUT_ABS/LYNX.res" LYNX.rc )
 
 echo "Linking..."
-"$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT"/wavpack/*.o "$OUT"/vorbis/*.o "$OUT"/lame/*.o "$OUT/LYNX.res" \
+"$ZIG" c++ -target "$TARGET" -O2 -o "$OUT/LYNX.exe" "$OUT"/juce/*.o "$OUT"/app/*.o "$OUT"/wavpack/*.o "$OUT"/vorbis/*.o "$OUT"/lame/*.o "$OUT"/pocketpy/*.o "$OUT/LYNX.res" \
     -Wl,--subsystem,windows \
     -lole32 -loleaut32 -luuid -lwinmm -lws2_32 -lshlwapi -lversion -lwininet -limm32 -lcomdlg32 \
     -lgdi32 -luser32 -lcomctl32 -lshell32 -ladvapi32 -lrpcrt4 -ldbghelp -lsetupapi -luxtheme -ldwmapi \

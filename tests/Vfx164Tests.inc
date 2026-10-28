@@ -807,10 +807,10 @@ TEST (vfx_script_keeps_fl_scripts_as_they_are)
     CHECK (s.source() == "import flvfx as vfx\n\ndef onTriggerVoice(v):\n    v.trigger()\n");
     CHECK (parseScript (writeScript (s)) == s);
     CHECK (! parseScript ({ 9, 0, 0, 0, 'x' }));
-    // a script plays its notes through unchanged
+    // (round 165d: LYNX runs it; an incoming voice can't be triggered, as in FL, so nothing comes out)
     auto p = makeProcessor (Kind::script, writeScript (s));
     const auto out = vfx164::run (*p, { vfx164::on (60) });
-    CHECK (out.size() == 1 && out[0].voice.key == 60);
+    CHECK (out.empty());
     if (realFlpDir.empty())
         return;
     namespace fs = std::filesystem;

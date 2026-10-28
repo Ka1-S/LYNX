@@ -28,6 +28,7 @@
 #include "platform/LinuxRealtime.h"
 #include "engine/Metronome.h"
 #include "core/NoteTools.h"
+#include "core/VfxScript.h"
 #include "engine/PreviewPlayer.h"
 #include "flp/Flp.h"
 
@@ -216,6 +217,8 @@ AudioEngine::AudioEngine (bool openAudioDevice)
 {
     inputSlot.fill (-1);
     outputSlot.fill (-1);
+    // VFX Script (round 165d): the audio thread waits a bounded time for the Python thread (exports wait for it)
+    vfx::script::setRealtime (openAudioDevice);
     const auto mark = [] (const char* step) { if (startupMark != nullptr) startupMark (step); };
     mark ("  engine: workers + default song");
     publishSong();
@@ -3221,6 +3224,7 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::setPluginsRenderMode (bool offline)
 {
+    vfx::script::setRealtime (! offline); // (an export waits for every VFX Script answer: exact and repeatable)
     if (! offline)
         midiSync.sendAllNotesOff(); // FL's "Send all notes off": after a render
     // FL's "Notify about rendering mode" off: that plugin is not told (round 149); "Reset plugin when FL Studio

@@ -16030,6 +16030,7 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity152bTests.inc"
 #include "Parity152cTests.inc"
 #include "Parity165Tests.inc"
+#include "Parity165wTests.inc"
 #include "Parity165aTests.inc"
 #include "Patcher141Tests.inc"
 #include "Patcher162Tests.inc"
@@ -16220,6 +16221,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Layer164Tests.inc"
 #include "Patcher164vTests.inc"
 #include "Vfx164Tests.inc"
+#include "VfxScript165Tests.inc"
 #include "Misc164Tests.inc"
 #include "Store165Tests.inc" // (round 165n; kept off the end of the list, where every round appends)
 #include "Visual164Tests.inc"
