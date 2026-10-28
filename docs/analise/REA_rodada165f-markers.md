@@ -119,4 +119,7 @@ wrap). No locks or allocations on the audio thread.
   the tests instead.
 
 ## Where I stopped
-- Done and landed (see the commits on main); what is left is in §3.
+- 2026-10-28 20:45 (after the BSOD and the disk-full freeze): the work is complete. Merged origin/main cce0794b (mixer
+  landed; conflicts in build-local.sh, PlaylistComponent.cpp and I18nData.h resolved, pt-BR deduplicated), build-local
+  with FL Data is running, then land.sh. Earlier landing attempts failed only on random clang crashes (unstable RAM),
+  not on the code. What is left is in §3.
