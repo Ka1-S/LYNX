@@ -42,6 +42,8 @@ struct EditToolInfo
 };
 
 const std::vector<EditToolInfo>& editTools();
+// The tool's key map name ("pencil", "drumPaint"...): the editors' actions are "pianoRoll.tool.<it>" / "playlist.tool.<it>".
+const char* editToolId (EditTool tool);
 
 // The mouse cursor of each editor gesture (core/EditorGestures.h): the system arrows for moving,
 // resizing and selecting, LYNX's own tool icons (outlined, so they read on any background) for
@@ -66,6 +68,8 @@ public:
     int getIdealWidth (int height) const;
 
     std::function<void (EditTool)> onChange;
+    // The tooltips with the keys the key map gives the tools now (`keyOf` returns "" for a tool without one).
+    void refreshKeys (const std::function<juce::String (EditTool)>& keyOf);
 
     void resized() override;
     // the wheel over the strip steps through the tools

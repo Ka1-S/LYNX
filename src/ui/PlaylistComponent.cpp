@@ -4,6 +4,7 @@
 #include "ui/TextCache.h"
 #include "ui/PlaylistComponent.h"
 
+#include "core/KeyMap.h"
 #include "core/Performance.h"
 #include "core/Templates.h"
 
@@ -4028,7 +4029,7 @@ bool PlaylistComponent::handleKey (const juce::KeyPress& key)
     const auto mods = key.getModifiers();
     const auto cmd = mods.isCommandDown();
     const auto code = key.getKeyCode();
-    const auto letter = (int) juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code);
+    const auto letter = keys::letterOfKeyCode (code); // (0 for F-keys, numpad, arrows: issue #12)
 
     if (code == juce::KeyPress::backspaceKey)
     {
@@ -4098,16 +4099,24 @@ bool PlaylistComponent::handleKey (const juce::KeyPress& key)
         return true;
     }
 
-    // single letters: only while the typing piano is off (otherwise they play notes)
-    if (! cmd && ! mods.isAltDown() && ! mods.isShiftDown() && ! EditorGlobals::get().typingPiano)
-        for (const auto& t : editTools())
-            if (letter == t.key && t.tool != EditTool::drumPaint)
-            {
-                tools.setTool (t.tool);
-                return true;
-            }
-
+    // (the tool letters are key map actions now: runKeyAction, issue #12)
     return false;
+}
+
+bool PlaylistComponent::runKeyAction (const std::string& id)
+{
+    for (const auto& t : editTools())
+        if (t.tool != EditTool::drumPaint && id == "playlist.tool." + std::string (editToolId (t.tool)))
+        {
+            tools.setTool (t.tool);
+            return true;
+        }
+    return false;
+}
+
+void PlaylistComponent::refreshToolKeys (const std::function<juce::String (const std::string&)>& keyOf)
+{
+    tools.refreshKeys ([&keyOf] (EditTool t) { return keyOf ("playlist.tool." + std::string (editToolId (t))); });
 }
 
 void PlaylistComponent::mouseMove (const juce::MouseEvent& e)

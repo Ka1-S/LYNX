@@ -74,6 +74,14 @@ const Action* findAction (const std::string& id);
 // B H N J M) and from C6 (Q 2 W 3 E R 5 T 6 Y 7 U I 9 O 0 P), with C5 = MIDI 60.
 int typingPianoNote (int key) noexcept;
 
+// The upper-case printable character of a key code (JUCE's getKeyCode()), or 0 for any other key. On Windows JUCE's
+// F-keys, numpad keys and arrows are VK | 0x10000: a plain towupper() of them (16-bit) gave F4 -> 'S', F1 -> 'P',
+// Numpad1 -> 'A', so the editors took them for tool letters (issue #12, found by round 165q).
+constexpr int letterOfKeyCode (int code) noexcept
+{
+    return code > ' ' && code < 0x7f ? (code >= 'a' && code <= 'z' ? code - 'a' + 'A' : code) : 0;
+}
+
 class KeyMap
 {
 public:
@@ -81,6 +89,14 @@ public:
 
     // Action triggered by `chord` with `focus` focused; "" for none. `typingPiano`: the piano is on.
     std::string find (const Chord& chord, Context focus, bool typingPiano) const;
+
+    // Like find(), but only an action the user gave `chord` himself (not one of its default keys). The main window
+    // runs it before the panels' own keys, so a key you chose always does what you chose (issue #12: Metronome on
+    // 'C' did nothing because the focused Playlist took 'C' for its Knife).
+    std::string findUserBound (const Chord& chord, Context focus, bool typingPiano) const;
+    // The actions of the other places (global vs a panel) bound to `chord` too: where both apply, the user's own key
+    // wins over a default one, else the panel's (the Shortcut manager tells which).
+    std::vector<std::string> shadowedBy (const Chord& chord, const std::string& actionId) const;
 
     // True when the chord plays a note (piano on, unmodified, mapped key).
     static bool playsNote (const Chord& chord, bool typingPiano) noexcept;

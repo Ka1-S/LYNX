@@ -1060,7 +1060,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
-    // 2. the focused panel's own keys
+    // 2. a key the user gave an action himself (Options › Shortcuts) wins over the panels' built-in keys
+    // (issue #12: Metronome on 'C' did nothing while the Playlist, whose Knife is 'C', had the focus)
+    if (const auto own = keyMap.findUserBound (chord, focusContext(), typingPiano); ! own.empty() && runAction (own))
+        return true;
+
+    // 3. the focused panel's own keys
     const auto focused = workspace.getFocused();
     const auto panelShown = workspace.isPanelVisible (focused);
 
@@ -1070,7 +1075,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (panelShown && focused == Panel::playlist && playlist.handleKey (key))
         return true;
 
-    // 3. the key map
+    // 4. the key map
     const auto action = keyMap.find (chord, focusContext(), typingPiano);
     return ! action.empty() && runAction (action);
 }
@@ -1078,6 +1083,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
 bool MainComponent::runAction (const std::string& id)
 {
     auto is = [&id] (const char* name) { return id == name; };
+
+    if (id.rfind ("pianoRoll.", 0) == 0 && pianoRoll.runKeyAction (id)) return true; // tools, slide, channel keys
+    if (id.rfind ("playlist.tool.", 0) == 0 && playlist.runKeyAction (id)) return true;
 
     if (is ("transport.playStop")) playStop();
     else if (is ("transport.pause")) playPause();
@@ -1263,6 +1271,13 @@ void MainComponent::loadKeyMap()
         for (const auto& e : errors)
             juce::Logger::writeToLog ("keys.json: " + juce::String (e));
     }
+
+    auto keyOf = [this] (const std::string& id) {
+        const auto& chords = keyMap.chordsFor (id);
+        return chords.empty() ? juce::String() : juce::String (keys::toString (chords.front()));
+    };
+    pianoRoll.refreshToolKeys (keyOf);
+    playlist.refreshToolKeys (keyOf);
 }
 
 // --- Browsers ------------------------------------------------------------------------------------
