@@ -30,7 +30,7 @@ before → after (blank = not touched in round 165). Lowest first.
 |---|---|---|---|---|---|
 | Ridge Strip | SSL E-Channel (Waves) | 9 | 8 | 165 | 8 → 9 / 7 → 8 |
 | Ember Saturator | Decapitator | 8 | 7 | 135 | |
-| LYNX Tune | Auto-Tune Pro | 8 | 7 | 135 | |
+| LYNX Tune | Auto-Tune Pro | 8 | 7 | 135 | 165j: sound only (highs kept, measured; scores unchanged) |
 | Ridge Strip (Vocal strip) | SSL Native Vocalstrip 2 | 9 | 7 | 145 | |
 | Hush De-esser | Pro-DS | 8 | 8 | 135 | |
 | Halo | ValhallaShimmer | 8 | 9 | 135 | |
@@ -57,10 +57,29 @@ before → after (blank = not touched in round 165). Lowest first.
 | Quell Denoiser | NS1 (Waves) | 9 | 9 | 137 | |
 | Foil Plate | ValhallaPlate | 9 | 10 | 135 | |
 | Compressor (stand-in) | Renaissance Compressor (Waves) | 10 | 8 | 152 | |
-| LYNX Tune | Waves Tune Real-Time | 10 | 8 | 152b | |
+| LYNX Tune | Waves Tune Real-Time | 10 | 8 | 152b | 165j: sound only (measured; scores unchanged) |
 | Echoform | EchoBoy / PrimalTap | 10 | 8 | 150 | |
 | Voice Shift | Little AlterBoy | 10 | 8 | 137 | |
 | Prism Multiband | Pro-MB | 10 | 10 | 152 | |
+
+## Round 165j: LYNX Tune sound quality, before → after (measured)
+
+Round 165j (`docs/analise/REA_rodada165j.md`): LYNX Tune against the official Auto-Tune Pro 11.6 and Waves Tune
+Real-Time trials (hosted black-box) on ten synthetic takes with a known f0 and on her 24 takes with her own Auto-Tune
+states (translated as LYNX loads them). Config / design scores unchanged (no controls were added); this table is the
+sound.
+
+| Measure (her 24 takes unless noted) | Auto-Tune Pro | LYNX 0.1.19 | LYNX 0.1.20 |
+|---|---|---|---|
+| pitch: median / p90 cents from the note | 5.79 / 26.2 | 4.39 / 20.9 | 4.42 / 21.0 |
+| same note as Auto-Tune (% voiced frames) | 100 | 95.8 | 95.7 |
+| HF balance vs the dry take (2.5–6.3 kHz over 0.3–1 kHz, dB) | −0.07 | −0.52 | −0.13 |
+| formant envelope distance to the dry take (dB) | 0.49 | 0.80 | 0.78 |
+| short bursts / min not in the dry take | 31.2 | 40.9 | 40.1 |
+| Classic / Low latency: bursts / min, HF balance | 27.9, −0.02 | 48.8, −0.51 | 45.4, −0.13 |
+| synthetic: latency ms, accuracy med / p90 c, retune ms, vibrato kept | 61.6, 2.8 / 10.1, 42, 1.01 | 25.4, 1.7 / 4.4, 38, 0.97 | 25.4, 1.7 / 4.4, 38, 0.97 |
+| synthetic: HF balance, formant distance (dB) | —, 0.18 | −0.40, 0.28 | −0.04, 0.36 |
+| CPU per instance (block 128, 44.1 kHz, median) | — | ~64 µs (2.3 % RT) | ~65 µs (+1 %) |
 
 ## Round 145: SSL Native Vocalstrip 2 (Ridge Strip's Vocal strip voicing)
 
@@ -512,6 +531,7 @@ edits (Remove / Bypass, Latched / Momentary), Hold, Auto Key.
 | ADVANCED: Create Vibrato (shape, rate, depth, onset), Ignore Vibrato, scale detune | ⚠️ | round 128: ADVANCED page with Create Vibrato (shape, rate, depth, onset delay / rate) and Ignore Vibrato, translated; no amplitude / formant / variation of the created vibrato, no per-note scale detune |
 | Target notes via MIDI | ✅ | "MIDI channel" |
 | Low latency | ✅ | |
+| Sound: pitch accuracy, timbre (highs, formants), bursts | ⚠️ | round 165j [RUN] on her takes: tighter pitch than Auto-Tune (median 4.4 vs 5.8 c), highs now within 0.1 dB of Auto-Tune (normalised grain overlap-add + 3 kHz shelf; was 0.45 dB darker), formant distance 0.78 vs 0.49 dB, short bursts 40 vs 31 / min (note changes / onsets) |
 | Pitch graph | ✅ | LYNX extra in Auto mode (input vs corrected) |
 | Graph mode (offline editing) | — | out of scope (a separate editor) |
 | Harmony Player | — | out of scope |
@@ -1159,6 +1179,7 @@ positions against wtune.png once it exists.
 | MIDI Target Pitch | MIDI note forces the target (Speed/NT timing) | "MIDI channel" (held pitch classes become the targets) | ⚠️ | pitch class only, no octave |
 | MIDI Reference Tone + level | tone generator ±18 dB | — | ✅ | round 152b: "Ref. tone" + level (±18 dB) on the Real-time page — the notes held on the MIDI channel play as sines at the reference pitch (0 dB = −12 dBFS peak per note [model]) [MANUAL S1 p.21] |
 | Latency | reports 0; real 0–4 ms dynamic | ~25 ms reported + PDC; "Low latency" toggle | ⚠️ | ➕ toggle; different by design |
+| Sound (measured, round 165j, synthetic takes) | latency 5.4 ms, accuracy 2.3 / 12.2 c, retune 29 ms, bursts 18.5 / min, formant 0.26 dB | 25.4 ms (Low latency 6.4), 1.7 / 4.4 c, 38 ms, 17.6 / min, 0.36 dB; highs within 0.1 dB of the dry take | ⚠️ | tighter pitch; slower to land by ~9 ms at the same transition setting; slightly larger envelope change |
 | Transpose | — | ±12 st stepper | ➕ | |
 | Tracking | — | knob | ➕ | |
 | Humanize / Flex-Tune | — | knobs | ➕ | Auto-Tune Pro role |
