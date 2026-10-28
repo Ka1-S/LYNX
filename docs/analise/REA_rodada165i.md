@@ -81,28 +81,40 @@ caches filled). FL: `bench.ps1` (window title with the project name, then quiet)
 "main" = `2f520ca6` (this round's test profile only), "branch" = feature/perf165. Memory: LYNX reports the whole
 working set, FL the private working set (so the comparison is, if anything, unfair to LYNX).
 
-### 2.1 Project open (seconds until the project is loaded; working set)
+### 2.1 Project open (seconds until the project is loaded; working set) — n = 3 per cell (FL: 2)
 
 | Project | FL 2026 | LYNX main cold / warm | LYNX branch cold / warm | RAM FL / main / branch (warm) |
 |---|---|---|---|---|
-| Empty start (window) | 1.6–1.7 | 2.5 / 2.8 | 2.5 / 2.5 | 310 / 99 / 99 MB |
-| Thief | 7.2–7.4 | 7.2 / 6.2 | 5.7 / **3.8** | 819 / 837 / **629** MB |
-| SHINE | 7.0–10.5 | 3.7 / 3.2 | 3.4 / 3.1 | 810 / 198 / 197 MB |
-| Never Out | 9.6–9.8 | 4.6 / 4.4 | 4.4 / **3.6** | 930 / 461 / 462 MB |
-| Exoplanet | 7.6–8.5 | 3.5 / 3.4 | 3.5 / 3.4 | 905 / 334 / 333 MB |
+| Empty start (window) | 1.6–1.7 | 2.5 / 2.5 | 2.5 / 2.4 | 310 / 99 / 99 MB |
+| Thief | 7.2–7.4 | 6.4 / 5.9 | **5.5 / 3.8** | 819 / 838 / **628** MB |
+| SHINE | 7.0–10.5 | 3.4 / 3.2 | 3.3 / 3.0 | 810 / 198 / 197 MB |
+| Never Out | 9.6–9.8 | 4.5 / 4.3 | 4.3 / **3.4** | 930 / 461 / 462 MB |
+| Exoplanet | 7.6–8.5 | 3.4 / 3.4 | 3.4 / 3.4 | 905 / 333 / 334 MB |
 
-CPU time spent until loaded (Thief): main 10.2 s cold / 9.2 s warm → branch 9.2 / **4.0** s. load.log (Thief, warm):
-total 3 727 → 1 237 ms; rack_build 1 532 → 453 ms (rack_instruments 768 → 208 ms, rack_keyshift 139 ms in parallel,
-rack_stretch 654 → 0 ms); stretch_wall 1 624 → 168 ms (the copies read from the disk cache in 505 ms of thread time).
+CPU time until loaded (Thief): main 9.3 s cold / 9.1 s warm → branch 8.6 / **3.9** s; Never Out 5.6 / 5.6 → 5.8 / 3.3 s.
+load.log (Thief, warm): total 3 727 → 1 237 ms; rack_build 1 532 → 453 ms (rack_instruments 768 → 208 ms,
+rack_keyshift 139 ms in parallel, rack_stretch 654 → 0 ms); stretch_wall 1 624 → 168 ms (the copies read from the
+disk cache in 505 ms of thread time). All 60 LYNX runs ended by themselves (no dialog, no "closed unexpectedly").
 
-Idle CPU after the open varies run to run with the third-party plugins in the project (LYNX 5–60 %, FL 29–111 %).
+Idle CPU after the open varies run to run with the third-party plugins in the project (LYNX 5–85 %, FL 10–111 %).
+The empty start is still ~0.8 s behind FL: the splash keeps a minimum time (the "landing" delay, a UI decision) and
+the audio device opens in ~1.4 s before the window.
 
 ### 2.2 Rendering (null tests)
 
 - Linux `renderwav`, sequential / layers / task graph: byte-identical (Thief `67a4184bf5ec…`, SHINE `e6be7b9a893b…`,
   also after the seed change). CPU at load ~2: Thief layers 4.90 → graph 4.20 s, SHINE 12.31 → 11.05 s (wall
   6.36 → 5.55 s).
-- Windows `--export` (test profile): see §2.3.
+- Windows `--export` (test profile, load < 4, 4 runs each, medians):
+
+| Project | main wall / CPU | branch, layers (`LYNX_TASKGRAPH=0`) | branch, task graph | md5 |
+|---|---|---|---|---|
+| Thief | 38.3 s / 150 s | 35.9 s / 150 s | **28.3 s / 128 s** | main: 4 different files in 4 runs; branch: one |
+| SHINE | 19.9 s / 91 s | 19.7 s / 92 s | **17.3 s / 82 s** | identical in all 12 runs (main = branch) |
+| Never Out | 21.8 s / 87 s | 25.3 s / 89 s | **19.5 s / 74 s** | main: 4 different; branch: one |
+
+  The task graph renders ~12–21 % faster with ~10–15 % less CPU, and its files are identical to the layers'. The
+  main build's Thief / Never Out exports differed on every run: the random-seeded stretch (§4.7).
 
 
 ## 3. How FL does it (REA)
