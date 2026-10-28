@@ -77,7 +77,7 @@ private:
 class StemsThread final : public juce::ThreadWithProgressWindow
 {
 public:
-    StemsThread (const AudioEngine& e, exportopts::Options o, juce::File base)
+    StemsThread (const AudioEngine& e, exportopts::Options o, juce::File base, const std::vector<int>& onlyTracks = {})
         : juce::ThreadWithProgressWindow (tr ("Exporting stems..."), true, true),
           options (o),
           baseFile (std::move (base)),
@@ -97,7 +97,7 @@ public:
                 items.push_back ({ juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), file (c + 1, song.channels[(std::size_t) c].name),
                                    exportopts::makeChannelStemSong (song, c) });
         else
-            for (auto t : exportopts::stemTracks (song))
+            for (auto t : exportopts::stemTracks (song, onlyTracks))
                 items.push_back ({ juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()), file (t, song.mixer[(std::size_t) t].name),
                                    makeBounceSong (song, t) });
     }
@@ -217,15 +217,25 @@ class ExportPanel final : public juce::Component
 {
 public:
     // initialFormat: −1 = the formats of the last export (FL's "Last exported format(s)"), else that one format only
-    ExportPanel (AudioEngine& e, juce::File folder, juce::String name, bool remember, int initialFormat = -1)
+    // onlyTracks (FL's "Render armed / selected tracks to wave file(s)", REA round 165f-mixer): one file per insert of the
+    // list, the stem choice locked (and not remembered); the Master in the list = also the full mix
+    ExportPanel (AudioEngine& e, juce::File folder, juce::String name, bool remember, int initialFormat = -1, std::vector<int> tracks = {})
         : engine (e),
           suggestedFolder (std::move (folder)),
           suggestedName (std::move (name)),
-          persistent (remember)
+          persistent (remember),
+          onlyTracks (std::move (tracks))
     {
         using namespace exportopts;
         if (persistent)
             options = fromText (exportSettingsFile().loadFileAsString().toStdString());
+        rememberedStems = options.stems;
+        rememberedStemsMaster = options.stemsIncludeMaster;
+        if (! onlyTracks.empty())
+        {
+            options.stems = Stems::mixerTracks;
+            options.stemsIncludeMaster = std::find (onlyTracks.begin(), onlyTracks.end(), 0) != onlyTracks.end();
+        }
         if (initialFormat >= 0 && initialFormat <= 3)
             options = withSingleFormat (options, (Format) initialFormat);
         const auto& song = engine.getSong();
@@ -263,6 +273,21 @@ public:
         stemsMaster.setButtonText (tr ("Also the full mix"));
         stemsMaster.onClick = [this] { readControls(); };
         addAndMakeVisible (stemsMaster);
+        if (! onlyTracks.empty())
+        {
+            stemsBox.setEnabled (false);
+            settingsui::styleLabel (tracksLabel, tr ("Tracks"));
+            addAndMakeVisible (tracksLabel);
+            juce::StringArray names;
+            for (auto t : stemTracks (song, onlyTracks))
+                names.add (juce::String (t) + " " + juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
+            tracksText.setText (names.joinIntoString (", "), juce::dontSendNotification);
+            tracksText.setTooltip (names.joinIntoString ("\n"));
+            tracksText.setMinimumHorizontalScale (0.7f);
+            tracksText.setFont (theme::font (theme::type::small));
+            tracksText.setColour (juce::Label::textColourId, theme::colour::textPrimary);
+            addAndMakeVisible (tracksText);
+        }
 
         formatButtons.onChange = [this] (int) { readControls(); };
         addAndMakeVisible (formatButtons);
@@ -321,7 +346,8 @@ public:
         realtimeToggle.setTooltip (tr ("The song plays through the audio device while it is recorded, so the hardware inserts' gear is "
                                        "in the file (the export takes as long as the song). At the device's sample rate, played once, "
                                        "with the playback quality: what you hear"));
-        realtimeToggle.setVisible (hwinsert::countActive (engine.getSong()) > 0);
+        // (not for a list of tracks: the real-time pass records the full mix only)
+        realtimeToggle.setVisible (onlyTracks.empty() && hwinsert::countActive (engine.getSong()) > 0);
         polyToggle.setTooltip (tr ("The channels' Max polyphony is lifted for the export, so no note is cut by the voice limit"));
         showToggle.setTooltip (tr ("Opens the file manager on the exported file when the export is done"));
         hqToggle.setTooltip (tr ("Plugins with a separate render quality use it, and HQ switches are turned on for the export. "
@@ -418,6 +444,11 @@ public:
         row (left, tailLengthLabel, tailLengthBox);
         row (left, stemsLabel, stemsBox);
         stemsMaster.setBounds (left.removeFromTop (22).withTrimmedLeft (labelWidth));
+        if (! onlyTracks.empty())
+        {
+            left.removeFromTop (gap);
+            row (left, tracksLabel, tracksText);
+        }
 
         formatTitle.setBounds (right.removeFromTop (26));
         right.removeFromTop (8);
@@ -582,6 +613,7 @@ private:
         // playback quality, no stems — the controls it doesn't use are off
         for (auto* c : std::initializer_list<juce::Component*> { &rateBox, &stemsBox, &masterFxToggle, &hqToggle, &polyToggle, &warmUpToggle })
             c->setEnabled (! realtime);
+        stemsBox.setEnabled (! realtime && onlyTracks.empty()); // a list of tracks locks the stem choice
         rangeBox.setItemEnabled (2, ! realtime);
         {
             // the boxes show what the export will use: real time = the Master's effects, the playback quality
@@ -621,7 +653,7 @@ private:
         if (options.format == Format::mp3 && mp3SampleRate (options.sampleRate) != options.sampleRate)
             info << "  ·  " << tr ("MP3 at {0} Hz", { juce::String ((int) mp3SampleRate (options.sampleRate)) });
         if (options.stems == Stems::mixerTracks)
-            info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemTracks (song).size() + (options.stemsIncludeMaster ? 1 : 0)) });
+            info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemTracks (song, onlyTracks).size() + (options.stemsIncludeMaster ? 1 : 0)) });
         else if (options.stems == Stems::channels)
             info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemChannels (song, options.range).size() + (options.stemsIncludeMaster ? 1 : 0)) });
         if (options.stems == Stems::none || realtime)
@@ -651,7 +683,15 @@ private:
     {
         readControls();
         if (persistent)
-            exportSettingsFile().replaceWithText (juce::String (exportopts::toText (options)));
+        {
+            auto remembered = options; // (the locked stem choice of a track render is not remembered)
+            if (! onlyTracks.empty())
+            {
+                remembered.stems = rememberedStems;
+                remembered.stemsIncludeMaster = rememberedStemsMaster;
+            }
+            exportSettingsFile().replaceWithText (juce::String (exportopts::toText (remembered)));
+        }
 
         const auto o = options;
         const auto extension = juce::String (exportopts::extension (o.format));
@@ -663,7 +703,7 @@ private:
         auto& engineRef = engine;
 
         chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                              [this, o, extension, &engineRef, realtime = realtime] (const juce::FileChooser& fc) {
+                              [this, o, extension, &engineRef, tracks = onlyTracks, realtime = realtime] (const juce::FileChooser& fc) {
                                   auto file = fc.getResult();
 
                                   if (file == juce::File())
@@ -687,7 +727,7 @@ private:
                                   if (o.stems != exportopts::Stems::none)
                                   {
                                       close();
-                                      (new StemsThread (engineRef, o, file))->launchThread();
+                                      (new StemsThread (engineRef, o, file, tracks))->launchThread();
                                       return;
                                   }
 
@@ -703,7 +743,11 @@ private:
     juce::File suggestedFolder;
     juce::String suggestedName;
     bool persistent = true;
+    std::vector<int> onlyTracks;
+    exportopts::Stems rememberedStems = exportopts::Stems::none;
+    bool rememberedStemsMaster = false;
     exportopts::Options options;
+    juce::Label tracksLabel, tracksText;
 
     settingsui::SectionTitle whatTitle, formatTitle, optionsTitle;
     juce::Label rangeLabel, loopsLabel, tailLabel, tailLengthLabel, stemsLabel;
@@ -792,6 +836,26 @@ std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int forma
     auto panel = std::make_unique<ExportPanel> (engine, juce::File(), "LYNX", false);
     panel->setFormatForSnapshot (format);
     return panel;
+}
+
+std::unique_ptr<juce::Component> makeExportPanelForTracks (AudioEngine& engine, const std::vector<int>& tracks)
+{
+    return std::make_unique<ExportPanel> (engine, juce::File(), "LYNX", false, 0, tracks);
+}
+
+void showExportDialogForTracks (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName,
+                                const std::vector<int>& tracks)
+{
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX",
+                                                                                 true, -1, tracks)).release());
+    options.dialogTitle = tr ("Render mixer tracks to audio files");
+    options.dialogBackgroundColour = theme::colour::bg2;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    options.escapeKeyTriggersCloseButton = true;
+    if (auto* dialog = options.launchAsync())
+        keepAboveMainWindow (*dialog);
 }
 
 void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName, int format)

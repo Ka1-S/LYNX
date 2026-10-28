@@ -459,10 +459,12 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                                    ? previous->echoes[c]
                                    : std::make_shared<channelmisc::NoteEcho>();
 
+    // (FL's Kepler keeps sounding when its cut group cuts it: FL's renders with and without "cut itself" are the same
+    // and both null against the engine fed every note to its end, REA_rodada165g-flbeta165k §3)
     for (std::size_t c = 0; c < channels.size(); ++c)
         if (channels[c].cutGroup > 0)
             for (std::size_t d = 0; d < channels.size(); ++d)
-                if (channels[d].cutBy == channels[c].cutGroup)
+                if (channels[d].cutBy == channels[c].cutGroup && channels[d].instrument != InstrumentKind::kepler)
                 {
                     state->cutTargets[c].push_back ((int) d);
                     state->hasCutGroups = true;
@@ -691,7 +693,7 @@ void RackState::buildPdc (const RackState* previous)
         for (std::size_t s = 0; s < effects[t].size(); ++s)
             slotLatency[t].push_back (*next++);
 
-    pdc = computePdc (song, channelLatency, slotLatency);
+    pdc = computePdc (song, channelLatency, slotLatency, sampleRate);
 
     // reuses lines of the same length: editing the song must not click the audio
     auto line = [] (int length, const std::shared_ptr<DelayLine>* old) -> std::shared_ptr<DelayLine> {
@@ -732,7 +734,9 @@ void RackState::buildPdc (const RackState* previous)
         const auto& track = song.mixer[t];
         if (track.outputChannel < 0 || track.outputChannel >= HardwareOutput::maxChannels)
             continue;
-        const auto length = t < pdc.outLat.size() ? std::max (0, pdc.total - pdc.outLat[t]) : 0;
+        // FL (FUN_010ffca0): only with "Compensate for master latency" on and the track not bypassed
+        const auto compensated = track.compensateMasterLatency && track.latencyBypass != LatencyBypass::always;
+        const auto length = compensated && t < pdc.outLat.size() ? std::max (0, pdc.total - pdc.outLat[t]) : 0;
         const std::shared_ptr<DelayLine>* old = nullptr;
         if (previous != nullptr)
             for (const auto& r : previous->hwRoutes)
@@ -740,6 +744,12 @@ void RackState::buildPdc (const RackState* previous)
                     old = &r.delay;
         hwRoutes.push_back ({ (int) t, track.outputChannel, track.outputMode, line (length, old) });
     }
+
+    bypassWhenIdle.assign (song.mixer.size(), 0);
+    anyBypassWhenIdle = false;
+    for (std::size_t t = 1; t < song.mixer.size(); ++t)
+        if (song.mixer[t].latencyBypass == LatencyBypass::whenRecordingOrStopped)
+            anyBypassWhenIdle = bypassWhenIdle[t] = 1;
 }
 
 void RackState::buildMidiRoutes()
@@ -938,6 +948,8 @@ void RackState::buildAutomationTables()
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::soundfont // (LYNX Soundfont's knobs)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))
+                                  // a recorded / drawn pitch bend plays on any instrument (issue #12)
+                                  || midictl::isPitchBend (t.param)
                                   // an Envelope Controller's global Mod X / Y (round 164f)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::controller
                                       && (t.param == envelopeControllerModXParam || t.param == envelopeControllerModYParam))
@@ -1439,6 +1451,30 @@ void RackRenderer::applyPluginParams (const RackState& state, int firstSlot, boo
 
         if (b.channel >= 0)
         {
+            const auto kind = (std::size_t) b.channel < state.song.channels.size() ? state.song.channels[(std::size_t) b.channel].instrument
+                                                                                    : InstrumentKind::plugin;
+            if (midictl::isPitchBend (b.param) && kind != InstrumentKind::plugin && kind != InstrumentKind::midiOut
+                && b.channel < (int) state.instruments.size() && b.channel < maxChannels)
+            {
+                // LYNX's own instruments: the bend as the controller's wheel plays it (applyLiveControl), when it changes
+                if (! automatedBendReset)
+                {
+                    automatedBend.fill (std::numeric_limits<float>::quiet_NaN());
+                    automatedBendReset = true;
+                }
+                auto& last = automatedBend[(std::size_t) b.channel];
+                if (! (last == v) && state.instruments[(std::size_t) b.channel] != nullptr)
+                {
+                    last = v;
+                    NoteEvent e;
+                    e.type = NoteEvent::Type::control;
+                    e.channel = b.channel;
+                    e.key = NoteEvent::controlPitchBend;
+                    e.velocity = std::clamp (v, 0.0f, 1.0f) * 2.0f - 1.0f;
+                    applyLiveControl (state, e);
+                }
+                continue;
+            }
             if (b.channel < (int) state.instruments.size())
                 state.instruments[(std::size_t) b.channel]->setParameter (b.param, v);
             // a MIDI Out's controls reach the plugins on its port
@@ -2479,6 +2515,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 {
     chunkTick = startTick;
     chunkPlaying = playing;
+    updatePdcBypass (state, playing);
     const auto& song = state.song;
     const auto tracks = std::max<int> (1, (int) song.mixer.size());
 
@@ -2794,8 +2831,9 @@ void RackRenderer::mixHardwareOutputs (const RackState& state, int n) noexcept
 
         const float* l = trackActive[(std::size_t) t] ? trackBuffer (t, 0) : nullptr;
         const float* r = trackActive[(std::size_t) t] ? trackBuffer (t, 1) : nullptr;
+        const auto bypassed = pdcBypassNow && (std::size_t) t < state.bypassWhenIdle.size() && state.bypassWhenIdle[(std::size_t) t] != 0;
 
-        if (route.delay != nullptr)
+        if (route.delay != nullptr && ! bypassed)
         {
             if (l != nullptr)
             {
@@ -2915,6 +2953,30 @@ void RackRenderer::sumChannelsInto (const RackState& state, int t, int channels,
     }
 }
 
+// FL's FUN_012c19f0: "When recording or not playing" bypasses while the transport is stopped or recording. Back to
+// compensated, those tracks' lines are emptied: they start from silence instead of replaying what they held.
+void RackRenderer::updatePdcBypass (const RackState& state, bool playing) noexcept
+{
+    const auto recording = liveInput != nullptr && liveInput->recording.load (std::memory_order_relaxed);
+    pdcBypassNow = state.anyBypassWhenIdle && (! playing || recording);
+
+    if (pdcBypassBefore && ! pdcBypassNow)
+    {
+        for (std::size_t t = 0; t < state.bypassWhenIdle.size() && t < state.sendDelays.size(); ++t)
+            if (state.bypassWhenIdle[t] != 0)
+            {
+                const auto plain = std::min (state.sendDelays[t].size(), 1 + state.song.mixer[t].sends.size()); // not the Fruity Send taps
+                for (std::size_t k = 0; k < plain; ++k)
+                    if (state.sendDelays[t][k] != nullptr)
+                        state.sendDelays[t][k]->clear();
+            }
+        for (const auto& route : state.hwRoutes)
+            if (route.delay != nullptr && (std::size_t) route.track < state.bypassWhenIdle.size() && state.bypassWhenIdle[(std::size_t) route.track] != 0)
+                route.delay->clear();
+    }
+    pdcBypassBefore = pdcBypassNow;
+}
+
 bool RackRenderer::runTaskGraph (const RackState& state, bool playing, int channels, int n, MeterBank* meters) noexcept
 {
     // LYNX_TASKGRAPH=0: the layers only (A/B measurements)
@@ -3004,6 +3066,8 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
         const auto active = tap >= 0 ? tapActive[(std::size_t) tap] : trackActive[(std::size_t) in.source];
         const auto& delays = state.sendDelays[(std::size_t) in.source];
         auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
+        if (pdcBypassNow && tap < 0 && state.bypassWhenIdle[(std::size_t) in.source] != 0)
+            delay = nullptr; // FL's "When recording or not playing": no compensation now
         auto* sl = tap >= 0 ? tapBuffer (tap, 0) : trackBuffer (in.source, 0);
         auto* sr = tap >= 0 ? tapBuffer (tap, 1) : trackBuffer (in.source, 1);
 

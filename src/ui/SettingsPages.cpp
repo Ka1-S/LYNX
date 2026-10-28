@@ -454,10 +454,15 @@ public:
         panelButton.onClick = [this] {
             if (auto* device = devices.getCurrentAudioDevice(); device != nullptr && device->hasControlPanel())
             {
-                // the driver's own window (ASIO): the device is reopened afterwards with what was set there
-                devices.closeAudioDevice();
-                device->showControlPanel();
-                devices.restartLastAudioDevice();
+                // the driver's own window (ASIO): the device is reopened afterwards with what was set there. (It used
+                // to close the device first and then call the deleted device: a crash every time, reported by the
+                // crash reports of issue #12's user with LYNX ASIO on 0.1.18. JUCE's own order: the panel, then the
+                // reopen when the driver says its settings changed.)
+                if (device->showControlPanel())
+                {
+                    devices.closeAudioDevice();
+                    devices.restartLastAudioDevice();
+                }
                 refresh();
             }
         };

@@ -1659,23 +1659,31 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
     // the pitch wheel, the mod wheel and the other controllers play into the channels the notes go to (round 162,
     // issue #9: they did nothing unless linked): hosted plugins get the MIDI message, LYNX's instruments bend by the
     // channel's pitch range. A CC with a MIDI link only moves its parameter.
-    auto playControl = [this, &device] (int control, float value) {
+    const auto recordBend = transport.recording.load() && transport.playing.load();
+    const auto bendTick = recordBend ? estimatedPositionNow() : 0.0;
+    auto playControl = [this, &device, &m, recordBend, bendTick] (int control, float value) {
         NoteEvent e;
         e.type = NoteEvent::Type::control;
         e.key = control;
         e.velocity = value;
+        auto send = [&] {
+            midiEvents.push (e);
+            // recording: the wheel is written too (the channel's pitch bend lane / automation clip, like FL)
+            if (recordBend && control == NoteEvent::controlPitchBend)
+                bendRecordQueue.push ({ bendTick, e.channel, juce::jlimit (0, 15, m.getChannel() - 1), (value + 1.0f) * 0.5f, true });
+        };
         const auto extra = juce::jlimit (0, maxLiveChannels, extraLiveCount.load());
         if (device.target >= 0)
         {
             e.channel = device.target;
-            midiEvents.push (e);
+            send();
             return;
         }
         for (int i = -1; i < extra; ++i)
         {
             e.channel = i < 0 ? liveChannel.load() : extraLiveChannels[(std::size_t) i].load();
             if (e.channel >= 0)
-                midiEvents.push (e);
+                send();
         }
     };
 
@@ -1917,6 +1925,7 @@ void AudioEngine::updateRecording()
     uiRecorded.clear();
 
     updateAudioRecording();
+    takeRecordedBends();
     updateAutomationRecording (active);
 
     if (! active && recorder.isActive())
@@ -2723,6 +2732,10 @@ std::optional<AutomationTarget> AudioEngine::getLastTweaked (int which) const
 
 float AudioEngine::currentTargetValue (const AutomationTarget& t) const
 {
+    // a controller's pitch wheel being recorded (any instrument: LYNX's own have no such parameter)
+    if (t.kind == AutomationTargetKind::channelParam && midictl::isPitchBend (t.param))
+        if (const auto it = liveBends.find (t.index); it != liveBends.end())
+            return it->second;
     const auto base = song.targetValue (t);
     if (base < 0.0f || (t.kind != AutomationTargetKind::channelParam && t.kind != AutomationTargetKind::effectParam))
         return base;
@@ -2763,6 +2776,30 @@ std::optional<AutomationTarget> AudioEngine::targetOfPlugin (const juce::AudioPl
     return std::nullopt;
 }
 
+void AudioEngine::takeRecordedBends()
+{
+    RecordedEvent e;
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    while (bendRecordQueue.pop (e))
+    {
+        if (! recordOptions.recordAutomation || e.channel < 0 || e.channel >= (int) song.channels.size())
+            continue;
+        const AutomationTarget target { AutomationTargetKind::channelParam, e.channel, 0, midictl::pitchBendBase + e.key };
+        liveBends[e.channel] = e.velocity;
+        // the wheel's own moves, at the times they were played (not only the UI's sampling)
+        auto it = std::find_if (touches.begin(), touches.end(), [&] (const Touch& t) { return t.target == target; });
+        if (it == touches.end())
+        {
+            touches.push_back ({ target, now, false, {} });
+            it = touches.end() - 1;
+        }
+        it->lastMs = now;
+        it->pending.push_back ({ e.tick, e.velocity });
+    }
+    if (! transport.recording.load() || ! transport.playing.load())
+        liveBends.clear();
+}
+
 void AudioEngine::updateAutomationRecording (bool active)
 {
     const auto now = juce::Time::getMillisecondCounterHiRes();
@@ -2792,7 +2829,7 @@ void AudioEngine::updateAutomationRecording (bool active)
                     auto& w = writeFor (t.target);
                     recordedAutomationPoints += (int) t.pending.size();
                     if (songMode)
-                        commitAutomationPoints (s, w, std::move (t.pending), grid);
+                        commitAutomationPoints (s, w, std::move (t.pending), grid, automationLinear);
                     else
                         commitEventPoints (s, automationPattern, w, std::move (t.pending), automationLoopLength, grid);
                     t.pending.clear();
@@ -2820,6 +2857,27 @@ void AudioEngine::updateAutomationRecording (bool active)
         automationOverrideActive = ! slots.empty();
     };
 
+    // the take's own clips reach the playhead (FL: the clip keeps growing until recording stops, holding the last value)
+    auto growClips = [this] (std::int64_t songTick, bool finished) {
+        if (song.mode != PlayMode::song || songTick < 0)
+            return;
+        const auto needed = std::any_of (takeWrites.begin(), takeWrites.end(), [&] (const AutomationWrite& w) {
+            if (! w.createdByTake || w.automation < 0)
+                return false;
+            for (const auto& c : song.playlist)
+                if (c.kind == ClipKind::automation && c.automation == w.automation)
+                    return finished || c.end() < songTick;
+            return false;
+        });
+        if (! needed)
+            return;
+        editSong ([&] (Song& s) {
+            for (const auto& w : takeWrites)
+                growTakeClip (s, w, songTick, finished);
+        }, ! automationTakeHasUndoStep);
+        automationTakeHasUndoStep = true;
+    };
+
     if (! recording)
     {
         commit ({});
@@ -2827,9 +2885,13 @@ void AudioEngine::updateAutomationRecording (bool active)
         overrideTouched();
         if (! active)
         {
+            growClips (lastAutomationTick, true);
             takeWrites.clear();
             automationTakeHasUndoStep = false;
             automationLoopLength = 0;
+            lastAutomationTick = -1;
+            if (std::exchange (automationLinear, false))
+                updateLinearSong();
         }
         return;
     }
@@ -2859,8 +2921,19 @@ void AudioEngine::updateAutomationRecording (bool active)
             ended.push_back (t.target);
     }
 
+    // song mode without a loop region: from the first move on, the song plays on past its end until recording stops
+    if (! takeWrites.empty() || ! touches.empty())
+        if (! automationLinear && song.mode == PlayMode::song && ! song.hasLoop())
+        {
+            automationLinear = true;
+            updateLinearSong();
+        }
+    if (song.mode == PlayMode::song)
+        lastAutomationTick = songTickForRecorded (song, tick, automationLinear);
+
     if (! ended.empty() || --automationCommitCountdown <= 0)
     {
+        growClips (lastAutomationTick, false);
         commit (ended);
         automationCommitCountdown = 6; // about 5 writes per second while a control keeps moving
     }
