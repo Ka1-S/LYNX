@@ -120,6 +120,12 @@ public:
     virtual Hint hintAt (juce::Point<int> position) = 0;
 };
 
+// One line of text fitted the way FL fits its captions (round 165): in `area`, or over up to `room` px of free space
+// around it (by the justification) when that is wider; the font shrinks down to `minHeight`, then the text narrows
+// down to `minScale` — no "..." while it can still be read.
+void drawFittingText (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area, juce::Justification just, juce::Font font,
+                      float minHeight = 7.5f, float room = 0.0f, float minScale = 0.6f);
+
 // A fixed hint for a component (stored in its properties; wins over the tooltip).
 void setHint (juce::Component& c, const juce::String& text, bool hasMenu = false, bool automatable = false);
 

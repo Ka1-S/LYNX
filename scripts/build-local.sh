@@ -19,7 +19,7 @@ mkdir -p build-local build-local/wavpack
 # workflow shell (key map, workspace layout, rack operations)
 CORE="$CORE src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/core/ChannelMiscFx.cpp src/core/MidiImport.cpp"
 # workflow P2 (note tools, mixer operations, history labels, browser search)
-CORE="$CORE src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/SearchService.cpp src/core/BrowserView.cpp src/core/EffectPresets.cpp src/core/PluginPresets.cpp src/core/ParamHelp.cpp"
+CORE="$CORE src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/FlAutoSlicer.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/SearchService.cpp src/core/BrowserView.cpp src/core/EffectPresets.cpp src/core/PluginPresets.cpp src/core/ParamHelp.cpp"
 # start-up sound (procedural)
 CORE="$CORE src/core/StartupSound.cpp"
 # FL's 3x Osc engine (REA round 47)
@@ -55,7 +55,7 @@ CORE="$CORE src/core/SoundFont.cpp src/core/SoundFontLoad.cpp src/core/SoundFont
 # Ogg Vorbis decoding as FL does (REA round 77)
 CORE="$CORE src/core/OggVorbis.cpp"
 # export options, MP3 encoding, plugin performance monitor, clip properties / arrangements (round 84)
-CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/Mp3Decoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp src/core/ProjectContents.cpp src/core/TempoDetect.cpp"
+CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/Mp3Decoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp src/core/ProjectContents.cpp src/core/TempoDetect.cpp src/core/ScoreLog.cpp"
 # LYNX's Facet EQ and Apex Limiter (round 99)
 CORE="$CORE src/core/FacetEq.cpp src/core/ApexLimiter.cpp"
 # LYNX's dynamics suite and FabFilter state translation (round 108)
@@ -68,7 +68,7 @@ CORE="$CORE src/core/VoiceShift.cpp"
 # FL engines usable in native projects (round 142, issue #5)
 CORE="$CORE src/core/NativeEngines.cpp"
 # FL's Layer channel and the round 164 controllers
-CORE="$CORE src/core/Layer.cpp src/core/XyController.cpp src/core/ControlSurface.cpp src/core/VoltageController.cpp"
+CORE="$CORE src/core/Layer.cpp src/core/XyController.cpp src/core/FlCurve.cpp src/core/ControlSurface.cpp src/core/VoltageController.cpp"
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 CORE="$CORE src/core/CrashReport.cpp"
 # WavPack decoder (C)
