@@ -85,11 +85,16 @@ void CurveEditor::paint (juce::Graphics& g)
     g.setFont (theme::font (theme::type::caption));
     if (axis == Axis::frequency)
     {
-        for (double hz : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0 })
+        // from the top down, so the labels that would crowd (a linear axis squeezes the lows) are the low ones
+        float lastLabel = 1.0e9f;
+        for (double hz : { 20000.0, 15000.0, 10000.0, 5000.0, 2000.0, 1000.0, 500.0, 200.0, 100.0, 50.0 })
         {
             if (hz >= sampleRate * 0.5)
                 continue;
             const auto x = a.getX() + (float) ae::curvePosition (hz, freqScale, sampleRate) * a.getWidth();
+            if (lastLabel - x < 30.0f)
+                continue;
+            lastLabel = x;
             g.setColour (theme::colour::gridBeat);
             g.drawVerticalLine ((int) x, a.getY(), a.getBottom());
             g.setColour (theme::colour::textDisabled);
@@ -417,7 +422,7 @@ public:
         sectionLines.clear();
         auto area = getLocalBounds().reduced (14, 10);
         title.setBounds (area.removeFromTop (22));
-        info.setBounds (area.removeFromTop (34));
+        info.setBounds (area.removeFromTop (infoHeight));
         area.removeFromTop (4);
 
         for (std::size_t i = 0; i < controls.size();)
@@ -440,10 +445,23 @@ public:
             const auto knobs = c.kind == Control::knob;
             auto row = area.removeFromTop (knobs ? knobHeight : rowHeight).reduced (0, 3);
             const auto count = (int) (j - i);
-            const auto cellW = row.getWidth() / count;
+            // check boxes take what their text needs, the others share the rest
+            std::vector<int> widths ((std::size_t) count, 0);
+            int fixed = 0, flexible = 0;
+            for (auto k = i; k < j; ++k)
+                if (controls[k].kind == Control::toggle && count > 1)
+                {
+                    const auto w = juce::GlyphArrangement::getStringWidthInt (theme::font (theme::type::body), controls[k].name) + 40;
+                    widths[(std::size_t) (k - i)] = w;
+                    fixed += w;
+                }
+                else
+                    ++flexible;
+            const auto share = flexible > 0 ? std::max (60, (row.getWidth() - fixed) / flexible) : 0;
             for (auto k = i; k < j; ++k)
             {
-                auto cell = row.removeFromLeft (cellW).reduced (k > i ? 4 : 0, 0);
+                const auto w = widths[(std::size_t) (k - i)] > 0 ? widths[(std::size_t) (k - i)] : (flexible > 0 ? share : row.getWidth() / count);
+                auto cell = row.removeFromLeft (w).reduced (k > i ? 4 : 0, 0);
                 if (controls[k].kind == Control::knob)
                 {
                     labels[k]->setBounds (cell.removeFromTop (16));
@@ -479,7 +497,7 @@ public:
     }
 
 private:
-    static constexpr int width = 500, rowHeight = 30, knobHeight = 80, headerHeight = 26, curveHeight = 170;
+    static constexpr int width = 500, infoHeight = 50, rowHeight = 30, knobHeight = 80, headerHeight = 26, curveHeight = 170;
 
     bool isEnvelopeTool() const noexcept
     {
@@ -488,7 +506,7 @@ private:
 
     int computeHeight() const
     {
-        int h = 10 + 22 + 34 + 4;
+        int h = 10 + 22 + infoHeight + 4;
         for (std::size_t i = 0; i < controls.size();)
         {
             if (controls[i].kind == Control::header)
@@ -888,9 +906,9 @@ private:
                 const auto amount = slider (tr ("Amount"), 0, 100, 0.1, 50, percent, 2);
                 header (tr ("Declipper"));
                 const auto clip = toggle (tr ("Enable declipper"), false, 3);
-                const auto clipThr = slider (tr ("Threshold"), 0, 100, 0.1, 90, percent, 3);
-                const auto clipModel = choice (tr ("Model"), { tr ("General"), tr ("Vocal") }, 0, 3);
                 const auto clipSafe = toggle (tr ("Safe mode"), false, 3);
+                const auto clipThr = slider (tr ("Threshold"), 0, 100, 0.1, 90, percent, 5);
+                const auto clipModel = choice (tr ("Model"), { tr ("General"), tr ("Vocal") }, 0, 5);
                 header (tr ("Declicker"));
                 const auto click = toggle (tr ("Enable declicker"), false, 4);
                 const auto clickSens = slider (tr ("Sensitivity"), 0, 100, 0.1, 25, percent, 4);

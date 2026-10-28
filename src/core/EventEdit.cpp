@@ -134,14 +134,17 @@ std::vector<AutomationPoint> toAutomationPoints (const PatternEvents& lane, floa
     const auto& ev = lane.events;
     if (ev.empty())
         return pts;
-    // a step per event: the value jumps at the event (two points at the same tick), then holds
+    // full sensitivity: a step per event (the value jumps at the event: two points at the same tick, then holds);
+    // lower: a point per event joined by lines, which the simplification below thins out
+    const auto exact = sensitivity >= 0.999f;
     for (std::size_t i = 0; i < ev.size(); ++i)
     {
         if (i == 0)
             pts.push_back ({ ev[i].tick, ev[i].value, 0.0f });
         else if (std::abs (ev[i].value - ev[i - 1].value) > 1.0e-6f)
         {
-            pts.push_back ({ ev[i].tick, ev[i - 1].value, 0.0f });
+            if (exact)
+                pts.push_back ({ ev[i].tick, ev[i - 1].value, 0.0f });
             pts.push_back ({ ev[i].tick, ev[i].value, 0.0f });
         }
     }
