@@ -1553,6 +1553,8 @@ AudioEngine::RecordingNotice AudioEngine::openAudioInput (const juce::String& de
         // Windows Audio / DirectSound: the input is a device of its own
         const auto inputs = type->getDeviceNames (true);
         auto name = deviceName.isNotEmpty() ? deviceName : setup.inputDeviceName;
+        if (name.isEmpty())
+            name = releasedInputDevice; // the one releaseAudioInputIfUnused closed
 
         if (! inputs.contains (name))
         {
@@ -1598,6 +1600,33 @@ AudioEngine::RecordingNotice AudioEngine::openAudioInput (const juce::String& de
     if (! hasAudioInput())
         return { InputIssue::noInputDevice, 0, {} };
     return {};
+}
+
+bool AudioEngine::audioInputNeeded() const
+{
+    if (audioArmed || ! armedInserts.empty() || hwinsert::returnsFromInput (song))
+        return true;
+    return std::any_of (song.mixer.begin(), song.mixer.end(), [] (const MixerTrack& t) { return t.inputChannel >= 0 || t.flInput >= 0; });
+}
+
+void AudioEngine::releaseAudioInputIfUnused()
+{
+    if (! hasAudioInput() || audioInputNeeded())
+        return;
+
+    auto* type = deviceManager.getCurrentDeviceTypeObject();
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    // a driver with separate input devices (Windows Audio) keeps capturing while an input device is set, even with
+    // no channel active: the device goes too (its name is remembered for the next openAudioInput)
+    if (type != nullptr && type->hasSeparateInputsAndOutputs() && setup.inputDeviceName.isNotEmpty())
+    {
+        releasedInputDevice = setup.inputDeviceName;
+        setup.inputDeviceName = {};
+    }
+    deviceManager.setAudioDeviceSetup (setup, true);
+    sendChangeMessage();
 }
 
 void AudioEngine::setInsertInput (int track, int channel, bool stereo)
@@ -1706,6 +1735,12 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
     if (m.isChannelPressure())
     {
         playControl (NoteEvent::controlPressure, (float) m.getChannelPressureValue() / 127.0f);
+        return;
+    }
+
+    if (m.isProgramChange()) // (round 165c: the selected channel's plugin / VFX Sequencer, as FL passes it on)
+    {
+        playControl (NoteEvent::controlProgram, (float) m.getProgramChangeNumber() / 127.0f);
         return;
     }
 
