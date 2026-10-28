@@ -33,5 +33,11 @@ Evidence markers: [DECOMP addr], [DATA], [FL render], [EXEC FL], [TEST], [SHOT],
     (portOnly routes keep the port silent for ordinary notes) [TEST]. One chunk of delay.
   - Editors: Level Scaler "Persistence" + fading lollipop markers (FL fade formula, 30 Hz), Keyboard Splitter
     "Manual mapping" toggle + hint, Sequencer Chain + Program change combos [SHOT build-linux vfxshot].
+  - 2026-10-28 13:00 (after the 2nd BSOD): the Plugin picker (Patcher / plugin window "Add plugin", core/PluginCatalog
+    Entry::renamed) and the mixer's plugin window title also show the Plugin database name of a renamed plugin (sorted
+    and found by it, still found by the original name; category from the original) [TEST r165c_plugin_catalog_renamed_plugins].
+    Merged origin/main (165d VFX Script: one Processor::setParameter for both rounds). build-local with FL Data
+    1 781 851 checks, 0 failures [RUN]; Linux build --vfxshot under Xvfb: quickadd-renamed / mixer-renamed show "1_EQ",
+    Sequencer Chain + Program change combos, Level Scaler Persistence, Splitter Manual mapping [SHOT].
   - Left: no automation target UI for VFX params; hosted plugins get no per-voice props; the program picked live by
     program change / chain is not written back to the saved state; zone-16 auto-end of Manual mapping is [HYP].
