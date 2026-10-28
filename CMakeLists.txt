@@ -300,6 +300,7 @@ if(LYNX_BUILD_APP)
         src/ui/PianoRollComponent.cpp
         src/ui/PlaylistComponent.cpp
         src/ui/MixerComponent.cpp
+        src/ui/QuickPick.cpp
         src/ui/PluginWindow.cpp
         src/ui/PluginPresetMenu.cpp
         src/ui/ProjectLoading.cpp
