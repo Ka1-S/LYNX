@@ -173,7 +173,9 @@ Core Audio / ALSA + JACK (PipeWire).
   (REA round 65 §3: PoiZone's framework, 6× oversampled filter, phaser and reverb; all 423 preset states bit-identical to
   FL's DLL with the effects off, as saved bit-identical except the reverb's −137…−155 dB residual); Fruity Granulizer on its engine (REA round 67: grains on the channel's sample with the library's 24-point windowed-sinc reader, grain
   envelope, stereo separation, randomness, wobble, freeze, loop, sample start, key modes, and the plugin voice processor;
-  within −128 dB of FL's DLL on 100 random states/scenarios and on every installation state without slices); Drumaxx on
+  within −128 dB of FL's DLL on 100 random states/scenarios; round 165g: slices from the WAV's markers or FL's auto
+  slicing with the transient hold, tempo lock on the ACID beats / stretch TIME, "Step" and "Transient" keys, FL's
+  32-point render quality — 17 FL renders matched end to end at the 16-bit floor, 127 random cases within −106 dB of the DLL); Drumaxx on
   its physical drum engine (REA round 67 §6–§9: 16 pads at 38 kHz — mallet and noise, 128 four-lane delay-line membrane,
   SOF, LOW, HIGH and enveloped MID sections, hold/release, lo-fi —, cut groups, velocity modulation, master EQ and
   limiter, with the engine's own C-runtime powf/sinf/cosf ported; all 133 distinct installation states bit-identical to
@@ -701,12 +703,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   is not decoded; the reverb's coefficient rounding (CRT float functions) leaves −137…−155 dB; without the user's
   `data.saw` the channel stays unsupported.
 - Fruity Granulizer
-  (REA round 67 §5): the slice modes (the sample's regions, "auto slicing": 2 presets, no project) and the slice key
-  mode play as "no slices"; tempo sync (FL's beat count of the sample) is off; FL's interpolation quality message is not
-  confirmed (the plugin's default, 24-point sinc, is used); the DLL's rcpps reciprocal and IPP sines are replaced by
-  exact ones (−128 dB; isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational
-  speed); the sample's own loop points are not read (whole sample); one random seed
-  per instrument.
+  (REA round 67 §5, round 165g flgran165): the DLL's rcpps reciprocal and IPP sines are replaced by exact ones (−128 dB;
+  isolated samples to about −87 dB when a grain reads within 10⁻¹² of a sample point at a rational speed); live playback
+  uses the plugin's 24-point sinc (FL's playback value is not measured; FL renders with 32 points, as LYNX's export);
+  the sample's own loop points are not read (whole sample); one random seed per instrument.
 - Drumaxx (REA round 67 §9): the pattern sequencer and swing are not played (a note on a pattern's trigger key — 100
   in every installation state — plays only the pads on that key); every pad plays on the channel (the plugin's
   separate mixer outputs are not routed; no installation state uses them); MIDI controllers are not wired; the CRT's
