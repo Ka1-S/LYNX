@@ -29,26 +29,25 @@ before → after (blank = not touched in round 165). Lowest first.
 | LYNX engine | Original | Config | Design | Since | Round 165 |
 |---|---|---|---|---|---|
 | Ridge Strip | SSL E-Channel (Waves) | 9 | 8 | 165 | 8 → 9 / 7 → 8 |
-| Ember Saturator | Decapitator | 8 | 7 | 135 | |
 | LYNX Tune | Auto-Tune Pro | 8 | 7 | 135 | 165j: sound only (highs kept, measured; scores unchanged) |
 | Ridge Strip (Vocal strip) | SSL Native Vocalstrip 2 | 9 | 7 | 145 | |
-| Hush De-esser | Pro-DS | 8 | 8 | 135 | |
 | Halo | ValhallaShimmer | 8 | 9 | 135 | |
 | Horizon | ValhallaFutureVerb | 8 | 9 | 135 | |
 | Orbit | ValhallaSpaceModulator | 8 | 9 | 135 | |
+| Hush De-esser | Pro-DS | 9 | 8 | 165w | 8 → 9 / 8 → 8 (in / out pan, state levels) |
 | Facet EQ | Pro-Q 4 | 9 | 8 | 152c | |
 | Crest Compressor | Pro-C 3 | 9 | 8 | 137 | |
 | Sentry Gate | Pro-G | 9 | 8 | 135 | |
 | Ember Saturator | Saturn 2 | 9 | 8 | 152b | |
 | Aether | Fresh Air | 9 | 8 | 128 | |
-| Glow Leveler | CLA-2A (Waves) | 9 | 8 | 152a | |
-| Hush De-esser | DeEsser (Waves) | 9 | 8 | 147 | |
-| Gemini Doubler | Doubler2 / Doubler4 (Waves) | 9 | 8 | 137 | |
+| Glow Leveler | CLA-2A (Waves) | 9 | 8 | 165w | 9 → 9 / 8 → 8 (sound: the measured release) |
+| Hush De-esser | DeEsser (Waves) | 10 | 8 | 165 | 9 → 10 / 8 → 8 |
 | Echoform | H-Delay (Waves) | 9 | 8 | 137 | |
 | Echoform | ValhallaDelay | 9 | 8 | 137 | |
 | Atrium | ValhallaRoom | 9 | 8 | 135 | |
 | Auto-pan (stand-in) | PanMan | 9 | 8 | 152 | |
 | Foil Plate | Little Plate | 9 | 8 | 152 | |
+| Ember Saturator | Decapitator | 9 | 9 | 165a | 8 → 9 / 7 → 9 |
 | Apex Limiter | Pro-L 2 | 9 | 9 | 135 | |
 | Epoch Verb | ValhallaVintageVerb | 9 | 9 | 135 | |
 | Nebula | Valhalla Supermassive | 9 | 9 | 135 | |
@@ -56,6 +55,7 @@ before → after (blank = not touched in round 165). Lowest first.
 | Lattice Mod | ValhallaUberMod | 9 | 9 | 144 | |
 | Quell Denoiser | NS1 (Waves) | 9 | 9 | 137 | |
 | Foil Plate | ValhallaPlate | 9 | 10 | 135 | |
+| Gemini Doubler | Doubler2 / Doubler4 (Waves) | 10 | 8 | 165w | 9 → 10 / 8 → 8 (defaults; 165w: shelf range −88 … +12 and law) |
 | Compressor (stand-in) | Renaissance Compressor (Waves) | 10 | 8 | 152 | |
 | LYNX Tune | Waves Tune Real-Time | 10 | 8 | 152b | 165j: sound only (measured; scores unchanged) |
 | Echoform | EchoBoy / PrimalTap | 10 | 8 | 150 | |
@@ -446,9 +446,12 @@ output level and pan.
 | LOOKAHEAD knob 0–15 ms with power button | ✅ | round 128 (the look-ahead is the latency; the mixer re-plans its delay compensation) |
 | DISPLAY button (hide / show the waveform) | ✅ | round 128: the window shrinks without it |
 | Oversampling (bottom bar) | ✅ | round 135: Off / 2x / 4x / 8x for Hush's own voicing (the band and its gain at the high rate; the measured classic voicing has none) |
-| In / Out levels (bottom bar) | ✅ | round 128: In ±12 dB, Out ±12 dB (no pan) |
+| In / Out levels (bottom bar) | ⚠️ | round 128: In ±12 dB, Out ±12 dB; [EXEC] round 165w: the 17.1 trial's run −∞ … +36 dB (36 dB per unit above −18); a state's levels are now read right (stored as 2 v − 1; +7.2 dB was read as +0.2) and the input translated |
+| In / Out pan (bottom bar) | ✅ | round 165w [EXEC]: **In pan / Out pan** — the trial's balance law (the far channel × (1 − \|pan\|), the near one untouched; in before the detector, out after the output level), translated from Pro-DS states; oversampling translated too |
 | Release | — | Pro-DS has no release control; LYNX keeps RELEASE as an extra (bottom bar) |
 | Input meter with threshold arrow, reduction meter | ✅ | |
+
+**Round 165w** (REA_rodada165w §5): configuration 8 → **9**, design 8 → 8 — In pan / Out pan (measured balance), the Pro-DS state's levels read correctly, input level / pans / oversampling translated. Left: the −∞ … +36 dB level range, the high-pass up to 20 kHz (Hush: 16 kHz), Stereo Link above 100 % (the mid-only blend) not translated.
 
 ## Ember Saturator ← Saturn 2 (and Decapitator's role)
 
@@ -670,7 +673,7 @@ Trial on this PC: yes (the new parity129 capture is missing; the w119 capture wa
 | TRIM | knob −18…+18 dB, default 0, bottom right (after the mix) | none (Gain is pre-mix and 0…+30 only) | ✅ | new parameter (output trim ±18 dB); round 129: Trim ±18 dB after the mix |
 | AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle; round 152 [EXEC]: the classic voicing's measured law (a make-up that follows the Peak reduction dial: −1.5 dB at 0, 0 at 46, +6.8 at 62.6, +11.4 at 80, +16.7 at 100 — not a level follower), translated (RW 207) |
 | Mono / stereo components | separate Mono and Stereo plugins | stereo-linked engine | ⚠️ | no mono variant needed in a DAW slot |
-| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ✅ | round 123: the classic voicing's measured log-domain attack (faster as the reduction grows), hyperbolic two-stage release and memory; round 152 check: the recovery after a loud passage is ≈ 1 dB slower than the trial's on 0.5 s stairs |
+| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ✅ | round 123: the classic voicing's measured log-domain attack (faster as the reduction grows), hyperbolic two-stage release and memory; round 152 check: the recovery after a loud passage is ≈ 1 dB slower than the trial's on 0.5 s stairs round 165w [EXEC]: the release measured on the 17.1 trial (bursts of 0.1 … 10 s at −24 … 0 dBFS, then a −40 dBFS probe; Compress 46 / 62.6 / 80, Limit 62.6): the same recovery after 0.5, 2 or 10 s (no long memory), back within 0.1 dB after ≈ 10 s; refitted (recovery 0.08 … 0.84 → 0.03 … 0.15 dB rms; held-out 0.5 s stairs, falling half 0.52 … 0.76 → 0.35 … 0.45 dB); older projects keep round 123's (Release Old \| Measured) |
 | Static curve | γ ≈ 4.54 (≈ 4.2:1 local, 5.5:1 asymptotic) | γ = 2 (≈ 3:1) | ✅ | round 123: the Opto classic voicing's cell law fitted on the trial (γ 2.15 on the side-chain level above its threshold, feedback detection); round 152 [EXEC]: **Limit** measured (a steeper cell, 1.5 % of the input in the side chain — the trial over-compresses at 62.6 — and the cell's deepest reduction, 30.4 dB): 0.34 / 0.52 / 0.50 dB rms at peak reduction 46 / 62.6 / 80 (round 123's Limit 0.37 / 1.00 / 1.32); older projects keep the old Limit (Opto law Old \| Measured) |
 | HF tilt under GR / 2nd harmonic | yes (+1…+6 dB above 6 kHz under GR; ≈ −52 dBc H2) | none | ✅ | round 123: the classic voicing's measured tilt (up to +7 dB at 20 kHz under reduction) and 2nd / 3rd harmonics |
 | Section layout | Gain left, VU centre, Peak Reduction right; Comp/Limit left; VU selector + Auto Makeup right; bottom strip Analog · Hi Freq · Mix · Trim | Gain left, VU centre, Peak reduction right; Comp/Limit under the VU; Emphasis + Mix small at the bottom | ⚠️ | the main row matches; the bottom strip has 2 of its 4 items, and the right column (selector, auto makeup) is missing |
@@ -678,6 +681,8 @@ Trial on this PC: yes (the new parity129 capture is missing; the w119 capture wa
 | Knob scales | 0–100 printed around Gain and Peak Reduction | arc only; the value appears under the knob | ⚠️ | a CLA user reads Gain as 0–100; LYNX shows dB |
 | Value entry / fine / reset | Waves value handling | right-click entry, Ctrl fine, double-click reset | ✅ | |
 | Saved-state translation | — | Gain (via the measured table), Peak Reduction, Comp/Limit translated; Hi Freq, Analog, Mix, Trim, Auto Makeup and VU ignored | ✅ | PLUGIN_FALLBACK row 140 / round 113 §3c; round 123: Hi Freq, Trim; round 152: Mix (RW 204), Auto Makeup (207), Analog (140); the VU selector is the editor's view only |
+
+**Round 165w** (REA_rodada165w §2): configuration 9 → 9, design 8 → 8 — sound: the classic voicing's measured release (appended **Opto release**: Measured for new instances and translated states, Old for projects / presets saved before; Release Old | Measured tabs top right with the classic voicing). Left: Auto Makeup's reference point, the VU selector not translated.
 
 **After round 152** (REA_rodada152a §2): configuration 7 → **9**/10, design 7 → **8**/10 — the reference's fresh instance (Opto classic, 40 / 46 / 50), ANALOG 50 / 60 Hz (measured hum and noise), the measured Limit and AUTO MAKEUP, Mix / Auto Makeup / Analog translated. Left: the release tail ≈ 1 dB slower than the trial's after loud passages, Auto Makeup's reference point (LYNX: the dial's default 46; the trial: the dial where it was switched on).
 
@@ -912,7 +917,7 @@ Trial on this PC: yes (no screenshot this round).
 | Factory presets | Default (5506 Hz HP Split), Male Ess 4500, Male Shh 3385, Female Ess 6779, Female Shh 5077 (all BandPass + Split) | none | ✅ | 4–5 generic-named presets (frequency + detector) would cover it; round 135w: "Classic split (band detector)" folder: Classic default 5.5 kHz, Male S 4.5, Male SH 3.4, Female S 6.8, Female SH 5.1 kHz (LYNX names; classic voicing, band detector, split) |
 | Thresh | slider −80…0 dB, default **0**, aligned with the Energy Detector meter | "Threshold" big knob −60…0 dB, default **−30 dB**; also a draggable line on the waveform and an arrow on the meter | ⚠️ | 3 ways to set it ➕; range is 20 dB shorter; default differs |
 | Freq | value window 2000–16000 Hz (log), default **5506 Hz** | horizontal slider 2–16 kHz with end labels, same log law; default **6.02 kHz** | ✅ | same law; set the default to 5506 (v = 0.487) |
-| SideChain HighPass / BandPass | button, default HighPass | "Detection: High-pass \| Band" tabs (+ bottom-bar menu), default High-pass | ✅ | Hush BP Q 1.4; Waves "very sharp", Q unknown |
+| SideChain HighPass / BandPass | button, default HighPass | "Detection: High-pass \| Band" tabs (+ bottom-bar menu), default High-pass | ✅ | **round 165** [EXEC]: the trial's BandPass is its HighPass side chain followed by a 4th-order low-pass (Q 0.68 ×2 at 1.84 × the frequency at 5.5 kHz, 1.75 × at 8 kHz): 0.1 … 0.35 dB rms at 4.5 … 14 kHz; BandPass states are now translated (17.1 stores HighPass 1 / BandPass 0, they were all read as HighPass) |
 | Audio Split / Wideband | button, default **Split** | "Processing: Wide band \| Split band" tabs, default Split | ✅ | Hush's split is 2nd order at the frequency; Waves' is 1st order at ≈ Freq/π (engine) |
 | Monitor Output / SideChain (+ yellow light) | button | "Audition" toggle under the frequency slider (plays the detection band) | ✅ | same function, different name |
 | Energy Detector meter (side-chain energy, dB below 0 dBFS, blue) aligned with the threshold | main meter | "IN" meter = input peak with a threshold arrow, and **inside it a blue bar = the detector's energy** (what the threshold is compared with, in the threshold's scale; both engines) | ✅ | round 147 |
@@ -921,9 +926,9 @@ Trial on this PC: yes (no screenshot this round).
 | Frequency-response display | **none in the classic DeEsser** (the manual lists no graph; Renaissance DeEsser has one) | small detector-band graph only in the generic `hushDeEsser()` layout; the display-first editor shows the scrolling waveform with the reduction in red | ➕ | nothing to add for parity |
 | Range | none (the floor is the split's leakage) | "Range" 0–24 dB, default 12 | ➕ | translator fixes it at 12 dB |
 | Release | none (hidden, unknown) | 10–250 ms, default 61 ms | ➕ | |
-| Lookahead | none, 0 latency | 2 ms toggle, **on** by default (adds 2 ms of latency) | ➕/⚠️ | the default should be Off for Waves parity (spec §7.3) |
+| Lookahead | none, 0 latency | 2 ms toggle, **on** by default (adds 2 ms of latency) in Hush's own engine | ✅ | **round 165** [EXEC]: the classic voicing (the DeEsser role, where the substitutes start) has no latency, as the trial (it reported 96 samples) |
 | Output gain | none | ±12 dB | ➕ | |
-| Knee / ratio | hard knee, effective ratio ≈ 7, RMS energy | 3 dB soft knee, ratio ∞, peak | ⚠️ | engine (spec §7.2) |
+| Knee / ratio | hard knee, effective ratio ≈ 7, RMS energy | classic voicing (round 123): ratio 7.1, 1.3 dB knee, power detector; Hush's own engine: 3 dB soft knee, ∞, peak | ✅ | **round 165** [EXEC] 7 kHz stairs, thresholds −10 … −60, HighPass / BandPass, Split / Wideband (24 settings): 0.10 … 0.25 dB rms; the wide-band reduction stops at 25.6 dB (was unlimited: up to 24 dB off at −60) |
 | Gestures | slider drag, value-window typing | drag, Ctrl fine, wheel, reset, right-click entry, line/arrow drags | ✅ | |
 | Saved-state translation | — | frequency (×0.81), threshold (+5 dB), Split/Wide, HP/BP, Monitor translated; range fixed at 12 dB | ✅ | round 113 §3c |
 
@@ -931,6 +936,8 @@ Trial on this PC: yes (no screenshot this round).
 editor is Pro-DS-like. A DeEsser user finds Threshold, Freq, HP/BP, Split/Wide and Monitor (as "Audition")
 quickly. What they miss: the side-chain energy meter beside the threshold, the Attn peak hold, the output meter,
 presets, and the Waves defaults.
+
+**Round 165** (REA_rodada165h §2): configuration 9 → **10**, design 8 → 8 — BandPass measured and translated, the 25.6 dB floor, no latency; vocal-take nulls −16 … −37 dB over six settings (as shipped: −12 … −34, BandPass states playing as HighPass). Left (design): Hush's threshold knob vs the reference's −80 … 0 slider aligned with the meter.
 
 **Top gaps:**
 1. **Defaults:**
@@ -1020,16 +1027,16 @@ Trial on this PC: yes (Doubler2 / Doubler4).
 | Direct on/off | row 2, left; On | toggle "Direct", On | ✅ | |
 | Direct gain | 0…−48 dB (manual default −12; trial default 0) | 0…−48 dB, default 0 dB | ✅ | |
 | Direct pan / stereo rotation | ±45°, centre | ±45°, rotation law measured | ✅ | |
-| Align (direct) | NO/YES button; default Off | toggle, default **On** | ⚠️ | default differs |
-| FB high-pass | 16…12000 Hz, default 16; numeric box with a HP icon | "FB low cut" knob 16 Hz…21.4 kHz, default 16 | ⚠️ | range top 12 kHz in the original |
+| Align (direct) | NO/YES button; default Off | toggle, default Off | ✅ | round 165: default Off, as the 17.1 trials |
+| FB high-pass | 16…21357 Hz, default 16 ([EXEC] 17.1 trial; the manual says 12 kHz); numeric box with a HP icon | "FB low cut" knob 16 Hz…21.4 kHz, default 16 | ✅ | same range and law |
 | Range | 80 Hz / 20 Hz, manual default 20 Hz (trial screenshot shows 80HZ) | tabs 80 Hz / 20 Hz, default 80 | ✅ | |
 | Modulation RESET | button, automatable, restarts every LFO in sync | — | ✅ | needs a trigger param + engine reset; round 135w: RESET button (momentary): every voice's LFO restarts in sync |
-| Low shelf on / gain / freq | L marker button + gain knob + freq box; gain +12…−24 dB, below −24 "the floor drops to make a cut filter"; default On | L toggle, gain −30…+12, freq 16 Hz–21 kHz, default **off** | ⚠️ | no cut mode below −24; default off vs On |
-| High shelf on / gain / freq | H marker + gain + freq box | H toggle, gain, freq, default off | ⚠️ | same remarks |
+| Low shelf on / gain / freq | L marker button + gain knob + freq box; gain +12…−24 dB, below −24 "the floor drops to make a cut filter"; default On | L toggle, gain −88…+12 (round 165w), freq 16 Hz–21 kHz; round 165: on, 0 dB at 101 Hz by default (the trial's) | ✅ | [EXEC] round 165w: the 17.1 trial's −88 … +12 dB (linear in the value) and its law — two first-order sections, the fixed corner at f0 / 1.557 (a 12 dB / oct cut below −24): 0.02 dB rms over 38 measured curves (round 124's shelf: 3.6 dB); older projects keep round 124's (EQ law Old \| Measured) |
+| High shelf on / gain / freq | H marker + gain + freq box | H toggle, gain −88…+12, freq; round 165: on, +4.1 dB at 1306 Hz by default (the trial's) | ✅ | round 165w: the same law, fixed corner at f0 · 1.557 |
 | EQ acts on voices only | yes | yes | ✅ | |
 | Voice on/off | coloured numbered buttons 1 / 2 | toggles "1" / "2" | ✅ | |
 | Voice gain | 0…−48 dB, default −12 | 0…−48 dB, default −6 | ✅ | default differs slightly |
-| Voice pan | ±45°, defaults V1 22.5 / V2 −22.5 (V3 45, V4 −45) | ±45°, defaults −45 / +45 | ⚠️ | defaults |
+| Voice pan | ±45°, defaults V1 22.5 / V2 −22.5 (V3 45, V4 −45) | ±45°, defaults −45 / +45 | ✅ | [EXEC] the Doubler2 17.1 trial's defaults are −45 / +45 too (the manual's ±22.5 is older) |
 | Voice delay | 0…100 ms, default 8 ms; min 8 / 14 ms when not aligned | 0…100 ms, defaults 9.4 / 23.7 | ✅ | the 8/14 ms minimum not enforced (measured: not enforced by the trial either, spec §4.2) |
 | Voice feedback (FDBK) | 0…100 %, default 0, warning > 25 % | 0…100 %, 0 | ✅ | |
 | Octaver | ▼ arrow button, octave down | "Oct" toggle | ✅ | |
@@ -1039,7 +1046,7 @@ Trial on this PC: yes (Doubler2 / Doubler4).
 | Value editing in the voice strip | numeric boxes (drag / type); gain & pan as small knobs | knobs everywhere with values under them | ⚠️ | design only; drag/type works on both |
 | Per-voice column order | Voice · Gain · Pan · Delay · Fdbk · Oct · Detune · Depth · Rate | 1 · Gain · Pan · Delay · Feedback · Oct · Detune · Depth · Rate · Source | ✅ | same order |
 | Source per voice (In 1 / In 2) | bottom-left drop-downs "In 1 L▾", "In 2 R▾" (L / L+R / L−R) | tabs at the end of each voice row | ⚠️ | different place, same options |
-| Master output gain | right column, vertical fader 0 … −∞ (scale 0 / 24) | vertical fader −24…0 dB, no scale | ⚠️ | no −∞, no scale marks |
+| Master output gain | right column, vertical fader 0 … −∞ (scale 0 / 24) | vertical fader −24…0 dB, no scale | ✅ | [EXEC] the 17.1 trial's Master Gain runs −24 … 0 dB (no −∞) |
 | Output meters | stereo bar meters beside the fader, scale 0…−24, peak counters under them (click to reset) | — | ✅ | round 129: output meters with peak read-outs beside the fader |
 | Clip light | red, click to reset | — | ✅ | round 135w: the meter's OUT label turns red when the output clipped; click the meter to reset |
 | Doubler4: voices 3 and 4 | 4 rows, each with its source | 2 voices only | ✅ | engine + params + translation (spec §7 item 6); round 135w: voices 3 / 4 (page "Voices 3-4" of the voice rows; off by default), drawn on the graphs; a Doubler4 state's blocks 46 / 56 are translated [model: same layout as voices 1 / 2; sources 3 / 4 not probed] |
@@ -1049,6 +1056,10 @@ Trial on this PC: yes (Doubler2 / Doubler4).
 | Window | fixed 800×580 | resizable 800×460 | ✅ | |
 
 **Scores** — configuration: 7/10 for Doubler2 users, 4/10 for Doubler4 users; design: 6/10.
+
+**Round 165** (REA_rodada165h §3): configuration 9 → 9, design 8 → 8 — the 17.1 trials' fresh instance (Align off, both shelves on at their frequencies / gains); rows re-checked against the trials' parameter lists (feedback high-pass range, voice pans, master range match). Left: the shelves' −88 … −24 dB cut range.
+
+**Round 165w** (REA_rodada165w §3): configuration 9 → **10**, design 8 → 8 — the shelves' whole range (−88 … +12 dB) and measured law (two first-order sections; the deep cut is a 12 dB / octave filter), the EQ graph on that scale, deep cuts translated one to one; appended **EQ law** (Old | Measured tabs on the Direct row) so older projects and presets sound the same. Left (design): numeric boxes in the voice strip, the source drop-downs' place.
 **Top gaps**
 1. Draggable markers in the three graphs (pan/gain, delay/detune, EQ L/H; double-click a shelf marker toggles it) —
    PluginEditors.cpp `geminipan` / `geminimap` / `geminieq` + a display-drag hook in mouseDown/mouseDrag (today only

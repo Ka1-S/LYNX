@@ -1779,6 +1779,10 @@ Layout glowLeveler()
     v.push_back (label (12, 236, 120, 12, TR_NOOP ("Analog")));
     v.push_back (tabs (12, 250, 120, 20, "Analog", TR_NOOP ("Off|50 Hz|60 Hz"), { 0.0f, 0.5f, 1.0f }));
     v.push_back (when (tabs (12, 26, 130, 18, "Opto law", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
+    // round 165w: the classic voicing's release (Measured = the trial's gain recovery; Old = round 123's slower tail, kept
+    // by a project saved before), right, under the VU selector
+    v.push_back (when (label (392, 46, 136, 10, TR_NOOP ("Release")), "Voicing", 0.5f, 1.0f));
+    v.push_back (when (tabs (392, 57, 136, 16, "Opto release", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
     v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));
@@ -1805,6 +1809,9 @@ Layout hushDeEsser()
     v.push_back (dial (412, 58, 40, "Range", TR_NOOP ("Range")));
     v.push_back (dial (300, 142, 32, "Release", TR_NOOP ("Release")));
     v.push_back (dial (376, 142, 32, "Output", TR_NOOP ("Output"), bipolar));
+    // round 165w: the reference's input / output pan (balance)
+    v.push_back (dial (240, 142, 28, "Input pan", TR_NOOP ("In pan"), bipolar));
+    v.push_back (dial (430, 142, 28, "Output pan", TR_NOOP ("Out pan"), bipolar));
     // round 128: the reference de-esser's other controls
     v.push_back (tabs (12, 222, 200, 20, "Allround", TR_NOOP ("Single vocal|Allround")));
     v.push_back (toggle (12, 252, 64, 20, "Link mid", TR_NOOP ("Mid (M/S)")));
@@ -2384,6 +2391,8 @@ Layout geminiDoubler()
     v.push_back (toggle (632, 208, 40, 22, "High shelf", TR_NOOP ("H")));
     v.push_back (dial (700, 206, 30, "High gain", TR_NOOP ("Gain"), bipolar));
     v.push_back (dial (754, 206, 30, "High freq", TR_NOOP ("Freq")));
+    // round 165w: the shelves' law (Measured: −88 … +12 dB, the reference's; Old: round 124's, kept by older projects)
+    v.push_back (tabs (656, 168, 132, 18, "EQ law", TR_NOOP ("Old|Measured")));
     // one row per voice; round 135w: voices 3 and 4 (the four-voice doubler's) on a second page of the same rows
     v.push_back (section (4, 264, 680, 192, TR_NOOP ("Voices")));
     l.pages = { TR_NOOP ("Voices 1-2"), TR_NOOP ("Voices 3-4") };

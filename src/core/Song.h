@@ -1015,6 +1015,27 @@ std::vector<MidiLink> linksWithGlobal (const std::vector<MidiLink>& project, con
 
 enum class PlaylistTrackMode : std::uint8_t { unassigned, audio, instrument };
 
+// FL's Performance mode track settings (round 165m: the track menu's "Performance settings" [DFM], stored in the
+// .flp Playlist track record 0xEE at bytes 22…45 [DATA]; the numbers are FL's menu Tags = the stored values).
+// How a clip launched in the performance zone (the Playlist before the "Start" marker) plays on its track.
+struct TrackPerformance
+{
+    enum class Press : std::uint8_t { retrigger, holdStop, holdMotion, latch };
+    enum class Motion : std::uint8_t { stay, oneShot, marchWrap, marchStay, marchStop, random, exclusiveRandom };
+    // Trigger / position sync: off, 1/4, 1/2, 1, 2 or 4 beats, or auto (the clip's own length)
+    enum class Sync : std::uint8_t { off, quarterBeat, halfBeat, beat, twoBeats, fourBeats, autoLength };
+
+    Press press = Press::retrigger;
+    Motion motion = Motion::stay;
+    Sync triggerSync = Sync::fourBeats; // a launch waits for the next multiple of this (FL's default 4 beats)
+    bool queue = false;                 // a launch waits for the playing clip to end
+    bool tolerant = true;               // a launch a little after the grid point still starts on it (FL's default on)
+    Sync positionSync = Sync::off;      // the launched clip starts at the song position modulo this, not at its start
+
+    bool isDefault() const noexcept { return *this == TrackPerformance {}; }
+    bool operator== (const TrackPerformance&) const = default;
+};
+
 // Header of a Playlist track.
 struct PlaylistTrack
 {
@@ -1032,6 +1053,7 @@ struct PlaylistTrack
     PlaylistTrackMode mode = PlaylistTrackMode::unassigned;
     int mixerTrack = -1; // audio / instrument tracks: the linked mixer track (-1 = none)
     int channel = -1;    // instrument tracks: the channel
+    TrackPerformance performance {}; // FL's Performance settings (round 165m)
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.
@@ -1054,6 +1076,7 @@ struct Marker
     static constexpr int none = 0, markerLoop = 1, markerSkip = 2, markerPause = 3, songLoop = 4, start = 5,
                          patternLength = 6, barOverride = 7, timeSignature = 8, punchIn = 9, punchOut = 10,
                          loopLength = 11, keyScale = 12;
+    static constexpr int songStart = start; // (round 165m's name) Performance mode's zone ends here
 
     bool isSignature() const noexcept { return numerator > 0; }
     bool operator== (const Marker&) const = default;
@@ -1134,6 +1157,14 @@ struct Song
     }
 
     bool hasLoop() const noexcept { return loopEnd > loopStart; }
+
+    // FL's Performance mode (Playlist › Options › Performance mode, Ctrl+P; round 165m): the clips before the first
+    // "Start" marker (the performance zone) don't play with the song; they are launched live (click, controller pads)
+    // and loop on their track by its Performance settings, while the song plays from the Start marker on.
+    bool performanceMode = false;
+    // The end of the performance zone: the first Start marker's tick, or 0 (no zone) without one / when off.
+    std::int64_t performanceZoneEnd() const noexcept;
+    bool inPerformanceZone (const Clip& clip) const noexcept { return performanceMode && clip.start < performanceZoneEnd(); }
 
     // Markers of the current arrangement.
     std::vector<Marker>& markers();

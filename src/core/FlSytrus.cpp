@@ -1942,6 +1942,27 @@ std::optional<KeyboardControllerData> parseKeyboardController (const std::vector
     out.autoRelease = d[552] != 0;
     return out;
 }
+void writeKeyboardController (const KeyboardControllerData& data, std::vector<std::uint8_t>& d)
+{
+    if (! parseKeyboardController (d))
+    {
+        d.assign (554, 0);
+        const std::uint32_t version = 3;
+        const std::int32_t smoothing = 32; // attack and release (FL's default)
+        std::memcpy (d.data(), &version, 4);
+        std::memcpy (d.data() + 4, &smoothing, 4);
+        std::memcpy (d.data() + 8, &smoothing, 4);
+    }
+    for (std::size_t k = 0; k < data.keys.size(); ++k)
+    {
+        const auto v = std::clamp (std::isfinite (data.keys[k]) ? data.keys[k] : 0.0f, 0.0f, 1.0f);
+        std::memcpy (d.data() + 12 + k * 4, &v, 4);
+    }
+    const auto off = std::clamp (std::isfinite (data.noteOffValue) ? data.noteOffValue : 0.0f, 0.0f, 1.0f);
+    std::memcpy (d.data() + 548, &off, 4);
+    d[552] = data.autoRelease ? 1 : 0;
+}
+
 std::optional<LovePhilterState> parseLovePhilter (const std::vector<std::uint8_t>& blob)
 {
     if (blob.size() < 8)

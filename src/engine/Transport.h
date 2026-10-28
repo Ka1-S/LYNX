@@ -46,6 +46,7 @@ struct Transport
     std::atomic<bool> songMode { false };
     std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 };
     std::atomic<double> songEnd { 0.0 }; // Song::songLength(): without a loop region Song mode loops there
+    std::atomic<double> songStart { 0.0 }; // Performance mode: the song loops back to its Start marker (round 165m)
 
     // The Playlist markers' actions (core/MarkerPlan.h) for the audio thread, published by the UI under a seqlock
     // like the signatures above (odd version while writing; the audio thread keeps its last good copy).
