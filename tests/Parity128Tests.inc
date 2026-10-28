@@ -175,7 +175,7 @@ TEST (ember_round128_new_parameters_default_to_the_old_sound)
 {
     using namespace lynx::mixsuite::ember;
     const auto& in = lynx::effectInfo (lynx::EffectKind::ember);
-    CHECK ((int) in.params.size() == count && count == 158 && count <= lynx::maxEffectParams); // round 135 (7) + round 136 (the Classic voicing, 11) + round 147b (9) + round 150b (41) + round 152b (25)
+    CHECK ((int) in.params.size() == count && count == 160 && count <= lynx::maxEffectParams); // round 135 (7) + round 136 (the Classic voicing, 11) + round 147b (9) + round 150b (41) + round 152b (25) + round 165a (2)
     const auto p = mixsuite96::defaults (lynx::EffectKind::ember);
     CHECK (std::abs (inputDb (p[inputGain])) < 1e-9);
     for (int b = 0; b < maxBands; ++b)

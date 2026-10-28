@@ -1819,8 +1819,9 @@ Layout aetherLayout()
 // High cut (+ Steep) and Mix in a row, the five styles one click each along the bottom
 Layout withEmberClassic (Layout l)
 {
+    // every item of Ember's own page hides in Classic (round 165: also the band rows, which carry their own condition)
     for (auto& it : l.items)
-        if (it.whenParam == nullptr)
+        if (it.whenParam == nullptr || it.when2Param == nullptr)
             it = when (it, "Voicing", 0.0f, 0.5f);
     auto add = [&l] (LayoutItem it) { l.items.push_back (when (it, "Voicing", 0.5f, 1.0f)); };
     add (section (4, 4, 512, 432, TR_NOOP ("Classic")));
