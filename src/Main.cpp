@@ -1517,6 +1517,24 @@ private:
                       && plainBack->mixer[0].outputChannel == lynx::outputDefault && plainBack->mixer[1].outputChannel == lynx::outputDefault;
         }
 
+        // FL's track latency (REA round 165f-mixer): manual ms, bypass mode and master compensation saved only when set
+        bool latencyOk = false;
+        {
+            auto song = lynx::Song::makeDefault();
+            const auto plain = lynx::ProjectFile::toJson (song);
+            song.mixer[1].latencyMs = -20.0f;
+            song.mixer[2].latencyMs = 12.5f;
+            song.mixer[2].latencyBypass = lynx::LatencyBypass::always;
+            song.mixer[3].latencyBypass = lynx::LatencyBypass::whenRecordingOrStopped;
+            song.mixer[3].compensateMasterLatency = false;
+            const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
+            latencyOk = back && back->mixer[1].latencyMs == -20.0f && back->mixer[2].latencyMs == 12.5f
+                        && back->mixer[2].latencyBypass == lynx::LatencyBypass::always
+                        && back->mixer[3].latencyBypass == lynx::LatencyBypass::whenRecordingOrStopped && ! back->mixer[3].compensateMasterLatency
+                        && back->mixer[4].latencyMs == 0.0f && back->mixer[4].compensateMasterLatency
+                        && ! plain.contains ("latencyMs") && ! plain.contains ("latencyBypass") && ! plain.contains ("compensateMaster");
+        }
+
         // LYNX substitutes (round 98): a missing plugin's slot plays a built-in equivalent and the project keeps the
         // original reference byte for byte (.flp record and LYNX plugin state)
         bool substituteOk = false;
@@ -1795,7 +1813,7 @@ private:
         }
         const auto nativesOk = nativesResult == "OK";
 
-        const auto ok = audioOk && projectOk && richOk && hwOutOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
+        const auto ok = audioOk && projectOk && richOk && hwOutOk && latencyOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
                         && wavpack != "ERROR" && effectsOk;
 
         juce::String report;
@@ -1804,6 +1822,7 @@ private:
                << "project=" << (projectOk ? "OK" : "ERROR " + error) << "\n"
                << "project_features=" << (richOk ? "OK" : "ERROR") << "\n"
                << "hardware_outputs=" << (hwOutOk ? "OK" : "ERROR") << "\n"
+               << "track_latency=" << (latencyOk ? "OK" : "ERROR") << "\n"
                << "plugin_substitutes=" << (substituteOk ? "OK" : "ERROR") << "\n"
                << "patcher=" << (patcherOk ? "OK" : "ERROR") << "\n"
                << "native_engines=" << nativesResult << " (" << nativesMade << " made)\n"
@@ -6029,6 +6048,41 @@ private:
             saveWindow (lynx::makeExportPanel (offline), "-export.png");
             saveWindow (lynx::makeExportPanel (offline, 1), "-export-mp3.png");
             saveWindow (lynx::makeExportPanel (offline, 3), "-export-flac-stems.png");
+            {
+                // REA round 165f-mixer: the mixer track's Track latency / routing submenus, Disk recording, PDC, and the
+                // Export window for "Render selected tracks to wave file(s)"
+                const auto before = offline.getSong();
+                offline.editSong ([] (lynx::Song& s) {
+                    if (s.mixer.size() > 3)
+                    {
+                        s.mixer[1].latencyMs = 5.0f;
+                        s.mixer[1].latencyBypass = lynx::LatencyBypass::whenRecordingOrStopped;
+                        s.mixer[2].latencyMs = -1.5f;
+                    }
+                });
+                offline.dispatchPendingMessages();
+                auto& strips = ui.getMixerForSnapshot().getStripsForSnapshot();
+                strips.setSelection ({ 1, 2, 3 }, 1);
+                const auto menu = strips.buildMenu (1);
+                juce::StringArray names { "Mixer track" };
+                std::vector<juce::PopupMenu> menus { menu };
+                const auto latencyPrefix = lynx::tr ("Track latency: {0}", { juce::String() });
+                const juce::String wanted[] = { lynx::tr ("Selected tracks ⇄ this track"), lynx::tr ("Disk recording"),
+                                                lynx::tr ("Plugin delay compensation") };
+                for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+                {
+                    const auto& item = it.getItem();
+                    if (item.subMenu != nullptr && (item.text.startsWith (latencyPrefix) || std::find (std::begin (wanted), std::end (wanted), item.text) != std::end (wanted)))
+                    {
+                        names.add (item.text.upToFirstOccurrenceOf (":", false, false));
+                        menus.push_back (*item.subMenu);
+                    }
+                }
+                saveMenus (names, menus, prefix + "-menus165-mixer.png");
+                saveWindow (lynx::makeExportPanelForTracks (offline, { 1, 2, 3 }), "-export165-tracks.png");
+                offline.setSong (before);
+                offline.dispatchPendingMessages();
+            }
             saveSplashFrames (prefix);
             saveIconSheet (prefix + "-icons.png", 1.0f);
             saveIconSheet (prefix + "-icons-150.png", 1.5f);

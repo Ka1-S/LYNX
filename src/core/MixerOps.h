@@ -4,6 +4,7 @@
 // sidechain gestures, linking channels, effect slot reordering). Pure functions over the Song model:
 // no JUCE, unit-tested in tests/WorkflowP2Tests.inc.
 
+#include <string>
 #include <vector>
 
 #include "core/Song.h"
@@ -86,6 +87,31 @@ int autoColorGroup (Song& song, int track);
 // "Group › Separator" and "Layout › Dock to" for the selected tracks (inserts; the Master can be docked).
 void setSeparator (Song& song, const std::vector<int>& tracks, bool on);
 void dockTracks (Song& song, const std::vector<int>& tracks, MixerDock dock);
+
+// --- FL's mixer track menu › Routing (REA round 165f-mixer: FUN_012ac520 / FUN_012ac950) ------------------------------
+enum class RouteKind
+{
+    route,         // a send at unity level (Master: the route to the Master)
+    routeOnly,     // ... and the source stops sending anywhere else (Master included)
+    sidechain,     // a level-0 send whose compressors / vocoders listen to the source (sidechainTo)
+    sidechainOnly  // ... and the source stops sending anywhere else
+};
+// "Selected tracks to this track": every selected insert but `to` is routed into `to`. Returns how many were routed
+// (sources that would make a cycle are skipped).
+int routeSelectedTo (Song& song, const std::vector<int>& selected, int to, RouteKind kind);
+// "This track to selected tracks": `from` is routed into every selected track but itself (0 = the Master).
+int routeToSelected (Song& song, int from, const std::vector<int>& selected, RouteKind kind);
+// "Create submix...": the selected inserts are routed only into `to`; `to` is renamed "<name> master" (when `name` is
+// not empty), the routed inserts take its colour and the unnamed ones (no name or "Insert n") the name; when they are
+// contiguous in one dock they become a group (separators; `to` joins when it is next to them). Returns how many
+// were routed.
+int createSubmix (Song& song, const std::vector<int>& selected, int to, const std::string& name);
+// True when `track`'s name is empty or the default "Insert <track>".
+bool hasDefaultName (const Song& song, int track);
+
+// --- FL's track latency (REA round 165f-mixer) ------------------------------------------------------------------------
+// "Plugin delay compensation › Reset manual latency on all tracks". Returns how many tracks had one.
+int resetManualLatency (Song& song);
 
 // All effects of the insert on or off (the "effects" switch).
 void setAllEffectsEnabled (Song& song, int track, bool enabled);
