@@ -30,12 +30,12 @@ sound.
 
 | Measure (her 24 takes unless noted) | Auto-Tune Pro | LYNX 0.1.19 | LYNX 0.1.20 |
 |---|---|---|---|
-| pitch: median / p90 cents from the note | 5.79 / 26.2 | 4.39 / 20.9 | 4.42 / 20.9 |
-| same note as Auto-Tune (% voiced frames) | 100 | 95.8 | 95.8 |
+| pitch: median / p90 cents from the note | 5.79 / 26.2 | 4.39 / 20.9 | 4.42 / 21.0 |
+| same note as Auto-Tune (% voiced frames) | 100 | 95.8 | 95.7 |
 | HF balance vs the dry take (2.5–6.3 kHz over 0.3–1 kHz, dB) | −0.07 | −0.52 | −0.13 |
-| formant envelope distance to the dry take (dB) | 0.49 | 0.80 | 0.77 |
+| formant envelope distance to the dry take (dB) | 0.49 | 0.80 | 0.78 |
 | short bursts / min not in the dry take | 31.2 | 40.9 | 40.1 |
-| Classic / Low latency: bursts / min, HF balance | 27.9, −0.02 | 48.8, −0.51 | 45.2, −0.13 |
+| Classic / Low latency: bursts / min, HF balance | 27.9, −0.02 | 48.8, −0.51 | 45.4, −0.13 |
 | synthetic: latency ms, accuracy med / p90 c, retune ms, vibrato kept | 61.6, 2.8 / 10.1, 42, 1.01 | 25.4, 1.7 / 4.4, 38, 0.97 | 25.4, 1.7 / 4.4, 38, 0.97 |
 | synthetic: HF balance, formant distance (dB) | —, 0.18 | −0.40, 0.28 | −0.04, 0.36 |
 | CPU per instance (block 128, 44.1 kHz, median) | — | ~64 µs (2.3 % RT) | ~65 µs (+1 %) |
@@ -490,7 +490,7 @@ edits (Remove / Bypass, Latched / Momentary), Hold, Auto Key.
 | ADVANCED: Create Vibrato (shape, rate, depth, onset), Ignore Vibrato, scale detune | ⚠️ | round 128: ADVANCED page with Create Vibrato (shape, rate, depth, onset delay / rate) and Ignore Vibrato, translated; no amplitude / formant / variation of the created vibrato, no per-note scale detune |
 | Target notes via MIDI | ✅ | "MIDI channel" |
 | Low latency | ✅ | |
-| Sound: pitch accuracy, timbre (highs, formants), bursts | ⚠️ | round 165j [RUN] on her takes: tighter pitch than Auto-Tune (median 4.4 vs 5.8 c), highs now within 0.1 dB of Auto-Tune (normalised grain overlap-add + 3 kHz shelf; was 0.45 dB darker), formant distance 0.77 vs 0.49 dB, short bursts 40 vs 31 / min (note changes / onsets) |
+| Sound: pitch accuracy, timbre (highs, formants), bursts | ⚠️ | round 165j [RUN] on her takes: tighter pitch than Auto-Tune (median 4.4 vs 5.8 c), highs now within 0.1 dB of Auto-Tune (normalised grain overlap-add + 3 kHz shelf; was 0.45 dB darker), formant distance 0.78 vs 0.49 dB, short bursts 40 vs 31 / min (note changes / onsets) |
 | Pitch graph | ✅ | LYNX extra in Auto mode (input vs corrected) |
 | Graph mode (offline editing) | — | out of scope (a separate editor) |
 | Harmony Player | — | out of scope |

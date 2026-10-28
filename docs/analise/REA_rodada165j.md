@@ -12,7 +12,7 @@ REA/Ghidra (clean-room); [SRC] open-source tuner source read (licence noted); [m
   experiment switches are gone). Unit tests in `tests/Tune165Tests.inc`.
 - Done too: final renders with the landed code (bit-identical to E6+E7), CPU (+1 %), the A/B listening folder
   (Desktop `LYNX-AB-afinacao`, 8 of her takes + 2 synthetic, outside git), PARITY rows.
-- Next: land (merge origin/main, land.sh), then §4.5.
+- First landing failed on two older tests (§4.3); fixed (normalisation follows the correction activity), re-measured, re-landing.
 
 ## 1. Method: the three-way comparison harness
 
@@ -122,23 +122,27 @@ Auto-Tune's.
 
 - `vocal::Psola::setNormalise` (`src/core/VocalPitch.h/.cpp`): the overlap-add also accumulates the window weights in a
   ring and divides the output by their sum (clamped 0.5…2) — on a steady unshifted note the windows already sum to 1,
-  so nothing changes there; when the marks are re-spaced the dips between marks are gone. LYNX Tune turns it on;
-  VoiceShift (the other Psola user) is unchanged.
+  so little changes there; when the marks are re-spaced the dips between marks are gone. It takes an amount (0…1):
+  LYNX Tune fades it in with the high shelf's correction activity (voiced and corrected by 5 c or more), so a voice
+  already on its note and unvoiced sounds keep the plain overlap-add — fully normalised, the round-95 consonant
+  transparency (−60 dB) and the round-148 held-note-in-noise wobble (110 Hz: 1.49 c > 1.2 c) tests failed at the
+  first landing; faded, −97 dB and 0.69 c, and her-take scores unchanged (§4.4). VoiceShift (the other Psola user)
+  is unchanged.
 - LYNX Tune's high shelf on the corrected path: 5 kHz +1 dB → 3 kHz +1.5 dB (it compensates the residual softening
   of the grain at the pulse, measured HF balance −0.52 → −0.13 dB vs the dry take; Auto-Tune −0.07 dB).
 - Tests: `tests/Tune165Tests.inc`.
 
-### 4.4 Before → after (the landed code; minitune with it is bit-identical to the E6+E7 renders)
+### 4.4 Before → after (the landed code: E6+E7, the normalisation faded in with the shelf's correction activity)
 
 | measure | Auto-Tune Pro | Waves Tune RT | LYNX 0.1.19 | LYNX 0.1.20 |
 |---|---|---|---|---|
-| her takes: pitch med / p90 c | 5.79 / 26.2 | — | 4.39 / 20.9 | 4.42 / 20.9 |
-| her takes: same note as Auto-Tune | 100 % | — | 95.8 % | 95.8 % |
+| her takes: pitch med / p90 c | 5.79 / 26.2 | — | 4.39 / 20.9 | 4.42 / 21.0 |
+| her takes: same note as Auto-Tune | 100 % | — | 95.8 % | 95.7 % |
 | her takes: HF balance vs dry (dB) | −0.07 | — | −0.52 | **−0.13** |
-| her takes: formant distance (dB) | 0.49 | — | 0.80 | 0.77 |
+| her takes: formant distance (dB) | 0.49 | — | 0.80 | 0.78 |
 | her takes: bursts / min | 31.2 | — | 40.9 | 40.1 |
-| her takes, Classic / Low latency: bursts, HF | 27.9, −0.02 | — | 48.8, −0.51 | 45.2, −0.13 |
-| her takes, Classic / Low latency: pitch med / p90 c | 7.64 / 28.2 | — | 4.12 / 20.5 | 4.20 / 20.5 |
+| her takes, Classic / Low latency: bursts, HF | 27.9, −0.02 | — | 48.8, −0.51 | 45.4, −0.13 |
+| her takes, Classic / Low latency: pitch med / p90 c | 7.64 / 28.2 | — | 4.12 / 20.5 | 4.16 / 20.4 |
 | synthetic: latency ms | 61.6 (Classic 2.1) | 5.4 | 25.4 (Low 6.4) | 25.4 (Low 6.4) |
 | synthetic: accuracy med / p90 c | 2.8 / 10.1 | 2.3 / 12.2 | 1.7 / 4.4 | 1.7 / 4.4 |
 | synthetic: retune ms | 42 | 29 | 38 | 38 |
