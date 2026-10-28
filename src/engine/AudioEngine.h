@@ -622,6 +622,15 @@ private:
     prefs::MidiPrefs midiPrefs;                      // UI thread
     juce::SpinLock midiPrefsLock;                    // guards midiPrefsShared (UI writes, MIDI thread reads)
     prefs::MidiPrefs midiPrefsShared;
+    // FL's "Receive notes from" (round 165f-rack): the channels locked to a MIDI input device (and MIDI channel, 0 = any),
+    // rebuilt from the song on every publish; guarded by midiPrefsLock too
+    struct NoteLock
+    {
+        std::string device;
+        int midiChannel = 0;
+        int channel = 0;
+    };
+    std::vector<NoteLock> noteLocks;
     void logPlayedNote (int channel, int key, float velocity, bool on);
     mutable juce::SpinLock scoreLogLock;             // MIDI thread and UI thread write, the UI reads
     scorelog::Log scoreLog;

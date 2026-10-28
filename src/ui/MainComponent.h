@@ -360,8 +360,9 @@ private:
     FilterBox rackFilterBox;
     IconButton rackGraphButton { "rackGraph", Icon::graph };
     IconButton rackPianoRollButton { "rackPianoRoll", Icon::pianoRoll };
+    IconButton rackLoopButton { "rackLoop", Icon::loop }; // FL's Loop button (round 165f-rack)
     static constexpr int rackPatternSelectorWidth = 132;
-    static constexpr int rackTitleToolsWidth = rackPatternSelectorWidth + 6 + 96 + 4 + 26 + 4 + 24 + 4 + 24;
+    static constexpr int rackTitleToolsWidth = rackPatternSelectorWidth + 6 + 96 + 4 + 26 + 4 + 24 + 4 + 24 + 4 + 24;
     // one icon per workspace panel (F5..F9): click toggles, right-click shows it maximized
     std::array<IconButton, workspace::panelCount> panelButtons { IconButton { "playlistPanel", Icon::playlist },
                                                                  IconButton { "rackPanel", Icon::channelRack },

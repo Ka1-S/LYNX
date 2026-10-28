@@ -144,6 +144,11 @@ int splitPatternByChannel (Song& song, int index)
         for (const auto& n : source.notes)
             if (n.channel == channel)
                 p.notes.push_back (n);
+        p.loopOn = source.loopOn; // (the channel keeps its loop point)
+        p.loopMode = source.loopMode;
+        for (const auto& l : source.channelLoops)
+            if (l.channel == channel)
+                p.channelLoops.push_back (l);
 
         created.push_back (std::move (p));
     }
@@ -502,6 +507,8 @@ void permuteChannels (Song& song, const std::vector<int>& newOrder)
     {
         for (auto& n : p.notes)
             n.channel = map (n.channel);
+        for (auto& l : p.channelLoops) // the Channel Rack's loop points (round 165f-rack)
+            l.channel = map (l.channel);
 
         p.sortNotes();
     }

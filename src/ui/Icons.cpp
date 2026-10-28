@@ -540,6 +540,21 @@ Shape make (Icon icon)
             line (st, 16.5f, 15.0f, 19.5f, 12.0f);
             break;
         }
+        case Icon::loop: // two arcs chasing each other around (a loop), arrow heads at their ends
+        {
+            juce::Path a;
+            a.addCentredArc (12.0f, 12.0f, 7.5f, 7.5f, 0.0f, 0.35f, 2.85f, true);
+            st.addPath (a);
+            juce::Path b;
+            b.addCentredArc (12.0f, 12.0f, 7.5f, 7.5f, 0.0f, 3.5f, 6.0f, true);
+            st.addPath (b);
+            juce::Path h1, h2;
+            h1.addTriangle (11.2f, 20.1f, 14.9f, 21.6f, 13.4f, 16.8f); // ahead of the first arc's end (bottom), clockwise
+            h2.addTriangle (12.8f, 3.9f, 9.2f, 2.4f, 10.6f, 7.2f);     // ahead of the second arc's end (top)
+            fi.addPath (h1);
+            fi.addPath (h2);
+            break;
+        }
         case Icon::tuningFork: // two prongs on a stem, with a weighted foot
         {
             juce::Path f;

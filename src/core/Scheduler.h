@@ -108,6 +108,14 @@ struct ScheduleIndex
     std::int64_t maxShift = 0;               // the largest channel time shift (FL's Misc › Shift), ticks
 };
 
+// When a note plays (ticks within its pattern) and for how long: the swing (with the channel's swing mix), FL's
+// Misc › Time › Shift and Gate (REA round 146b). c = the note's channel (nullptr: only the swing).
+struct PlayedTiming
+{
+    std::int64_t start = 0, length = 1;
+};
+PlayedTiming playedTiming (const Note& note, float swing, const ChannelDef* c) noexcept;
+
 // The largest Misc › Shift of the channels, in ticks.
 std::int64_t maxChannelShift (const std::vector<ChannelDef>& channels) noexcept;
 

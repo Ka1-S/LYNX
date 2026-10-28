@@ -930,6 +930,8 @@ juce::var channelToVar (const ChannelDef& c)
     // FL's key region and Layer channels (round 164)
     if (c.hasKeyRegion())
         o->setProperty ("keyRegion", juce::Array<juce::var> { c.keyLow, c.keyHigh });
+    if (! c.receiveFrom.empty()) // FL's "Receive notes from" (round 165f-rack)
+        o->setProperty ("receiveFrom", juce::Array<juce::var> { str (c.receiveFrom), c.receiveMidiChannel });
     if (c.instrument == InstrumentKind::layer)
     {
         auto l = std::make_unique<juce::DynamicObject>();
@@ -1156,6 +1158,11 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
             def.arp.slide = (bool) fl.getProperty ("slide", false);
             def.arp.octaveRepeat = juce::jlimit (0, 16, (int) fl.getProperty ("octaveRepeat", 1));
         }
+    }
+    if (const auto& from = c["receiveFrom"]; from.isArray() && from.size() >= 2)
+    {
+        def.receiveFrom = from[0].toString().toStdString();
+        def.receiveMidiChannel = juce::jlimit (0, 16, (int) from[1]);
     }
     if (const auto& region = c["keyRegion"]; region.isArray() && region.size() >= 2)
     {
@@ -1523,6 +1530,19 @@ juce::String toJson (const Song& song)
         if (p.colour != 0)
             o->setProperty ("colour", juce::String::toHexString ((juce::int64) (p.colour & 0xFFFFFF)).paddedLeft ('0', 6));
 
+        // the Channel Rack's looping (round 165f-rack): on, type, and the loop points [channel, setting]
+        if (p.loopOn)
+            o->setProperty ("loopOn", true);
+        if (p.loopMode != RackLoopMode::steps)
+            o->setProperty ("loopMode", (int) p.loopMode);
+        if (! p.channelLoops.empty())
+        {
+            juce::Array<juce::var> loops;
+            for (const auto& l : p.channelLoops)
+                loops.add (juce::Array<juce::var> { l.channel, l.setting });
+            o->setProperty ("channelLoops", loops);
+        }
+
         juce::Array<juce::var> notes;
 
         for (const auto& n : p.notes)
@@ -1787,6 +1807,13 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
             if (p.hasProperty ("colour"))
                 pattern.colour = 0xFF000000u | (std::uint32_t) p["colour"].toString().getHexValue32();
+
+            pattern.loopOn = (bool) p.getProperty ("loopOn", false);
+            pattern.loopMode = (RackLoopMode) juce::jlimit (1, 3, (int) p.getProperty ("loopMode", 1));
+            if (auto* loops = p["channelLoops"].getArray())
+                for (const auto& l : *loops)
+                    if (l.isArray() && l.size() >= 2 && (int) l[0] >= 0)
+                        pattern.channelLoops.push_back ({ (int) l[0], juce::jmax (-3, (int) l[1]) });
 
             if (auto* notes = p["notes"].getArray())
                 for (const auto& n : *notes)

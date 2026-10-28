@@ -532,6 +532,21 @@ void splitDrumChannel (Song& song, int channel, const std::vector<DrumPad>& pads
 
         p.notes = std::move (kept);
         p.sortNotes();
+
+        // the Channel Rack's loop points: the pads loop like the kit did
+        std::vector<ChannelLoop> loops;
+        for (auto l : p.channelLoops)
+        {
+            if (l.channel != channel)
+            {
+                l.channel = shift (l.channel);
+                loops.push_back (l);
+                continue;
+            }
+            for (int i = 0; i < (int) pads.size(); ++i)
+                loops.push_back ({ channel + i, l.setting });
+        }
+        p.channelLoops = std::move (loops);
     }
 
     song.forEachClipList ([&] (std::vector<Clip>& clips) {
@@ -2815,6 +2830,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         if (src.colour && *src.colour != 0x485156) // FL's default gray becomes an automatic colour
             p.colour = 0xFF000000u | *src.colour;
+
+        // the Channel Rack's looping (round 165f-rack): FL keeps the loop points of every channel, by FL index
+        p.loopOn = src.loopOn;
+        p.loopMode = (RackLoopMode) std::clamp (src.loopMode, 1, 3);
+        for (const auto& [flChannel, setting] : src.channelLoops)
+            if (const auto it = channelMap.find (flChannel); it != channelMap.end())
+                if (std::none_of (p.channelLoops.begin(), p.channelLoops.end(), [&] (const ChannelLoop& l) { return l.channel == it->second; }))
+                    p.channelLoops.push_back ({ it->second, std::max (setting, -3) });
 
         for (const auto& n : src.notes)
         {

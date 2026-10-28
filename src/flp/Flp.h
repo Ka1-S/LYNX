@@ -11,6 +11,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace flp
@@ -253,6 +254,11 @@ struct Pattern
     std::optional<std::uint32_t> colour; // 0xRRGGBB (stored in the file as 0x00BBGGRR)
     std::vector<Note> notes;
     std::vector<ControlEvent> controlEvents; // event 0xDF: pattern events (event editor), file order
+    // FL's Channel Rack looping (FL 20.5+, REA_rodada165f-rack §1): 0x1A u8 on, 0xA2 u32 type (1 step channels, 2 all
+    // channels, 3 advanced), then 0xA0 u32 channel / 0xA1 i32 loop point pairs (0 none, -1 step, -2 beat, -3 bar, N steps)
+    bool loopOn = false;
+    int loopMode = 1;
+    std::vector<std::pair<int, int>> channelLoops; // (FL channel index, setting)
 };
 
 struct PlaylistItem

@@ -197,7 +197,10 @@ target_sources(lynx_core PRIVATE
     src/core/ProjectContents.cpp
     src/core/PlaylistOps.cpp
     src/core/TempoDetect.cpp
-    src/core/ScoreLog.cpp)
+    src/core/ScoreLog.cpp
+    src/core/ChannelLoops.cpp
+    src/core/ChannelBurn.cpp
+    src/core/AutoSampler.cpp)
 
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 target_sources(lynx_core PRIVATE
@@ -316,6 +319,7 @@ if(LYNX_BUILD_APP)
         src/ui/PatcherEditor.cpp
         src/ui/DynamicsDisplays.cpp
         src/ui/ExportDialog.cpp
+        src/ui/AutoSamplerDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
         src/ui/VisualEditors.cpp
