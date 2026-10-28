@@ -111,6 +111,13 @@ transport commands). Engine: audio thread pushes timestamped events into a lock-
 MidiOutput and sends at the target time (sample clock → ms through a DLL); offsets applied there. Settings › MIDI UI.
 
 ## Where I stopped
-- 16:20 — PAUSED by the coordinator (load). Done: briefs read, DFM + strings evidence above, handler addresses,
-  own Ghidra script dir tmp/rea165-midisync (g.sh + Dec.java on /mnt/d/lynx-work/rea165-midisync). No code yet.
-  Next: decompile the handlers + TMIDIClockReceiver (depth 1–2), then implement core/MidiSync.
+- 21:25 — implementation, tests (build-local with FL Data: 0 failures), Linux GUI build + `--midisync-test` +
+  `--snapshot` done; origin/main merged; release-note bullets added to notes-0.1.20.md. Waiting for the Windows build
+  slot (winbuild lock queue), then land via land.sh.
+
+## What's left (next version)
+- A real hardware / loopback-port test (none on this machine): send clock to a device and measure on its input;
+  Windows MIDI Services loopback endpoints if installed later.
+- FL's toolbar MIDI sync LED and its global Options-menu action "Enable MIDI master sync" (a quick toggle of all
+  outputs' master sync); FL's warning when the audio driver is "FL Studio ASIO" (not applicable to LYNX's drivers).
+- MTC input (chase timecode) — FL doesn't follow MTC either (its receiver handles clock only).
