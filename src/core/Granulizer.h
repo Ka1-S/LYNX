@@ -15,11 +15,16 @@
 // key mode, sync byte, the 364-byte channel-settings snapshot); ChannelDef::samplePath is the channel's sample (FL hands
 // it to the plugin through the host's GetSampleInfo); ChannelDef::modelParams[0] (optional) is the project's PPQ.
 //
-// Not modelled (REA_rodada67 §5): the slice modes (regions from the sample, "auto slicing") and the slice key mode;
-// tempo sync (the host's beat count, Dispatcher 0x13); other interpolation qualities sent by FL's host (Dispatcher 1;
-// FL's value not confirmed); rcpps (a CPU-specific approximate reciprocal in the sinc kernel) is replaced by the exact
-// reciprocal; the sines of the kernel use the C library instead of IPP's ippsSin_64f_A50; one random seed per
-// instrument (FL: one per process).
+// Slices (REA_rodada165g-flgran165): with a transients source (the WAV's cue points / regions, or FL's auto slicing,
+// core/FlAutoSlicer) grains line up with the slice starts and the first grain of each slice holds for "transient hold";
+// tempo lock plays the sample once per its beat count (the WAV's ACID beats, else the channel's stretch TIME in beats,
+// as FL hands the plugin with Dispatcher 0x13); the keys can move the start in 16th notes or to the k-th slice. The
+// sample reader uses FL's render quality (16 points per side) while LYNX exports and the plugin's 12 live.
+//
+// Not modelled: rcpps (a CPU-specific approximate reciprocal in the sinc kernel) is replaced by the exact reciprocal;
+// the sines of the kernel use the C library instead of IPP's ippsSin_64f_A50 (both: about −130 dB, isolated samples
+// on the reader's edge path near −90 dB); one random seed per instrument (FL: one per process); the sample's own loop
+// points (the whole sample, as FL hands it).
 
 #include <cstdint>
 #include <memory>
@@ -43,6 +48,12 @@ std::vector<std::uint8_t> granulizerNormalisedState (const std::vector<std::uint
 std::optional<int> granulizerParam (const std::vector<std::uint8_t>& state, int index);
 bool granulizerSetParam (std::vector<std::uint8_t>& state, int index, int value); // clamped to the knob's range
 int granulizerParamCount() noexcept;
+
+// The editor's modes of a normalised state: 0 = transients source (slice mode: 0 off, 1 the sample's regions / cue
+// points, 2 FL's auto slicing; "Transient" keys turn 0 into 2 as FL's editor does), 1 = key to (0 pitch, 1 percent:
+// the start across the sample, 2 step: 16th notes, 3 transient: the slices), 2 = tempo locked (0/1)
+std::optional<int> granulizerMode (const std::vector<std::uint8_t>& state, int which);
+bool granulizerSetMode (std::vector<std::uint8_t>& state, int which, int value); // clamped to the mode's range
 std::pair<int, int> granulizerParamRange (int index) noexcept; // the editor knobs' ranges (EXEC)
 
 // The instrument; `sample` is the channel's sample (silent without one, as FL: TriggerVoice refuses the note)
@@ -65,6 +76,9 @@ struct RefOptions
     int ppq = 96;
     double tempo = 140.0;
     std::uint32_t seed = 0; // the DLL's RandSeed when the first note starts
+    float beats = 0.0f;     // the host's beat count (Dispatcher 0x13): tempo sync and key mode 2
+    std::vector<std::int64_t> slices; // slice starts (ascending) for slice modes 1 and 2
+    int points = 16;        // interpolation points per side (FL renders with 16; the plugin's own default is 12)
 };
 
 // Renders `notes` from a normalised `state` and `sample` like granmodel.run(). Interleaved stereo float samples
