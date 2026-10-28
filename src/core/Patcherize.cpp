@@ -147,7 +147,7 @@ int patcherizeSlots (Song& song, int track, int slot, bool all)
     {
         PatchNode node;
         node.effect = fx[(std::size_t) moved[k]];
-        node.x = 160.0f + 150.0f * (float) k;
+        node.x = 300.0f + 200.0f * (float) k; // (clear of From LYNX on the left)
         node.y = 150.0f;
         if (node.effect.sidechain >= 0)
         {
@@ -161,7 +161,7 @@ int patcherizeSlots (Song& song, int track, int slot, bool all)
             doc.wires.push_back (wire (PatchWire::Kind::audio, patchFromHost, 1, n, 1));
     }
     doc.wires.push_back (wire (PatchWire::Kind::audio, (int) moved.size() - 1, 0, patchToHost, 0));
-    doc.outputX = 160.0f + 150.0f * (float) moved.size() + 40.0f;
+    doc.outputX = 300.0f + 200.0f * (float) moved.size() + 20.0f;
     patch.sidechain = sidechain;
 
     // the new chain: the Patcher where the first moved slot was, the others in their order
