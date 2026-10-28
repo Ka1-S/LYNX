@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 // Vocal pitch toolkit shared by LYNX Tune (the real-time pitch corrector, core/LynxTune.h) and the Newtone engine
 // (core/NewtoneFx.h). Written only from published DSP (docs/analise/REA_rodada95.md §4):
 //
@@ -155,8 +157,9 @@ public:
     // the previous mark (round 148), the strongest peak for a phrase's first mark. Default on.
     void setPeakAlign (bool on) noexcept { peakAlign = on; }
     // Round 165j: divide the overlap-add by the summed grain windows (no level dips / bulges where grains of different
-    // lengths or spacings meet). Off by default (LYNX Tune turns it on).
-    void setNormalise (bool on) noexcept { normalise = on; }
+    // lengths or spacings meet), by `amount` (0 = plain overlap-add, 1 = fully normalised). Off by default (LYNX Tune
+    // fades it in while it corrects a voiced sound).
+    void setNormalise (float amount) noexcept { normalise = std::clamp (amount, 0.0f, 1.0f); }
     // Marks are placed this many samples behind the newest input (the centre of the pitch detector's window, so the
     // period and shift given with setPitch / setShift describe the signal where the mark lies). Clamped so that the
     // grains stay within the latency.
@@ -181,7 +184,8 @@ private:
     double nextSynth = 0.0;      // next synthesis mark (absolute, output timeline = input timeline)
     double lastMark = 0.0;       // the last voiced mark placed (absolute; 0 = none): the next one correlates with it
     double period = 0.0, ratio = 1.0, formant = 1.0;
-    bool voiced = false, peakAlign = true, lastVoiced = false, normalise = false;
+    bool voiced = false, peakAlign = true, lastVoiced = false;
+    float normalise = 0.0f;
     std::array<Mark, maxMarks> marks {};
     int markHead = 0, markCount = 0;
     std::vector<float> in[2], acc[2], env; // input history, output accumulators, a low-passed copy for peak search

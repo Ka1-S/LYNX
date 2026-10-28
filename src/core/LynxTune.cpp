@@ -654,6 +654,10 @@ public:
             semis = std::clamp (semis, -24.0, 24.0);
             const auto ratio = std::exp2 (semis / 12.0);
             psola.setShift (ratio, preserve ? fShift : ratio * fShift);
+            // round 165j: the normalised overlap-add follows the high shelf's activity (below): only while a voiced
+            // sound is being corrected — a voice already on its note and unvoiced sounds keep the plain overlap-add
+            // (bit-transparent consonants, no level modulation from marks that jump between noise peaks)
+            psola.setNormalise ((float) activity);
 
             float y[2];
             psola.process (xin, y, stereo ? 2 : 1);
@@ -760,7 +764,6 @@ private:
         latency = std::min (latencyFor (sr, rg, low), dryRing - 1);
         psola.prepare (sr, sr / rangeMinHz (rg), latency);
         psola.setMarkLag (det.windowCentre());
-        psola.setNormalise (true); // round 165j (REA_rodada165j §4)
         latencyNow.store (latency, std::memory_order_relaxed);
         reset();
     }

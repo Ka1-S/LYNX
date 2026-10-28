@@ -681,9 +681,9 @@ void Psola::process (const float* x, float* y, int channels) noexcept
     if (e >= 0)
     {
         auto& ws = wsum[(std::size_t) (e & m)];
-        if (normalise && ws > 1e-3f)
+        if (normalise > 0.0f && ws > 1e-3f)
         {
-            const auto g = 1.0f / std::clamp (ws, 0.5f, 2.0f);
+            const auto g = 1.0f + normalise * (1.0f / std::clamp (ws, 0.5f, 2.0f) - 1.0f);
             for (int c = 0; c < channels; ++c)
                 y[c] *= g;
         }
