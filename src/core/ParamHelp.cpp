@@ -311,6 +311,8 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::glowLeveler, "opto release" }, TR_NOOP ("Measured: the reference's gain recovery after loud passages; old: the slower tail of projects saved before round 165") },
         // Hush De-esser
         { { K::hushDeEsser, "frequency" }, TR_NOOP ("Where the sibilance is detected and reduced") },
+        { { K::hushDeEsser, "input pan" }, TR_NOOP ("Balance of the input before the de-esser hears it") },
+        { { K::hushDeEsser, "output pan" }, TR_NOOP ("Balance of the output") },
         { { K::hushDeEsser, "threshold" }, TR_NOOP ("Level of sibilance above which the de-esser works") },
         { { K::hushDeEsser, "range" }, TR_NOOP ("The most the sibilance is turned down") },
         { { K::hushDeEsser, "wideband" }, TR_NOOP ("Turns the whole signal down instead of only the sibilant band") },

@@ -188,3 +188,75 @@ TEST (glow_older_projects_keep_the_round123_release_round165w)
     const auto s = vm123::wavesSlot ("CLA-2A", values.c_str(), n);
     CHECK (s.kind == EffectKind::glowLeveler && s.params[g::releaseLaw] == 1.0f);
 }
+
+// Hush De-esser ← Pro-DS: the reference's input / output pan (a balance, measured) and its state's levels and pans
+namespace p165w
+{
+// a "FabF" version-2 component state named "Default Setting" holding `values` (as tests/Vox148Tests.inc)
+inline std::vector<std::uint8_t> fabf (const std::vector<float>& values)
+{
+    std::vector<std::uint8_t> b { 'F', 'a', 'b', 'F' };
+    auto put = [&b] (std::uint32_t u) {
+        for (int i = 0; i < 4; ++i)
+            b.push_back ((std::uint8_t) (u >> (8 * i)));
+    };
+    const std::string name = "Default Setting";
+    put (2);
+    put ((std::uint32_t) name.size());
+    b.insert (b.end(), name.begin(), name.end());
+    put (0);
+    put ((std::uint32_t) values.size());
+    for (const auto v : values)
+    {
+        std::uint32_t u;
+        std::memcpy (&u, &v, 4);
+        put (u);
+    }
+    put (1); put (1);
+    return b;
+}
+} // namespace p165w
+TEST (hush_input_output_pan_round165w)
+{
+    using namespace lynx;
+    namespace h = mixsuite::hush;
+    const auto& info = effectInfo (EffectKind::hushDeEsser);
+    CHECK ((int) info.params.size() == h::count && h::outputPan == h::count - 1);
+    auto p = makeEffectSlot (EffectKind::hushDeEsser).params;
+    CHECK (p[h::inputPan] == 0.5f && p[h::outputPan] == 0.5f); // older projects load the centre: unchanged
+    CHECK (formatEffectParam (EffectKind::hushDeEsser, h::outputPan, 0.25f, 120.0) == "50% L");
+    p[h::threshold] = 1.0f; // 0 dB: nothing to de-ess
+    const auto run = [&] (const EffectParams& q, double& gl, double& gr) {
+        auto fx = makeEffect (EffectKind::hushDeEsser);
+        fx->prepare (48000.0);
+        std::vector<float> l (9600), r;
+        for (std::size_t i = 0; i < l.size(); ++i)
+            l[i] = 0.1f * (float) std::sin (2.0 * 3.141592653589793 * 1000.0 * (double) i / 48000.0);
+        r = l;
+        const auto x = l;
+        for (std::size_t off = 0; off < l.size(); off += 256)
+            fx->process (l.data() + off, r.data() + off, (int) std::min<std::size_t> (256, l.size() - off), q, 120.0);
+        double el = 0, er = 0, ex = 0;
+        for (std::size_t i = 4800; i < l.size(); ++i) { el += (double) l[i] * l[i]; er += (double) r[i] * r[i]; ex += (double) x[i] * x[i]; }
+        gl = std::sqrt (el / ex);
+        gr = std::sqrt (er / ex);
+    };
+    double gl = 0, gr = 0;
+    // [EXEC] the trial: pan +0.5 keeps the right channel and halves the left; −1 silences the right; the same law in and out
+    auto q = p;
+    q[h::outputPan] = 0.75f;
+    run (q, gl, gr);
+    CHECK (std::abs (gl - 0.5) < 0.01 && std::abs (gr - 1.0) < 0.01);
+    q = p;
+    q[h::inputPan] = 0.0f;
+    run (q, gl, gr);
+    CHECK (std::abs (gl - 1.0) < 0.01 && gr < 1e-3);
+    // a Pro-DS state with input +7.2 dB, input pan −0.5, output pan +0.75, 2x (as the trial saved it)
+    // (her first state's values, tests/Vox148Tests.inc, with these four changed)
+    std::vector<float> st { 0.0f, 0.2715f, 6.0f, 0.0f, 0.5f, 0.0f, 12.0f, 1.0f, 0.0f, 0.0f, 0.54407f, 0.8451f,
+                            0.0f, 0.0f, 1.0f, 0.2f, -0.5f, 0.0f, 0.75f, 0.0f };
+    int n = 0;
+    const auto s = m124x::substitute ("FabFilter Pro-DS", p165w::fabf (st), n);
+    CHECK (std::abs (h::panValue (s.params[h::inputPan]) + 0.5) < 1e-4 && std::abs (h::panValue (s.params[h::outputPan]) - 0.75) < 1e-4);
+    CHECK (std::abs (s.params[h::input] - (7.2f + 12.0f) / 24.0f) < 1e-4 && h::oversamplingOf (s.params[h::oversampling]) == 2);
+}

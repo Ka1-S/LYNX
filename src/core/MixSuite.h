@@ -207,7 +207,10 @@ namespace hush
 // (core/VoiceMatch.h vocalds: band detector + "stands out" test, look-ahead within a fixed 15 ms latency); uses the
 // threshold, range, frequency (the band's high-pass), low-pass, look-ahead, mode and listen controls
 enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
-             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing, count };
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing,
+             // round 165w (appended): the reference's input / output pan (a balance: the far side × (1 − |pan|), measured)
+             inputPan, outputPan, count };
+double panValue (float v) noexcept; // −1 … +1
 bool vocal (const EffectParams& p) noexcept; // round 148
 int oversamplingOf (float v) noexcept; // 1 (off), 2, 4, 8
 double hz (float v) noexcept;          // 2 .. 16 kHz

@@ -101,9 +101,29 @@ LYNX (`voicetools::gemini`, core/VoiceTools.{h,cpp}):
   markers sit on their gain values; **Old | Measured** tabs at the top right of the Direct row;
 - translation (`translateWavesDoubler`): the shelves' gains one to one over −88 … +12, EQ law Measured.
 
+## 5. Hush De-esser ← FabFilter Pro-DS (follow-up, branch parity165w2)
+
+Parameter list of the trial (`pds/p.tsv`): Mode, Threshold, Range, Band Processing, Stereo Link (0 … 100 %, then
+"100 %, n % Mid-only" up to 200 %), Stereo Link Mode, Lookahead 0 … 15 ms + Enabled, Audition Triggering, Side Chain
+Input, High-Pass / Low-Pass 2 … 20 kHz, Audition Side Chain, MIDI, Oversampling Off / 2x / 4x, **Input / Output Level
+−∞ … +36 dB** (0.5 = 0 dB, 72 dB per unit above 0.25 = −18 dB, a steeper curve below), **Input / Output Pan −1 … +1**,
+Bypass. Fresh instance: Single Vocal, −36 dB, 6 dB, Wide Band, 100 %, look-ahead 10 ms on, 7.5 … 14 kHz; latency 720.
+
+- **Pan law [EXEC]** (L = 1 kHz, R = 1.5 kHz, threshold 0 dB, range 0; every quarter step): a balance — the far channel
+  × (1 − |pan|), the near one untouched, nothing crosses over; Input Pan and Output Pan alike.
+- **State units [EXEC]** (a component saved after setting Input Level 0.6 = +7.2 dB, Input Pan −0.5, Output Pan +0.75,
+  2x): the 20-value list stores the pans as −1 … +1, the oversampling as an index, and **the levels as 2 v − 1**
+  (+7.2 dB → 0.2). LYNX's translator read the output level as dB (+7.2 dB came back as +0.2 dB); fixed (36 dB per unit,
+  Hush's ±12 dB clamp), and the input level, pans and oversampling are now translated.
+
+LYNX: Hush appended **Input pan / Output pan** (indices 20 / 21, centre by default, so older projects are unchanged):
+input after the input level (the detector hears it), output after everything; "In pan" / "Out pan" dials in the panel.
+Left: the levels' −∞ … +36 dB range, the 20 kHz high-pass, Stereo Link's mid-only half.
+
 ## 4. Tests
 
 tests/Parity165wTests.inc: Gemini's measured shelves against the trial's points (−88 high / low, −24 at 1189 Hz, +12,
 −12; engine within 0.3 dB, the editor's curve within 0.1 dB of the engine), the old law kept and shown on its own scale, older projects /
 presets → Old, deep cuts translated; Glow's measured release against the trial (Compress 46 after 2 s and 10 s, Limit 62.6;
-within 0.45 / 0.6 / 0.7 dB), round 123's tail kept for older projects, the upgrade and the CLA-2A translation.
+within 0.45 / 0.6 / 0.7 dB), round 123's tail kept for older projects, the upgrade and the CLA-2A translation; Hush's pans (balance in / out) and the
+Pro-DS state's levels, pans and oversampling.

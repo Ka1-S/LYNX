@@ -897,6 +897,18 @@ double lookaheadMs() noexcept { return 2.0; }
 double lookaheadTimeMs (float v) noexcept { return std::round (lin (v, 0.0, 15.0) * 100.0) / 100.0; } // (0.01 ms steps: the default is exactly 2 ms)
 float lookaheadTimeValue (double ms) noexcept { return (float) std::clamp (ms / 15.0, 0.0, 1.0); }
 double classicThresholdDb (float v) noexcept { return lin (v, -80.0, 0.0); }
+double panValue (float v) noexcept { return lin (v, -1.0, 1.0); }
+// round 165w [EXEC] (REA_rodada165w §5): the reference's input / output pan is a balance — the far channel × (1 − |pan|),
+// the near one untouched (both 1 kHz / 1.5 kHz test tones, every quarter step)
+static void balance (float* l, float* r, int n, double pan) noexcept
+{
+    if (pan == 0.0)
+        return;
+    const auto g = (float) (1.0 - std::min (1.0, std::abs (pan)));
+    auto* far = pan > 0.0 ? l : r;
+    for (int i = 0; i < n; ++i)
+        far[i] *= g;
+}
 bool classic (const EffectParams& p) noexcept { return on (p[voicing]); }
 bool vocal (const EffectParams& p) noexcept { return on (p[vocalVoicing]) && ! on (p[voicing]); }
 
@@ -970,7 +982,13 @@ public:
     }
 
 private:
-    void processBlock (float* l, float* r, int n, const EffectParams& p, double) noexcept
+    void processBlock (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept
+    {
+        processCore (l, r, n, p, bpm);
+        balance (l, r, n, panValue (p[outputPan])); // round 165w: after the output level, every voicing
+    }
+
+    void processCore (float* l, float* r, int n, const EffectParams& p, double) noexcept
     {
         // round 128: the look-ahead time is the delay (and the reported latency; the engine re-plans the delay
         // compensation when it moves). The default 2 ms is the old fixed value.
@@ -982,6 +1000,7 @@ private:
             const auto gIn = (float) dbToGain (inGainDb);
             for (int i = 0; i < n; ++i) { l[i] *= gIn; r[i] *= gIn; }
         }
+        balance (l, r, n, panValue (p[inputPan])); // round 165w: after the input level, before the detector
         const auto inPeak = Meters::peak (l, r, n);
         // round 135: oversampling (Hush's own voicing): the gain and the band it acts on are upsampled with the audio
         const auto factor = classic (p) ? 1 : oversamplingOf (p[oversampling]);
@@ -2862,7 +2881,8 @@ const EffectInfo& hushInfo()
                                      { "Stereo link", 1.0f }, { "Link mid", 0.0f }, { "External SC", 0.0f }, { "Input", 0.5f },
                                      { "Display", 1.0f },
                                      { "Oversampling", 0.0f }, // round 135
-                                     { "Vocal voicing", 0.0f } } }; // round 148
+                                     { "Vocal voicing", 0.0f }, // round 148
+                                     { "Input pan", 0.5f }, { "Output pan", 0.5f } } }; // round 165w
     return info;
 }
 
@@ -3138,6 +3158,11 @@ std::string paramText (EffectKind kind, int param, float v)
             case display: return on (v) ? "shown" : "hidden";
             case release: return fmt ("%.0f ms", releaseMs (v));
             case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+            case inputPan: case outputPan:
+            {
+                const auto pan = panValue (v);
+                return std::abs (pan) < 0.0005 ? std::string ("centre") : fmt (pan < 0.0 ? "%.0f%% L" : "%.0f%% R", std::abs (pan) * 100.0);
+            }
             case voicing: return on (v) ? "classic split" : "modern";
             case oversampling: return oversamplingOf (v) == 1 ? "off" : std::to_string (oversamplingOf (v)) + "x";
             default: return onOff (v);

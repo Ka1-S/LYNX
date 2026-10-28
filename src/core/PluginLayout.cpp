@@ -1790,6 +1790,9 @@ Layout hushDeEsser()
     v.push_back (dial (412, 58, 40, "Range", TR_NOOP ("Range")));
     v.push_back (dial (300, 142, 32, "Release", TR_NOOP ("Release")));
     v.push_back (dial (376, 142, 32, "Output", TR_NOOP ("Output"), bipolar));
+    // round 165w: the reference's input / output pan (balance)
+    v.push_back (dial (240, 142, 28, "Input pan", TR_NOOP ("In pan"), bipolar));
+    v.push_back (dial (430, 142, 28, "Output pan", TR_NOOP ("Out pan"), bipolar));
     // round 128: the reference de-esser's other controls
     v.push_back (tabs (12, 222, 200, 20, "Allround", TR_NOOP ("Single vocal|Allround")));
     v.push_back (toggle (12, 252, 64, 20, "Link mid", TR_NOOP ("Mid (M/S)")));

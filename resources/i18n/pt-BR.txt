@@ -5400,3 +5400,5 @@ countries: br
 "Black notes" = "Teclas pretas"
 "Sharps (#)" = "Sustenidos (#)"
 "Flats (b)" = "Bemóis (b)"
+"Balance of the input before the de-esser hears it" = "Balanço da entrada antes de o de-esser ouvi-la"
+"Balance of the output" = "Balanço da saída"
