@@ -1232,7 +1232,7 @@ private:
     }
 
     static constexpr int blockSize = 512;
-    static constexpr double ppq = 96.0; // LYNX's song ticks per beat (setSongPosition)
+    static constexpr double ppq = (double) lynx::ppq; // LYNX's song ticks per beat (setSongPosition): 960
     std::shared_ptr<const SampleData> sample;
     Engine engine;
     Setup current;
