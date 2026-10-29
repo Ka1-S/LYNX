@@ -125,6 +125,12 @@ public:
         };
         addAndMakeVisible (clearButton);
 
+        // FL's "Convert to automation" (round 165l): the lane becomes an automation clip in the Playlist
+        toAutoButton.setButtonText (tr ("To automation..."));
+        toAutoButton.setTooltip (tr ("Turn these events into an automation clip (the events are removed from the pattern)"));
+        toAutoButton.onClick = [this] { showConvertToAutomation(); };
+        addAndMakeVisible (toAutoButton);
+
         rebuildTargets();
         setSize (900, 400);
         setWantsKeyboardFocus (true);
@@ -280,8 +286,9 @@ public:
         for (auto* b : { &drawButton, &lineButton, &selectButton })
             modeWidth[i++] = theme::buttonWidth (*b, 64, 120);
         const auto clearWidth = theme::buttonWidth (clearButton, 70, 120);
+        const auto toAutoWidth = theme::buttonWidth (toAutoButton, 120, 180); // (round 165l)
         const auto gridWidth = theme::labelColumnWidth ({ &gridLabel }, 40, 110);
-        const auto fixedTop = 240 + 12 + modeWidth[0] + modeWidth[1] + modeWidth[2] + 12 + gridWidth + 110 + clearWidth;
+        const auto fixedTop = 240 + 12 + modeWidth[0] + modeWidth[1] + modeWidth[2] + 12 + gridWidth + 110 + clearWidth + 4 + toAutoWidth;
         auto titleWidth = juce::jlimit (120, 230, top.getWidth() - fixedTop), boxWidth = 240;
         // a title longer than its room ("Événements - Pattern 1") takes up to 80 px from the target box
         const auto titleNeeds = juce::jmin (230, theme::labelColumnWidth ({ &title }, 0, 400));
@@ -301,6 +308,8 @@ public:
         gridLabel.setBounds (top.removeFromLeft (gridWidth));
         gridBox.setBounds (top.removeFromLeft (110).reduced (0, 2));
         clearButton.setBounds (top.removeFromRight (clearWidth).reduced (0, 2));
+        top.removeFromRight (4);
+        toAutoButton.setBounds (top.removeFromRight (toAutoWidth).reduced (0, 2));
 
         auto tools = r.removeFromBottom (32);
         r.removeFromBottom (6);
@@ -604,6 +613,115 @@ private:
         commitGesture();
     }
 
+    void showConvertToAutomation()
+    {
+        const auto* lane = eventedit::findLane (currentPattern(), target);
+        if (lane == nullptr || lane->events.empty())
+            return;
+        struct Panel final : public juce::Component
+        {
+            Panel (EventEditor& o) : owner (&o)
+            {
+                label.setText (tr ("Sensitivity"), juce::dontSendNotification);
+                addAndMakeVisible (label);
+                slider.setRange (40.0, 100.0, 0.1);
+                slider.setValue (100.0, juce::dontSendNotification);
+                slider.setDoubleClickReturnValue (true, 100.0);
+                slider.setTextValueSuffix ("%");
+                slider.onValueChange = [this] { update(); };
+                addAndMakeVisible (slider);
+                info.setFont (theme::font (theme::type::small));
+                info.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+                addAndMakeVisible (info);
+                accept.setButtonText (tr ("Accept"));
+                accept.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
+                cancel.setButtonText (tr ("Cancel"));
+                accept.onClick = [this] {
+                    if (owner != nullptr)
+                        owner->convertToAutomation ((float) slider.getValue() / 100.0f);
+                    closeToolWindowOf (*this);
+                };
+                cancel.onClick = [this] { closeToolWindowOf (*this); };
+                addAndMakeVisible (accept);
+                addAndMakeVisible (cancel);
+                setSize (380, 130);
+                update();
+            }
+            void update()
+            {
+                if (owner == nullptr)
+                    return;
+                const auto* l = eventedit::findLane (owner->currentPattern(), owner->target);
+                const auto n = l != nullptr ? eventedit::toAutomationPoints (*l, (float) slider.getValue() / 100.0f).size() : 0u;
+                info.setText (tr ("{0} events become {1} automation points", { juce::String (l != nullptr ? (int) l->events.size() : 0), juce::String ((int) n) }), juce::dontSendNotification);
+            }
+            void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg2); }
+            void resized() override
+            {
+                auto r = getLocalBounds().reduced (12);
+                auto row = r.removeFromTop (28);
+                label.setBounds (row.removeFromLeft (90));
+                slider.setBounds (row);
+                info.setBounds (r.removeFromTop (28));
+                auto b = r.removeFromBottom (28);
+                cancel.setBounds (b.removeFromRight (84));
+                b.removeFromRight (6);
+                accept.setBounds (b.removeFromRight (84));
+            }
+            juce::Component::SafePointer<EventEditor> owner;
+            juce::Label label, info;
+            juce::Slider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+            juce::TextButton accept, cancel;
+        };
+        openToolWindow (std::make_unique<Panel> (*this), tr ("Convert to automation"), "eventeditor-toauto");
+    }
+
+    void convertToAutomation (float sensitivity)
+    {
+        const auto* lane = eventedit::findLane (currentPattern(), target);
+        if (lane == nullptr || lane->events.empty())
+            return;
+        auto points = eventedit::toAutomationPoints (*lane, sensitivity);
+        const auto t = target;
+        const auto name = describeAutomationTarget (engine, t).toStdString();
+        const auto length = juce::jmax (patternLength(), points.back().tick + 1);
+        if (points.back().tick < length)
+            points.push_back ({ length, points.back().value, 0.0f });
+        int index = -1;
+        engine.editSong ([&] (Song& s) {
+            Automation a;
+            a.name = name;
+            a.target = t;
+            a.points = points;
+            s.automations.push_back (std::move (a));
+            index = (int) s.automations.size() - 1;
+            // the clip sits where the pattern is first used in the Playlist (else at the start), on a new track
+            const auto pattern = juce::jlimit (0, (int) s.patterns.size() - 1, s.currentPattern);
+            std::int64_t at = -1;
+            int track = 0;
+            for (const auto& c : s.playlist)
+            {
+                track = std::max (track, c.track + 1);
+                if (c.kind == ClipKind::pattern && c.pattern == pattern && (at < 0 || c.start < at))
+                    at = c.start;
+            }
+            Clip clip;
+            clip.kind = ClipKind::automation;
+            clip.automation = index;
+            clip.track = track;
+            clip.start = std::max<std::int64_t> (0, at);
+            clip.length = length;
+            s.playlist.push_back (clip);
+            auto& p = currentPattern (s);
+            eventedit::erase (eventedit::laneFor (p, t), 0, std::numeric_limits<std::int64_t>::max());
+            eventedit::removeEmptyLanes (p);
+        });
+        rebuildTargets();
+        repaint();
+        if (index >= 0)
+            openAutomationEditor (engine, index);
+    }
+
     std::int64_t lastEventTick() const
     {
         const auto* lane = eventedit::findLane (currentPattern(), target);
@@ -728,7 +846,7 @@ private:
 
     juce::Label title, gridLabel, scaleLabel, offsetLabel, randomLabel, lfoLabel;
     juce::ComboBox targetBox, gridBox, shapeBox, periodBox;
-    juce::TextButton drawButton, lineButton, selectButton, randomButton, lfoButton, clearButton;
+    juce::TextButton drawButton, lineButton, selectButton, randomButton, lfoButton, clearButton, toAutoButton;
     juce::Slider scaleSlider, offsetSlider, amountSlider;
 
     juce::Rectangle<int> canvas;

@@ -183,6 +183,7 @@ target_sources(lynx_core PRIVATE
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
     src/core/AudioEdit.cpp
+    src/core/AudioEditTools.cpp
     src/core/FlAutoSlicer.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
@@ -390,6 +391,7 @@ if(LYNX_BUILD_APP)
         src/ui/NoteToolDialogs.cpp
         src/ui/EventEditor.cpp
         src/ui/AudioEditor.cpp
+        src/ui/AudioEditorTools.cpp
         src/ui/ToolWindow.cpp
         src/ui/TempoTapper.cpp
         src/ui/HistoryPanel.cpp

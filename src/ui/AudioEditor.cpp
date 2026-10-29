@@ -1,4 +1,5 @@
 #include "ui/AudioEditor.h"
+#include "ui/AudioEditorTools.h"
 #include "ui/BrowserComponent.h"
 #include "ui/EditorTools.h"
 
@@ -7,6 +8,7 @@
 #include <functional>
 
 #include "core/AudioCapture.h"
+#include "core/AudioEditTools.h"
 #include "core/WaveAnalysis.h"
 #include "core/ValueMath.h"
 #include "engine/SampleLibrary.h"
@@ -198,6 +200,7 @@ struct Source
 
 class AudioEditor final : public juce::Component,
                           public juce::FileDragAndDropTarget,
+                          public audiotools::Host,
                           public juce::DragAndDropTarget,
                           private juce::Timer
 {
@@ -286,6 +289,8 @@ public:
             spectrumView = viewButton.getToggleState();
             repaint();
         };
+        setupText (envButton, tr ("Edit: Wave"), tr ("What the mouse edits: the waveform, or the volume / panning / stereo separation envelope drawn over it (E)"));
+        envButton.onClick = [this] { envModeMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&envButton)); };
         setupText (sendButton, tr ("Send"), tr ("Send to the Playlist as an audio clip, to a new Sampler channel or back to the channel"));
         sendButton.setColour (juce::TextButton::buttonColourId, theme::colour::accentMuted);
         sendButton.onClick = [this] { sendMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&sendButton)); };
@@ -312,7 +317,7 @@ public:
             { TR_NOOP ("Reverse"), TR_NOOP ("Reverse the selection (or everything)"), [this] { edit (tr ("Reverse"), [] (ae::Document& d, ae::Range r) { ae::reverse (d, r); }); } },
             { TR_NOOP ("Invert"), TR_NOOP ("Reverse the polarity"), [this] { edit (tr ("Reverse polarity"), [] (ae::Document& d, ae::Range r) { ae::invert (d, r); }); } },
             { TR_NOOP ("Center"), TR_NOOP ("Remove the DC offset"), [this] { edit (tr ("Remove DC offset"), [] (ae::Document& d, ae::Range r) { ae::removeDc (d, r); }); } },
-            { TR_NOOP ("Stretch..."), TR_NOOP ("Time stretch / pitch shift"), [this] { showStretch(); } },
+            { TR_NOOP ("Stretch..."), TR_NOOP ("Time stretch / pitch shift"), [this] { openEdisonTool (audiotools::Tool::stretch); } },
             { TR_NOOP ("Resample..."), TR_NOOP ("Change the sample rate"), [this] { showResample(); } },
             { TR_NOOP ("Marker"), TR_NOOP ("Add a marker at the cursor (M)"), [this] { addMarkerAtCursor(); } },
             { TR_NOOP ("Region"), TR_NOOP ("Make the selection a region"), [this] { addRegionFromSelection(); } },
@@ -403,6 +408,7 @@ public:
     }
 
     juce::PopupMenu mainMenu();
+    void setEnvModeForSnapshot (int mode) { setEnvMode ((EnvMode) juce::jlimit (0, 3, mode)); }
 
     // --- layout and painting ---------------------------------------------------------------------------------
     void resized() override
@@ -424,6 +430,7 @@ public:
         place (loopButton, 54, 4);
         place (volumeKnob, 26, 12);
         place (viewButton, 76, 6);
+        place (envButton, 120, 6);
         place (snapButton, 28);
         place (fitButton, 28);
         place (followButton, 28);
@@ -573,6 +580,9 @@ public:
             }
         }
 
+        if (envMode != EnvMode::wave && waveArea.contains (pos) && envelopeMouseDown (e))
+            return;
+
         if (e.mods.isPopupMenu())
         {
             editMenu (true).showMenuAsync (juce::PopupMenu::Options().withMousePosition());
@@ -602,6 +612,11 @@ public:
         if (drag == Drag::overview)
         {
             centreViewOnOverview (e.x);
+            return;
+        }
+        if (drag == Drag::envPoint || drag == Drag::envBend)
+        {
+            envelopeMouseDrag (e);
             return;
         }
         if (drag == Drag::none)
@@ -636,6 +651,15 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        if (drag == Drag::envPoint || drag == Drag::envBend)
+        {
+            drag = Drag::none;
+            envDragPoint = -1;
+            if (envChanged)
+                commit (tr ("Edit envelope"));
+            envChanged = false;
+            return;
+        }
         if (drag == Drag::marker || drag == Drag::loopStart || drag == Drag::loopEnd)
         {
             const auto& before = history.current();
@@ -739,6 +763,8 @@ public:
             viewButton.triggerClick();
         else if (! ctrl && c == 'm')
             addMarkerAtCursor();
+        else if (! ctrl && c == 'e')
+            setEnvMode ((EnvMode) (((int) envMode + 1) % 4));
         else if (! ctrl && c == 'f')
             zoomToFit();
         else if (c == '+' || c == '=')
@@ -810,7 +836,9 @@ private:
         marker,
         loopStart,
         loopEnd,
-        overview
+        overview,
+        envPoint,
+        envBend
     };
     enum class RecState
     {
@@ -1251,6 +1279,7 @@ private:
                 g.drawDashedLine ({ x, (float) waveArea.getY(), x, (float) waveArea.getBottom() }, dash, 2);
             }
         }
+        paintEnvelopes (g);
         if (! selection.empty())
         {
             g.setColour (colour::selection.withAlpha (0.8f));
@@ -1384,7 +1413,10 @@ private:
         }
         stopPlayback();
         const auto frames = doc.audio.frames();
+        const auto edited = ae::orAll (doc, selection);
         fn (doc, selection);
+        if (ae::hasEnvelopes (doc) && doc.audio.frames() != frames)
+            ae::remapEnvelopes (doc, frames, edited, edited.length() + (doc.audio.frames() - frames));
         // a length-changing edit of the selection keeps the edited part selected
         if (! selection.empty())
             selection.end = juce::jmax (selection.start, selection.end + (doc.audio.frames() - frames));
@@ -1498,6 +1530,80 @@ private:
             zoomToFit();
     }
 
+    // FL's Paste mix (envelope): the first time it shows the mix envelope to shape (top = the clipboard, bottom = the
+    // original); the second time it mixes the clipboard in at the cursor / selection start with that envelope
+    void pasteMixWithEnvelope()
+    {
+        const auto& clip = clipboard();
+        if (clip.empty() || doc.audio.empty() || recState != RecState::idle)
+            return;
+        if (envMode != EnvMode::mix)
+        {
+            if (doc.mixEnvelope.empty())
+                doc.mixEnvelope = ae::Envelope::flat (0.5);
+            setEnvMode (EnvMode::mix);
+            setStatus (tr ("Shape the mix envelope (top: the clipboard, bottom: the original), then choose Edit > Paste mix (envelope): apply."), false);
+            repaint();
+            return;
+        }
+        stopPlayback();
+        const auto at = selection.empty() ? cursor : selection.start;
+        const auto mix = doc.mixEnvelope;
+        doc.mixEnvelope = {};
+        const auto r = ae::pasteMixEnvelope (doc, at, clip, mix);
+        setEnvMode (EnvMode::wave);
+        selection = r;
+        commit (tr ("Paste mix (envelope)"));
+    }
+
+    // FL's Scratch (envelope): the first time it shows the position envelope (a rising diagonal = the audio as it is);
+    // the second time it renders the audio played along that envelope
+    void scratchWithEnvelope()
+    {
+        if (doc.audio.empty() || recState != RecState::idle)
+            return;
+        if (envMode != EnvMode::scratch)
+        {
+            if (doc.scratchEnvelope.empty())
+                doc.scratchEnvelope.points = { { 0.0, 0.0, 0.0f }, { 1.0, 1.0, 0.0f } };
+            setEnvMode (EnvMode::scratch);
+            setStatus (tr ("Draw the play position over time (rising = forwards, falling = backwards, flat = held), then choose Tools > Scratch (envelope): apply."), false);
+            repaint();
+            return;
+        }
+        stopPlayback();
+        const auto env = doc.scratchEnvelope;
+        doc.scratchEnvelope = {};
+        ae::scratch (doc, env);
+        setEnvMode (EnvMode::wave);
+        commit (tr ("Scratch (envelope)"));
+    }
+
+    // the clipboard stretched to the selection's length (pitch kept), or drum-stretched (slices keep their attacks),
+    // replacing the selection
+    void pasteFitted (bool drum)
+    {
+        const auto& clip = clipboard();
+        if (clip.empty() || selection.empty() || recState != RecState::idle)
+            return;
+        stopPlayback();
+        ae::Document part;
+        part.audio = ae::conform (clip, doc.audio.numChannels(), doc.audio.sampleRate);
+        const auto ratio = (double) selection.length() / (double) juce::jmax<std::int64_t> (1, part.audio.frames());
+        if (drum)
+        {
+            ae::DrumStretchSettings s;
+            s.ratio = ratio;
+            ae::drumloopStretch (part, {}, s);
+        }
+        else
+            ae::timeStretch (part, {}, ratio);
+        for (auto& ch : part.audio.channels)
+            ch.resize ((std::size_t) selection.length(), 0.0f);
+        ae::pasteReplace (doc, selection, part.audio);
+        commit (drum ? tr ("Paste replace (drum)") : tr ("Paste stretch"));
+    }
+
     void fade (bool in)
     {
         const auto curve = fadeCurve;
@@ -1549,59 +1655,7 @@ private:
         openToolWindow (std::move (panel), title, "audioeditor-tool");
     }
 
-    void showAmp()
-    {
-        if (doc.audio.empty())
-            return;
-        juce::Component::SafePointer<AudioEditor> self (this);
-        auto run = [] (ae::Document& d, ae::Range r, const std::vector<double>& v) { ae::amp (d, r, juce::Decibels::decibelsToGain ((float) v[0], -100.0f), (float) v[1] / 100.0f); };
-        openTool (std::make_unique<ToolPanel> (std::vector<ToolPanel::Param> { { tr ("Volume"), -36.0, 24.0, 0.0, 0.1, " dB" }, { tr ("Pan"), -100.0, 100.0, 0.0, 1.0, "%" } },
-                                               juce::StringArray {}, juce::String {}, 0,
-                                               [self, run] (const std::vector<double>& v, int) {
-                                                   if (self != nullptr)
-                                                       self->edit (tr ("Amp"), [run, v] (ae::Document& d, ae::Range r) { run (d, r, v); });
-                                               },
-                                               [self, run] (const std::vector<double>& v, int) {
-                                                   if (self != nullptr)
-                                                       self->previewProcessed ([run, v] (ae::Document& d) { run (d, {}, v); });
-                                               }),
-                  tr ("Amp"));
-    }
-
-    void showStretch()
-    {
-        if (doc.audio.empty())
-            return;
-        juce::Component::SafePointer<AudioEditor> self (this);
-        // v: time (%), pitch (semitones), fine (cents); choice 0 = stretch (pitch kept), 1 = resample (speed)
-        auto run = [] (ae::Document& d, ae::Range r, const std::vector<double>& v, int method) {
-            const auto ratio = v[0] / 100.0;
-            const auto semitones = v[1] + v[2] / 100.0;
-            if (method == 1)
-                ae::changeSpeed (d, r, ratio * std::pow (2.0, -semitones / 12.0));
-            else
-            {
-                const auto start = ae::orAll (d, r).start;
-                const auto length = ae::orAll (d, r).length();
-                ae::timeStretch (d, r, ratio);
-                ae::pitchShift (d, { start, start + (std::int64_t) std::llround ((double) length * ratio) }, semitones);
-            }
-        };
-        openTool (std::make_unique<ToolPanel> (
-                      std::vector<ToolPanel::Param> { { tr ("Length"), 25.0, 400.0, 100.0, 0.1, "%" },
-                                                      { tr ("Pitch"), -24.0, 24.0, 0.0, 1.0, " st" },
-                                                      { tr ("Fine"), -100.0, 100.0, 0.0, 1.0, " ct" } },
-                      juce::StringArray { tr ("Stretch (keep pitch and length apart)"), tr ("Resample (pitch follows the speed)") }, tr ("Method"), 0,
-                      [self, run] (const std::vector<double>& v, int m) {
-                          if (self != nullptr)
-                              self->edit (tr ("Time stretch / pitch shift"), [run, v, m] (ae::Document& d, ae::Range r) { run (d, r, v, m); });
-                      },
-                      [self, run] (const std::vector<double>& v, int m) {
-                          if (self != nullptr)
-                              self->previewProcessed ([run, v, m] (ae::Document& d) { run (d, {}, v, m); });
-                      }),
-                  tr ("Time stretch / pitch shift"));
-    }
+    void showAmp() { openEdisonTool (audiotools::Tool::amp); } // Edison's Amp form (round 165l)
 
     void showResample()
     {
@@ -1724,6 +1778,18 @@ private:
             r = { cursor, doc.audio.frames() };
         if (r.length() < 2)
             r = { 0, doc.audio.frames() };
+        if (ae::hasEnvelopes (doc))
+        {
+            // the envelopes are heard before they are mixed down (like Edison)
+            ae::Document mixed;
+            mixed.audio = doc.audio;
+            mixed.volumeEnvelope = doc.volumeEnvelope;
+            mixed.panEnvelope = doc.panEnvelope;
+            mixed.separationEnvelope = doc.separationEnvelope;
+            ae::mixdownEnvelopes (mixed);
+            playAudio (ae::copy (mixed.audio, r), r.start, loopPlay);
+            return;
+        }
         playAudio (ae::copy (doc.audio, r), r.start, loopPlay);
     }
 
@@ -2336,9 +2402,9 @@ private:
                 return;
             }
             const auto before = playhead;
-            playhead = playFrom + (std::int64_t) pos;
+            playhead = playFrom < 0 ? -1 : playFrom + (std::int64_t) pos; // (a tool preview is not on the timeline)
             // page along with the playhead (Follow on, issue #12)
-            if (EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::audioEditor)
+            if (playhead >= 0 && EditorGlobals::get().isFollowingView (EditorGlobals::FollowView::audioEditor)
                 && ((double) playhead > viewStart + (double) waveArea.getWidth() * fpp || (double) playhead < viewStart) && fpp < maxFpp())
             {
                 viewStart = (double) playhead;
@@ -2348,6 +2414,318 @@ private:
             else if (before != playhead)
                 repaint (waveArea.withTrimmedTop (-2));
         }
+    }
+
+    // --- Edison's tools (round 165l): the tool windows' host ---------------------------------------------------
+public:
+    const ae::Document& toolDocument() const override { return doc; }
+    ae::Range toolSelection() const override { return selection; }
+    void toolApply (const juce::String& label, ae::Document d, ae::Range newSelection) override
+    {
+        if (recState != RecState::idle)
+            return;
+        stopPlayback();
+        const auto frames = doc.audio.frames();
+        const auto edited = ae::orAll (doc, selection);
+        doc = std::move (d);
+        if (ae::hasEnvelopes (doc) && doc.audio.frames() != frames)
+            ae::remapEnvelopes (doc, frames, edited, edited.length() + (doc.audio.frames() - frames));
+        selection = ae::clamp (doc, newSelection);
+        commit (label);
+    }
+    void toolPreview (const ae::Audio& audio) override
+    {
+        stopPlayback();
+        playAudio (audio, -1, false);
+    }
+    void toolStopPreview() override { stopPlayback(); }
+    double toolBpm() const override { return juce::jmax (1.0, engine.getSong().bpm); }
+    ae::NoiseProfile& toolNoiseProfile() override { return noiseProfile; }
+    const ae::Audio& toolClipboard() const override { return clipboard(); }
+    ae::Envelope* toolEnvelope() override
+    {
+        if (envMode == EnvMode::wave)
+            setEnvMode (EnvMode::volume);
+        return &currentEnvelope();
+    }
+    void toolEnvelopeChanged (bool commitIt, const juce::String& label) override
+    {
+        if (commitIt)
+            commit (label);
+        else
+            repaint();
+    }
+    juce::Component& toolComponent() override { return *this; }
+
+private:
+    enum class EnvMode
+    {
+        wave,
+        volume,
+        panning,
+        separation,
+        mix,    // the mix envelope of Paste mix (envelope)
+        scratch // the position envelope of Scratch (envelope)
+    };
+    EnvMode envMode = EnvMode::wave;
+    ae::NoiseProfile noiseProfile;
+    float noiseThreshold = -1.0f;
+    int envDragPoint = -1;
+    bool envChanged = false;
+    float envBendStartY = 0.0f, envBendStartTension = 0.0f;
+
+    ae::Envelope& currentEnvelope()
+    {
+        return envMode == EnvMode::panning ? doc.panEnvelope : envMode == EnvMode::separation ? doc.separationEnvelope : envMode == EnvMode::mix ? doc.mixEnvelope : envMode == EnvMode::scratch ? doc.scratchEnvelope : doc.volumeEnvelope;
+    }
+
+    static const char* envModeName (EnvMode m)
+    {
+        switch (m)
+        {
+            case EnvMode::wave: return TR_NOOP ("Edit: Wave");
+            case EnvMode::volume: return TR_NOOP ("Edit: Volume");
+            case EnvMode::panning: return TR_NOOP ("Edit: Panning");
+            case EnvMode::separation: return TR_NOOP ("Edit: Stereo sep");
+            case EnvMode::mix: return TR_NOOP ("Edit: Paste mix");
+            case EnvMode::scratch: return TR_NOOP ("Edit: Scratch");
+        }
+        return "";
+    }
+
+    void setEnvMode (EnvMode m)
+    {
+        envMode = m;
+        envButton.setButtonText (tr (envModeName (m)));
+        envButton.setToggleState (m != EnvMode::wave, juce::dontSendNotification);
+        if (m != EnvMode::wave)
+            setStatus (tr ("Right-click (or click) adds a point, drag moves it, right-click or Alt+click on a point deletes it, the hollow handles bend. Tools > Mixdown amp envelopes applies it."), false);
+        repaint();
+    }
+
+    juce::PopupMenu envModeMenu()
+    {
+        juce::PopupMenu m;
+        for (auto mode : { EnvMode::wave, EnvMode::volume, EnvMode::panning, EnvMode::separation })
+            m.addItem (tr (envModeName (mode)), mode == EnvMode::wave || doc.audio.numChannels() > 1 || mode == EnvMode::volume, envMode == mode, [this, mode] { setEnvMode (mode); });
+        if (envMode == EnvMode::mix || envMode == EnvMode::scratch)
+            m.addItem (tr (envModeName (envMode)), true, true, [] {});
+        return m;
+    }
+
+    // envelope y 0..1 <-> the wave area's height
+    float envY (double y) const noexcept { return (float) waveArea.getBottom() - 4.0f - (float) y * ((float) waveArea.getHeight() - 8.0f); }
+    double envValue (float py) const noexcept { return juce::jlimit (0.0, 1.0, (double) (((float) waveArea.getBottom() - 4.0f - py) / ((float) waveArea.getHeight() - 8.0f))); }
+    float envX (double x) const noexcept { return frameToX (x * (double) juce::jmax<std::int64_t> (1, doc.audio.frames() - 1)); }
+    double envPosition (int px) const noexcept { return juce::jlimit (0.0, 1.0, (double) xToFrame (px) / (double) juce::jmax<std::int64_t> (1, doc.audio.frames() - 1)); }
+
+    int envelopeHit (juce::Point<float> p)
+    {
+        auto& env = currentEnvelope();
+        for (int i = 0; i < (int) env.points.size(); ++i)
+            if (juce::Point<float> (envX (env.points[(std::size_t) i].x), envY (env.points[(std::size_t) i].y)).getDistanceFrom (p) < 7.0f)
+                return i;
+        return -1;
+    }
+
+    // the segment (its end point) whose hollow tension handle is under p, or -1
+    int envelopeHandleHit (juce::Point<float> p)
+    {
+        auto& env = currentEnvelope();
+        for (int i = 1; i < (int) env.points.size(); ++i)
+        {
+            const auto& a = env.points[(std::size_t) i - 1];
+            const auto& b = env.points[(std::size_t) i];
+            if (envX (b.x) - envX (a.x) < 14.0f)
+                continue;
+            const auto mx = 0.5 * (a.x + b.x);
+            if (juce::Point<float> (envX (mx), envY (env.at (mx))).getDistanceFrom (p) < 6.0f)
+                return i;
+        }
+        return -1;
+    }
+
+    // FL's point editing on the envelope: right-click (or click) on an empty spot adds a point and drags it, drag a
+    // point moves it, right-click or Alt+click on a point deletes it, the hollow handle between two points bends the
+    // segment (right-click it: straight). Returns true when the click was for the envelope.
+    bool envelopeMouseDown (const juce::MouseEvent& e)
+    {
+        auto& env = currentEnvelope();
+        const auto hit = envelopeHit (e.position);
+        envChanged = false;
+        if (env.empty())
+            env = ae::Envelope::flat (0.5); // a new envelope starts flat at its neutral value (unity / centre)
+        if (hit >= 0 && (e.mods.isPopupMenu() || e.mods.isAltDown()))
+        {
+            env.points.erase (env.points.begin() + hit);
+            if (env.points.empty())
+                env = {};
+            commit (tr ("Delete envelope point"));
+            return true;
+        }
+        if (const auto h = envelopeHandleHit (e.position); h > 0 && hit < 0)
+        {
+            if (e.mods.isPopupMenu())
+            {
+                env.points[(std::size_t) h].tension = 0.0f;
+                commit (tr ("Edit envelope"));
+                return true;
+            }
+            envDragPoint = h;
+            envBendStartY = e.position.y;
+            envBendStartTension = env.points[(std::size_t) h].tension;
+            drag = Drag::envBend;
+            return true;
+        }
+        envDragPoint = hit >= 0 ? hit : env.insert (envPosition (e.x), envValue (e.position.y));
+        envChanged = hit < 0;
+        drag = Drag::envPoint;
+        repaint();
+        return true;
+    }
+
+    void envelopeMouseDrag (const juce::MouseEvent& e)
+    {
+        auto& env = currentEnvelope();
+        if (! juce::isPositiveAndBelow (envDragPoint, (int) env.points.size()))
+            return;
+        auto& p = env.points[(std::size_t) envDragPoint];
+        if (drag == Drag::envBend)
+        {
+            const auto rising = p.y >= env.points[(std::size_t) envDragPoint - 1].y;
+            p.tension = juce::jlimit (-1.0f, 1.0f, envBendStartTension + (e.position.y - envBendStartY) / 120.0f * (rising ? 1.0f : -1.0f));
+        }
+        else
+        {
+            const auto lo = envDragPoint > 0 ? env.points[(std::size_t) envDragPoint - 1].x : 0.0;
+            const auto hi = envDragPoint + 1 < (int) env.points.size() ? env.points[(std::size_t) envDragPoint + 1].x : 1.0;
+            p.x = juce::jlimit (lo, hi, envPosition (e.x));
+            p.y = envValue (e.position.y);
+            const auto y = p.y;
+            setStatus (envMode == EnvMode::volume ? tr ("Volume {0} dB", { juce::String (20.0 * std::log10 (juce::jmax (1.0e-6f, ae::envelopeGain (y))), 1) })
+                                                  : envMode == EnvMode::mix ? tr ("Clipboard {0}%", { juce::String (juce::roundToInt (y * 100.0)) })
+                                                  : envMode == EnvMode::scratch ? tr ("Play position {0} s", { juce::String (y * (double) doc.audio.frames() / doc.audio.sampleRate, 3) })
+                                                  : envMode == EnvMode::panning ? tr ("Panning {0}", { juce::String (juce::roundToInt ((y * 2.0 - 1.0) * 100.0)) })
+                                                                                : tr ("Stereo separation {0}", { juce::String (juce::roundToInt ((y * 2.0 - 1.0) * 100.0)) }),
+                       false);
+        }
+        envChanged = true;
+        repaint();
+    }
+
+    void paintEnvelopes (juce::Graphics& g)
+    {
+        struct Lane
+        {
+            const ae::Envelope* env;
+            EnvMode mode;
+            juce::Colour colour;
+        };
+        const Lane lanes[] = { { &doc.volumeEnvelope, EnvMode::volume, theme::colour::meterLow },
+                               { &doc.panEnvelope, EnvMode::panning, theme::colour::info },
+                               { &doc.separationEnvelope, EnvMode::separation, theme::colour::warning },
+                               { &doc.mixEnvelope, EnvMode::mix, theme::colour::accent },
+                               { &doc.scratchEnvelope, EnvMode::scratch, theme::colour::accent } };
+        for (const auto& l : lanes)
+        {
+            const auto active = envMode == l.mode;
+            if (l.env->empty() && ! active)
+                continue;
+            if (active)
+            {
+                // the neutral line (unity / centre)
+                g.setColour (l.colour.withAlpha (0.25f));
+                g.drawHorizontalLine ((int) envY (0.5), (float) waveArea.getX(), (float) waveArea.getRight());
+            }
+            if (l.env->empty())
+                continue;
+            juce::Path path;
+            for (int x = waveArea.getX(); x <= waveArea.getRight(); x += 2)
+            {
+                const auto pt = juce::Point<float> ((float) x, envY (l.env->at (envPosition (x))));
+                if (x == waveArea.getX())
+                    path.startNewSubPath (pt);
+                else
+                    path.lineTo (pt);
+            }
+            g.setColour (l.colour.withAlpha (active ? 0.95f : 0.4f));
+            g.strokePath (path, juce::PathStrokeType (active ? 1.8f : 1.2f));
+            if (active)
+                for (int i = 1; i < (int) l.env->points.size(); ++i)
+                {
+                    const auto& a = l.env->points[(std::size_t) i - 1];
+                    const auto& b = l.env->points[(std::size_t) i];
+                    if (envX (b.x) - envX (a.x) < 14.0f)
+                        continue;
+                    const auto mx = 0.5 * (a.x + b.x);
+                    g.setColour (l.colour.withAlpha (0.8f));
+                    g.drawEllipse (envX (mx) - 3.0f, envY (l.env->at (mx)) - 3.0f, 6.0f, 6.0f, 1.2f);
+                }
+            if (active)
+                for (const auto& p : l.env->points)
+                {
+                    const auto c = juce::Point<float> (envX (p.x), envY (p.y));
+                    g.setColour (l.colour);
+                    g.fillEllipse (c.x - 3.5f, c.y - 3.5f, 7.0f, 7.0f);
+                    g.setColour (theme::colour::bg0);
+                    g.drawEllipse (c.x - 3.5f, c.y - 3.5f, 7.0f, 7.0f, 1.0f);
+                }
+        }
+    }
+
+    void openEdisonTool (audiotools::Tool t)
+    {
+        if (doc.audio.empty() || recState != RecState::idle)
+            return;
+        audiotools::showTool (*this, t);
+    }
+
+    void envelopeEdit (const juce::String& label, const std::function<void (ae::Envelope&)>& fn)
+    {
+        if (doc.audio.empty())
+            return;
+        if (envMode == EnvMode::wave)
+            setEnvMode (EnvMode::volume);
+        auto& env = currentEnvelope();
+        if (env.empty())
+            env = ae::Envelope::flat (0.5);
+        fn (env);
+        commit (label);
+    }
+
+    void acquireThreshold()
+    {
+        if (doc.audio.empty())
+            return;
+        if (selection.empty())
+        {
+            setStatus (tr ("Select a part with only the background noise first"), false);
+            return;
+        }
+        noiseThreshold = ae::acquireNoiseThreshold (doc.audio, selection);
+        setStatus (tr ("Noise threshold: {0} dB", { juce::String (juce::Decibels::gainToDecibels (noiseThreshold, -120.0f), 1) }), false);
+        repaint();
+    }
+
+    float gateThreshold()
+    {
+        if (noiseThreshold >= 0.0f)
+            return noiseThreshold * 1.12f; // a little over what was measured
+        // not acquired: -48 dB under the peak
+        return ae::peak (doc.audio, {}) * juce::Decibels::decibelsToGain (-48.0f);
+    }
+
+    void regionsTool (const juce::String& label, const std::function<int (ae::Document&)>& fn)
+    {
+        if (std::none_of (doc.markers.begin(), doc.markers.end(), [] (const ae::Marker& m) { return m.isRegion(); }))
+        {
+            setStatus (tr ("There are no regions (Regions > Auto-slice or Trim all noise & slice up make them)"), false);
+            return;
+        }
+        stopPlayback();
+        const auto n = fn (doc);
+        commit (label);
+        setStatus (tr ("{0} regions", { juce::String (n) }), false);
     }
 
     AudioEngine& engine;
@@ -2398,7 +2776,7 @@ private:
         historyButton { "history", Icon::chevronDown }, recordButton { "record", Icon::record }, recordMenuButton { "recordMenu", Icon::chevronDown },
         playButton { "play", Icon::play }, stopButton { "stop", Icon::stop }, snapButton { "snap", Icon::magnet }, fitButton { "fit", Icon::zoom },
         saveButton { "save", Icon::save }, followButton { "follow", Icon::follow };
-    juce::TextButton loopButton, viewButton, sendButton;
+    juce::TextButton loopButton, viewButton, sendButton, envButton;
     juce::Slider volumeKnob { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     juce::OwnedArray<juce::TextButton> quickButtons;
 
@@ -2430,6 +2808,15 @@ juce::PopupMenu AudioEditor::editMenu (bool contextual)
     menu.addItem (tr ("Paste insert") + "\tCtrl+V", clip && selection.empty(), false, [this] { paste (false); });
     menu.addItem (tr ("Paste replace"), clip && sel, false, [this] { paste (false); });
     menu.addItem (tr ("Paste mix"), clip && has, false, [this] { paste (true); });
+    menu.addItem (envMode == EnvMode::mix ? tr ("Paste mix (envelope): apply") : tr ("Paste mix (envelope)"), clip && has, false, [this] { pasteMixWithEnvelope(); });
+    menu.addItem (tr ("Paste mix (spectral)..."), clip && has, false, [this] {
+        if (selection.empty())
+            selection = { cursor, juce::jmin (doc.audio.frames(), cursor + ae::conform (clipboard(), doc.audio.numChannels(), doc.audio.sampleRate).frames()) };
+        openEdisonTool (audiotools::Tool::pasteSpectral);
+    });
+    // Edison's "Paste stretch" / "Paste replace (drum)" (round 165l): the clipboard brought to the selection's length
+    menu.addItem (tr ("Paste stretch"), clip && sel, false, [this] { pasteFitted (false); });
+    menu.addItem (tr ("Paste replace (drum)"), clip && sel, false, [this] { pasteFitted (true); });
     menu.addSeparator();
     menu.addItem (tr ("Delete") + "\tDel", sel, false, [this] { deleteSelection(); });
     menu.addItem (tr ("Clear (silence)"), sel, false, [this] { edit (tr ("Silence"), [] (ae::Document& d, ae::Range r) { ae::clear (d, r); }, true); });
@@ -2480,20 +2867,67 @@ juce::PopupMenu AudioEditor::mainMenu()
     file.addItem (tr ("Send to a new Sampler channel"), has, false, [this] { sendToNewSampler(); });
 
     juce::PopupMenu tools;
-    tools.addSectionHeader (tr ("Level"));
+    using T = audiotools::Tool;
+    const auto envOn = has && envMode != EnvMode::wave;
+    const auto envAny = has && ae::hasEnvelopes (doc);
+    tools.addSectionHeader (tr ("Envelope"));
+    tools.addSubMenu (tr ("Edit"), envModeMenu(), has);
+    tools.addItem (tr ("Cancel all envelopes"), envAny, false, [this] {
+        doc.volumeEnvelope = doc.panEnvelope = doc.separationEnvelope = doc.mixEnvelope = doc.scratchEnvelope = {};
+        if (envMode == EnvMode::mix || envMode == EnvMode::scratch)
+            setEnvMode (EnvMode::wave);
+        commit (tr ("Cancel all envelopes"));
+    });
+    tools.addItem (tr ("Add points at selection"), has && ! selection.empty(), false, [this] {
+        const auto n = (double) juce::jmax<std::int64_t> (1, doc.audio.frames() - 1);
+        const std::vector<double> xs { (double) selection.start / n, (double) selection.end / n };
+        envelopeEdit (tr ("Add points at selection"), [xs] (ae::Envelope& e) { ae::addPointsAt (e, xs); });
+    });
+    tools.addItem (tr ("Add points at regions"), has && ! doc.markers.empty(), false, [this] {
+        const auto n = (double) juce::jmax<std::int64_t> (1, doc.audio.frames() - 1);
+        std::vector<double> xs;
+        for (const auto& m : doc.markers)
+        {
+            xs.push_back ((double) m.start / n);
+            if (m.isRegion())
+                xs.push_back ((double) m.end / n);
+        }
+        envelopeEdit (tr ("Add points at regions"), [xs] (ae::Envelope& e) { ae::addPointsAt (e, xs); });
+    });
+    tools.addItem (tr ("Flip vertically"), envOn, false, [this] { envelopeEdit (tr ("Flip vertically"), [] (ae::Envelope& e) { ae::flipLevels (e); }); });
+    tools.addItem (tr ("Scale levels..."), has, false, [this] { openEdisonTool (T::scaleLevels); });
+    tools.addItem (tr ("Normalize levels"), envOn, false, [this] { envelopeEdit (tr ("Normalize levels"), [] (ae::Envelope& e) { ae::normalizeLevels (e); }); });
+    tools.addItem (tr ("Decimate points..."), has, false, [this] { openEdisonTool (T::decimate); });
+    tools.addItem (tr ("Filter..."), has, false, [this] { openEdisonTool (T::envFilter); });
+    tools.addItem (tr ("Smooth up..."), has, false, [this] { openEdisonTool (T::smoothUp); });
+    tools.addItem (tr ("Turn all points smooth"), envOn, false, [this] { envelopeEdit (tr ("Turn all points smooth"), [] (ae::Envelope& e) { ae::makePointsSmooth (e); }); });
+    tools.addItem (tr ("Create sequence..."), has, false, [this] { openEdisonTool (T::createSequence); });
+
+    tools.addSectionHeader (tr ("Amp"));
+    tools.addItem (tr ("Mixdown amp envelopes"), envAny, false, [this] {
+        stopPlayback();
+        ae::mixdownEnvelopes (doc);
+        setEnvMode (EnvMode::wave);
+        commit (tr ("Mixdown amp envelopes"));
+    });
     tools.addItem (tr ("Amp..."), has, false, [this] { showAmp(); });
+    tools.addItem (tr ("Reverse polarity"), has, false, [this] { edit (tr ("Reverse polarity"), [] (ae::Document& d, ae::Range r) { ae::invert (d, r); }); });
     tools.addItem (tr ("Normalize"), has, false, [this] { edit (tr ("Normalize"), [] (ae::Document& d, ae::Range r) { ae::normalize (d, r); }); });
     tools.addItem (tr ("Normalize to..."), has, false, [this] { showNormalizeTo(); });
-    tools.addItem (tr ("Reverse polarity"), has, false, [this] { edit (tr ("Reverse polarity"), [] (ae::Document& d, ae::Range r) { ae::invert (d, r); }); });
-    tools.addItem (tr ("Remove DC offset (center)"), has, false, [this] { edit (tr ("Remove DC offset"), [] (ae::Document& d, ae::Range r) { ae::removeDc (d, r); }); });
+    tools.addItem (tr ("Lossy normalize"), has, false, [this] { edit (tr ("Lossy normalize"), [] (ae::Document& d, ae::Range r) { ae::lossyNormalize (d, r); }); });
     tools.addItem (tr ("Fade in"), has, false, [this] { fade (true); });
     tools.addItem (tr ("Fade out"), has, false, [this] { fade (false); });
     tools.addSubMenu (tr ("Fade curve"), curveMenu());
     tools.addItem (tr ("Declick in"), has, false, [this] { edit (tr ("Declick in"), [] (ae::Document& d, ae::Range r) { ae::declickIn (d, r); }); });
     tools.addItem (tr ("Declick out"), has, false, [this] { edit (tr ("Declick out"), [] (ae::Document& d, ae::Range r) { ae::declickOut (d, r); }); });
+    tools.addSectionHeader (tr ("Waveform"));
+    tools.addItem (tr ("Remove DC offset (center)"), has, false, [this] { edit (tr ("Remove DC offset"), [] (ae::Document& d, ae::Range r) { ae::removeDc (d, r); }); });
     tools.addSectionHeader (tr ("Time"));
     tools.addItem (tr ("Reverse"), has, false, [this] { edit (tr ("Reverse"), [] (ae::Document& d, ae::Range r) { ae::reverse (d, r); }); });
-    tools.addItem (tr ("Time stretch / pitch shift..."), has, false, [this] { showStretch(); });
+    tools.addItem (tr ("Time stretch / pitch shift..."), has, false, [this] { openEdisonTool (T::stretch); });
+    tools.addItem (tr ("Drum(loop) stretch..."), has, false, [this] { openEdisonTool (T::drumStretch); });
+    tools.addItem (tr ("Claw machine..."), has, false, [this] { openEdisonTool (T::claw); });
+    tools.addItem (envMode == EnvMode::scratch ? tr ("Scratch (envelope): apply") : tr ("Scratch (envelope)"), has, false, [this] { scratchWithEnvelope(); });
     tools.addItem (tr ("Resample..."), has, false, [this] { showResample(); });
     tools.addSectionHeader (tr ("Channels"));
     const auto stereo = doc.audio.numChannels() > 1;
@@ -2501,7 +2935,63 @@ juce::PopupMenu AudioEditor::mainMenu()
     tools.addItem (tr ("Convert to mono (mix)"), has && stereo, false, [this] { edit (tr ("Convert to mono"), [] (ae::Document& d, ae::Range) { ae::toMono (d, ae::MonoSource::merged); }); });
     tools.addItem (tr ("Convert the left channel to mono"), has && stereo, false, [this] { edit (tr ("Convert to mono"), [] (ae::Document& d, ae::Range) { ae::toMono (d, ae::MonoSource::left); }); });
     tools.addItem (tr ("Convert the right channel to mono"), has && stereo, false, [this] { edit (tr ("Convert to mono"), [] (ae::Document& d, ae::Range) { ae::toMono (d, ae::MonoSource::right); }); });
+    tools.addItem (tr ("Convert a mono signal to mono format"), has && stereo, false, [this] {
+        stopPlayback();
+        if (ae::monoIfMono (doc))
+            commit (tr ("Convert to mono"));
+        else
+            setStatus (tr ("The left and right channels differ: the audio is really stereo"), false);
+    });
     tools.addItem (tr ("Convert to stereo"), has && ! stereo, false, [this] { edit (tr ("Convert to stereo"), [] (ae::Document& d, ae::Range) { ae::toStereo (d); }); });
+    tools.addSectionHeader (tr ("Synthesis"));
+    tools.addItem (tr ("Generate noise"), true, false, [this] {
+        stopPlayback();
+        if (doc.audio.channels.empty())
+        {
+            doc.audio = ae::silence (2, 44100.0, 0);
+            history.reset (doc, tr ("Empty").toStdString());
+        }
+        const auto at = selection.empty() ? cursor : selection.start;
+        const auto length = selection.empty() ? (std::int64_t) doc.audio.sampleRate : selection.length();
+        ae::generateNoise (doc, selection, 1.0f, (std::uint32_t) juce::Random::getSystemRandom().nextInt(), length);
+        selection = { at, at + length };
+        commit (tr ("Generate noise"));
+        if (history.size() <= 2)
+            zoomToFit();
+    });
+    tools.addSectionHeader (tr ("Noise gating"));
+    tools.addItem (tr ("Acquire noise threshold"), has && ! selection.empty(), false, [this] { acquireThreshold(); });
+    tools.addItem (tr ("Gate noise"), has, false, [this] {
+        const auto t = gateThreshold();
+        edit (tr ("Gate noise"), [t] (ae::Document& d, ae::Range r) { ae::gateNoise (d, r, t); });
+    });
+    tools.addItem (tr ("Trim side noise"), has, false, [this] {
+        const auto t = gateThreshold();
+        edit (tr ("Trim side noise"), [t] (ae::Document& d, ae::Range r) { ae::trimSideNoise (d, r, t); });
+    });
+    tools.addItem (tr ("Trim all noise && slice up"), has, false, [this] {
+        const auto t = gateThreshold();
+        int n = 0;
+        edit (tr ("Trim all noise & slice up"), [t, &n] (ae::Document& d, ae::Range r) { n = ae::trimNoiseAndSlice (d, r, t); });
+        setStatus (tr ("{0} regions", { juce::String (n) }), false);
+    });
+    tools.addSectionHeader (tr ("Spectral"));
+    tools.addItem (tr ("Convolution reverb..."), has, false, [this] { openEdisonTool (T::reverb); });
+    tools.addItem (tr ("Blur..."), has, false, [this] { openEdisonTool (T::blur); });
+    tools.addItem (tr ("Equalize..."), has, false, [this] { openEdisonTool (T::equalize); });
+    tools.addItem (tr ("Acquire noise profile"), has && ! selection.empty(), false, [this] {
+        noiseProfile = ae::acquireNoiseProfile (doc.audio, selection);
+        setStatus (tr ("Noise profile acquired from the selection: Clean up (denoise) uses it"), false);
+    });
+    tools.addItem (tr ("Clean up (denoise)..."), has, false, [this] { openEdisonTool (T::denoise); });
+    tools.addItem (tr ("Match spectrum..."), has, false, [this] { openEdisonTool (T::matchSpectrum); });
+    tools.addItem (tr ("Vocal denoise/isolator..."), has, false, [this] { openEdisonTool (T::vocalDenoise); });
+    tools.addSectionHeader (tr ("Regions"));
+    tools.addItem (tr ("Normalize all regions"), has, false, [this] { regionsTool (tr ("Normalize all regions"), [] (ae::Document& d) { return ae::normalizeRegions (d); }); });
+    tools.addItem (tr ("Declick in all regions"), has, false, [this] { regionsTool (tr ("Declick in all regions"), [] (ae::Document& d) { return ae::declickRegions (d, true, false); }); });
+    tools.addItem (tr ("Declick out all regions"), has, false, [this] { regionsTool (tr ("Declick out all regions"), [] (ae::Document& d) { return ae::declickRegions (d, false, true); }); });
+    tools.addItem (tr ("Perfect all regions"), has, false, [this] { regionsTool (tr ("Perfect all regions"), [] (ae::Document& d) { return ae::perfectRegions (d); }); });
+    tools.addItem (tr ("Tune loop..."), has, false, [this] { openEdisonTool (T::loopTuner); });
 
     juce::PopupMenu regions;
     regions.addItem (tr ("Add marker") + "\tM", has, false, [this] { addMarkerAtCursor(); });
@@ -2634,6 +3124,28 @@ std::unique_ptr<juce::Component> makeAudioEditorForSnapshot (AudioEngine& engine
     editor->setDocument (std::move (doc), tr ("Open"));
     editor->selectForSnapshot ({ frames / 4, frames / 2 }, spectrum);
     return editor;
+}
+
+std::unique_ptr<juce::Component> makeAudioToolPanelForSnapshot (juce::Component& editor, int tool, int envelopeMode)
+{
+    auto* e = dynamic_cast<AudioEditor*> (&editor);
+    if (e == nullptr || tool < 0 || tool > (int) audiotools::Tool::stretch)
+        return {};
+    e->setEnvModeForSnapshot (envelopeMode);
+    return audiotools::makeToolPanel (*e, (audiotools::Tool) tool);
+}
+
+const char* audioToolNameForSnapshot (int tool)
+{
+    if (tool < 0 || tool > (int) audiotools::Tool::stretch)
+        return nullptr;
+    return audiotools::toolTitle ((audiotools::Tool) tool);
+}
+
+void setAudioEditorEnvelopeModeForSnapshot (juce::Component& editor, int mode)
+{
+    if (auto* e = dynamic_cast<AudioEditor*> (&editor))
+        e->setEnvModeForSnapshot (mode);
 }
 
 juce::StringArray audioEditorMenuForSnapshot (juce::Component& component)

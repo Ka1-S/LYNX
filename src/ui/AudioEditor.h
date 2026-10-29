@@ -33,4 +33,9 @@ void openAudioEditorForInsert (AudioEngine& engine, int insert);
 std::unique_ptr<juce::Component> makeAudioEditorForSnapshot (AudioEngine& engine, audioedit::Document doc, bool spectrum);
 // --snapshot: the items of the editor's main menu, one per line ("Section > Item"), for the menu check.
 juce::StringArray audioEditorMenuForSnapshot (juce::Component& editor);
+// --edisonshot (round 165l): a tool window of `editor` (tool = audiotools::Tool as int; envelopeMode 0 wave,
+// 1 volume, 2 panning, 3 stereo separation: what the envelope tools work on), its English title, and the editor's mode.
+std::unique_ptr<juce::Component> makeAudioToolPanelForSnapshot (juce::Component& editor, int tool, int envelopeMode = 0);
+const char* audioToolNameForSnapshot (int tool); // nullptr past the last tool
+void setAudioEditorEnvelopeModeForSnapshot (juce::Component& editor, int mode);
 } // namespace lynx

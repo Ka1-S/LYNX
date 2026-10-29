@@ -33,4 +33,8 @@ void scale (PatternEvents& lane, std::int64_t from, std::int64_t to, float facto
 void randomize (PatternEvents& lane, std::int64_t from, std::int64_t to, float amount, std::uint32_t seed);
 // Writes FL's piano roll LFO (prtools::lfoCurve) over [from, to), one event per `step`.
 void applyLfo (PatternEvents& lane, std::int64_t from, std::int64_t to, const prtools::LfoOptions& options, std::int64_t step);
+// FL's "Convert to automation" (event editor, round 165l): the lane's events as automation points (ticks from the
+// pattern start), holding each value until the next one (an event's step) and dropping the points a straight line
+// explains. sensitivity 0.4..1 like FL's form: 1 keeps every change, lower values simplify more.
+std::vector<AutomationPoint> toAutomationPoints (const PatternEvents& lane, float sensitivity);
 } // namespace lynx::eventedit
