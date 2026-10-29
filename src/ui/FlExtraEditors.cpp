@@ -4,8 +4,11 @@
 #include <cmath>
 #include <map>
 
+#include <juce_audio_formats/juce_audio_formats.h>
+
 #include "core/Effects.h"
 #include "core/FlExtraFx.h"
+#include "core/Scratcher.h"
 #include "core/VisualFx.h"
 #include "engine/AudioEngine.h"
 #include "platform/Paths.h"
@@ -25,7 +28,7 @@ namespace fx = flextra;
 
 bool isExtraKind (EffectKind k)
 {
-    return k == EffectKind::bigClock || k == EffectKind::tuner || k == EffectKind::htmlNotebook;
+    return k == EffectKind::bigClock || k == EffectKind::tuner || k == EffectKind::htmlNotebook || k == EffectKind::scratcher;
 }
 
 VisualTarget slotTarget (AudioEngine& engine, int track, int slot)
@@ -817,6 +820,363 @@ private:
 };
 
 // ------------------------------------------------------------------------------------------------------------
+// Fruity Scratcher (REA_rodada165g-flscratch165, core/Scratcher.h)
+// ------------------------------------------------------------------------------------------------------------
+// The turntable's three-way transport (Backwards / Stopped / Forwards)
+class TransportSelector final : public juce::Component
+{
+public:
+    explicit TransportSelector (const VisualTarget& t) : target (t)
+    {
+        setRepaintsOnMouseActivity (true);
+        ui::setHint (*this, tr ("Transport") + ": " + tr ("Backwards") + " / " + tr ("Stopped") + " / " + tr ("Forwards"));
+    }
+
+    int direction() const
+    {
+        const auto* e = target.current();
+        return scratcher::transportOf (e != nullptr ? e->params[scratcher::transport] : 0.5f);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto box = getLocalBounds().toFloat().reduced (2.0f, 3.0f);
+        const auto w = box.getWidth() / 3.0f;
+        const juce::String labels[3] = { tr ("Backwards"), tr ("Stopped"), tr ("Forwards") };
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto cell = box.withX (box.getX() + w * (float) i).withWidth (w).reduced (1.0f, 0.0f);
+            const auto lit = direction() == i - 1;
+            skin::button (g, cell, lit, isMouseOver(), theme::colour::accent);
+            g.setFont (theme::font (theme::type::small, true));
+            g.setColour (lit ? theme::colour::textPrimary : theme::colour::textSecondary);
+            g.drawFittedText (labels[i], cell.toNearestInt(), juce::Justification::centred, 1);
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! getLocalBounds().contains (e.getPosition()))
+            return;
+        const auto d = juce::jlimit (0, 2, (int) (e.position.x / ((float) getWidth() / 3.0f))) - 1;
+        target.edit ([d] (EffectSlot& s) { s.params[scratcher::transport] = scratcher::transportValue (d); });
+        if (auto* parent = getParentComponent())
+            parent->repaint();
+    }
+
+private:
+    VisualTarget target;
+};
+
+class ScratcherEditor final : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
+{
+public:
+    ScratcherEditor (const VisualTarget& t, bool demoMode)
+        : target (t), demo (demoMode), transportSel (t),
+          pan (t, EffectKind::scratcher, scratcher::pan), volume (t, EffectKind::scratcher, scratcher::volume),
+          speed (t, EffectKind::scratcher, scratcher::speed), accel (t, EffectKind::scratcher, scratcher::accel),
+          sens (t, EffectKind::scratcher, scratcher::sensitivity),
+          smooth1 (t, EffectKind::scratcher, scratcher::smooth1), smooth2 (t, EffectKind::scratcher, scratcher::smooth2),
+          smooth3 (t, EffectKind::scratcher, scratcher::smooth3), smooth4 (t, EffectKind::scratcher, scratcher::smooth4),
+          hold (t, scratcher::hold, tr ("Off"), tr ("On"), tr ("Hold")), mute (t, scratcher::mute, tr ("Off"), tr ("On"), tr ("Mute"))
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &transportSel, &pan, &volume, &speed, &accel, &sens, &smooth1, &smooth2,
+                                                                 &smooth3, &smooth4, &hold, &mute, &load })
+            addAndMakeVisible (*c);
+        load.setButtonText (tr ("Load sample..."));
+        load.onClick = [this] { chooseSample(); };
+        ui::setHint (load, tr ("The sample on the platter (or drop a file here)"));
+        setSize (620, 360);
+        refreshSample();
+        if (! demo)
+            startTimerHz (30);
+    }
+
+    void setDemoPosition (float turns)
+    {
+        demoPos = turns;
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (10);
+        auto top = area.removeFromTop (26);
+        load.setBounds (top.removeFromRight (130));
+        nameArea = top;
+        area.removeFromTop (4);
+        waveArea = area.removeFromTop (54);
+        area.removeFromTop (8);
+        transportSel.setBounds (area.removeFromBottom (30).withSizeKeepingCentre (300, 30));
+        area.removeFromBottom (4);
+
+        auto left = area.removeFromLeft (84);
+        const auto knobH = juce::jmin (78, left.getHeight() / 3);
+        pan.setBounds (left.removeFromTop (knobH));
+        volume.setBounds (left.removeFromTop (knobH));
+        auto switches = left;
+        hold.setBounds (switches.removeFromTop (switches.getHeight() / 2));
+        mute.setBounds (switches);
+
+        auto right = area.removeFromRight (84);
+        speed.setBounds (right.removeFromTop (knobH));
+        accel.setBounds (right.removeFromTop (knobH));
+        sens.setBounds (right.removeFromTop (knobH));
+
+        auto smooth = area.removeFromRight (124);
+        smoothArea = smooth;
+        smooth.removeFromTop (16);
+        const auto cell = juce::jmin (62, smooth.getHeight() / 2);
+        auto row1 = smooth.removeFromTop (cell), row2 = smooth.removeFromTop (cell);
+        smooth1.setBounds (row1.removeFromLeft (62));
+        smooth2.setBounds (row1);
+        smooth3.setBounds (row2.removeFromLeft (62));
+        smooth4.setBounds (row2);
+
+        const auto d = (float) juce::jmin (area.getWidth(), area.getHeight());
+        platter = juce::Rectangle<float> (d, d).withCentre (area.toFloat().getCentre()).reduced (4.0f);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg0);
+
+        // the sample's name
+        g.setFont (theme::font (theme::type::small, true));
+        g.setColour (sampleName.isEmpty() ? theme::colour::textDisabled : theme::colour::textPrimary);
+        g.drawFittedText (sampleName.isEmpty() ? tr ("No sample: load one or drop a file") : sampleName, nameArea.reduced (2, 0),
+                          juce::Justification::centredLeft, 1);
+
+        // the waveform with the platter's position
+        const auto wave = waveArea.toFloat();
+        g.setColour (theme::colour::bg1);
+        g.fillRoundedRectangle (wave, theme::radius::md);
+        g.setColour (theme::colour::border);
+        g.drawRoundedRectangle (wave.reduced (0.5f), theme::radius::md, 1.0f);
+        if (! peaks.empty())
+        {
+            const auto mid = wave.getCentreY(), half = wave.getHeight() * 0.45f;
+            g.setColour (theme::colour::accent.withAlpha (0.75f));
+            const auto cols = (int) peaks.size();
+            for (int x = 0; x < cols; ++x)
+            {
+                const auto [lo, hi] = peaks[(std::size_t) x];
+                const auto px = wave.getX() + (float) x;
+                g.drawVerticalLine ((int) px, mid - hi * half, mid - lo * half + 1.0f);
+            }
+            const auto px = wave.getX() + position() * wave.getWidth();
+            g.setColour (theme::colour::textPrimary);
+            g.drawVerticalLine ((int) px, wave.getY() + 2.0f, wave.getBottom() - 2.0f);
+        }
+
+        // the platter: a record with its grooves and a mark at the position (one turn = the whole sample)
+        const auto c = platter.getCentre();
+        const auto r = platter.getWidth() * 0.5f;
+        g.setColour (juce::Colour (0xff15161a));
+        g.fillEllipse (platter);
+        g.setColour (juce::Colour (0xff2a2c33));
+        for (float k = 0.42f; k < 0.97f; k += 0.055f)
+            g.drawEllipse (juce::Rectangle<float> (2.0f * r * k, 2.0f * r * k).withCentre (c), 1.0f);
+        g.setColour (theme::colour::border);
+        g.drawEllipse (platter.reduced (0.5f), 1.5f);
+        const auto label = juce::Rectangle<float> (r * 0.66f, r * 0.66f).withCentre (c);
+        g.setColour (theme::colour::accent);
+        g.fillEllipse (label);
+        g.setColour (juce::Colour (0xff15161a));
+        g.fillEllipse (juce::Rectangle<float> (r * 0.07f, r * 0.07f).withCentre (c));
+        const auto angle = position() * juce::MathConstants<float>::twoPi;
+        const juce::Point<float> dir { std::sin (angle), -std::cos (angle) };
+        g.setColour (theme::colour::textPrimary);
+        g.drawLine ({ c + dir * (r * 0.36f), c + dir * (r * 0.95f) }, 3.0f);
+        if (holding)
+        {
+            g.setColour (theme::colour::accent.withAlpha (0.8f));
+            g.drawEllipse (platter.reduced (2.0f), 3.0f);
+        }
+
+        g.setFont (theme::font (theme::type::caption));
+        g.setColour (skin::captionColour());
+        g.drawText (tr ("Smoothing"), smoothArea.removeFromTop (16), juce::Justification::centred);
+        const auto* e = target.current();
+        const auto turns = e != nullptr ? scratcher::rotationsOf (e->params[scratcher::rotations]) - 9 : 0;
+        if (turns != 0)
+            g.drawText (tr ("Rotations") + " " + juce::String (turns > 0 ? "+" : "") + juce::String (turns),
+                        platter.withHeight (16.0f).translated (0.0f, platter.getHeight() - 8.0f).toNearestInt(), juce::Justification::centred);
+    }
+
+    // drag the platter (or the waveform) to scratch: Hold is on while the button is down, as in FL [DECOMP 0x732630]
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto onPlatter = e.position.getDistanceFrom (platter.getCentre()) <= platter.getWidth() * 0.5f;
+        if (! onPlatter && ! waveArea.contains (e.getPosition()))
+            return;
+        const auto* s = target.current();
+        if (s == nullptr)
+            return;
+        holding = true;
+        holdBefore = s->params[scratcher::hold];
+        dragStartPos = s->params[scratcher::hold] >= 0.5f ? s->params[scratcher::wavePos] : position();
+        dragTurns = scratcher::rotationsOf (s->params[scratcher::rotations]);
+        dragFrom = e.position;
+        // the platter is caught where it is: Wave position takes the motor's place, then Hold stops the motor
+        target.edit ([p = dragStartPos] (EffectSlot& x) {
+            x.params[scratcher::wavePos] = p;
+            x.params[scratcher::hold] = 1.0f;
+        }, false);
+        repaint();
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! holding)
+            return;
+        const auto* s = target.current();
+        if (s == nullptr)
+            return;
+        // FL: 0.0025 · Sensitivity of a turn per pixel (vertical: up = forwards; on the waveform: horizontal) [DECOMP 0x732770]
+        const auto onWave = waveArea.contains (dragFrom.toInt());
+        const auto pixels = onWave ? e.position.x - dragFrom.x : dragFrom.y - e.position.y;
+        const auto slow = e.mods.isCtrlDown() ? 0.25f : 1.0f;
+        auto pos = dragStartPos + pixels * 0.0025f * s->params[scratcher::sensitivity] * slow;
+        auto turns = dragTurns;
+        // whole turns go to Rotations (0…18), as FL's hidden wheel counts them
+        while (pos > 1.0f && turns < 18)
+            pos -= 1.0f, ++turns;
+        while (pos < 0.0f && turns > 0)
+            pos += 1.0f, --turns;
+        pos = juce::jlimit (0.0f, 1.0f, pos);
+        target.edit ([pos, turns] (EffectSlot& x) {
+            x.params[scratcher::wavePos] = pos;
+            x.params[scratcher::rotations] = scratcher::valueOfRaw (scratcher::rotations, turns);
+        }, false);
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! holding)
+            return;
+        holding = false;
+        target.edit ([h = holdBefore] (EffectSlot& x) { x.params[scratcher::hold] = h; });
+        repaint();
+    }
+
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        return files.size() == 1 && target.engine != nullptr && target.engine->getSampleLibrary().wildcard().containsIgnoreCase (juce::File (files[0]).getFileExtension());
+    }
+
+    void filesDropped (const juce::StringArray& files, int, int) override
+    {
+        if (! files.isEmpty())
+            useSample (juce::File (files[0]));
+    }
+
+private:
+    float position() const
+    {
+        if (demo)
+            return demoPos;
+        const auto* e = target.current();
+        if (e != nullptr && e->params[scratcher::hold] >= 0.5f && holding)
+            return e->params[scratcher::wavePos];
+        if (target.running)
+            if (const auto fx = target.running())
+                return fx->controlOutput (0);
+        return e != nullptr ? e->params[scratcher::wavePos] : 0.0f;
+    }
+
+    void timerCallback() override
+    {
+        const auto* e = target.current();
+        if (e != nullptr && e->samplePath != shownPath)
+            refreshSample();
+        repaint (platter.getSmallestIntegerContainer().expanded (4));
+        repaint (waveArea);
+    }
+
+    void refreshSample()
+    {
+        const auto* e = target.current();
+        shownPath = e != nullptr ? e->samplePath : std::string();
+        peaks.clear();
+        sampleName.clear();
+        if (shownPath.empty() || target.engine == nullptr)
+            return;
+        const juce::File file (juce::String::fromUTF8 (shownPath.c_str()));
+        sampleName = file.getFileName();
+        const auto sample = target.engine->getSampleLibrary().load (file.getFullPathName());
+        if (sample == nullptr)
+        {
+            sampleName = tr ("Could not read {0}", { file.getFileName() });
+            return;
+        }
+        const auto cols = juce::jmax (1, waveArea.getWidth() > 0 ? waveArea.getWidth() : 600);
+        const auto n = sample->frames();
+        const auto* l = sample->leftData();
+        const auto* rr = sample->rightData();
+        peaks.assign ((std::size_t) cols, { 0.0f, 0.0f });
+        for (int x = 0; x < cols && n > 0; ++x)
+        {
+            const auto a = (std::size_t) ((double) x * (double) n / cols), b = juce::jmax (a + 1, (std::size_t) ((double) (x + 1) * (double) n / cols));
+            float lo = 0.0f, hi = 0.0f;
+            for (auto i = a; i < b && i < n; ++i)
+            {
+                const auto v = 0.5f * (l[i] + rr[i]);
+                lo = juce::jmin (lo, v);
+                hi = juce::jmax (hi, v);
+            }
+            peaks[(std::size_t) x] = { lo, hi };
+        }
+    }
+
+    void chooseSample()
+    {
+        if (target.engine == nullptr)
+            return;
+        const auto* e = target.current();
+        const juce::File current (juce::String::fromUTF8 (e != nullptr ? e->samplePath.c_str() : ""));
+        chooser = std::make_unique<juce::FileChooser> (tr ("Load sample"), current.existsAsFile() ? current : juce::File(),
+                                                       target.engine->getSampleLibrary().wildcard());
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [safe = juce::Component::SafePointer<ScratcherEditor> (this)] (const juce::FileChooser& fc) {
+                                  if (safe != nullptr && fc.getResult().existsAsFile())
+                                      safe->useSample (fc.getResult());
+                              });
+    }
+
+    void useSample (const juce::File& file)
+    {
+        if (target.engine == nullptr || target.engine->getSampleLibrary().load (file.getFullPathName()) == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load sample"), tr ("Could not read {0}", { file.getFileName() }));
+            return;
+        }
+        target.edit ([path = file.getFullPathName().toStdString()] (EffectSlot& s) { s.samplePath = path; });
+        refreshSample();
+        repaint();
+    }
+
+    VisualTarget target;
+    bool demo;
+    float demoPos = 0.0f;
+    TransportSelector transportSel;
+    Knob pan, volume, speed, accel, sens, smooth1, smooth2, smooth3, smooth4;
+    Switch hold, mute;
+    juce::TextButton load;
+    juce::Rectangle<int> nameArea, waveArea, smoothArea;
+    juce::Rectangle<float> platter;
+    std::vector<std::pair<float, float>> peaks;
+    std::string shownPath;
+    juce::String sampleName;
+    std::unique_ptr<juce::FileChooser> chooser;
+    bool holding = false;
+    float holdBefore = 0.0f, dragStartPos = 0.0f;
+    int dragTurns = 9;
+    juce::Point<float> dragFrom;
+};
+
+// ------------------------------------------------------------------------------------------------------------
 // Windows
 // ------------------------------------------------------------------------------------------------------------
 class ExtraWindow final : public juce::DocumentWindow
@@ -832,6 +1192,8 @@ public:
             setResizeLimits (200, 80, 3000, 1200);
         else if (kind == EffectKind::tuner)
             setResizeLimits (300, 300, 1200, 1200);
+        else if (kind == EffectKind::scratcher)
+            setResizeLimits (520, 320, 1600, 1200);
         else
             setResizeLimits (360, 240, 3000, 2400);
         centreWithSize (getWidth(), getHeight());
@@ -881,6 +1243,7 @@ std::unique_ptr<juce::Component> makeFlExtraEditor (const VisualTarget& target, 
     {
         case EffectKind::bigClock: return std::make_unique<BigClockEditor> (target, demo);
         case EffectKind::tuner: return std::make_unique<TunerEditor> (target, demo);
+        case EffectKind::scratcher: return std::make_unique<ScratcherEditor> (target, demo);
         default: return std::make_unique<HtmlNotebookEditor> (target);
     }
 }
@@ -1008,6 +1371,47 @@ bool runFlExtraShots (AudioEngine& engine, const juce::File& folder)
         {
             ok = false;
             report << name << " FAILED (no editor)\n";
+        }
+    }
+    // Fruity Scratcher: FL's own DL Breaker loop when installed (else a generated beat), motor and hold views
+    {
+        auto loop = juce::File ("C:\\Program Files\\Image-Line\\FL Studio 2026\\Data\\Patches\\Packs\\Loops\\DL Breaker.wav");
+        if (! loop.existsAsFile())
+        {
+            loop = folder.getChildFile ("scratcher-loop.wav");
+            loop.deleteFile();
+            juce::AudioBuffer<float> beat (2, 88200);
+            beat.clear();
+            for (int hit = 0; hit < 8; ++hit)
+                for (int i = 0; i < 6000; ++i)
+                {
+                    const auto env = std::exp (-(float) i / (hit % 2 == 0 ? 1800.0f : 500.0f));
+                    const auto v = 0.7f * env * (hit % 2 == 0 ? std::sin (2.0f * juce::MathConstants<float>::pi * 55.0f * (float) i / 44100.0f)
+                                                              : (float) ((i * 7919) % 200 - 100) / 100.0f);
+                    beat.setSample (0, hit * 11025 + i, v);
+                    beat.setSample (1, hit * 11025 + i, v);
+                }
+            juce::WavAudioFormat wav;
+            if (auto stream = loop.createOutputStream())
+                if (std::unique_ptr<juce::AudioFormatWriter> w { wav.createWriterFor (stream.get(), 44100.0, 2, 16, {}, 0) })
+                {
+                    stream.release();
+                    w->writeFromAudioSampleBuffer (beat, 0, beat.getNumSamples());
+                }
+        }
+        for (const auto& [name, holdOn, transport, pos] : std::vector<std::tuple<juce::String, float, int, float>> {
+                 { "scratcher-forwards", 0.0f, 1, 0.3f }, { "scratcher-hold", 1.0f, 0, 0.72f } })
+        {
+            auto e = makeEffectSlot (EffectKind::scratcher);
+            e.samplePath = loop.getFullPathName().toStdString();
+            e.params[scratcher::hold] = holdOn;
+            e.params[scratcher::transport] = scratcher::transportValue (transport);
+            e.params[scratcher::wavePos] = pos;
+            setSlot (e);
+            ScratcherEditor editor (slotTarget (engine, 1, 0), true);
+            editor.setSize (620, 360);
+            editor.setDemoPosition (pos);
+            save (editor, name);
         }
     }
     folder.getChildFile ("report.txt").replaceWithText (report);

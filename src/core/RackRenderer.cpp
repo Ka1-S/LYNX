@@ -20,6 +20,7 @@
 #include "core/DirectWave.h"
 #include "core/SoundFont.h"
 #include "core/NewtoneFx.h"
+#include "core/Scratcher.h"
 
 #include <algorithm>
 #include <atomic>
@@ -233,6 +234,12 @@ std::shared_ptr<Effect> buildEffect (const EffectSlot& slot, double sampleRate, 
         // (Newtone: its note edits rendered by LYNX's engine, REA_rodada95)
         effect = newtonefx::make (factories.samples && ! slot.samplePath.empty() ? factories.samples (slot.samplePath) : nullptr,
                                   slot.state);
+        effect->prepare (sampleRate);
+    }
+    else if (kind == EffectKind::scratcher)
+    {
+        // Fruity Scratcher: its turntable's sample, loaded off the audio thread (REA_rodada165g-flscratch165)
+        effect = scratcher::make (factories.samples && ! slot.samplePath.empty() ? factories.samples (slot.samplePath) : nullptr);
         effect->prepare (sampleRate);
     }
     else
@@ -1886,6 +1893,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         if (key < smartDisable.size() && slots[i].smartDisable && ! (isPlugin && ! slots[i].plugin.allowSmartDisable)
             && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
             && slots[i].kind != EffectKind::newtime
+            && slots[i].kind != EffectKind::scratcher // (nor the Scratcher: its turntable plays whatever the input)
             && slots[i].kind != EffectKind::hardwareInsert // (nor the hardware insert: outboard gear has its own tails and noise)
             && ! (slots[i].kind == EffectKind::patcher && patcher::usesHardwareIo (slots[i].patcher)) // (nor a Patcher holding one, round 165c)
             // (nor a controller: its outputs move whatever the sound — a silent insert is their usual place; round 164)

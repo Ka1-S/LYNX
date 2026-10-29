@@ -1536,6 +1536,8 @@ private:
                 return "Visual";
             case EffectKind::tuner: // round 165g (FL's Tuner: an analyser)
                 return "Misc";
+            case EffectKind::scratcher: // round 165g (FL's Scratcher: a turntable, a generator in effect form)
+                return "Misc";
             default:
                 return "Misc";
         }

@@ -46,6 +46,7 @@
 #include "core/NewtoneFx.h"
 #include "core/VisualFx.h"
 #include "core/FlExtraFx.h"
+#include "core/Scratcher.h"
 #include "flp/Flp.h"
 
 namespace lynx
@@ -1234,6 +1235,14 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
         flextra::tuner::fromFl (state, slot);
         return slot;
     }
+    if (pluginName == "Fruity Scratcher") // REA_rodada165g-flscratch165: FL's engine; the sample path is resolved by the import
+    {
+        auto slot = makeEffectSlot (EffectKind::scratcher);
+        if (const auto st = scratcher::parse (state))
+            for (int i = 0; i < scratcher::count; ++i)
+                slot.params[(std::size_t) i] = st->values[(std::size_t) i];
+        return slot;
+    }
     if (pluginName == "Fruity HTML NoteBook")
     {
         auto slot = makeEffectSlot (EffectKind::htmlNotebook);
@@ -1574,6 +1583,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::bigClock: return { "Fruity Big Clock" };
         case EffectKind::tuner: return { "Tuner" };
         case EffectKind::htmlNotebook: return { "Fruity HTML NoteBook" };
+        case EffectKind::scratcher: return { "Fruity Scratcher" };
         case EffectKind::visualizer: return { "ZGameEditor Visualizer" };
         case EffectKind::xyController: return { "Fruity X-Y Controller" };
         case EffectKind::xyzController: return {}; // (FL's X-Y-Z Controller: name from REA_rodada164a)
