@@ -5641,10 +5641,24 @@ countries: pl
 "Selects the sequence" = "Wybiera sekwencję"
 "Passed on" = "Przekazywana dalej"
 "An incoming MIDI program change: ignored, selects the sequence (0 = the first), or goes on to the instruments after it" = "Przychodząca zmiana programu MIDI: ignorowana, wybiera sekwencję (0 = pierwsza) lub trafia do instrumentów za nim"
+"Backwards" = "Do tyłu"
+"Stopped" = "Zatrzymany"
+"Forwards" = "Do przodu"
+"The sample on the platter (or drop a file here)" = "Sampel na talerzu (lub upuść tu plik)"
+"No sample: load one or drop a file" = "Brak sampla: wczytaj go lub upuść plik"
+"Rotations" = "Obroty"
+"Load sample" = "Wczytaj sampel"
+"Wave position" = "Pozycja w fali"
+"Acceleration" = "Przyspieszenie"
+"Smooth 1" = "Wygładzanie 1"
+"Smooth 2" = "Wygładzanie 2"
+"Smooth 3" = "Wygładzanie 3"
+"Smooth 4" = "Wygładzanie 4"
 
-# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
+# --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Odwrócone stereo"
 "Ping-pong" = "Ping-pong"
+
 # --- Not in pt-BR.txt (yet)
 "[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu" = "[LMB] otwórz/zamknij edytor  [Alt]+[LMB] nie zamykaj innych  [Ctrl]+[LMB] odsłuch  [2xLMB] Piano Roll  [LMB] przeciągnij w górę/dół zmienia kolejność  [RMB] menu kanału"
 "Peak meter (left/right) with peak hold  [LMB] clears the clip light" = "Miernik szczytowy (lewy/prawy) z podtrzymaniem  [LMB] gasi lampkę przesterowania"
