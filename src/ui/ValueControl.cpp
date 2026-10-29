@@ -16,6 +16,7 @@ constexpr const char* hintProperty = "lynxHint";
 constexpr const char* hintMenuProperty = "lynxHintMenu";
 constexpr const char* hintAutoProperty = "lynxHintAuto";
 constexpr const char* ownContractProperty = "lynxOwnContract";
+constexpr const char* ownMenuProperty = "lynxOwnMenu";
 constexpr const char* configuredProperty = "lynxContract";
 constexpr const char* sensitivityProperty = "lynxDragPixels";
 
@@ -562,7 +563,10 @@ struct SliderContract final : juce::MouseListener
         };
 
         if (e.mods.isPopupMenu())
-            showValueMenu (*s, nullptr, sliderSpec (*s), s->getValue(), set);
+        {
+            if (! s->getProperties().contains (ownMenuProperty)) // (a knob with its own parameter menu shows only that)
+                showValueMenu (*s, nullptr, sliderSpec (*s), s->getValue(), set);
+        }
         else if (e.mods.isMiddleButtonDown())
             set (sliderSpec (*s).defaultValue);
     }
@@ -609,6 +613,22 @@ std::unique_ptr<SliderContract>& contract()
     return instance;
 }
 } // namespace
+
+void showSliderMenu (juce::Slider& slider, AudioEngine* engine, const std::optional<AutomationTarget>& target)
+{
+    auto spec = sliderSpec (slider);
+    spec.target = target;
+    juce::Component::SafePointer<juce::Slider> safe (&slider);
+    showValueMenu (slider, engine, spec, slider.getValue(), [safe] (double v) {
+        if (safe != nullptr)
+            safe->setValue (v, juce::sendNotificationSync);
+    });
+}
+
+void setOwnMenu (juce::Slider& slider)
+{
+    slider.getProperties().set (ownMenuProperty, true);
+}
 
 Hint hintFor (juce::Component* component, juce::Point<int> position)
 {

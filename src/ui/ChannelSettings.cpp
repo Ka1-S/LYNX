@@ -1737,11 +1737,9 @@ public:
             if (ref.index < 0) // (a Patcher node: no automation target)
                 break;
             const auto target = [this, param] { return AutomationTarget { AutomationTargetKind::channelParam, ref.index, 0, param }; };
-            slider->onMenu = [this, slider, target] {
-                juce::PopupMenu menu;
-                addAutomationItem (menu, engine, target(), true);
-                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (slider));
-            };
+            // one menu, FL's parameter menu (the slider contract's plain value menu used to open beside it)
+            ui::setOwnMenu (*slider);
+            slider->onMenu = [this, slider, target] { ui::showSliderMenu (*slider, &engine, target()); };
             slider->onDragStart = [this, target] { engine.noteTweaked (target(), true); };
             slider->onDragEnd = [this, target] { engine.tweakReleased (target()); };
             tweakTargets.push_back ({ slider, param });
