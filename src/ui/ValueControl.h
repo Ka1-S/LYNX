@@ -80,6 +80,12 @@ std::optional<double> wheelValue (double value, const juce::MouseEvent& e, const
 // control cannot be automated.
 void showValueMenu (juce::Component& target, AudioEngine* engine, const ValueSpec& spec, double current, std::function<void (double)> set);
 
+// A juce::Slider's parameter menu in FL's order (name: value, Reset, Automation, Remote control, Value), with the
+// automation items when `target` is set. A slider that shows it itself calls setOwnMenu, so the app-wide slider
+// contract does not open its plain value menu on top of it (two menus at once, round 165z-b).
+void showSliderMenu (juce::Slider& slider, AudioEngine* engine, const std::optional<AutomationTarget>& target);
+void setOwnMenu (juce::Slider& slider);
+
 // A context menu's title band in the colour of what it is about (FL tints a mixer track's menu with the track's
 // colour; LYNX draws a band in its own style): `kind` in small caps ("Mixer track"), then `name`. A transparent
 // colour draws a neutral band.

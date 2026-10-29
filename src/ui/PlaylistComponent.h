@@ -266,7 +266,7 @@ private:
     juce::Rectangle<int> rubberBand;
     std::int64_t loopAnchor = 0;
     juce::ModifierKeys downMods;
-    bool startedOnEmpty = false, erasedSomething = false, holdExpired = false, muteTarget = false;
+    bool startedOnEmpty = false, erasedSomething = false, holdExpired = false;
     std::vector<int> touchedClips;
     std::int64_t nextPaintTick = 0;
     Clip paintClip;
@@ -284,11 +284,9 @@ private:
     std::vector<Clip> timeMoveOriginals; // Shift+drag on the ruler: the playlist when it started
     std::int64_t timeMoveFrom = 0, timeMoveTo = 0, timeMoveAnchor = 0;
     bool timeMoveCopy = false;
-    juce::uint32 lastClipEraseTime = 0;  // double right-click on a clip: mute instead of delete
-    juce::Point<int> lastClipErasePos;
     juce::uint32 lastRightClickTime = 0; // FL: a double right-click (held) is the Mute tool, on clips or empty space
     juce::Point<int> lastRightClickPos;
-    bool muteTargetPending = false;      // the mute drag takes its target (mute / unmute) from the first clip crossed
+    gesture::MuteSweep muteSweep;        // the mute drag takes its target (mute / unmute) from the first clip crossed
     // inline automation editing: points of automation clips are dragged, added on the curve, deleted by right-click
     int autoClip = -1, autoPoint = -1;
     juce::Rectangle<float> automationBody (const Clip& clip) const;

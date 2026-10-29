@@ -2053,27 +2053,24 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
-        // FL: a double right-click is the Mute tool while the button stays down: on a clip the first click deleted
-        // it, so it comes back and toggles; dragging on mutes / unmutes every clip crossed (issue #11)
+        // FL 2026 [SHOT, round 165z-b]: a double right-click is the Mute tool while the button stays down. The first
+        // click already deleted the clip under it and FL leaves it deleted; the sweep then mutes / unmutes every clip
+        // it crosses, the first one deciding which (issue #11)
         const auto now = juce::Time::getMillisecondCounter();
-        const auto doubleRight = lastRightClickTime != 0 && now - lastRightClickTime < 500 && lastRightClickPos.getDistanceFrom (e.getPosition()) < 6;
+        const auto doubleRight = gesture::isDoubleClick (lastRightClickTime, now, lastRightClickPos.getDistanceFrom (e.getPosition()));
         lastRightClickTime = doubleRight ? 0 : now;
         lastRightClickPos = e.getPosition();
         if (doubleRight)
         {
-            if (lastClipEraseTime != 0 && lastClipErasePos.getDistanceFrom (e.getPosition()) < 6 && now - lastClipEraseTime < 1000)
-                engine.undo(); // the clip the first click deleted
-            lastClipEraseTime = 0;
             drag = Drag::muting;
             touchedClips.clear();
-            muteTargetPending = true;
+            muteSweep = {};
             bool r = false, l = false;
             if (const auto clip = clipAt (e.x, e.y, r, l); clip >= 0)
             {
-                muteTarget = ! engine.getSong().playlist[(std::size_t) clip].muted;
-                muteTargetPending = false;
                 touchedClips.push_back (clip);
-                engine.editSong ([clip, m = muteTarget] (Song& s) { s.playlist[(std::size_t) clip].muted = m; });
+                const auto m = muteSweep.touch (engine.getSong().playlist[(std::size_t) clip].muted);
+                engine.editSong ([clip, m] (Song& s) { s.playlist[(std::size_t) clip].muted = m; });
             }
             return;
         }
@@ -2081,13 +2078,10 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         drag = Drag::erase;
         startedOnEmpty = hit < 0;
         setSelection ({}); // indices change while deleting
-        lastClipEraseTime = 0;
 
         if (hit >= 0)
         {
             erasedSomething = true;
-            lastClipEraseTime = juce::Time::getMillisecondCounter();
-            lastClipErasePos = e.getPosition();
             engine.editSong ([hit] (Song& s) { s.playlist.erase (s.playlist.begin() + hit); });
         }
         return;
@@ -2148,13 +2142,16 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
         case EditTool::mute:
             drag = Drag::muting;
             touchedClips.clear();
-            muteTarget = true;
-            muteTargetPending = false;
+            muteSweep = {};
             if (hit >= 0)
             {
-                muteTarget = ! engine.getSong().playlist[(std::size_t) hit].muted;
                 touchedClips.push_back (hit);
-                engine.editSong ([hit, m = muteTarget] (Song& s) { s.playlist[(std::size_t) hit].muted = m; });
+                const auto m = muteSweep.touch (engine.getSong().playlist[(std::size_t) hit].muted);
+                engine.editSong ([hit, m] (Song& s) { s.playlist[(std::size_t) hit].muted = m; });
+            }
+            else
+            {
+                muteSweep.touch (false); // the Mute tool started on empty space mutes
             }
             return;
 
@@ -2563,13 +2560,9 @@ void PlaylistComponent::mouseDrag (const juce::MouseEvent& e)
 
             if (hit >= 0 && std::find (touchedClips.begin(), touchedClips.end(), hit) == touchedClips.end())
             {
-                if (muteTargetPending) // started on empty space: the first clip crossed decides
-                {
-                    muteTarget = ! engine.getSong().playlist[(std::size_t) hit].muted;
-                    muteTargetPending = false;
-                }
-                touchedClips.push_back (hit);
-                engine.editSong ([hit, m = muteTarget] (Song& s) { s.playlist[(std::size_t) hit].muted = m; });
+                touchedClips.push_back (hit); // a double right-click started on empty space: the first clip decides
+                const auto m = muteSweep.touch (engine.getSong().playlist[(std::size_t) hit].muted);
+                engine.editSong ([hit, m] (Song& s) { s.playlist[(std::size_t) hit].muted = m; });
             }
             return;
         }
