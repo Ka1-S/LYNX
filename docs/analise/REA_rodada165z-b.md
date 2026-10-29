@@ -38,7 +38,7 @@ Method
 | Sampler knobs automatable | "Make ADSR, Cutoff, Resonance, and Start + End knobs automatable via automation clip" | FL: right-click a knob → one parameter menu (Create automation clip …) | right-click Attack → "Create automation clip" opened "Riser Cymbal - Attack" (k6, k7). **Found: two menus opened at once** (the knob's automation menu + the app-wide slider value menu; also visible in r165p's c12.png) | DIFFERENT → **fixed** (b1): one menu in FL's order (name, Reset, Automation, Remote control, Value) |
 | Header double-click rename | pattern menu and mixer insert menu | request | insert menu header → Rename track, focused (v2, v3); pattern menu → rename "verse" (v4, v5) | MATCH (request) |
 | Audio Editor follow / drop / replace | follow button; drop replaces the loaded sample | request | Follow button; real Explorer drop loads (e6), a second drop replaces (e7) | MATCH |
-| Audio Editor region → new Sampler | (FL Edison "Send to channel") | Edison sends a selection to a channel | "Send to a new Sampler channel" in the selection menu (code; b1 Windows check below) | see b1 check |
+| Audio Editor region → new Sampler | (FL Edison "Send to channel") | Edison sends a selection to a channel | channel menu › Edit the sample in the audio editor, select 1.1–3.2 s, right-click › "Send the selection to a new Sampler channel": status "went to a new Sampler channel (Riser Cymbal (part))", the original stays 7.5 s (b1_10–b1_12) | MATCH |
 | Channel Rack pattern length + follow | length buttons, follow playhead | request | "A 1"→"L 4" by wheel, follow button (v6, v7) | MATCH |
 | Piano Roll bold "All" | bulk edit of the pattern | request | bold All shows every channel's notes (v8, v9) | MATCH |
 | Mixer send knobs automatable | "ADD Automation ability for the routing volume level knobs" | FL: route knob has the parameter menu | right-click the route knob → one menu; "Insert 1 → Master - Level to Master" clip created (k13, k14) | MATCH |
@@ -68,9 +68,27 @@ Method
 
 ## Counts
 #11 (14 items): 12 MATCH, 1 DIFFERENT fixed (#9), 1 DIFFERENT kept on purpose (#7 Delete key, reporter's request).
-#12 (19 items): 15 MATCH, 1 DIFFERENT fixed (Sampler knob menu), 1 DIFFERENT kept (song-mode storage model), 1 UNVERIFIED
-(pitch bend recording), 1 pending b1 Windows check (region → new Sampler).
+#12 (19 items): 16 MATCH, 1 DIFFERENT fixed (Sampler knob menu), 1 DIFFERENT kept (song-mode storage model), 1 UNVERIFIED
+(pitch bend recording).
 #13 (2 items): 2 MATCH.
 
-## Where I stopped
-(updated at the end of the round)
+## Windows check of batch b1 (build of feature/audit165z-b1, fresh profile b1, test mode, real input)
+- Double right-click held on a clip, sweep right: that clip stays deleted, the next clip crossed is muted (b1_2, b1_3).
+- Started on empty space, first crossing a muted clip: it is unmuted and the unmuted clips crossed after it stay
+  unmuted (b1_4); started on empty space, first crossing an unmuted clip: both clips crossed are muted (b1_5). = FL fm3–fme.
+- Sampler Cutoff right-click: one menu window (name: value, Reset, Automation, Remote control, Value) (b1_7);
+  Create automation clip → "Automation - Riser Cymbal - Cutoff".
+- Desktop after the session: clean of LYNX windows (a Windows LSA notice about Bonjour's mdnsNSP.dll, not from
+  LYNX SHARE, was on screen from before the launch; left alone).
+
+## Landed
+- b1 = 24b148f0 (feature/audit165z-b1: mute sweep + one Sampler knob menu + this doc); land.sh: 1887142 checks,
+  0 failures, Windows build, selftest OK.
+
+## Where I stopped / next version
+- Song-mode automation recording: FL 2026's default stores the moves as pattern events + a pattern clip placed at Stop
+  (ending at the last event's bar); LYNX SHARE records an automation clip that grows to the Stop, as the reporter asked.
+  Changing the model is the user's call (reply draft asks the reporter).
+- Pitch bend recording end to end: needs a MIDI controller or a test-mode MIDI injection (not available here).
+- Sampler knob menu header shows the knob's long tooltip-like name ("Channel filter cutoff (low-pass at maximum …)");
+  FL's header is the short parameter name. Cosmetic.
