@@ -675,7 +675,9 @@ enum class EffectKind : std::uint8_t
 // the last EffectKind (loops over every kind; update when one is appended)
 constexpr EffectKind lastEffectKind = EffectKind::htmlNotebook;
 
-constexpr int maxEffectParams = 160; // round 150: Prism Multiband 155, Ember 133. LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
+// round 165x: 160 → 192 (Ember had reached 160; a slot's parameters are 768 bytes, project files store only an engine's
+// own count, so older projects load unchanged). Round 150: 128 → 160 (Prism Multiband 155, Ember 133).
+constexpr int maxEffectParams = 192; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
 constexpr int maxEffectSlots = 10; // as in FL
 using EffectParams = std::array<float, maxEffectParams>;
 

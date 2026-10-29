@@ -221,7 +221,7 @@ TEST (hush_input_output_pan_round165w)
     using namespace lynx;
     namespace h = mixsuite::hush;
     const auto& info = effectInfo (EffectKind::hushDeEsser);
-    CHECK ((int) info.params.size() == h::count && h::outputPan == h::count - 1);
+    CHECK ((int) info.params.size() == h::count && h::outputPan == h::rangeLaw - 1); // (round 165x appended three)
     auto p = makeEffectSlot (EffectKind::hushDeEsser).params;
     CHECK (p[h::inputPan] == 0.5f && p[h::outputPan] == 0.5f); // older projects load the centre: unchanged
     CHECK (formatEffectParam (EffectKind::hushDeEsser, h::outputPan, 0.25f, 120.0) == "50% L");
@@ -258,5 +258,5 @@ TEST (hush_input_output_pan_round165w)
     int n = 0;
     const auto s = m124x::substitute ("FabFilter Pro-DS", p165w::fabf (st), n);
     CHECK (std::abs (h::panValue (s.params[h::inputPan]) + 0.5) < 1e-4 && std::abs (h::panValue (s.params[h::outputPan]) - 0.75) < 1e-4);
-    CHECK (std::abs (s.params[h::input] - (7.2f + 12.0f) / 24.0f) < 1e-4 && h::oversamplingOf (s.params[h::oversampling]) == 2);
+    CHECK (std::abs (h::levelDb (s.params[h::input], true) - 7.2) < 1e-3 && h::oversamplingOf (s.params[h::oversampling]) == 2); // (round 165x: the extended law)
 }
