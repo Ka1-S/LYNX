@@ -6,7 +6,10 @@
 #include "ui/Theme.h"
 #include "platform/Paths.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
+#include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <functional>
@@ -36,9 +39,29 @@ void* mainWindowHandle()
     return main != nullptr && main->getPeer() != nullptr ? main->getWindowHandle() : nullptr;
 }
 
+namespace
+{
+// Every time the main window comes to the front (a click in it, the drag image hiding at a drop...), JUCE moves it to
+// the top of its list; the windows kept above it go back above it there (matchWindowOrderToScreen, issue #12)
+struct OrderKeeper final : juce::ComponentListener
+{
+    void componentBroughtToFront (juce::Component&) override { matchWindowOrderToScreen(); }
+};
+
+OrderKeeper& orderKeeper()
+{
+    static OrderKeeper keeper;
+    return keeper;
+}
+} // namespace
+
 void setMainWindowForOwnership (juce::Component* window)
 {
+    if (auto* before = mainWindow().getComponent())
+        before->removeComponentListener (&orderKeeper());
     mainWindow() = window;
+    if (window != nullptr)
+        window->addComponentListener (&orderKeeper());
 }
 
 void activateMainWindow()
@@ -635,4 +658,52 @@ std::unique_ptr<juce::Component> fitContentToScreen (std::unique_ptr<juce::Compo
         return content;
     return std::make_unique<ScrollingContent> (std::move (content));
 }
+
+void matchWindowOrderToScreen()
+{
+    auto* owner = mainWindow().getComponent();
+    if (owner == nullptr)
+        return;
+
+    // the windows above the main window, from the lowest up (raising them in that order keeps their order)
+    std::vector<juce::Component*> above;
+    auto& desktop = juce::Desktop::getInstance();
+    for (int i = 0; i < desktop.getNumComponents(); ++i)
+        if (auto* c = desktop.getComponent (i); c != owner && c->isVisible() && ! c->isAlwaysOnTop() && isAboveMainWindow (*c))
+            above.push_back (c);
+
+   #if JUCE_WINDOWS
+    std::map<HWND, int> depth; // 0 = the topmost window on the screen
+    int d = 0;
+    for (auto h = GetTopWindow (nullptr); h != nullptr; h = GetWindow (h, GW_HWNDNEXT))
+        depth[h] = d++;
+    const auto depthOf = [&depth] (juce::Component* c) {
+        const auto it = depth.find ((HWND) c->getWindowHandle());
+        return it == depth.end() ? std::numeric_limits<int>::max() : it->second;
+    };
+    std::stable_sort (above.begin(), above.end(), [&] (juce::Component* a, juce::Component* b) { return depthOf (a) > depthOf (b); });
+   #endif
+
+    // JUCE's list already in that order after the main window: nothing to do (no window is touched)
+    const auto indexOf = [&desktop] (juce::Component* c) {
+        for (int i = 0; i < desktop.getNumComponents(); ++i)
+            if (desktop.getComponent (i) == c)
+                return i;
+        return -1;
+    };
+    auto inOrder = true;
+    auto last = indexOf (owner);
+    for (auto* c : above)
+    {
+        const auto at = indexOf (c);
+        inOrder = inOrder && at > last;
+        last = at;
+    }
+    if (inOrder)
+        return;
+
+    for (auto* c : above)
+        c->toFront (false);
+}
+
 } // namespace lynx

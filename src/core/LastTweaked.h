@@ -28,6 +28,7 @@ inline std::string valueText (const Song& song, const AutomationTarget& t, float
         case AutomationTargetKind::channelVolume:
         case AutomationTargetKind::effectMix: std::snprintf (text, sizeof (text), "%d%%", (int) std::lround (v * 100.0f)); break;
         case AutomationTargetKind::mixerVolume:
+        case AutomationTargetKind::mixerSend:
         {
             const auto gain = faderGain (v);
             if (gain <= 1.0e-5f)
@@ -58,6 +59,27 @@ inline std::string valueText (const Song& song, const AutomationTarget& t, float
             return formatEffectParam (slot.kind, t.param, v, song.bpm, slot.params);
         }
         case AutomationTargetKind::channelParam:
+        {
+            // the Sampler's knobs (issue #12)
+            if (t.index < 0 || t.index >= (int) song.channels.size() || song.channels[(std::size_t) t.index].instrument != InstrumentKind::sampler
+                || t.param < 0 || t.param >= samplerparam::count)
+                return {};
+            const auto x = samplerparam::toNatural (t.param, v);
+            switch (t.param)
+            {
+                case samplerparam::attack:
+                case samplerparam::decay:
+                case samplerparam::release: std::snprintf (text, sizeof (text), "%.3f s", (double) x); break;
+                case samplerparam::cutoff:
+                    if (x >= 1000.0f)
+                        std::snprintf (text, sizeof (text), "%.1f kHz", (double) x / 1000.0);
+                    else
+                        std::snprintf (text, sizeof (text), "%d Hz", (int) std::lround (x));
+                    break;
+                default: std::snprintf (text, sizeof (text), "%d%%", (int) std::lround (x * 100.0f)); break;
+            }
+            break;
+        }
         case AutomationTargetKind::none: return {};
     }
     return text;

@@ -21,6 +21,14 @@ void* mainWindowHandle();
 // that handles every key itself (a detached panel) sets the property "lynxOwnKeys".
 void setSecondaryWindowKeyHandler (std::function<bool (const juce::KeyPress&)> handler);
 
+// Before a drag (a sample from the Browser...): JUCE finds the drop target in its own list of windows, where the main
+// window comes first after any click in it, while the windows kept above it (channel settings, a plugin...) are on top
+// on the screen. This puts those windows back above the main window in that list, in their screen order, so a drop on
+// one of them lands there and not on the panel under it (issue #12: a sample dropped on the Sampler's waveform
+// replaced the sample of the Channel Rack row under the window). Runs whenever the main window comes to the front
+// (setMainWindowForOwnership listens), so also when the drag image hides at the drop and Windows activates the main window.
+void matchWindowOrderToScreen();
+
 // Makes the main window the active one (round 165q): a closing secondary window that is active calls it first, so
 // the activation does not go to another program.
 void activateMainWindow();

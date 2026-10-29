@@ -2,6 +2,8 @@
 
 #include <map>
 
+#include <juce_audio_formats/juce_audio_formats.h>
+
 #include "platform/Paths.h"
 #include "ui/ColourPicker.h"
 #include "ui/I18n.h"
@@ -140,6 +142,8 @@ juce::String toJson (const themes::Spec& spec)
     o->setProperty ("fit", juce::String (themes::imageFitId (spec.fit)));
     o->setProperty ("imageOpacity", spec.imageOpacity);
     o->setProperty ("dim", spec.dim);
+    if (! spec.startupSound.empty())
+        o->setProperty ("startupSound", juce::String::fromUTF8 (spec.startupSound.c_str()));
     return juce::JSON::toString (juce::var (o));
 }
 
@@ -165,6 +169,7 @@ std::optional<themes::Spec> fromJson (const juce::String& json)
         spec.imageOpacity = juce::jlimit (0.0f, 1.0f, (float) v["imageOpacity"]);
     if (! v["dim"].isVoid())
         spec.dim = juce::jlimit (0.0f, 1.0f, (float) v["dim"]);
+    spec.startupSound = v["startupSound"].toString().toStdString();
     return spec;
 }
 
@@ -186,6 +191,45 @@ juce::File userThemesFolder()
     return platform::settingsFile ("Themes");
 }
 
+std::function<void (const juce::String&)> previewStartupSound;
+
+juce::File backgroundsFolder()
+{
+    static const juce::File folder = [] {
+        if (const auto profile = platform::profileOverride(); profile != juce::File())
+            return profile.getChildFile ("Backgrounds");
+        // (a probe file: Windows reports Program Files as writable and then virtualises the writes)
+        const auto beside = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("Backgrounds");
+        if (beside.isDirectory() || beside.createDirectory().wasOk())
+        {
+            const auto probe = beside.getChildFile (".lynx-write-test");
+            const auto ok = probe.replaceWithText ("x") && probe.existsAsFile();
+            probe.deleteFile();
+            if (ok)
+                return beside;
+        }
+        return platform::settingsFile ("Backgrounds");
+    }();
+    folder.createDirectory();
+    return folder;
+}
+
+juce::File imageFile (const std::string& image)
+{
+    if (image.empty())
+        return {};
+    const auto path = juce::String::fromUTF8 (image.c_str());
+    return juce::File::isAbsolutePath (path) ? juce::File (path) : backgroundsFolder().getChildFile (path);
+}
+
+std::string imagePathFor (const juce::File& file)
+{
+    const auto folder = backgroundsFolder();
+    if (file.isAChildOf (folder))
+        return file.getRelativePathFrom (folder).replaceCharacter ('\\', '/').toStdString();
+    return file.getFullPathName().toStdString();
+}
+
 void paintWorkspaceBackdrop (juce::Graphics& g, juce::Rectangle<int> area)
 {
     const auto& spec = state();
@@ -196,12 +240,12 @@ void paintWorkspaceBackdrop (juce::Graphics& g, juce::Rectangle<int> area)
         return;
 
     auto& b = backdrop();
-    const auto path = juce::String::fromUTF8 (spec.image.c_str());
+    const auto file = imageFile (spec.image);
+    const auto path = file.getFullPathName();
     if (b.path != path)
     {
         b = {};
         b.path = path;
-        const juce::File file (path);
         if (file.existsAsFile() && file.getSize() < 64 * 1024 * 1024)
             b.source = juce::ImageFileFormat::loadFrom (file);
     }
@@ -307,8 +351,31 @@ public:
         for (auto* c : std::initializer_list<juce::Component*> { &presetTitle, &presetBox, &importButton, &exportButton, &savePreset, &resetButton,
                                                                  &presetNote, &coloursTitle, &accentWell, &backgroundWell, &workspaceWell, &autoWorkspace,
                                                                  &picker, &contrastNote, &imageTitle, &imageButton, &removeImage, &imageName, &fitLabel,
-                                                                 &fitBox, &opacityLabel, &opacitySlider, &dimLabel, &dimSlider })
+                                                                 &fitBox, &opacityLabel, &opacitySlider, &dimLabel, &dimSlider, &imageListLabel, &imageList,
+                                                                 &openBackgrounds, &imageNote, &soundTitle, &soundName, &soundButton, &soundPlay,
+                                                                 &soundDefault, &soundNote })
             add (*c);
+
+        // the Backgrounds folder next to LYNX.exe (issue #12): its images in a list, the folder a click away
+        styleLabel (imageListLabel, tr ("Backgrounds folder"));
+        imageList.onChange = [this] {
+            const auto i = imageList.getSelectedItemIndex();
+            if (i >= 0 && i < backgroundFiles.size())
+                edit ([path = imagePathFor (backgroundFiles[i])] (themes::Spec& s) { s.image = path; });
+        };
+        openBackgrounds.onClick = [] { backgroundsFolder().startAsProcess(); };
+        openBackgrounds.setTooltip (tr ("Open the Backgrounds folder: images put there show in the list (refreshed when this page opens)"));
+        styleNote (imageNote, tr ("Images you choose are copied into the Backgrounds folder next to LYNX.exe, so a portable LYNX keeps them, "
+                                  "and a saved theme preset keeps its image."));
+
+        // Startup sound (issue #12): any audio file instead of LYNX's own sound
+        soundButton.onClick = [this] { chooseSound(); };
+        soundPlay.onClick = [this] {
+            if (previewStartupSound)
+                previewStartupSound (juce::String::fromUTF8 (spec.startupSound.c_str()));
+        };
+        soundDefault.onClick = [this] { edit ([] (themes::Spec& s) { s.startupSound.clear(); }); };
+        styleNote (soundNote, tr ("Played when LYNX starts (if Settings › General › \"Play the startup sound\" is on). Default: LYNX's own sound."));
 
         presetBox.onChange = [this] { choosePreset(); };
         importButton.onClick = [this] { importTheme(); };
@@ -416,12 +483,33 @@ private:
             r.removeFromLeft (10);
             imageName.setBounds (r.withTrimmedTop (6));
         }
+        {
+            auto r = row (26);
+            imageListLabel.setBounds (r.removeFromLeft (130));
+            imageList.setBounds (r.removeFromLeft (juce::jmin (300, r.getWidth() - 140)));
+            r.removeFromLeft (8);
+            openBackgrounds.setBounds (r.removeFromLeft (juce::jmin (130, r.getWidth())));
+        }
+        imageNote.setBounds (row (32));
         for (auto [label, control] : { std::pair<juce::Component*, juce::Component*> { &fitLabel, &fitBox }, { &opacityLabel, &opacitySlider }, { &dimLabel, &dimSlider } })
         {
             auto r = row (26);
             label->setBounds (r.removeFromLeft (130));
             control->setBounds (r.removeFromLeft (juce::jmin (300, r.getWidth())));
         }
+
+        soundTitle.setBounds (row (24));
+        {
+            auto r = row (28);
+            soundButton.setBounds (r.removeFromLeft (150));
+            r.removeFromLeft (8);
+            soundPlay.setBounds (r.removeFromLeft (80));
+            r.removeFromLeft (8);
+            soundDefault.setBounds (r.removeFromLeft (90));
+            r.removeFromLeft (10);
+            soundName.setBounds (r.withTrimmedTop (6));
+        }
+        soundNote.setBounds (row (32));
         return area.getY() - top + 28;
     }
 
@@ -501,8 +589,22 @@ private:
         else
             presetBox.setText (tr ("Custom"), juce::dontSendNotification);
 
-        imageName.setText (spec.image.empty() ? tr ("No image") : juce::File (juce::String::fromUTF8 (spec.image.c_str())).getFileName(),
+        imageName.setText (spec.image.empty() ? tr ("No image") : imageFile (spec.image).getFileName(), juce::dontSendNotification);
+        // the Backgrounds folder's images
+        backgroundFiles = backgroundsFolder().findChildFiles (juce::File::findFiles, false, "*.png;*.jpg;*.jpeg;*.gif");
+        backgroundFiles.sort();
+        imageList.clear (juce::dontSendNotification);
+        for (int i = 0; i < backgroundFiles.size(); ++i)
+        {
+            imageList.addItem (backgroundFiles[i].getFileName(), i + 1);
+            if (! spec.image.empty() && backgroundFiles[i] == imageFile (spec.image))
+                imageList.setSelectedId (i + 1, juce::dontSendNotification);
+        }
+        imageList.setTextWhenNothingSelected (backgroundFiles.isEmpty() ? tr ("(no images in the folder yet)") : tr ("Pick an image..."));
+        imageList.setEnabled (! backgroundFiles.isEmpty());
+        soundName.setText (spec.startupSound.empty() ? tr ("LYNX's own sound") : juce::File (juce::String::fromUTF8 (spec.startupSound.c_str())).getFileName(),
                            juce::dontSendNotification);
+        soundDefault.setEnabled (! spec.startupSound.empty());
         removeImage.setEnabled (! spec.image.empty());
         fitBox.setSelectedId ((int) spec.fit + 1, juce::dontSendNotification);
         opacitySlider.setValue (std::round (spec.imageOpacity * 100.0f), juce::dontSendNotification);
@@ -586,8 +688,7 @@ private:
 
     void chooseImage()
     {
-        chooser = std::make_unique<juce::FileChooser> (tr ("Workspace image"), juce::File::getSpecialLocation (juce::File::userPicturesDirectory),
-                                                       "*.png;*.jpg;*.jpeg;*.gif");
+        chooser = std::make_unique<juce::FileChooser> (tr ("Workspace image"), backgroundsFolder(), "*.png;*.jpg;*.jpeg;*.gif");
         juce::Component::SafePointer<ThemePage> safe (this);
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe] (const juce::FileChooser& fc) {
             if (safe == nullptr || ! fc.getResult().existsAsFile())
@@ -597,7 +698,48 @@ private:
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Workspace image"), tr ("LYNX can't read this image (PNG, JPEG or GIF)."));
                 return;
             }
-            safe->edit ([path = fc.getResult().getFullPathName().toStdString()] (themes::Spec& s) { s.image = path; });
+            // kept in the Backgrounds folder (issue #12): a copy, unless it is there already (the same file under that
+            // name is reused)
+            auto file = fc.getResult();
+            const auto folder = backgroundsFolder();
+            if (! file.isAChildOf (folder))
+            {
+                auto copy = folder.getChildFile (file.getFileName());
+                if (copy.existsAsFile() && ! copy.hasIdenticalContentTo (file))
+                    copy = folder.getNonexistentChildFile (file.getFileNameWithoutExtension(), file.getFileExtension(), true);
+                if (copy.existsAsFile() || file.copyFileTo (copy))
+                    file = copy;
+            }
+            safe->edit ([path = imagePathFor (file)] (themes::Spec& s) { s.image = path; });
+        });
+    }
+
+    void chooseSound()
+    {
+        chooser = std::make_unique<juce::FileChooser> (tr ("Startup sound"), juce::File::getSpecialLocation (juce::File::userMusicDirectory),
+                                                       "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+        juce::Component::SafePointer<ThemePage> safe (this);
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe] (const juce::FileChooser& fc) {
+            if (safe == nullptr || ! fc.getResult().existsAsFile())
+                return;
+            // a short sound: it plays in full at every start
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (fc.getResult()));
+            if (reader == nullptr || reader->sampleRate <= 0.0)
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Startup sound"), tr ("LYNX can't read this audio file."));
+                return;
+            }
+            if ((double) reader->lengthInSamples / reader->sampleRate > 30.0)
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Startup sound"),
+                                                        tr ("Choose a sound of 30 seconds or less: it plays in full every time LYNX starts."));
+                return;
+            }
+            safe->edit ([path = fc.getResult().getFullPathName().toStdString()] (themes::Spec& s) { s.startupSound = path; });
+            if (previewStartupSound)
+                previewStartupSound (fc.getResult().getFullPathName());
         });
     }
 
@@ -606,7 +748,12 @@ private:
     juce::ComboBox presetBox;
     juce::TextButton importButton { tr ("Import...") }, exportButton { tr ("Export...") }, savePreset { tr ("Save preset...") },
         resetButton { tr ("Default") }, imageButton { tr ("Choose image...") }, removeImage { tr ("Remove") };
-    juce::Label presetNote, contrastNote, imageName, fitLabel, opacityLabel, dimLabel;
+    juce::Label presetNote, contrastNote, imageName, fitLabel, opacityLabel, dimLabel, imageListLabel, imageNote, soundName, soundNote;
+    juce::ComboBox imageList;
+    juce::Array<juce::File> backgroundFiles;
+    juce::TextButton openBackgrounds { tr ("Open folder") }, soundButton { tr ("Choose sound...") }, soundPlay { tr ("Play") },
+        soundDefault { tr ("Default") };
+    SectionTitle soundTitle { tr ("Startup sound") };
     ColourWell accentWell { tr ("Accent color") }, backgroundWell { tr ("Background") }, workspaceWell { tr ("Workspace") };
     ColourWell* selected = nullptr;
     juce::ToggleButton autoWorkspace;
