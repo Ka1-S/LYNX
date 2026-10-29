@@ -1591,7 +1591,8 @@ private:
 class SettingsPanel final : public juce::Component,
                             public juce::DragAndDropTarget,
                             public juce::FileDragAndDropTarget,
-                            private juce::ChangeListener
+                            private juce::ChangeListener,
+                            private juce::Timer
 {
 public:
     SettingsPanel (AudioEngine& e, ChannelRef c)
@@ -1683,6 +1684,8 @@ public:
         refresh();
         engine.addChangeListener (this);
         setSize (420, 676);
+        if (ref.index >= 0)
+            startTimerHz (30); // the knobs follow their automation while the song plays (issue #12)
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -1813,7 +1816,7 @@ private:
         s.setRange (lo, hi, step);
         s.setTextValueSuffix (suffix);
         s.setDoubleClickReturnValue (true, 0.0);
-        s.onValueChange = [this] { apply(); };
+        s.onValueChange = [this, &s] { apply (&s); };
         label.setText (tr (name), juce::dontSendNotification);
         label.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (s);
@@ -1849,6 +1852,7 @@ private:
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
             porta.setToggleState (c->sampler.porta, juce::dontSendNotification);
             updating = false;
+            showAutomation (true);
 
             const auto path = juce::String::fromUTF8 ((c->samplePath.empty() && ! c->zones.empty() ? c->zones.front().path : c->samplePath).c_str());
             wave.setFile (path, [&e = engine, path] { return e.getSampleLibrary().load (path); });
@@ -1861,7 +1865,65 @@ private:
         }
     }
 
-    void apply()
+    // The knobs an automation drives show its value while the song plays, as in FL (issue #12); a knob held by the
+    // mouse shows the hand's value. `force`: after refresh() put the Song's values back.
+    void showAutomation (bool force)
+    {
+        const auto* c = current();
+        if (c == nullptr || ref.index < 0)
+            return;
+        const auto& shown = engine.getAutomationDisplay();
+        if (! force && shown.getGeneration() == shownGeneration)
+            return;
+        shownGeneration = shown.getGeneration();
+        if (! force && automatedShown.empty() && ! shown.any())
+            return;
+
+        std::vector<juce::Slider*> now;
+        updating = true;
+        for (const auto& [slider, param] : tweakTargets)
+        {
+            if (slider->isMouseButtonDown())
+                continue;
+            const auto v = shown.valueOf ({ AutomationTargetKind::channelParam, ref.index, 0, param });
+            const auto was = std::find (automatedShown.begin(), automatedShown.end(), slider) != automatedShown.end();
+            if (v)
+            {
+                slider->setValue (samplerparam::toNatural (param, *v), juce::dontSendNotification);
+                now.push_back (slider);
+            }
+            else if (was && ! force)
+                slider->setValue (samplerparam::toNatural (param, samplerparam::get (c->sampler, param)), juce::dontSendNotification);
+        }
+        updating = false;
+        automatedShown = std::move (now);
+        wave.setRegion ((float) regionStart.getValue(), (float) regionEnd.getValue());
+    }
+
+    void timerCallback() override
+    {
+        if (isShowing())
+            showAutomation (false);
+    }
+
+    // the Song's value of `param` (a knob that shows its automation must not write the automated value back)
+    static void keepSongValue (SamplerSettings& s, const SamplerSettings& song, int param) noexcept
+    {
+        switch (param)
+        {
+            case samplerparam::attack: s.attack = song.attack; break;
+            case samplerparam::decay: s.decay = song.decay; break;
+            case samplerparam::sustain: s.sustain = song.sustain; break;
+            case samplerparam::release: s.release = song.release; break;
+            case samplerparam::cutoff: s.cutoff = song.cutoff; break;
+            case samplerparam::resonance: s.resonance = song.resonance; break;
+            case samplerparam::start: s.regionStart = song.regionStart; break;
+            case samplerparam::end: s.regionEnd = song.regionEnd; break;
+            default: break;
+        }
+    }
+
+    void apply (juce::Slider* changed = nullptr)
     {
         if (updating || current() == nullptr)
             return;
@@ -1885,6 +1947,9 @@ private:
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
         s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
+        for (const auto& [slider, param] : tweakTargets)
+            if (slider != changed && std::find (automatedShown.begin(), automatedShown.end(), slider) != automatedShown.end())
+                keepSongValue (s, current()->sampler, param);
         {
             // an ADSR edited by hand replaces FL's imported volume envelope
             const auto& old = current()->sampler;
@@ -1927,6 +1992,8 @@ private:
     juce::Slider pitch, gain, stretch;
     MenuSlider attack, release, decay, sustain, regionStart, regionEnd, cutoff, resonance;
     std::vector<std::pair<MenuSlider*, int>> tweakTargets; // knob -> samplerparam
+    std::vector<juce::Slider*> automatedShown;             // knobs showing their automation's value now
+    std::uint32_t shownGeneration = 0;
     bool dropHighlight = false;
     juce::Label pitchLabel, gainLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
         cutoffLabel, resonanceLabel;
@@ -2344,7 +2411,8 @@ private:
 // A small rotary control with LYNX's control contract (drag, Ctrl = fine, wheel, Alt / middle-click / double-click
 // reset, right-click menu with automation items when the spec has a target); the hint bar shows its name and value.
 class FrameKnob final : public juce::Component,
-                        public ui::HintSource
+                        public ui::HintSource,
+                        private juce::Timer
 {
 public:
     FrameKnob (AudioEngine& e, std::function<ui::ValueSpec()> makeSpec, std::function<double()> get, std::function<void (double)> set,
@@ -2352,7 +2420,32 @@ public:
         : engine (e), specOf (std::move (makeSpec)), getter (std::move (get)), setter (std::move (set)), label (std::move (caption))
     {
         setRepaintsOnMouseActivity (true);
+        if (specOf().target)
+            startTimerHz (30); // follows its automation while the song plays (issue #12)
     }
+
+    // the value drawn: the automation's while the song plays (pan / volume: the targets these knobs have), else the Song's
+    double shownValue (const ui::ValueSpec& spec) const
+    {
+        if (spec.target && ! isMouseButtonDown())
+            if (const auto v = engine.getAutomationDisplay().valueOf (*spec.target))
+                return spec.target->kind == AutomationTargetKind::channelPan || spec.target->kind == AutomationTargetKind::mixerPan
+                           ? (double) *v * 2.0 - 1.0
+                           : (double) *v;
+        return getter();
+    }
+
+    void timerCallback() override
+    {
+        if (! isShowing())
+            return;
+        if (const auto generation = engine.getAutomationDisplay().getGeneration(); generation != shownGeneration)
+        {
+            shownGeneration = generation;
+            repaint();
+        }
+    }
+    std::uint32_t shownGeneration = 0;
 
     ui::Hint hintAt (juce::Point<int>) override { return ui::valueHint (specOf(), getter(), ui::valueGestures()); }
 
@@ -2363,13 +2456,14 @@ public:
         const auto caption = area.removeFromBottom (13.0f);
         const auto valueArea = area.removeFromBottom (13.0f);
         const auto size = juce::jmin (area.getWidth(), area.getHeight());
-        const auto v = (float) juce::jlimit (0.0, 1.0, (getter() - spec.minimum) / juce::jmax (1e-9, spec.maximum - spec.minimum));
+        const auto shown = shownValue (spec);
+        const auto v = (float) juce::jlimit (0.0, 1.0, (shown - spec.minimum) / juce::jmax (1e-9, spec.maximum - spec.minimum));
         theme::drawKnob (g, juce::Rectangle<float> (size, size).withCentre (area.getCentre()), v, spec.minimum < 0.0,
                          isMouseOverOrDragging() ? theme::colour::accent : theme::colour::knobArc, isMouseOver());
         g.setFont (theme::font (theme::type::caption));
         g.setColour (theme::colour::textPrimary);
         // squeezed (down to 65 %) before an ellipsis: translated captions are often longer (round 165o)
-        g.drawFittedText (spec.text (getter()), valueArea.toNearestInt(), juce::Justification::centred, 1, 0.65f);
+        g.drawFittedText (spec.text (shown), valueArea.toNearestInt(), juce::Justification::centred, 1, 0.65f);
         g.setColour (theme::colour::textSecondary);
         g.drawFittedText (theme::caps (label), caption.toNearestInt(), juce::Justification::centred, 1, 0.65f);
     }
