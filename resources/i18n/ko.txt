@@ -5897,3 +5897,7 @@ countries: kr
 "Set image wallpaper..." = "배경 이미지 설정..."
 "Remove image wallpaper" = "배경 이미지 제거"
 "Set background color..." = "배경 색상 설정..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "메트로놈 트랙"
+"Metronome target mixer track" = "메트로놈 대상 믹서 트랙"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "메트로놈이 재생되는 믹서 트랙 (---은 마스터). 클릭 소리는 내보내기에 포함되지 않습니다."

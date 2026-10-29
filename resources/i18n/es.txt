@@ -5897,3 +5897,7 @@ countries: es mx ar co cl pe ve
 "Set image wallpaper..." = "Establecer imagen de fondo..."
 "Remove image wallpaper" = "Quitar imagen de fondo"
 "Set background color..." = "Establecer color de fondo..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "Pista del metrónomo"
+"Metronome target mixer track" = "Pista del mezclador de destino del metrónomo"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "La pista del mezclador por la que suena el metrónomo (--- es el Master). El clic nunca entra en una exportación."

@@ -512,6 +512,9 @@ public:
         warmup::Settings warmUp;
         // false: samples above 0 dBFS are clamped to ±1 before the dither / the file (integer formats, Ogg)
         bool keepOvers = false;
+        // FL never puts the metronome in an export (round 165z-a2, measured): off, the click is left out even with
+        // the metronome on. (The selftest turns it on to measure the click.)
+        bool includeMetronome = false;
     };
 
     float renderOffline (const RenderOptions& options);

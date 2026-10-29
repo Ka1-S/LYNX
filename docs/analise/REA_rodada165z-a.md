@@ -13,6 +13,15 @@ verdict MATCH / DIFFERENT / MISSING / UNVERIFIED. DIFFERENT / MISSING items that
   running; next: Windows LYNX session (ly/*.png), then land.
 - 2026-10-29 17:57: Windows session done (§ Windows run below, all looked at; desktop clean, lock released). Small
   follow-up: the preview strip updates its button only on state changes. Next: tests, land.
+- 2026-10-29 19:12: DONE. lynx_tests 1887130 checks, 0 failures (with FL Data); landed as 6e67c278 (selftest OK).
+  The landed LYNX.exe re-checked by hand: preview strip Stop → Play, hides when the mouse leaves, shows on hover,
+  Play restarts (ly/m0–m4). Replies (#4/#9 follow-up, #2/#3/#5–#8 no reply needed) and release-note bullets added
+  to the coordinator's drafts. Left: §"Left for the next version".
+- 2026-10-29 19:55: part a2 (4.10 metronome FL-exact, coordinator's request): worktree ../lynx-wt-audit165z-a2
+  (feature/audit165z-a2 from origin/main 6e67c278). FL measured (me0–me20, fl_met*.wav, Audio logger fits; FL's
+  registry values restored afterwards), fix F done, Windows run mt0–mt12 + selftest OK (desktop clean, lock
+  released). lynx_tests: 1887165 checks; the two fader checks of the new test expected a linear fader (fixed to FL's
+  fader curve, `audit165za2_*` 36 checks, 0 failures). Next: land.
 
 ## Evidence
 
@@ -68,7 +77,7 @@ configured folders. The Plugin manager writes that file before it scans, so user
 | 4.7 | "Include 'Audio Editor' in the "View" menu" | [FL] s01: FL's View menu has **no** Audio editor (FL opens Edison from a mixer track: "Open audio editor Ctrl+E", m1) | View › Audio editor (by request) [W165q] a2 | DIFFERENT (extra, by request; kept) |
 | 4.8 | "Add a basic volume control in 'Browser' window for samples that are previewed" | [FL] s16/s17: the volume is an orange **slider on the preview strip** at the bottom of the Browser, beside a Play/Stop toggle, both shown on hover / while playing | before: a small knob at the end of the search row. **Fixed**: slider + Play/Stop toggle on the preview strip, shown on hover or while a sample plays; [W] ly/pv*.png | DIFFERENT → fixed |
 | 4.9 | "Channel Rack: Add a 'Piano Roll' button right next to "Graph editor" button and "Swing" knob" | [FL] s08/s09: overview button right of the graph-editor button; every row becomes a mini piano roll; click → Piano roll of that channel | same [T] `feat132_rack_piano_roll_view`; [W165q] f2 | MATCH |
-| 4.10 | "Add a metronome volume control - somewhere handy." | [FL] s05: metronome right-click = only *Metronome sound: Hi-hat / Tick / Beep / Cowbell / Pulse*; the level is the fader of the **metronome target mixer track** (Settings › MIDI, `MetronomeTrackSelect`) | right-click on the metronome = volume knob + presets + count-in; Options › Metronome volume | DIFFERENT → next version (needs metronome routing to a mixer track + FL's 5 sounds; LYNX's click is synthesised and not routed through the mixer) |
+| 4.10 | "Add a metronome volume control - somewhere handy." | [FL] s05, me0/me1: metronome right-click = only *Metronome sound*: Hi-hat / Tick / Beep / Cowbell / Pulse (radio), factory default **Tick** (registry `General\Metronome number` deleted → Tick ticked; 0-based, 1 = Tick). The sounds are FL's files `Data\System\Metronome.wav`, `Metronome2..5.wav` (44.1 kHz 16-bit; Hi-hat stereo 4612 frames, Tick stereo 657, Beep stereo 3000, Cowbell mono 9467, Pulse mono 67). me6–me12: Settings › **Audio › Mixer › "Metronome track"** (hint "Metronome target mixer track", registry `General\MIDIForm\MetronomeTrackSelect`), default "---" = the click on the **Master** meter only (me8); track 1 lights Insert 1 + Master (me12). Audio logger (post effects, pre master fader) fitted against the files: beat = sample × **0.6233** (−4.11 dB) at its pitch; downbeat = sample **+2 semitones** (linear interpolation) × **0.9404** (−0.53 dB); mono files to both sides; same with "---" and track 1 (insert at 0 dB); Tick and Cowbell checked. Export of a bar with the metronome on: **silent** with "---" (fl_met0.wav) and with track 1 (fl_met1.wav). No metronome volume knob in FL: the level is the fader of the track it plays through | before: right-click = volume knob + presets + count-in, six synthesised sounds (LYNX click default), the click mixed after the mixer. **Fixed (a2)**: right-click = FL's *Metronome sound* menu (same names, order, default Tick); FL's own files read from the user's FL install at run time (LYNX stand-ins of the same length and peak without FL); beat/downbeat gains and the +2 st downbeat as measured; the click goes into the mixer track chosen in Settings › Audio › Mixer › *Metronome track* (--- = Master, or an insert: its effects, fader and mute apply); never in an export (offline or real-time bounce). The LYNX volume trim stays in Options › Metronome volume (100 % = FL's level) so a volume set before keeps applying; old `metronomeSound` (0 click → Tick, 1–5 → FL's 0–4) migrated to `metronomeSoundFl` [T] `audit165za2_*`; selftest `metronome=OK (FL sounds 5/5)`; [W] ly/mt*.png | DIFFERENT → fixed (a2) |
 | 4.11 | "ADD Tap Tempo function." | [FL] s01: View › Tempo tapper Ctrl+F5; s06: tempo right-click › Tempo tapper | View › Tempo tapper Ctrl+F5, tempo right-click [T] `feat132_tap_tempo_states`, `feat132_tapper_sync_and_nudge`; [W165q] c3/c4, s5_40/41 | MATCH |
 | 4.12 | "'Channel settings' (for a loaded sample): Add gain knob" | [FLDOC 132] FL's Sampler has **no** gain knob (precomputed effects Normalize etc.; level = channel volume) | Gain −24…+24 dB in Channel settings [W165q] f16 | DIFFERENT (extra, by request; kept) |
 
@@ -142,6 +151,10 @@ configured folders. The Plugin manager writes that file before it scans, so user
 | Generator dropped on a channel (dr0–dr6) | LYNX SHARE › Synth onto "Clap" (channel 2): it becomes "Synth" on row 2, its steps and insert 2 stay, still 5 channels; Kick dropped below the channels: new channel 6 "Kick"; FL engines › 3x Osc onto channel 6: the row turns 3x Osc and its window "3x Osc (Insert 6)" opens — as FL's z3 |
 | Browser preview strip (pv2–pv7, fc1) | while a loop plays: Stop button (accent) + volume slider at the strip's bottom left, the search row has neither any more; clicking Stop stops it and the button turns into Play (hover hint "Stop the sample preview"); with the mouse away and nothing playing both hide. 5 of 6 clicks stopped at once; the first click of session 1 replayed the sample instead (not reproduced in 5 later tries nor on a fresh start); the button's state is now only touched when it changes |
 | Stop / double Stop (st3–st10) | see 9.10 |
+| a2: metronome menu + migration (mt0–mt3) | profile seeded with the old `metronomeSound=4` (cowbell) and `metronomeVolume=0.71`: right-click on the metronome shows "METRONOME SOUND" + Hi-hat / Tick / Beep / Cowbell / Pulse with **Cowbell** ticked (mt1); picking Tick ticks Tick (mt2); Options › Metronome volume (71 % (−5.9 dB)) kept (mt3) |
+| a2: Metronome track (mt4–mt11) | Settings › Audio › MIXER › Metronome track "---" by default with FL's note (mt5); the list "---", "1  Insert 1" … (mt6); set to 10, metronome on, Play: **Insert 10's meter** moves with the clicks besides the Master (the pattern's inserts 1–3 play their drums) (mt10) |
+| a2: saved options (after closing) | ui-options.txt: `metronomeVolume=0.71`, `metronomeSoundFl=1`, `metronomeTrack=10`; the old `metronomeSound` key is gone |
+| a2: selftest | `metronome=OK (FL sounds 5/5, downbeat peak 0.9391)`: the five FL files read from the install; Tick downbeat ≤ 0.9404; insert 2 as the track = the same level; insert 2 muted = silent; an export render with the metronome on = silent; `result=OK`, `connections=4` (the metronome node is gone from the graph) |
 
 ## Fixes in this round
 
@@ -161,14 +174,22 @@ D. **Browser preview controls on the preview strip** (4.8 / 9.2, FL s16/s17): Pl
 E. **View › Background ›** Set image wallpaper… / Remove image wallpaper / Set background color… (9.16, FL th1) —
    the image goes through the same copy-into-Backgrounds path as Options › Theme (`themeui::chooseWorkspaceImage`).
 
+F. **The metronome as FL plays it** (4.10, part a2; FL me0–me20, fl_met*.wav, fl_metlog*.wav) —
+   `core/MetronomeVoice.h` (sounds, order, default, legacy migration, target track, the measured beat/downbeat
+   rule, LYNX stand-ins); `engine/Metronome` is no longer a graph node wired to the output: the Channel Rack node
+   renders it per block and `RackRenderer::setMetronomeInput` adds it to the input of the "Metronome track" (both
+   the layer pass and the task graph), so it is metered and processed like FL's. `RenderOptions::includeMetronome`
+   (off) keeps it out of every offline render, and the real-time bounce skips it. Settings › Audio › Mixer ›
+   Metronome track (--- / 1…127, global like FL's, kept in ui-options.txt `metronomeTrack`). Right-click on the
+   metronome button = FL's menu exactly (header "Metronome sound" + 5 radio items). The FL files are read from the
+   user's FL install (`Data\System`), never copied into LYNX.
+
 New strings ("Auto scrolling", "Play the sample preview", "Set image wallpaper...", "Remove image wallpaper",
-"Set background color...") in all 15 languages.
+"Set background color..."; a2: "Metronome track", "Metronome target mixer track" and the Settings note) in all 15
+languages.
 
 ## Left for the next version
 
-- 4.10 metronome: route the click to a selectable mixer track (FL's "Metronome target mixer track") and offer FL's
-  five sounds (Hi-hat, Tick, Beep, Cowbell, Pulse) in the right-click menu. LYNX's synthesised click is mixed after
-  the mixer today, so this is an engine change, not a menu.
 - 8.1 FL-style theme knobs (Hue/Saturation/Brightness/Contrast/Text + role colours, light mode) on top of LYNX's
   accent/background themes.
 - 9.13 an FL-like unsigned 3-dB ladder, if users prefer it to the signed labels.

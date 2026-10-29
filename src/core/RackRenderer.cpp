@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/MetronomeVoice.h"
 
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
@@ -2869,6 +2870,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
         if (liveInput != nullptr && liveInput->numChannels > 0)
             mixLiveInput (state, playing, numSamples);
+        mixMetronome (state, metronomeTarget (state), numSamples);
 
         // 2) inserts by layers: within a layer nothing depends on anything else; each track pulls the
         //    outputs of the tracks that send to it (without writing into others' buffers)
@@ -3153,6 +3155,7 @@ bool RackRenderer::runTaskGraph (const RackState& state, bool playing, int chann
             sumChannelsInto (state, t, channels, n);
             if (live)
                 mixLiveInputTrack (state, t, recording, playing, n);
+            mixMetronome (state, t, n);
             processTrack (state, t, n, meters);
         }
         for (auto k = state.graphNextStart[(std::size_t) id]; k < state.graphNextStart[(std::size_t) id + 1]; ++k)
@@ -3168,7 +3171,30 @@ bool RackRenderer::runTaskGraph (const RackState& state, bool playing, int chann
     sumChannelsInto (state, 0, channels, n);
     if (live)
         mixLiveInputTrack (state, 0, recording, playing, n);
+    mixMetronome (state, 0, n);
     return true;
+}
+
+int RackRenderer::metronomeTarget (const RackState& state) const noexcept
+{
+    return metronome::targetTrack (clickTrack, std::min ((int) state.song.mixer.size(), maxMixerTracks));
+}
+
+// the metronome's click into its track's input (round 165z-a2); `track` is the one being filled, the click goes in
+// only when it is the metronome's
+void RackRenderer::mixMetronome (const RackState& state, int track, int n) noexcept
+{
+    if (clickLeft == nullptr || state.song.mixer.empty() || track != metronomeTarget (state))
+        return;
+    auto* dl = trackBuffer (track, 0);
+    auto* dr = trackBuffer (track, 1);
+    const auto* a = clickLeft + liveInputOffset;
+    const auto* b = clickRight + liveInputOffset;
+    for (int i = 0; i < n; ++i)
+    {
+        dl[i] += a[i];
+        dr[i] += b[i];
+    }
 }
 
 void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept

@@ -5897,3 +5897,7 @@ countries: de at ch li lu
 "Set image wallpaper..." = "Hintergrundbild festlegen..."
 "Remove image wallpaper" = "Hintergrundbild entfernen"
 "Set background color..." = "Hintergrundfarbe festlegen..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "Metronom-Spur"
+"Metronome target mixer track" = "Ziel-Mixerspur des Metronoms"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Die Mixerspur, über die das Metronom spielt (--- ist der Master). Der Klick ist nie in einem Export."

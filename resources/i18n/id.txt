@@ -5897,3 +5897,7 @@ countries: id
 "Set image wallpaper..." = "Atur gambar latar..."
 "Remove image wallpaper" = "Hapus gambar latar"
 "Set background color..." = "Atur warna latar..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "Trek metronom"
+"Metronome target mixer track" = "Trek mixer tujuan metronom"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Trek mixer tempat metronom berbunyi (--- adalah Master). Klik tidak pernah masuk ke ekspor."

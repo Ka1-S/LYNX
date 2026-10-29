@@ -38,6 +38,7 @@
 
 #include "engine/Text.h"
 
+#include "core/MetronomeVoice.h"
 #include "core/RackOps.h"
 #include "core/Templates.h"
 #include "ui/NewProjectDialog.h"
@@ -1450,6 +1451,8 @@ void MainComponent::loadUiSettings()
 {
     juce::StringArray lines;
     lines.addLines (uiSettingsFile().loadFileAsString());
+    // the sound in FL's order (0.1.20) wins over the old key, wherever each line is
+    const auto flMetronomeSound = std::any_of (lines.begin(), lines.end(), [] (const juce::String& l) { return l.trim().startsWith ("metronomeSoundFl"); });
 
     for (const auto& line : lines)
     {
@@ -1507,8 +1510,12 @@ void MainComponent::loadUiSettings()
             askUnusedRecordings = on;
         else if (key == "autosaveKeep")
             autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
-        else if (key == "metronomeSound")
-            engine.getTransport().metronomeSound.store (juce::jlimit (0, 5, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "metronomeSound" && ! flMetronomeSound) // (before 0.1.20: 0 LYNX click, 1..5 hi-hat..pulse)
+            engine.getTransport().metronomeSound.store (metronome::soundFromLegacy (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "metronomeSoundFl") // FL's order: 0 Hi-hat, 1 Tick, 2 Beep, 3 Cowbell, 4 Pulse
+            engine.getTransport().metronomeSound.store (metronome::clampSound (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "metronomeTrack")
+            engine.getTransport().metronomeTrack.store (juce::jlimit (0, maxMixerTracks - 1, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
         else if (key == "metronomeVolume")
             engine.getTransport().metronomeVolume.store ((float) controls::clampUtilityVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue()));
         else if (key == "previewVolume")
@@ -1598,7 +1605,8 @@ void MainComponent::saveUiSettings()
                                       + "\naskUnusedRecordings=" + juce::String (askUnusedRecordings ? 1 : 0)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\nmetronomeVolume=" + juce::String (engine.getTransport().metronomeVolume.load(), 2)
-                                      + "\nmetronomeSound=" + juce::String (engine.getTransport().metronomeSound.load())
+                                      + "\nmetronomeSoundFl=" + juce::String (metronome::clampSound (engine.getTransport().metronomeSound.load()))
+                                      + "\nmetronomeTrack=" + juce::String (engine.getTransport().metronomeTrack.load())
                                       + "\npreviewVolume=" + juce::String (engine.getPreviewVolume(), 2)
                                       + "\neditorVolume=" + juce::String (engine.getEditorVolume(), 2)
                                       + "\nrackPianoRollView=" + juce::String (rack.isPianoRollView() ? 1 : 0)
@@ -2207,35 +2215,17 @@ void MainComponent::armSelectedInsertForAudio()
 
 void MainComponent::showMetronomeMenu()
 {
+    // FL 2026's right-click on the metronome button, as it is (REA round 165z-a2): the "Metronome sound" choice only,
+    // in FL's order. The volume trim is in Options, the count-in has its own button and the track the click plays
+    // through is in Settings › Audio › Mixer.
     auto& transport = engine.getTransport();
     juce::PopupMenu menu;
-    menu.addSectionHeader (tr ("Metronome"));
-    menu.addItem (tr ("Metronome") + shortcutText ("transport.metronome"), true, transport.metronome.load(), [this] {
-        metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
-    });
-    menu.addItem (tr ("Volume: {0}...", { ui::utilityVolumeText (transport.metronomeVolume.load()) }), [this] { showMetronomeVolume(); });
-    {
-        juce::PopupMenu levels;
-        for (const auto v : { 0.25, 0.5, 0.71, 1.0, 1.25 })
-            levels.addItem (ui::utilityVolumeText (v), true, std::abs (transport.metronomeVolume.load() - v) < 0.005, [this, v] {
-                engine.getTransport().metronomeVolume.store ((float) v);
-                saveUiSettings();
-            });
-        menu.addSubMenu (tr ("Volume"), levels);
-    }
-    // FL's Metronome sound section (REA round 165f), LYNX's own synthesized sounds
     menu.addSectionHeader (tr ("Metronome sound"));
-    {
-        const char* names[] = { TR_NOOP ("Click"), TR_NOOP ("Hi-hat"), TR_NOOP ("Tick"), TR_NOOP ("Beep"), TR_NOOP ("Cowbell"), TR_NOOP ("Pulse") };
-        for (int i = 0; i < 6; ++i)
-            menu.addItem (tr (names[i]), true, transport.metronomeSound.load() == i, [this, i] {
-                engine.getTransport().metronomeSound.store (i);
-                saveUiSettings();
-            });
-    }
-    menu.addSeparator();
-    menu.addItem (tr ("Count-in before recording") + shortcutText ("record.countIn"), true, engine.getRecordOptions().countInBars > 0,
-                  [this] { runAction ("record.countIn"); });
+    for (int i = 0; i < metronome::soundCount; ++i)
+        menu.addItem (tr (metronome::soundName (i)), true, metronome::clampSound (transport.metronomeSound.load()) == i, [this, i] {
+            engine.getTransport().metronomeSound.store (i);
+            saveUiSettings();
+        });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&metronomeButton));
 }
 

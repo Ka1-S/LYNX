@@ -5897,3 +5897,7 @@ countries: nl be
 "Set image wallpaper..." = "Achtergrondafbeelding instellen..."
 "Remove image wallpaper" = "Achtergrondafbeelding verwijderen"
 "Set background color..." = "Achtergrondkleur instellen..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "Metronoomspoor"
+"Metronome target mixer track" = "Doel-mixerspoor van de metronoom"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Het mixerspoor waardoor de metronoom speelt (--- is de Master). De klik zit nooit in een export."

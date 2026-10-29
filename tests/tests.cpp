@@ -122,6 +122,8 @@
 #include "core/DelphiMath.h"
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
+#include "core/MetronomeVoice.h"
+#include "engine/Transport.h"
 #include "core/Patcherize.h"
 #include "core/Performance.h"
 #include "core/Scheduler.h"
@@ -16523,3 +16525,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Issue11cTests.inc"
 #include "FlNewt165Tests.inc"
 #include "Audit165zATests.inc"
+#include "Audit165zA2Tests.inc"
