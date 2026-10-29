@@ -33,6 +33,19 @@ struct Item
     bool title = false; // the hint's subject ("Volume" in "Volume: drag...")
 };
 
+bool isCjk (juce::juce_wchar c)
+{
+    return (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xff00 && c <= 0xffef);
+}
+
+// closing punctuation (、。，．：；！？）」』】〉》, the long-vowel mark ー, ASCII ),.:;!?) stays on the previous line
+bool noLineStart (juce::juce_wchar c)
+{
+    static const auto marks = juce::String::fromUTF8 ("\xe3\x80\x81\xe3\x80\x82\xef\xbc\x8c\xef\xbc\x8e\xef\xbc\x9a\xef\xbc\x9b\xef\xbc\x81\xef\xbc\x9f"
+                                   "\xef\xbc\x89\xe3\x80\x8d\xe3\x80\x8f\xe3\x80\x91\xe3\x80\x89\xe3\x80\x8b\xe3\x83\xbc");
+    return marks.containsChar (c) || c == ')' || c == ',' || c == '.' || c == ':' || c == ';' || c == '!' || c == '?';
+}
+
 std::vector<Item> makeItems (const juce::String& text, const juce::Font& font, const juce::Font& keyFont, float glyph)
 {
     std::vector<Item> items;
@@ -41,7 +54,10 @@ std::vector<Item> makeItems (const juce::String& text, const juce::Font& font, c
     // the subject: the words before the first ": " or " - " (when it comes early, before any glyph)
     auto titleEnd = -1;
     {
-        const auto colon = text.indexOf (": "), dash = text.indexOf (" - "), bracket = text.indexOf ("[");
+        auto colon = text.indexOf (": ");
+        if (const auto wide = text.indexOf (juce::String::fromUTF8 ("\xef\xbc\x9a")); wide > 0 && (colon < 0 || wide < colon))
+            colon = wide; // CJK full-width colon
+        const auto dash = text.indexOf (" - "), bracket = text.indexOf ("[");
         const auto first = colon < 0 ? dash : dash < 0 ? colon : juce::jmin (colon, dash);
         if (first > 0 && first < 48 && (bracket < 0 || first < bracket))
             titleEnd = first + (first == colon ? 1 : 0);
@@ -85,15 +101,25 @@ std::vector<Item> makeItems (const juce::String& text, const juce::Font& font, c
             while (i < value.length() && value[i] != ' ')
                 ++i;
 
-            if (i > start)
+            // Chinese/Japanese text has no spaces: a line may break before any of its characters (so each is its own item,
+            // with the punctuation that must not start a line kept on the previous one)
+            for (auto from = start; from < i;)
             {
+                auto to = from + 1;
+                if (! isCjk (value[from]))
+                    while (to < i && ! isCjk (value[to]))
+                        ++to;
+                while (to < i && noLineStart (value[to]))
+                    ++to;
+
                 Item item;
-                item.text = value.substring (start, i);
+                item.text = value.substring (from, to);
                 item.gap = pendingGap;
                 item.width = juce::GlyphArrangement::getStringWidth (font, item.text);
-                item.title = titleEnd > 0 && consumed + start < titleEnd;
+                item.title = titleEnd > 0 && consumed + from < titleEnd;
                 items.push_back (item);
                 pendingGap = 0.0f;
+                from = to;
             }
         }
 

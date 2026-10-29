@@ -14,15 +14,13 @@ DAW gratuita e open source con workflow basato sui pattern: Channel Rack, Piano 
 
 LYNX (pubblicato qui come LYNX SHARE) è una workstation audio digitale (DAW) gratuita e open source per creare beat e brani. Segue il workflow basato sui pattern tanto amato dai beatmaker — un Channel Rack con step sequencer, pattern, un Piano Roll, una Playlist con arrangiamenti e un Mixer con insert, send e sidechain — ed è progettata per restare leggera e veloce su qualsiasi PC.
 
-Al momento l'interfaccia di LYNX è disponibile solo in inglese e in portoghese (Brasile).
-
 • Leggera: un motore audio lock-free che distribuisce canali e tracce del mixer sui core della CPU, salta i canali inattivi e legge l'audio lungo direttamente dal disco.
 • Completa: oltre 100 strumenti ed effetti integrati — sintetizzatori, drum machine, sampler, EQ, compressori, limiter, riverberi, delay, correzione dell'intonazione, visualizzatori e molto altro.
 • I tuoi plugin: carica strumenti ed effetti VST3, CLAP e VST2, ognuno opzionalmente in un proprio processo isolato (sandbox), così un plugin che va in crash non fa cadere la tua sessione.
 • Apre i progetti FL Studio (.flp) con pattern, note, mixer, automazioni e sample, e importa file MIDI.
 • Bassa latenza: ASIO (compreso il driver ASIO di LYNX, per qualsiasi dispositivo), WASAPI in modalità condivisa ed esclusiva.
 • Registra audio e MIDI, modifica l'audio, automatizza qualsiasi parametro ed esporta in WAV, FLAC, MP3, OGG o stem.
-• Interfaccia in inglese e portoghese brasiliano (altre lingue in programma).
+• Interfaccia in 15 lingue, tra cui italiano, inglese, portoghese, spagnolo, francese, tedesco, olandese, polacco, russo, turco, giapponese, coreano e cinese.
 
 Nessun account, nessun abbonamento, nessuna pubblicità e nessuna telemetria. LYNX è software libero (GNU AGPL-3.0); il codice sorgente è su GitHub.
 
@@ -44,7 +42,7 @@ LYNX 0.1.20: prima versione sul Microsoft Store. Modifica dei punti in stile FL 
 6. Motore multi-core che resta leggero anche sui PC meno recenti
 7. Registrazione audio e MIDI, editor audio, clip di automazione
 8. Esportazione in WAV, FLAC, MP3, OGG e stem
-9. Interfaccia in inglese e portoghese brasiliano (altre lingue in programma)
+9. Interfaccia in 15 lingue, incluso l'italiano
 10. Gratuito e open source (AGPL-3.0): nessun account, nessuna pubblicità, nessuna telemetria
 
 ## Search terms

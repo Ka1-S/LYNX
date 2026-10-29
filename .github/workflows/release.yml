@@ -252,7 +252,7 @@ jobs:
             $a = @('scripts\make-msix-layout.py', '--version', $env:VERSION, '--bin', 'bin', '--out', $layout, '--extra', $demo, 'LICENSE', 'THIRD_PARTY.md', 'PRIVACY.md')
             if ($test) { $a += '--test-identity' }
             python @a; if ($LASTEXITCODE -ne 0) { throw "make-msix-layout failed" }
-            & "$tools\makepri.exe" createconfig /cf "$layout.priconfig.xml" /dq en-US_pt-BR /pv 10.0.0 /o | Out-Null
+            & "$tools\makepri.exe" createconfig /cf "$layout.priconfig.xml" /dq en-US_pt-BR_es-ES_fr-FR_de-DE_it-IT_nl-NL_pl-PL_ru-RU_tr-TR_id-ID_ja-JP_ko-KR_zh-CN_zh-TW /pv 10.0.0 /o | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
             & "$tools\makepri.exe" new /pr $layout /cf "$layout.priconfig.xml" /of "$layout\resources.pri" /o
             if ($LASTEXITCODE -ne 0) { throw "makepri new failed" }

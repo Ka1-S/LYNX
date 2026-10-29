@@ -77,7 +77,7 @@ public:
         for (const auto& l : i18n::languages())
         {
             languageBox.addItem (juce::String::fromUTF8 (l.nativeName), id);
-            if (i18n::saved() == l.id)
+            if (i18n::current() == l.id)
                 languageBox.setSelectedId (id, juce::dontSendNotification);
             ++id;
         }
