@@ -5655,6 +5655,9 @@ countries: tr
 "Smooth 3" = "Yumuşatma 3"
 "Smooth 4" = "Yumuşatma 4"
 
+"Play / stop from the start of the song or pattern" = "Şarkının veya pattern'in başından çal / durdur"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Ters stereo"
 "Ping-pong" = "Ping-pong"

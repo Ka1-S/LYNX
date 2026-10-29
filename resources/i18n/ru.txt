@@ -5655,6 +5655,9 @@ countries: ru by kz
 "Smooth 3" = "Сглаживание 3"
 "Smooth 4" = "Сглаживание 4"
 
+"Play / stop from the start of the song or pattern" = "Старт / стоп с начала песни или паттерна"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Инвертированное стерео"
 "Ping-pong" = "Пинг-понг"

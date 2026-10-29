@@ -5655,6 +5655,9 @@ countries: it ch sm
 "Smooth 3" = "Smussatura 3"
 "Smooth 4" = "Smussatura 4"
 
+"Play / stop from the start of the song or pattern" = "Riproduci / ferma dall'inizio del brano o del pattern"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Stereo invertito"
 "Ping-pong" = "Ping-pong"

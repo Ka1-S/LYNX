@@ -5655,6 +5655,9 @@ countries: kr
 "Smooth 3" = "스무딩 3"
 "Smooth 4" = "스무딩 4"
 
+"Play / stop from the start of the song or pattern" = "곡 또는 패턴의 처음부터 재생 / 정지"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "반전 스테레오"
 "Ping-pong" = "핑퐁"

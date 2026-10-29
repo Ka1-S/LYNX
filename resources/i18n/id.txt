@@ -5655,6 +5655,9 @@ countries: id
 "Smooth 3" = "Penghalusan 3"
 "Smooth 4" = "Penghalusan 4"
 
+"Play / stop from the start of the song or pattern" = "Putar / hentikan dari awal lagu atau pattern"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Stereo terbalik"
 "Ping-pong" = "Ping-pong"

@@ -5655,6 +5655,9 @@ countries: nl be
 "Smooth 3" = "Afvlakking 3"
 "Smooth 4" = "Afvlakking 4"
 
+"Play / stop from the start of the song or pattern" = "Afspelen / stoppen vanaf het begin van de song of het pattern"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Omgekeerde stereo"
 "Ping-pong" = "Pingpong"

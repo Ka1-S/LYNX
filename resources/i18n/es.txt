@@ -5655,6 +5655,9 @@ countries: es mx ar co cl pe ve
 "Smooth 3" = "Suavizado 3"
 "Smooth 4" = "Suavizado 4"
 
+"Play / stop from the start of the song or pattern" = "Reproducir / detener desde el inicio de la canción o del patrón"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Estéreo invertido"
 "Ping-pong" = "Ping-pong"

@@ -5655,6 +5655,9 @@ countries: pl
 "Smooth 3" = "Wygładzanie 3"
 "Smooth 4" = "Wygładzanie 4"
 
+"Play / stop from the start of the song or pattern" = "Odtwórz / zatrzymaj od początku utworu lub patternu"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Odwrócone stereo"
 "Ping-pong" = "Ping-pong"

@@ -5655,6 +5655,9 @@ countries: de at ch li lu
 "Smooth 3" = "Glättung 3"
 "Smooth 4" = "Glättung 4"
 
+"Play / stop from the start of the song or pattern" = "Wiedergabe / Stopp ab dem Anfang des Songs oder Patterns"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Stereo invertiert"
 "Ping-pong" = "Ping-Pong"

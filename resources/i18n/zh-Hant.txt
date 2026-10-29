@@ -5655,6 +5655,9 @@ countries: tw hk mo
 "Smooth 3" = "平滑 3"
 "Smooth 4" = "平滑 4"
 
+"Play / stop from the start of the song or pattern" = "從歌曲或樣式的開頭播放/停止"
+
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "反相立體聲"
 "Ping-pong" = "乒乓"

@@ -276,6 +276,13 @@ if(LYNX_BUILD_APP)
         GIT_SHALLOW ON)
     FetchContent_MakeAvailable(JUCE)
 
+    # JUCE fixes LYNX needs (Linux drag & drop from Wayland file managers, issue #11); see the file for details
+    option(LYNX_PATCH_JUCE "Apply cmake/LynxPatchJuce.cmake to the JUCE sources" ON)
+    if(LYNX_PATCH_JUCE)
+        include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/LynxPatchJuce.cmake)
+        lynx_patch_juce("${juce_SOURCE_DIR}")
+    endif()
+
     juce_add_gui_app(LYNX
         PRODUCT_NAME "LYNX"
         COMPANY_NAME "Ka1-S"

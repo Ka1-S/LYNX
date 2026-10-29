@@ -26,6 +26,7 @@
 #endif
 
 #include "core/AutomationDisplay.h"
+#include "core/ShownEffectSlot.h"
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
@@ -16481,3 +16482,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Vfx165cTests.inc"
 #include "HarmorBeta165hTests.inc"
 #include "Crash13Tests.inc"
+#include "Issue11bTests.inc"
