@@ -5729,7 +5729,6 @@ countries: br
 "Flats (b)" = "Bemóis (b)"
 "Key to" = "Tecla para"
 "Percent" = "Porcentagem"
-"Transient" = "Transiente"
 "Use regions" = "Usar regiões"
 "Tempo locked" = "Travado no andamento"
 "What the keys do: Pitch = transpose; Percent = start point (sample time, C5 to C7); Step = start point in 16th notes (song time); Transient = start at the slice of the key" = "O que as teclas fazem: Pitch = transpõe; Porcentagem = ponto de início (tempo do sample, C5 a C7); Step = ponto de início em semicolcheias (tempo da música); Transiente = começa na fatia da tecla"
