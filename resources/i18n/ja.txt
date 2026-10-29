@@ -5642,6 +5642,9 @@ countries: jp
 "Passed on" = "そのまま渡す"
 "An incoming MIDI program change: ignored, selects the sequence (0 = the first), or goes on to the instruments after it" = "受信したMIDIプログラムチェンジ: 無視、シーケンスを選択 (0 = 最初)、または後段のインストゥルメントに渡す"
 
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
+"Inverted stereo" = "反転ステレオ"
+"Ping-pong" = "ピンポン"
 # --- Not in pt-BR.txt (yet)
 "[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu" = "[LMB] エディターを開く/閉じる  [Alt]+[LMB] 他を開いたまま  [Ctrl]+[LMB] 試聴  [2xLMB] ピアノロール  [LMB] 上下ドラッグで並べ替え  [RMB] チャンネルメニュー"
 "Peak meter (left/right) with peak hold  [LMB] clears the clip light" = "ピークメーター (左/右) とピークホールド  [LMB] クリップランプをクリア"
