@@ -182,8 +182,16 @@ namespace glow
 // project saved before keeps the round-123 law) and ANALOG (Off / 50 Hz / 60 Hz: the reference's measured hum and noise)
 // round 165w (REA_rodada165w §2): appended — the opto release (the Opto classic voicing's measured gain recovery; a
 // project saved before keeps round 123's slower tail)
-enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, releaseLaw, count };
+// round 165x (REA_rodada165x §1): appended — the make-up reference (the peak reduction dial where AUTO MAKEUP was
+// switched on: the trial's make-up follows the dial from there; 0.46 = round 152's fixed reference, so older projects
+// are unchanged); the opto release now also selects the measured attack; and the VU display (gain reduction / input /
+// output: the reference saves its VU DISPLAY knob with the state, so LYNX keeps the editor's selector with the project)
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, releaseLaw, makeupRef, vuDisplay, count };
+// round 165x: an editor edit with the reference's AUTO MAKEUP behaviour (switching it on takes the dial as the
+// reference; switching it off leaves the make-up in the Gain dial, as the trial turns its own Gain knob)
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value);
 int analogHz (float v) noexcept; // 0 (off), 50 or 60
+int vuModeOf (float v) noexcept;  // round 165x: the VU display: 0 gain reduction (0), 1 input (0.5), 2 output (1)
 bool classic (const EffectParams& p) noexcept;
 std::string classicParamText (int param, float v);
 double trimDb (float v) noexcept;   // −18 .. +18 dB
@@ -209,7 +217,18 @@ namespace hush
 enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
              allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing,
              // round 165w (appended): the reference's input / output pan (a balance: the far side × (1 − |pan|), measured)
-             inputPan, outputPan, count };
+             inputPan, outputPan,
+             // round 165x (appended, REA_rodada165x §2): the reference's ranges and stereo link — Input / Output −∞ … +36 dB
+             // on the reference's own curve, the high-pass 2 … 20 kHz, Stereo link as the reference links (a blend of the
+             // two channels' signals, 100 % = the mid signal) and its 100 … 200 % half: `linkOnly` (0 … 100 % of the
+             // processing on the mid — or with `linkSide`, the side — signal only). A project saved before keeps the old
+             // law (±12 dB, 2 … 16 kHz, Hush's own link) through upgradeLoadedEffectParams; the classic voicing ignores it.
+             rangeLaw, linkOnly, linkSide, count };
+bool extended (const EffectParams& p) noexcept;         // round 165x: the extended law (and not the classic voicing)
+double levelDb (float v, bool extended) noexcept;       // input / output: ±12 dB, or −∞ (−200) … +36 dB
+float levelValue (double db, bool extended) noexcept;
+double hpHz (float v, bool extended) noexcept;          // the high-pass (the Frequency): 2 … 16 kHz, or 2 … 20 kHz
+float hpValue (double hz, bool extended) noexcept;
 double panValue (float v) noexcept; // −1 … +1
 bool vocal (const EffectParams& p) noexcept; // round 148
 int oversamplingOf (float v) noexcept; // 1 (off), 2, 4, 8
@@ -220,6 +239,7 @@ float lookaheadTimeValue (double ms) noexcept;
 double classicThresholdDb (float v) noexcept; // voicing 1: -80 .. 0 dB (the original's dial)
 bool classic (const EffectParams& p) noexcept;
 std::string classicParamText (int param, float v);
+std::string oldLawText (int param, float v); // round 165x: the texts with the old ranges (±12 dB, 2 … 16 kHz)
 double thresholdDb (float v) noexcept; // −60 .. 0 dBFS
 double rangeDb (float v) noexcept;     // 0 .. 24 dB
 double releaseMs (float v) noexcept;   // 10 .. 250 ms

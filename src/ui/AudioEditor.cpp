@@ -9,6 +9,7 @@
 #include "core/AudioCapture.h"
 #include "core/WaveAnalysis.h"
 #include "core/ValueMath.h"
+#include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "ui/HintBar.h"
 #include "ui/ValueControl.h"
@@ -430,15 +431,65 @@ public:
         bar.removeFromRight (6);
         saveButton.setBounds (bar.removeFromRight (28));
 
-        auto tools = area.removeFromTop (30).reduced (6, 2);
+        // each button gets the width its text needs, plus an equal share of what is left (round 165o: translated
+        // labels such as "Normalisieren" or "Ausschneiden" are never cut). When one row cannot hold them all (German,
+        // Russian, Polish… at the default width) the buttons go on two rows instead; English keeps its single row.
         const auto n = quickButtons.size();
         const auto curveWidth = 18;
-        const auto each = (tools.getWidth() - curveWidth - (n - 2) * 2) / juce::jmax (1, n - 1);
+        const juce::Font font (theme::font (theme::type::body));
+        std::vector<float> natural;
+        float total = 0.0f;
         for (int i = 0; i < n; ++i)
         {
-            const auto w = i == 8 ? curveWidth : each;
-            quickButtons[i]->setBounds (tools.removeFromLeft (w));
-            tools.removeFromLeft (i == 7 ? 0 : 2);
+            natural.push_back (i == 8 ? (float) curveWidth : juce::GlyphArrangement::getStringWidth (font, quickButtons[i]->getButtonText()) + 18.0f);
+            total += natural.back() + (i == 7 ? 0.0f : 2.0f);
+        }
+        const auto rowWidth = (float) (area.getWidth() - 12);
+        const auto twoRows = total - 14.0f * (float) (n - 1) > rowWidth && n > 9; // not even with 4 px padding
+        auto tools = area.removeFromTop (twoRows ? 56 : 30).reduced (6, 2);
+        // lays out buttons [first, last) in one row: natural widths plus an equal share of the free space; still too
+        // narrow -> the padding goes first (down to 4 px a side), then the text squeezes (drawFittedText)
+        auto layoutRow = [&] (juce::Rectangle<int> row, int first, int last)
+        {
+            float need = 0.0f;
+            int stretchable = 0;
+            for (int i = first; i < last; ++i)
+            {
+                need += natural[(std::size_t) i] + (i == 7 || i == last - 1 ? 0.0f : 2.0f);
+                stretchable += i == 8 ? 0 : 1;
+            }
+            const auto avail = (float) row.getWidth();
+            const auto extra = juce::jmax (0.0f, avail - need) / (float) juce::jmax (1, stretchable);
+            auto shrink = 0.0f, scale = 1.0f;
+            if (need > avail)
+            {
+                const auto padding = 14.0f * (float) stretchable;
+                shrink = 14.0f * juce::jlimit (0.0f, 1.0f, (need - avail) / padding);
+                const auto after = need - shrink * (float) stretchable;
+                scale = after > avail ? avail / after : 1.0f;
+            }
+            float x = (float) row.getX();
+            for (int i = first; i < last; ++i)
+            {
+                const auto w = i == 8 ? (float) curveWidth : (natural[(std::size_t) i] - shrink) * scale + extra;
+                quickButtons[i]->setBounds (juce::roundToInt (x), row.getY(), juce::roundToInt (x + w) - juce::roundToInt (x), row.getHeight());
+                x += w + (i == 7 ? 0.0f : 2.0f);
+            }
+        };
+        if (! twoRows)
+            layoutRow (tools, 0, n);
+        else
+        {
+            // split near half the total width, never between Fade out (7) and its curve menu (8)
+            int split = 1;
+            float run = 0.0f;
+            while (split < n - 1 && run + natural[(std::size_t) split - 1] < total * 0.5f)
+                run += natural[(std::size_t) split++ - 1] + 2.0f;
+            if (split == 8)
+                ++split;
+            const auto top = tools.removeFromTop (tools.getHeight() / 2);
+            layoutRow (top.withTrimmedBottom (1), 0, split);
+            layoutRow (tools.withTrimmedTop (1), split, n);
         }
 
         infoArea = area.removeFromBottom (24);
@@ -702,13 +753,13 @@ public:
     // --- drag and drop of files -----------------------------------------------------------------------------
     bool isInterestedInFileDrag (const juce::StringArray& files) override
     {
-        return files.size() == 1 && juce::File (files[0]).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+        return files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
     }
 
     // a sample dragged from LYNX's Browser too (issue #12)
     bool isInterestedInDragSource (const SourceDetails& details) override
     {
-        return BrowserComponent::isBrowserDrag (details) && BrowserComponent::draggedFile (details).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3");
+        return BrowserComponent::isBrowserDrag (details) && SampleLibrary::isSampleFile (BrowserComponent::draggedFile (details));
     }
 
     void itemDropped (const SourceDetails& details) override

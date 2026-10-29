@@ -30,6 +30,19 @@
   <Resources>
     <Resource Language="en-us" />
     <Resource Language="pt-br" />
+    <Resource Language="es-es" />
+    <Resource Language="fr-fr" />
+    <Resource Language="de-de" />
+    <Resource Language="it-it" />
+    <Resource Language="nl-nl" />
+    <Resource Language="pl-pl" />
+    <Resource Language="ru-ru" />
+    <Resource Language="tr-tr" />
+    <Resource Language="id-id" />
+    <Resource Language="ja-jp" />
+    <Resource Language="ko-kr" />
+    <Resource Language="zh-cn" />
+    <Resource Language="zh-tw" />
   </Resources>
 
   <Applications>

@@ -1,3 +1,4 @@
+#include "ui/ThemeSettings.h"
 #include "ui/ColourPicker.h"
 #include "core/NoteNames.h"
 #include "ui/ProjectLoading.h"
@@ -482,6 +483,13 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::installSliderContract();
     // FL's Last tweaked and automation recording (REA round 143): every automatable control reports its moves
     ui::onTweak = [this] (const AutomationTarget& t) { engine.noteTweaked (t); };
+    // Options › Theme › Startup sound: its Play button (issue #12)
+    themeui::previewStartupSound = [this] (const juce::String& path) {
+        std::shared_ptr<const SampleData> sound;
+        if (path.isNotEmpty() && juce::File (path).existsAsFile())
+            sound = engine.getSampleLibrary().load (path);
+        engine.previewSample (sound != nullptr ? sound : makeStartupSample());
+    };
     // the toolbar's last-tweaked read-out opens the parameter's own menu (FL's Tools › Last tweaked; round 162d)
     tweakReadout.onClick = [this] {
         makeLastTweakedMenu (0).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tweakReadout));
@@ -564,6 +572,7 @@ MainComponent::~MainComponent()
     workspace.saveState();
     ui::uninstallSliderContract();
     ui::onTweak = nullptr;
+    themeui::previewStartupSound = nullptr;
     onEditEventsInPianoRoll = nullptr;
     PluginWindows::onGesture = nullptr;
     removeDialogTextFocus();
@@ -643,9 +652,19 @@ void MainComponent::resized()
 
     // panel widths
     auto& lf = getLookAndFeel();
-    int menuWidth = 0;
-    for (const auto& name : getMenuBarNames())
-        menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
+    auto measureMenu = [&] {
+        int w = 0;
+        for (const auto& name : getMenuBarNames())
+            w += lf.getMenuBarItemWidth (menuBar, 0, name);
+        return w;
+    };
+    menuBar.getProperties().set ("lynxTightMenuBar", false);
+    int menuWidth = measureMenu();
+    if (menuWidth > 390) // translated menu titles (German, Russian...): English stays as it was
+    {
+        menuBar.getProperties().set ("lynxTightMenuBar", true);
+        menuWidth = measureMenu();
+    }
 
     const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
     const int tempoWidth = 90 + grow, timeWidth = 110 + grow, captionWidth = 50, gridWidth = 148;
@@ -1082,6 +1101,12 @@ keys::Context MainComponent::focusContext() const
         case Panel::browser: return keys::Context::browser;
     }
     return keys::Context::global;
+}
+
+void MainComponent::dragOperationStarted (const juce::DragAndDropTarget::SourceDetails&)
+{
+    // a drop on a window above this one (the Sampler's waveform, a plugin...) lands there, not on the panel under it
+    matchWindowOrderToScreen();
 }
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
