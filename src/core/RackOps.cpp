@@ -772,4 +772,21 @@ std::string stepPositionText (std::int64_t tick, int beatsPerBar)
     std::snprintf (text, sizeof (text), "%lld:%02lld:%02lld", (long long) bar, (long long) step, (long long) flTick);
     return text;
 }
+
+bool replaceGenerator (Song& song, int index, ChannelDef generator)
+{
+    if (index < 0 || index >= (int) song.channels.size())
+        return false;
+    auto& c = song.channels[(std::size_t) index];
+    generator.mixerTrack = c.mixerTrack;
+    generator.volume = c.volume;
+    generator.pan = c.pan;
+    generator.muted = c.muted;
+    generator.group = c.group;
+    generator.swingMix = c.swingMix;
+    if (c.colour != 0)
+        generator.colour = c.colour;
+    c = std::move (generator);
+    return true;
+}
 } // namespace lynx

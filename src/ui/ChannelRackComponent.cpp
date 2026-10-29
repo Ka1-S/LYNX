@@ -2486,11 +2486,32 @@ bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& detail
 
 void ChannelRackComponent::itemDropped (const SourceDetails& details)
 {
-    // a generator dragged from the Browser's Plugin database (round 162): a new channel with it, its window open
+    // a generator dragged from the Browser's Plugin database (round 162): below the channels a new channel with it, onto a
+    // channel it replaces that channel's instrument (FL, audit round 165z-a: insert, notes and levels stay); window open
     if (BrowserComponent::isGeneratorDrag (details))
     {
         if (auto c = BrowserComponent::draggedGenerator (details))
-            addChannel (std::move (*c), true);
+        {
+            int row = 0;
+            const auto area = areaAt (details.localPosition.x, details.localPosition.y, row);
+            if (area != Area::none && area != Area::addRow && row >= 0 && row < (int) engine.getSong().channels.size())
+            {
+                closeEditor (row);
+                const auto kind = c->instrument;
+                engine.editSong ([row, &c] (Song& s) { replaceGenerator (s, row, std::move (*c)); });
+                selectionAnchor = row;
+                selectRows ({ row }, row);
+                if (kind == InstrumentKind::plugin)
+                {
+                    openPluginWindow (row);
+                    openEditorRow = row;
+                }
+                else if (natives::instrumentEngine (kind) != nullptr)
+                    openChannelSettings (engine, row);
+            }
+            else
+                addChannel (std::move (*c), true);
+        }
         return;
     }
 

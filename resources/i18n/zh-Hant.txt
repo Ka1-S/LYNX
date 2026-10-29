@@ -5892,3 +5892,4 @@ countries: tw hk mo
 "(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly" = "（測試版）LYNX SHARE 自有的時間引擎；不精確重現 FL 的變速處理"
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "{0} 個音符。切割模式：按一下音符將其切開，Ctrl+按一下將其與前一個音符黏合（C：離開）"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "{0} 個音符。拖曳：音高（Alt：自由），Ctrl+拖曳：時間，Shift+按一下 / 在空白處拖曳：選擇，尺規：設定音高，右鍵：選單"
+"Auto scrolling" = "自動捲動"

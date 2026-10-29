@@ -5892,3 +5892,4 @@ countries: tr
 "(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly" = "(beta) LYNX SHARE'in kendi zaman motoru; FL'nin warping'i birebir yeniden üretilmez"
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "{0} nota. Kesme modu: kesmek için bir notaya tıklayın, öncekine yapıştırmak için Ctrl+tıklayın (C: çık)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "{0} nota. Sürükle: perde (Alt: serbest), Ctrl+sürükle: zaman, Shift+tıkla / boş alanda sürükle: seç, cetvel: perde ayarla, sağ tık: menü"
+"Auto scrolling" = "Otomatik kaydırma"

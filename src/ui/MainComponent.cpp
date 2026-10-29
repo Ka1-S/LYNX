@@ -4708,6 +4708,18 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addItem (tr ("Metronome volume ({0})...", { ui::utilityVolumeText (engine.getTransport().metronomeVolume.load()) }),
                       [this] { showMetronomeVolume(); });
         {
+            // FL's Options › "Auto scrolling" (audit round 165z-a): one switch for every editor's Follow (Playlist,
+            // Piano roll, Channel rack, Audio editor); each window's own Follow button still sets just that window
+            auto& globals = EditorGlobals::get();
+            const auto on = globals.isFollowing (false) && globals.isFollowing (true);
+            menu.addItem (tr ("Auto scrolling"), true, on, [on] {
+                auto& g = EditorGlobals::get();
+                for (auto v : { EditorGlobals::FollowView::playlist, EditorGlobals::FollowView::pianoRoll,
+                                EditorGlobals::FollowView::channelRack, EditorGlobals::FollowView::audioEditor })
+                    g.setFollowingView (v, ! on);
+            });
+        }
+        {
             juce::PopupMenu recording;
             addRecordOptions (recording);
             menu.addSubMenu (tr ("Recording"), recording);

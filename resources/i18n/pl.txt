@@ -5892,3 +5892,4 @@ countries: pl
 "(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly" = "(beta) Własny silnik czasu LYNX SHARE; warping FL nie jest odtwarzany dokładnie"
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "Nuty: {0}. Tryb cięcia: kliknij nutę, aby ją przeciąć, Ctrl+klik, aby skleić z poprzednią (C: wyjście)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "Nuty: {0}. Przeciąganie: wysokość (Alt: swobodnie), Ctrl+przeciąganie: czas, Shift+klik / przeciąganie w pustym miejscu: zaznaczanie, linijka: ustaw wysokość, prawy klik: menu"
+"Auto scrolling" = "Automatyczne przewijanie"

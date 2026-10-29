@@ -5892,3 +5892,4 @@ countries: ru by kz
 "(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly" = "(бета) Собственный временной движок LYNX SHARE; варпинг FL не воспроизводится точно"
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "Нот: {0}. Режим резки: щелчок по ноте разрезает её, Ctrl+щелчок склеивает с предыдущей (C: выход)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "Нот: {0}. Перетаскивание: высота (Alt: свободно), Ctrl+перетаскивание: время, Shift+щелчок / перетаскивание по пустому месту: выделение, линейка: задать высоту, правый щелчок: меню"
+"Auto scrolling" = "Автопрокрутка"

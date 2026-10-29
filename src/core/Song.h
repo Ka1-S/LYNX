@@ -1261,7 +1261,7 @@ struct Song
     // channel takes the next of its 125 inserts (round 162); 0 (Master) only when the mixer is full.
     int claimFreeInsert();
 
-    // End of the last clip, rounded up to a bar (minimum 1 bar; with no clip, the current pattern's length).
+    // End of the last clip, exactly where FL loops Song mode (no clip: the current pattern's length, minimum 1 bar).
     std::int64_t songLength() const noexcept;
 
     // Removes a pattern and fixes the clips and the current index.
