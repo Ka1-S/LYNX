@@ -1455,6 +1455,33 @@ bool runFlExtraShots (AudioEngine& engine, const juce::File& folder)
             editor.setDemoPosition (pos);
             save (editor, name);
         }
+        // drops: an OS file drop and a drag from the Browser load the sample (other files are refused, so they fall
+        // through to whatever lies under the editor)
+        {
+            auto e = makeEffectSlot (EffectKind::scratcher);
+            setSlot (e);
+            ScratcherEditor editor (slotTarget (engine, 1, 0), false);
+            editor.setSize (620, 360);
+            auto samplePath = [&] {
+                const auto& fx = engine.getSong().mixer[1].effects[0];
+                return juce::String (fx.samplePath);
+            };
+            const auto refused = ! editor.isInterestedInFileDrag ({ folder.getChildFile ("song.flp").getFullPathName() })
+                                 && ! editor.isInterestedInFileDrag ({ loop.getFullPathName(), loop.getFullPathName() });
+            editor.filesDropped ({ loop.getFullPathName() }, 300, 180);
+            const auto osDrop = editor.isInterestedInFileDrag ({ loop.getFullPathName() }) && samplePath() == loop.getFullPathName();
+            engine.editSong ([] (Song& song) { song.mixer[1].effects[0].samplePath.clear(); }, false);
+            const juce::DragAndDropTarget::SourceDetails browser (juce::String (BrowserComponent::dragDescription) + "|" + loop.getFullPathName(),
+                                                                   nullptr, { 300, 180 });
+            const auto interested = editor.isInterestedInDragSource (browser);
+            editor.itemDropped (browser);
+            const auto browserDrop = interested && samplePath() == loop.getFullPathName();
+            ok = ok && refused && osDrop && browserDrop;
+            report << "scratcher-drops " << (refused && osDrop && browserDrop ? "ok" : "FAILED") << " (refuses other files "
+                   << (refused ? "yes" : "no") << ", OS drop " << (osDrop ? "loaded" : "not loaded") << ", Browser drag "
+                   << (browserDrop ? "loaded" : "not loaded") << ")\n";
+            save (editor, "scratcher-dropped");
+        }
     }
     folder.getChildFile ("report.txt").replaceWithText (report);
     return ok;
