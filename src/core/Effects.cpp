@@ -3031,6 +3031,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, 
         return mixsuite::glow::classicParamText (param, v);
     if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))
         return mixsuite::hush::classicParamText (param, v);
+    if (kind == EffectKind::hushDeEsser && ! mixsuite::hush::extended (context)) // round 165x: the old ranges
+        return mixsuite::hush::oldLawText (param, v);
     if (kind == EffectKind::fruityPhaser && param == 0) // the sweep rate follows the frequency range switch
         return phaserfx::sweepText (v, context[3] > 0.5f);
     if (kind == EffectKind::parametricEq && peq::flLaw (context) && param >= 0 && param < peq::slopeParam + peq::bands)
@@ -3593,6 +3595,9 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 165w: … and before the measured release keeps round 123's
     if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::releaseLaw)
         slot.params[(std::size_t) mixsuite::glow::releaseLaw] = 0.0f;
+    // round 165x: a Hush De-esser saved before the extended law keeps ±12 dB levels, the 2 … 16 kHz high-pass, its own link
+    if (slot.kind == EffectKind::hushDeEsser && savedCount <= (std::size_t) mixsuite::hush::rangeLaw)
+        slot.params[(std::size_t) mixsuite::hush::rangeLaw] = 0.0f;
     // round 152: a Compressor saved before the measured vintage curve keeps the round-150 curve
     if (slot.kind == EffectKind::compressor && savedCount <= 18 && slot.params.size() > 18)
         slot.params[18] = 0.0f;

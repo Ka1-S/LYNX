@@ -512,16 +512,26 @@ void RackState::buildMixerGraph()
         for (const auto listener : sidechainListeners[(std::size_t) t])
             depth[(std::size_t) listener] = std::max (depth[(std::size_t) listener], depth[(std::size_t) t] + 1);
 
+        // a route whose level knob is automated (issue #12)
+        auto routeAuto = [this, t] (int to) {
+            for (const auto& r : routeAutos)
+                if (r.from == t && r.to == to)
+                    return r.slot;
+            return -1;
+        };
+
         if (track.toMaster)
-            mixerInputs[0].push_back ({ t, 0, track.masterLevel });
+            mixerInputs[0].push_back ({ t, 0, track.masterLevel, -1, routeAuto (0) });
 
         for (std::size_t k = 0; k < track.sends.size(); ++k)
         {
             const auto& send = track.sends[k];
+            const auto automation = send.target > 0 ? routeAuto (send.target) : -1;
 
-            if (send.target > 0 && send.target < tracks && send.target != t && send.level > 0.0f)
+            // (a send at 0 is left out, unless an automation brings it up)
+            if (send.target > 0 && send.target < tracks && send.target != t && (send.level > 0.0f || automation >= 0))
             {
-                mixerInputs[(std::size_t) send.target].push_back ({ t, (int) k + 1, send.level });
+                mixerInputs[(std::size_t) send.target].push_back ({ t, (int) k + 1, send.level, -1, automation });
                 depth[(std::size_t) send.target] = std::max (depth[(std::size_t) send.target], depth[(std::size_t) t] + 1);
             }
         }
@@ -943,6 +953,7 @@ void RackState::buildAutomationTables()
     }
 
     pluginParams.clear();
+    routeAutos.clear();
     hasAutomation = false;
     tempoAutomation = -1;
 
@@ -975,7 +986,10 @@ void RackState::buildAutomationTables()
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::dashboard && t.param >= 0
                                       && t.param < surface::maxOutputs)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0
-                                      && t.param < voltage::paramCount)))
+                                      && t.param < voltage::paramCount)
+                                  // the Sampler's knobs (issue #12)
+                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::sampler && t.param >= 0
+                                      && t.param < samplerparam::count)))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
                 else
                     used = false;
@@ -1007,6 +1021,19 @@ void RackState::buildAutomationTables()
                 break;
 
             case AutomationTargetKind::tempo: tempoAutomation = a; break;
+            case AutomationTargetKind::mixerSend:
+                if (trackOk && song.routes (t.index, t.slot))
+                {
+                    // the last one of the same route wins (as the loop's order makes it for the other targets)
+                    auto it = std::find_if (routeAutos.begin(), routeAutos.end(), [&t] (const RouteAuto& r) { return r.from == t.index && r.to == t.slot; });
+                    if (it == routeAutos.end())
+                        routeAutos.push_back ({ t.index, t.slot, a });
+                    else
+                        it->slot = a;
+                }
+                else
+                    used = false;
+                break;
             case AutomationTargetKind::none: used = false; break;
         }
 
@@ -3155,6 +3182,9 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
     for (const auto& in : state.mixerInputs[(std::size_t) t])
     {
         const auto tap = in.tap >= 0 && in.tap < RackState::maxSendTaps ? in.tap : -1;
+        // an automated route level (fader curve, like the knob)
+        const auto automatedLevel = in.automation >= 0 ? automationValues[(std::size_t) in.automation] : std::numeric_limits<float>::quiet_NaN();
+        const auto level = std::isnan (automatedLevel) ? in.level : faderGain (automatedLevel);
         const auto active = tap >= 0 ? tapActive[(std::size_t) tap] : trackActive[(std::size_t) in.source];
         const auto& delays = state.sendDelays[(std::size_t) in.source];
         auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
@@ -3167,7 +3197,7 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
         {
             // PDC: this edge is shorter than the slowest one arriving here. A silent source
             // still drains the tail that was in the line.
-            delay->mixInto (active ? sl : nullptr, active ? sr : nullptr, in.level, dl, dr, n);
+            delay->mixInto (active ? sl : nullptr, active ? sr : nullptr, level, dl, dr, n);
             continue;
         }
 
@@ -3176,8 +3206,8 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
 
         for (int i = 0; i < n; ++i)
         {
-            dl[i] += sl[i] * in.level;
-            dr[i] += sr[i] * in.level;
+            dl[i] += sl[i] * level;
+            dr[i] += sr[i] * level;
         }
     }
 }

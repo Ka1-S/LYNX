@@ -34,13 +34,12 @@ before → after (blank = not touched in round 165). Lowest first.
 | Halo | ValhallaShimmer | 8 | 9 | 135 | |
 | Horizon | ValhallaFutureVerb | 8 | 9 | 135 | |
 | Orbit | ValhallaSpaceModulator | 8 | 9 | 135 | |
-| Hush De-esser | Pro-DS | 9 | 8 | 165w | 8 → 9 / 8 → 8 (in / out pan, state levels) |
 | Facet EQ | Pro-Q 4 | 9 | 8 | 152c | |
 | Crest Compressor | Pro-C 3 | 9 | 8 | 137 | |
 | Sentry Gate | Pro-G | 9 | 8 | 135 | |
 | Ember Saturator | Saturn 2 | 9 | 8 | 152b | |
 | Aether | Fresh Air | 9 | 8 | 128 | |
-| Glow Leveler | CLA-2A (Waves) | 9 | 8 | 165w | 9 → 9 / 8 → 8 (sound: the measured release) |
+| Glow Leveler | CLA-2A (Waves) | 10 | 8 | 165x | 9 → 9 → 10 / 8 → 8 (165w: the measured release; 165x: the measured attack, Auto Makeup's reference, the VU display saved and translated) |
 | Hush De-esser | DeEsser (Waves) | 10 | 8 | 165 | 9 → 10 / 8 → 8 |
 | Echoform | H-Delay (Waves) | 9 | 8 | 137 | |
 | Echoform | ValhallaDelay | 9 | 8 | 137 | |
@@ -54,6 +53,7 @@ before → after (blank = not touched in round 165). Lowest first.
 | Spiral Echo | ValhallaFreqEcho | 9 | 9 | 129 | |
 | Lattice Mod | ValhallaUberMod | 9 | 9 | 144 | |
 | Quell Denoiser | NS1 (Waves) | 9 | 9 | 137 | |
+| Hush De-esser | Pro-DS | 10 | 9 | 165x | 8 → 9 → 10 / 8 → 8 → 9 (165w: pans, state levels; 165x: ranges, the 0 … 200 % link knob) |
 | Foil Plate | ValhallaPlate | 9 | 10 | 135 | |
 | Gemini Doubler | Doubler2 / Doubler4 (Waves) | 10 | 8 | 165w | 9 → 10 / 8 → 8 (defaults; 165w: shelf range −88 … +12 and law) |
 | Compressor (stand-in) | Renaissance Compressor (Waves) | 10 | 8 | 152 | |
@@ -437,21 +437,23 @@ output level and pan.
 |---|---|---|
 | Scrolling waveform with the removed part, threshold lines | ✅ | |
 | THRESHOLD and RANGE big knobs, listen (headphones) button | ✅ | |
-| Frequency slider with TWO handles (high-pass and low-pass of the detection band) | ✅ | round 128: left = where the band starts, right = where it ends (far right = off), 2–20 kHz |
+| Frequency slider with TWO handles (high-pass and low-pass of the detection band) | ✅ | round 128: left = where the band starts, right = where it ends (far right = off), 2–20 kHz; round 165x [EXEC]: the high-pass reaches 20 kHz too (the trial's 2000 · 10^v Hz; Hush's was 2 … 16 kHz), translated one to one |
 | Audition (hear the detection band) | ✅ | |
 | MODE: SINGLE VOCAL / ALLROUND | ✅ | round 128 (Allround: the sibilance must also stand out from the full-band level); LYNX's high-pass / band detection stays in the bottom bar |
 | WIDE BAND / SPLIT BAND | ✅ | |
 | SIDE CHAIN In / Ext | ✅ | round 128: Ext picks the source track (menu) |
-| STEREO LINK knob with MID switch | ✅ | round 128 |
+| STEREO LINK knob with MID switch | ✅ | round 128; round 165x [EXEC]: the knob's upper half (100 % + n % Mid-only / Side-only): appended **Link only** and **Link only side** (Mid only \| Side only), the trial's blend (k < 100 %: each side detects on (1 − k/2) own + (k/2) other; above: the mid / side detection and output blend); link matrices within 0.014 of the trial (mid and side modes); translated |
 | LOOKAHEAD knob 0–15 ms with power button | ✅ | round 128 (the look-ahead is the latency; the mixer re-plans its delay compensation) |
 | DISPLAY button (hide / show the waveform) | ✅ | round 128: the window shrinks without it |
 | Oversampling (bottom bar) | ✅ | round 135: Off / 2x / 4x / 8x for Hush's own voicing (the band and its gain at the high rate; the measured classic voicing has none) |
-| In / Out levels (bottom bar) | ⚠️ | round 128: In ±12 dB, Out ±12 dB; [EXEC] round 165w: the 17.1 trial's run −∞ … +36 dB (36 dB per unit above −18); a state's levels are now read right (stored as 2 v − 1; +7.2 dB was read as +0.2) and the input translated |
+| In / Out levels (bottom bar) | ✅ | round 128: In ±12 dB, Out ±12 dB; [EXEC] round 165w: the 17.1 trial's run −∞ … +36 dB (36 dB per unit above −18); a state's levels are now read right (stored as 2 v − 1; +7.2 dB was read as +0.2) and the input translated; round 165x [EXEC]: the trial's law (72 v − 36 dB above v = 0.2, 40 log10 v + 6.36 below, 0 = −∞) with **Range law** Extended (new instances; Old ranges for older projects), both levels translated one to one |
 | In / Out pan (bottom bar) | ✅ | round 165w [EXEC]: **In pan / Out pan** — the trial's balance law (the far channel × (1 − \|pan\|), the near one untouched; in before the detector, out after the output level), translated from Pro-DS states; oversampling translated too |
 | Release | — | Pro-DS has no release control; LYNX keeps RELEASE as an extra (bottom bar) |
 | Input meter with threshold arrow, reduction meter | ✅ | |
 
 **Round 165w** (REA_rodada165w §5): configuration 8 → **9**, design 8 → 8 — In pan / Out pan (measured balance), the Pro-DS state's levels read correctly, input level / pans / oversampling translated. Left: the −∞ … +36 dB level range, the high-pass up to 20 kHz (Hush: 16 kHz), Stereo Link above 100 % (the mid-only blend) not translated.
+
+**Round 165x** (REA_rodada165x §3): configuration 9 → **10**, design 8 → **9** — the measured ranges (levels −∞ … +36 dB, high-pass to 20 kHz) behind an appended **Range law** (Old ranges | Extended: older projects unchanged), Stereo Link's upper half (appended **Link only** / **Link only side**, the measured mid- and side-only blends, matrices within 0.014), all translated from Pro-DS states; the STEREO LINK knob runs 0 … 200 % as the trial's ("100 %, 40 % mid only"; one knob over Stereo link and Link only, Mid | Side under it). Left (design): the waveform's look, the knob's printed scale.
 
 ## Ember Saturator ← Saturn 2 (and Decapitator's role)
 
@@ -664,16 +666,16 @@ Trial on this PC: yes (the new parity129 capture is missing; the w119 capture wa
 | PEAK REDUCTION knob | 0–100, default **46**, right of the VU, nonlinear | "Peak reduction" 0–100 (side chain −20…+40 dB linear), default **0** = off, big knob on the right | ✅ | round 123: the classic voicing's measured taper (one to one); round 152: default **46** |
 | COMPRESS / LIMIT switch | toggle, left side under the logo; default Compress | "Compress | Limit" tabs under the VU | ✅ | different place (centre, not left) but easy to find; Limit γ = 9 (~10:1) vs about 100:1 on the hardware |
 | VU meter | analog VU in the centre; −20…+3 scale, red above 0 | analog VU in the centre, same −20…+3 scale | ✅ | good match |
-| VU DISPLAY selector | rotary knob INPUT / **GR** (default) / OUTPUT, top right | hidden: clicking the meter switches GR ↔ Output; no Input | ✅ | no visible selector, and Input is missing; add a 3-position switch beside the VU; round 129: INPUT / GR / OUTPUT selector beside the VU |
+| VU DISPLAY selector | rotary knob INPUT / **GR** (default) / OUTPUT, top right | hidden: clicking the meter switches GR ↔ Output; no Input | ✅ | no visible selector, and Input is missing; add a 3-position switch beside the VU; round 129: INPUT / GR / OUTPUT selector beside the VU; round 165x [EXEC]: saved with the project (**VU display**) and translated from the state (RealWorld 17) |
 | VU readout text | none (needle only) | "Gain reduction −x.x dB" or "Output x VU" inside the face | ➕ | |
 | VU calibration | 0 VU = −18 dBFS (spec, unverified) | output mode 0 VU = −18 dBFS | ✅ | |
 | HI FREQ (side-chain HF emphasis) | knob 0–100, default **50** (≈ +5–6 dB detector sensitivity at 6 kHz), with a "FLAT" mark; bottom strip | "Emphasis" 0–100 % (+0…+10 dB shelf at 2.5 kHz in the detector), default **0 %**, small knob under the switch | ✅ | round 123: the classic voicing's measured side-chain emphasis and Hi Freq law, translated (RW 153); round 152: default **50** |
 | ANALOG | 3 buttons 50Hz / 60Hz / OFF, bottom left; default **Off** (the trial's fresh instance) | none | ✅ | round 152 [EXEC]: **Analog Off \| 50 Hz \| 60 Hz** bottom left — the measured hum (mains harmonics, the 2nd strongest at −98.7 dBFS, both channels alike) and noise (−89.5 dBFS RMS, flat per third octave, L / R uncorrelated) in the wet path after the gain (Trim moves it, Mix 0 % removes it); translated (RW 140) |
 | MIX | knob 0–100 %, default 100, bottom strip | "Mix" 0–100 %, default 100 %, small knob | ✅ | round 152: translated (RW 204) |
 | TRIM | knob −18…+18 dB, default 0, bottom right (after the mix) | none (Gain is pre-mix and 0…+30 only) | ✅ | new parameter (output trim ±18 dB); round 129: Trim ±18 dB after the mix |
-| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle; round 152 [EXEC]: the classic voicing's measured law (a make-up that follows the Peak reduction dial: −1.5 dB at 0, 0 at 46, +6.8 at 62.6, +11.4 at 80, +16.7 at 100 — not a level follower), translated (RW 207) |
+| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle; round 165x [EXEC]: the make-up counts from the dial where it was switched on (**Makeup ref**), switching off keeps it in Gain, translated; round 152 [EXEC]: the classic voicing's measured law (a make-up that follows the Peak reduction dial: −1.5 dB at 0, 0 at 46, +6.8 at 62.6, +11.4 at 80, +16.7 at 100 — not a level follower), translated (RW 207) |
 | Mono / stereo components | separate Mono and Stereo plugins | stereo-linked engine | ⚠️ | no mono variant needed in a DAW slot |
-| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ✅ | round 123: the classic voicing's measured log-domain attack (faster as the reduction grows), hyperbolic two-stage release and memory; round 152 check: the recovery after a loud passage is ≈ 1 dB slower than the trial's on 0.5 s stairs round 165w [EXEC]: the release measured on the 17.1 trial (bursts of 0.1 … 10 s at −24 … 0 dBFS, then a −40 dBFS probe; Compress 46 / 62.6 / 80, Limit 62.6): the same recovery after 0.5, 2 or 10 s (no long memory), back within 0.1 dB after ≈ 10 s; refitted (recovery 0.08 … 0.84 → 0.03 … 0.15 dB rms; held-out 0.5 s stairs, falling half 0.52 … 0.76 → 0.35 … 0.45 dB); older projects keep round 123's (Release Old \| Measured) |
+| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ✅ | round 165x [EXEC]: the measured attack (rate-limited: the transient goes through, ≈ 2 dB per ms; Limit 80 −0.9 / −2.9 / −4.8 / −7.9 / −13 dB at 0 / 1 / 2 / 4 / 10 ms), with the Opto release Measured; round 123: the classic voicing's measured log-domain attack (faster as the reduction grows), hyperbolic two-stage release and memory; round 152 check: the recovery after a loud passage is ≈ 1 dB slower than the trial's on 0.5 s stairs round 165w [EXEC]: the release measured on the 17.1 trial (bursts of 0.1 … 10 s at −24 … 0 dBFS, then a −40 dBFS probe; Compress 46 / 62.6 / 80, Limit 62.6): the same recovery after 0.5, 2 or 10 s (no long memory), back within 0.1 dB after ≈ 10 s; refitted (recovery 0.08 … 0.84 → 0.03 … 0.15 dB rms; held-out 0.5 s stairs, falling half 0.52 … 0.76 → 0.35 … 0.45 dB); older projects keep round 123's (Release Old \| Measured) |
 | Static curve | γ ≈ 4.54 (≈ 4.2:1 local, 5.5:1 asymptotic) | γ = 2 (≈ 3:1) | ✅ | round 123: the Opto classic voicing's cell law fitted on the trial (γ 2.15 on the side-chain level above its threshold, feedback detection); round 152 [EXEC]: **Limit** measured (a steeper cell, 1.5 % of the input in the side chain — the trial over-compresses at 62.6 — and the cell's deepest reduction, 30.4 dB): 0.34 / 0.52 / 0.50 dB rms at peak reduction 46 / 62.6 / 80 (round 123's Limit 0.37 / 1.00 / 1.32); older projects keep the old Limit (Opto law Old \| Measured) |
 | HF tilt under GR / 2nd harmonic | yes (+1…+6 dB above 6 kHz under GR; ≈ −52 dBc H2) | none | ✅ | round 123: the classic voicing's measured tilt (up to +7 dB at 20 kHz under reduction) and 2nd / 3rd harmonics |
 | Section layout | Gain left, VU centre, Peak Reduction right; Comp/Limit left; VU selector + Auto Makeup right; bottom strip Analog · Hi Freq · Mix · Trim | Gain left, VU centre, Peak reduction right; Comp/Limit under the VU; Emphasis + Mix small at the bottom | ⚠️ | the main row matches; the bottom strip has 2 of its 4 items, and the right column (selector, auto makeup) is missing |
@@ -681,6 +683,8 @@ Trial on this PC: yes (the new parity129 capture is missing; the w119 capture wa
 | Knob scales | 0–100 printed around Gain and Peak Reduction | arc only; the value appears under the knob | ⚠️ | a CLA user reads Gain as 0–100; LYNX shows dB |
 | Value entry / fine / reset | Waves value handling | right-click entry, Ctrl fine, double-click reset | ✅ | |
 | Saved-state translation | — | Gain (via the measured table), Peak Reduction, Comp/Limit translated; Hi Freq, Analog, Mix, Trim, Auto Makeup and VU ignored | ✅ | PLUGIN_FALLBACK row 140 / round 113 §3c; round 123: Hi Freq, Trim; round 152: Mix (RW 204), Auto Makeup (207), Analog (140); the VU selector is the editor's view only |
+
+**Round 165x** (REA_rodada165x §1, §2, §5b): configuration 9 → **10**, design 8 → 8 — the measured attack (the transient goes through, ≈ 2 dB per ms; first 50 ms of 30 onsets 5.86 → 1.21 dB rms, worst 26.7 → 3.3 dB; round 123's for older projects), AUTO MAKEUP's reference point (appended **Makeup ref**: the dial where it was switched on; switching it off folds the make-up into Gain, as the trial turns its own Gain knob; translated), the VU DISPLAY selector saved with the project (appended **VU display**) and translated (RealWorld 17). Left (design): the 0–100 scales printed around the big knobs, the ≡ menu.
 
 **Round 165w** (REA_rodada165w §2): configuration 9 → 9, design 8 → 8 — sound: the classic voicing's measured release (appended **Opto release**: Measured for new instances and translated states, Old for projects / presets saved before; Release Old | Measured tabs top right with the classic voicing). Left: Auto Makeup's reference point, the VU selector not translated.
 

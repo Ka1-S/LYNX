@@ -151,3 +151,28 @@ The profile used for plugin tests got a copy of the user's plugins.xml (the list
   opens and closes its channel window, like FL's channel button. The window has the channel header and the Misc tab
   (SettingsWindow already built it for kinds without an instrument page). The hint's "[LMB] open/close the editor"
   is now true for every channel.
+
+## Follow-up audit165c (coordinator, 2026-10-28)
+
+- F7 (fixed): FL 2026 was run and its channel button double-clicked (808 Clap, default template). A single click
+  opens or closes the channel window, so a double-click opens it and closes it again: the channel only ends up
+  selected. Nothing else opens, not even the Piano Roll. LYNX's name double-click used to open the Piano Roll on top
+  of the two toggles, which the hint advertised as "[2xLMB] Piano Roll". The extra action is gone, and the hint (and
+  its pt-BR text) no longer lists it. The Piano Roll is still reachable from the channel menu, F7 and the step-area
+  shortcut.
+- Abuse pass on today's landings (Windows, real input; main 3d88f2b2 + this fix). Nothing crashed, nothing hung,
+  and LYNX closed normally:
+  - Fruity Granulizer: added from Quick-add with no sample and every knob dragged to its extremes while playing.
+    Then a sample loaded, Transients set to Detect, Key to set to Transient, Beats set to 61, steps playing. The
+    channel was deleted with its window open while playing, and Ctrl+Z / Ctrl+Y were spammed.
+  - Issue #12: the Channel Rack's Pattern length box was wheel-spammed and double-clicked back to automatic,
+    Follow playhead was toggled while playing, and the mixer VU meters were clicked to select tracks.
+  - Performance mode: Tools > Prepare for performance mode ran while the song played, followed by undo / redo.
+  - VFX: a VFX Sequencer was added in a Patcher, its patterns and factory presets stepped through, Steps dragged,
+    Chain set to 01, its window closed and the node deleted.
+  - Piano Roll: select all / copy / paste / delete / undo while playing.
+- Notes found:
+  - (a) The notes bullet "Issue #12, more FL habits" describes features that are not in main yet: the Piano Roll's
+    **All** entry, Backgrounds and Startup sound. They are presumably waiting in feature/issue12b.
+  - (b) A sample dropped on the Fruity Granulizer's window falls through to the Playlist and becomes an audio clip.
+    FL's Granulizer takes a drop on its own window.

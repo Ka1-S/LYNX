@@ -284,6 +284,12 @@ private:
     std::vector<int> selection;     // indices into Pattern::notes, sorted
     std::vector<int> selectionBefore; // selection at the start of a Shift+rectangle
     juce::ModifierKeys downMods;      // modifiers at the click (locks start when Shift/Ctrl are pressed later)
+    // the channel box's bold "All" (issue #12): every channel's notes in the pattern are editable at once (new notes
+    // still go to the selected channel); off again when another channel is picked
+    bool allChannels = false;
+    static constexpr int allChannelsId = 100000; // its id in channelBox
+    bool edits (const Note& n) const noexcept { return allChannels || n.channel == engine.getSelectedChannel(); }
+    void setAllChannels (bool on);
     bool showGhosts = true;
     bool editGhosts = false;          // Ctrl+Alt+V: a press on a ghost note edits it (switching to its channel)
     // the selection's stretch handle (R5): drag it to scale the selected notes in time
