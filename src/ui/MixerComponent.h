@@ -35,8 +35,7 @@ extern std::function<void()> openAudioSettings;
 // The insert's input menu: (none), the open device's stereo pairs and single channels, the monitoring mode and
 // "Audio settings...". Opens the device input first when it is closed. `chosen` runs after a source is picked.
 void showMenu (AudioEngine& engine, int track, juce::Component* target, std::function<void()> chosen = {});
-// The arm switch: disarms, or arms; an insert without an input source asks for one first ("Audio input
-// needed") and is armed once it has one.
+// The arm switch: disarms, or arms at once — also an insert without an input source, as FL 2026 does.
 void toggleArm (AudioEngine& engine, int track, juce::Component* target);
 // Explains a recording problem to the user, with a way to Settings > Audio when it is about the device.
 void explain (const AudioEngine::RecordingNotice& notice);

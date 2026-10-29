@@ -6,6 +6,8 @@ was last, but where shift+space was pressed") in every setup, and fix round issu
 
 ## Where I stopped
 
+- issue11d: Mixer / Playlist arm without an input arms at once (FL); building, then Windows check and landing.
+
 - Done: FL observed, implemented, lynx_tests 0 failures (1887113 checks, with FL Data), Windows build checked by hand. Landing.
 
 ## 1. FL 2026: arming from a Playlist track [SHOT] [STRINGS]
@@ -47,8 +49,7 @@ and the mute LED. Arming was only in the Mixer (`mixerinput::toggleArm`) and Shi
   Mixer. [RMB] on it does nothing (FL). On rows of 52 px or more (FL: 150 %) an "Audio input source" button sits next
   to it (`mixerinput::showMenu`: inputs + monitoring + record safe). Unassigned / instrument tracks: unchanged.
 - Right-click on the name keeps opening the track menu (FL).
-- Difference kept on purpose: when the insert has no input, LYNX's arm (Mixer and Playlist alike) opens the input menu
-  first and arms once an input is chosen; FL 2026 arms without an input.
+- (issue11d) No difference left: like FL 2026, the button arms at once even without an input (see §5).
 - Code: `trackmodes::armableInsert` (core/PlaylistOps), `PlaylistComponent::trackArm / trackInput`.
 
 ## 4. Shift+Space in FL 2026 [SHOT]
@@ -99,3 +100,21 @@ and played from there). Fixed: `MainComponent::playFromStart` (stopped → `play
   selection 3-7, Shift+Space while playing stops at 3:1:1 — the same as FL in every case.
 - Note: WScript SendKeys "+ " reaches LYNX as plain Space (JUCE doesn't see the synthetic Shift), while FL gets
   Shift+Space; keybd_event is needed for LYNX tests.
+
+## 5. Round issue11d: FL 2026's Mixer arm, measured [SHOT] (C:\Users\kauan\lynx-test\issue11c\m*.png)
+
+Fresh FL session, mixer strip button under the latency clock, hint "Arm disk recording" (with a right-click icon).
+
+| step | FL 2026 |
+|---|---|
+| Insert 1, input "(none)": [LMB] the arm button | armed at once (red ring, fader rail orange), no prompt; hint "Record to: untitled_<date time>_Insert 1.wav" |
+| [LMB] again | disarmed |
+| [RMB] the arm button | a Windows save dialog "Record Insert 1 to" (folder Documents\Image-Line\FL Studio\Audio\Recorded, name untitled_<date time>_Insert 1); after Cancel the insert stays armed |
+| Insert 2, input "In 1 - In 2" (FL first asks "switch to External input only?" when the input is chosen — answered No) | [LMB] arms at once, no prompt; [LMB] again disarms |
+
+Before, LYNX's arm (Mixer and Playlist) opened the input menu when the insert had no input ("Audio input needed") and
+armed after the choice. Now `mixerinput::toggleArm` arms at once in both cases (`armClick`, core/LiveInput.h); a
+recording started with an armed insert that has no input still reports it (InputIssue::insertWithoutInput /
+armedWithoutInput). Kept: the Mixer arm's right-click opens LYNX's input menu (LYNX records takes into the Playlist and
+has no per-insert "record to file" name, which is what FL's right-click sets); the Tools menu item "Arm the selected
+mixer insert for audio (choose its input)..." still opens the input menu first, as it says.

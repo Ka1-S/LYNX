@@ -47,3 +47,15 @@ TEST (issue11c_shift_space_stop_target_matches_fl)
     const auto* action = findAction ("transport.playFromStart");
     CHECK (action != nullptr && std::string (action->description) == "Play, or stop at the start of the song or pattern");
 }
+
+// Round 165 issue11d — FL 2026 [SHOT]: a left-click on a mixer track's "Arm disk recording" (or on an audio track's
+// record button) arms it at once, with no input source as well as with one; a second click disarms; the Master has none.
+TEST (issue11d_arm_click_arms_at_once_like_fl)
+{
+    using namespace lynx;
+    CHECK (armClick (1, false) == ArmClick::arm);   // insert without (or with) an input: armed at once
+    CHECK (armClick (1, true) == ArmClick::disarm);
+    CHECK (armClick (126, false) == ArmClick::arm);
+    CHECK (armClick (0, false) == ArmClick::none);  // the Master
+    CHECK (armClick (-1, true) == ArmClick::none);
+}
