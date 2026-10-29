@@ -226,7 +226,13 @@ protected:
     float v (int p) const
     {
         const auto* fx = current();
-        return fx != nullptr && p >= 0 && p < maxEffectParams ? fx->params[(std::size_t) p] : 0.0f;
+        if (fx == nullptr || p < 0 || p >= maxEffectParams)
+            return 0.0f;
+        // an automated knob shows its automation's value while the song plays (issue #12), unless the mouse holds it
+        if (! isMouseButtonDown (true))
+            if (const auto a = engine.getAutomationDisplay().valueOf ({ AutomationTargetKind::effectParam, track, slot, p }))
+                return *a;
+        return fx->params[(std::size_t) p];
     }
     // a subclass may add linked changes (Aether's linked knobs) before they are applied
     virtual void linkChanges (std::vector<std::pair<int, float>>&) const {}
@@ -992,9 +998,18 @@ private:
         for (int k = 0; k < 6; ++k) meters += liveMeter (k) * (float) (k + 1);
         if (std::abs (meters - lastMeters) > 1e-5f) live = true;
         lastMeters = meters;
+        // knobs following their automation (issue #12)
+        if (const auto& shown = engine.getAutomationDisplay(); shown.getGeneration() != shownAutomation)
+        {
+            shownAutomation = shown.getGeneration();
+            for (const auto& t : shown.automatedTargets())
+                if (t.kind == AutomationTargetKind::effectParam && t.index == track && t.slot == slot)
+                    live = true;
+        }
         if (live || demo) repaint();
     }
     float lastMeters = 0.0f;
+    std::uint32_t shownAutomation = 0;
 
     juce::dsp::FFT fft;
     std::vector<float> fftData, window;

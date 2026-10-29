@@ -171,6 +171,10 @@ private:
     int trackAt (int x) const noexcept;
     Part partAt (int track, juce::Point<int> p) const;
     juce::Rectangle<int> faderArea (int track) const;
+    float shownVolume (int track) const; // the fader's value, or its automation's while the song plays (issue #12)
+    void repaintAutomatedStrips();
+    std::uint32_t shownAutomation = 0;
+    std::vector<int> automatedStrips;
     juce::Rectangle<int> panArea (int track) const;
     juce::Rectangle<int> muteArea (int track) const;
     juce::Rectangle<int> soloArea (int track) const;

@@ -1,8 +1,9 @@
 # Round 165p "issue12" — GitHub issue #12 (BURNER1PA, Windows 10, portable 0.1.18)
 
 ## Where I stopped
-- 2026-10-28 18:15: batch 1 (feature/issue12) LANDED as 7c61c0a2. Batch 2 (feature/issue12b) checked on Windows
-  (build bc11936d+, C:\Users\kauan\lynx-test\issue12\c3) and going to land.
+- 2026-10-28: batch 1 (feature/issue12) LANDED as 7c61c0a2; batch 2 (feature/issue12b) LANDED as ddb06db3.
+- Follow-up feature/issue12c (coordinator): knobs and faders follow their automation on screen while the song plays
+  (core/AutomationDisplay.h, UI-side). Checked on Windows; landing.
 - Windows helpers: C:\Users\kauan\lynx-test\issue12\ (launch.ps1 -keep 1 keeps a seeded profile, drive.ps1 = audit165's
   real-input driver, close.ps1, winshot.ps1, fg.ps1, hwnd.ps1). Test samples: D:\lynx-work\issue12\samples (1500 WAVs).
 
@@ -49,10 +50,24 @@ main ea719caf = C:\Users\kauan\lynx-test\issue12\main\LYNX.exe:
 ### Batch 2 (feature/issue12b), checked on Windows (real input, fresh profile)
 | feature | test | Windows check |
 |---|---|---|
-| Sampler knobs automatable (Attack, Decay, Sustain, Release, Start, End, Cutoff, Resonance) | issue12_sampler_knobs_are_automation_targets, issue12_sampler_cutoff_automation_changes_the_sound | right-click Cutoff: FL's parameter menu (c12.png); Create automation clip opens "s0000 - Cutoff" and the clip is in the Playlist (c13.png, c20.png). The knob does not move on screen while the clip plays (no LYNX knob follows its automation yet; the sound does: the test) |
+| Sampler knobs automatable (Attack, Decay, Sustain, Release, Start, End, Cutoff, Resonance) | issue12_sampler_knobs_are_automation_targets, issue12_sampler_cutoff_automation_changes_the_sound | right-click Cutoff: FL's parameter menu (c12.png); Create automation clip opens "s0000 - Cutoff" and the clip is in the Playlist (c13.png, c20.png). The knob did not move on screen while the clip played (no LYNX knob followed its automation); fixed by issue12c below |
 | Mixer send / level-to-Master knob automatable | issue12_send_level_is_an_automation_target | right-click the route knob: the menu with Automation (c24c.png); "Insert 6 → Master - Level to Master" clip created (c25.png, c32.png) |
 | Piano Roll bold "All" channels | (batch 2 tests) | bold "All" on top of the list, every channel's notes shown (c2c.png, c3.png) |
 | Sampler waveform drop from the Browser | — | first try: the drop replaced the sample of the Channel Rack row UNDER the window (Snare, c34.png). Cause: JUCE finds the drop target in its own window list, where the main window comes first after it is activated (a click in it, or the drag image hiding at mouse-up), while the owned windows stay above on the screen. Fix: WindowOwner matchWindowOrderToScreen, run on drag start and whenever the main window comes to the front. After: s0005 dropped on s0000's waveform replaces it, Snare intact (e1.png, e2.png) |
 | Theme › Backgrounds folder list + Startup sound | — | an image put in the folder shows in the list after the page reopens and applies (c30.png, c31.png); Startup sound row with Choose / Play / Default (c28.png) |
 | Browser folder drop from Explorer (copies the files the Browser lists) | — | not driven (needs an Explorer drag) |
 | Drop targets use SampleLibrary::isSampleFile (Audio editor, Sampler waveform) | — | (code; the Sampler drop above) |
+
+### Follow-up issue12c: knobs follow their automation (coordinator)
+- core/AutomationDisplay.h evaluates on the UI thread, at most once per frame (AudioEngine::getAutomationDisplay), the
+  value each automated target has at the playhead with RackRenderer::updateAutomation's rules (song-mode clips, pattern
+  event lanes; the last source of a target wins). Tables rebuilt only when the Song is published (songStamp). The audio
+  thread does nothing new. Stopped: nothing shown (the controls show the Song's value, which a hand move edits).
+- Editors: mixer faders / pan / send knobs (only automated strips repaint), Channel Rack volume / pan, channel window
+  header knobs, Sampler knobs (a knob that shows automation never writes it back; the mouse wins while held), LYNX
+  effect editors (ProEditorBase::v).
+- Tests: issue12c_automated_value_at_the_playhead, issue12c_display_refresh_is_cheap (300 automated targets, 3000
+  clips: the per-refresh time is printed by the test run).
+- Windows (build 43dc0ff7, fresh profile): Sampler Cutoff clip: the knob reads 20000 Hz, then 14766 Hz at 4:1:2 while
+  playing (f6.png, f7.png); send clip Insert 6 → Master falling to 3%: the route knob near its minimum at 4:4:4, back
+  to 0 dB when stopped (h1.png, hsend.png). Toolbar CPU 1% while playing.
