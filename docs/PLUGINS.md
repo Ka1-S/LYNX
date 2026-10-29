@@ -240,7 +240,7 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Vocodex † | Vocodex | Import | Near-exact | −136…−145 dB (internal Sytrus carrier −112 dB) |
 | Vintage Phaser | Vintage Phaser | Import | Near-exact | within −121 dB |
 | Pitch correction | Pitcher | Insert | Close | bit-exact with the reference model; MIDI mode / Harmonize get no MIDI in LYNX SHARE |
-| Newtone | Newtone | Import | Close | pass-through as FL; in slave mode the note edits (pitch offsets and transitions, drift, vibrato, formant, volume, timing, disabled notes) rendered by LYNX SHARE's own pitch engine; tremolo / ramps and FL's sample re-alignment after edits missing |
+| Newtone | Newtone | Import | Close | pass-through as FL; in slave mode the note edits (pitch offsets and transitions, drift, vibrato, tremolo, ramps, formant, volume, timing, disabled notes) rendered by LYNX SHARE's own pitch engine: against FL's own engine on 135 states every note's level within 0.4 dB and its median pitch within 9 cents, unedited notes bit-identical; legato glides with long smooth times (up to 40 c) and FL's sample re-alignment after edits differ (round 165g) |
 | Newtime | Newtime | Import | Placeholder | pass-through (as FL) + the source sample in slave mode; time warping not reproduced |
 | Utility | Transporter | Insert | Approximate | mapped to a utility stage |
 | Limiter | Emphasis | Insert | Approximate | not ported yet |

@@ -16485,3 +16485,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "HarmorBeta165hTests.inc"
 #include "Crash13Tests.inc"
 #include "Issue11bTests.inc"
+#include "FlNewt165Tests.inc"

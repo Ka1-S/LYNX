@@ -148,7 +148,7 @@ const std::vector<EffectEngine>& effectEngines()
         { EffectKind::vintagePhaser, "Vintage Phaser", own, false },
         { EffectKind::squeeze, "Fruity Squeeze", own, false },
         { EffectKind::rhythmGain, "", own, false },
-        { EffectKind::newtone, "", own, true },
+        { EffectKind::newtone, "", own, false }, // out of beta in round 165g (REA_rodada165g-flnewt165)
         { EffectKind::newtime, "", own, true },
     };
     return list;
