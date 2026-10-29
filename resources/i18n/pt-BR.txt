@@ -5726,6 +5726,20 @@ countries: br
 "An incoming MIDI program change: ignored, selects the sequence (0 = the first), or goes on to the instruments after it" = "Um program change MIDI que chega: ignorado, escolhe a sequência (0 = a primeira) ou segue para os instrumentos depois dele"
 "Play / stop from the start of the song or pattern" = "Tocar / parar a partir do início da música ou do pattern"
 
+# Fruity Scratcher (round 165g, flscratch165)
+"Backwards" = "Para trás"
+"Stopped" = "Parado"
+"Forwards" = "Para frente"
+"The sample on the platter (or drop a file here)" = "O sample no prato (ou solte um arquivo aqui)"
+"No sample: load one or drop a file" = "Sem sample: carregue um ou solte um arquivo"
+"Rotations" = "Voltas"
+"Load sample" = "Carregar sample"
+"Wave position" = "Posição na onda"
+"Acceleration" = "Aceleração"
+"Smooth 1" = "Suavização 1"
+"Smooth 2" = "Suavização 2"
+"Smooth 3" = "Suavização 3"
+"Smooth 4" = "Suavização 4"
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Estéreo invertido"
 "Ping-pong" = "Pingue-pongue"

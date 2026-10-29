@@ -51,6 +51,7 @@
 #include "core/VoiceShift.h"
 #include "core/VisualFx.h"
 #include "core/FlExtraFx.h"
+#include "core/Scratcher.h"
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
 
@@ -2964,6 +2965,19 @@ const EffectInfo& effectInfo (EffectKind kind)
             static const EffectInfo info { "Fruity HTML NoteBook", {} };
             return info;
         }
+        case EffectKind::scratcher:
+        {
+            // FL's defaults (its editor's DFM): platter at 690 / 30000, 1x, stopped, Hold off, Volume 199 / 255
+            static const EffectInfo info = [] {
+                const auto d = scratcher::defaults();
+                return EffectInfo { "Fruity Scratcher",
+                                    { { "Wave position", d[0] }, { "Mute", d[1] }, { "Speed", d[2] }, { "Acceleration", d[3] },
+                                      { "Pan", d[4] }, { "Volume", d[5] }, { "Hold", d[6] }, { "Sensitivity", d[7] },
+                                      { "Transport", d[8] }, { "Smooth 1", d[9] }, { "Smooth 2", d[10] }, { "Smooth 3", d[11] },
+                                      { "Smooth 4", d[12] }, { "Rotations", d[13] } } };
+            }();
+            return info;
+        }
         case EffectKind::waveCandy:
         {
             // round 164c (core/VisualFx.h wavecandy::Param): a new one shows the spectrum, like FL's Default preset's analyser
@@ -3519,6 +3533,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return flextra::tuner::paramText (param, v);
         case EffectKind::htmlNotebook:
             return {};
+        case EffectKind::scratcher:
+            return scratcher::paramText (param, v);
         case EffectKind::waveCandy:
             return visualfx::wavecandy::paramText (param, v);
         case EffectKind::visualizer:
@@ -3802,6 +3818,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::bigClock:
         case EffectKind::tuner:
         case EffectKind::htmlNotebook: return visualfx::make(); // round 165g: pass the sound, feed the editor's tap
+        case EffectKind::scratcher: return scratcher::make (nullptr); // (with its sample: RackRenderer's buildEffect)
         case EffectKind::waveCandy:
         case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
         case EffectKind::xyController:

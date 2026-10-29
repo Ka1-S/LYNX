@@ -5641,12 +5641,27 @@ countries: ru by kz
 "Selects the sequence" = "Выбирает последовательность"
 "Passed on" = "Передается дальше"
 "An incoming MIDI program change: ignored, selects the sequence (0 = the first), or goes on to the instruments after it" = "Входящая MIDI-смена программы: игнорируется, выбирает последовательность (0 = первая) или передается следующим за ним инструментам"
+"Backwards" = "Назад"
+"Stopped" = "Остановлено"
+"Forwards" = "Вперёд"
+"The sample on the platter (or drop a file here)" = "Сэмпл на диске (или перетащите файл сюда)"
+"No sample: load one or drop a file" = "Нет сэмпла: загрузите его или перетащите файл"
+"Rotations" = "Обороты"
+"Load sample" = "Загрузить сэмпл"
+"Wave position" = "Позиция в волне"
+"Acceleration" = "Ускорение"
+"Smooth 1" = "Сглаживание 1"
+"Smooth 2" = "Сглаживание 2"
+"Smooth 3" = "Сглаживание 3"
+"Smooth 4" = "Сглаживание 4"
 
 "Play / stop from the start of the song or pattern" = "Старт / стоп с начала песни или паттерна"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) modes
+# --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Инвертированное стерео"
 "Ping-pong" = "Пинг-понг"
+
 # --- Not in pt-BR.txt (yet)
 "[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu" = "[LMB] открыть/закрыть редактор  [Alt]+[LMB] не закрывать другие  [Ctrl]+[LMB] прослушать  [2xLMB] Piano Roll  [LMB] перетаскивание вверх/вниз меняет порядок  [RMB] меню канала"
 "Peak meter (left/right) with peak hold  [LMB] clears the clip light" = "Пиковый индикатор (левый/правый) с удержанием пика  [LMB] сбрасывает индикатор клиппинга"
