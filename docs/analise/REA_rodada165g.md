@@ -7,8 +7,8 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
 - 2026-10-28 17:20: Kepler landed b06e2c59, Granulizer engine landed 471b4f23 (both out of beta). Video Player:
   build-local 1 781 828 checks, 0 failures; Windows --videoshot with the user's ffmpeg 8.1 [SHOT]: frames at song
   0 / 1.5 / 3.25 s (delay 0.5 s) = ffmpeg's own frames at video 0 (held before the delay) / 1.0 / 2.75 s; landing.
-  Harmor's presets run as sub-round flbeta165h. Left: Transmitter and Scratcher ports (§6), Kepler Exo, Newtime /
-  Newtone.
+  Harmor's presets run as sub-round flbeta165h. Left: Transmitter port (§6), Kepler Exo, Newtime /
+  Newtone. (Scratcher: landed by sub-round flscratch165, §6.)
 - 2026-10-28 12:50 (resume after the 2nd BSOD): batch 2 for 0.1.20, one sub-round at a time. (1) Kepler
   (feature/flbeta165k, out of beta, verified in REA_rodada165g-flbeta165k.md) merged with main, build-local running;
   (2) Granulizer engine (feature/flgran165, out of beta, REA_rodada165g-flgran165.md) merged with main (pt-BR conflict:
@@ -27,7 +27,7 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
 | Fruity Big Clock | effect (no sound) | §2 | [MANUAL] |
 | Tuner | effect (no sound) | §3 | [MANUAL] |
 | Fruity HTML NoteBook | effect (no sound) | §4 | [MANUAL] |
-| Fruity Scratcher | effect (turntable) | (todo) | [MANUAL] |
+| Fruity Scratcher | effect (turntable) | FL's engine, state, sample, pattern events, editor (REA_rodada165g-flscratch165.md); DVS timecode not reproduced | [DECOMP], [FL render] |
 | Transmitter | effect (transient / sustain split) | (todo) | [MANUAL], presets |
 | Fruity Video Player | generator | §7 (video via the user's ffmpeg, sound track, FL's state) | [DECOMP] |
 | FL Studio Mobile / Mobile Rack FX | generator / effect | import note (§5) | |
@@ -86,8 +86,12 @@ of their own) are imported muted, with the note (Fruity Video Player: §7 since 
   0/1 enables: "Transient only" clears 38, "Sustain only" clears 37; 39–40 selectors 0…5; 41–42 0/1), 46 = 49…90,
   47 = 257 / 65793 (bytes). The DSP (transient / sustain split, Saturation / Bounce / Diffusion / Delay per section) needs
   a decompile of Transmitter.dll before LYNX can reproduce it; until then an imported Transmitter is reported as unsupported.
-- Fruity Scratcher [DATA presets]: state = version 1001000 + 14 floats + the sample path. engine_x64.dll is only the
-  DVS timecode decoder; the scratch DSP is in the 4 MB Delphi DLL. An FL render exists (D:\lynx-work\flplugins165\r\m_ref.wav).
+- Fruity Scratcher: **done** in sub-round flscratch165 (REA_rodada165g-flscratch165.md): FL's engine (motor / hold,
+  smoothing, rotations, DC blocker, gain / pan glides), FL's 16-bit copy of the sample, state + sample path + pattern
+  events imported, editor (scratch with the mouse, Browser / desktop drops). LYNX's renders vs FL's: motor within 1 LSB
+  (96.5…99 % of the samples equal), hold 99.5…99.95 % equal. Left: the DVS timecode input (engine_x64.dll) and RIAA,
+  FL's stop / reset of the platter at the song's end and its render pre-roll, FL's chunk grid for pattern events
+  (2…4 ms), the resampling of non-44.1 kHz samples [HYP].
 - Fruity Video Player: done in batch 2 (§7).
 
 ## 7. Fruity Video Player [DECOMP Fruity Video Player_x64.dll][DATA Default.fst]

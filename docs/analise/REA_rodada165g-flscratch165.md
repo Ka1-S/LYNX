@@ -6,6 +6,8 @@ Scratcher_x64.dll` (clean-room: behaviour only), [DFM] the editor form `TSYNTHED
 (why it stayed unported: FL's Ogg decoder — solved in round 77 — and the pattern events' scale — solved here).
 
 ## Where I stopped
+- 2026-10-29 00:10: done. build-local 1 885 975 checks, 0 failures (merged with main); Windows --flextrashot: editor
+  shots + drops (OS file drop and Browser drag load the sample, other files refused) [SHOT]; landing.
 - 2026-10-28 22:35: full core build OK; pattern events on the Scratcher's controls now map (they were dropped:
   effectParamFromFl had no entry); LYNX's full-path renders vs FL documented (§6). Next: Windows build + editor shot, land.
 - 2026-10-28 21:40: LYNX's engine alone (harness) matches FL to 1 LSB in every crafted project (§6). Waiting for a
