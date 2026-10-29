@@ -481,7 +481,7 @@ void PresetBar::showPresetMenu (juce::Component& owner, const FlPresets* flPrese
                 order.push_back (p.folder);
             folders[p.folder].addItem (utf8 (p.name.c_str()), true, p.name == fx->presetName, [this, i] { loadFactory (i); });
         }
-        menu.addSectionHeader (tr ("LYNX presets"));
+        menu.addSectionHeader (tr ("LYNX SHARE presets"));
         for (const auto& f : order)
             if (f.empty())
                 for (juce::PopupMenu::MenuItemIterator it (folders[f]); it.next();)

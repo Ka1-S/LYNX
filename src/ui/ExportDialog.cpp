@@ -833,21 +833,21 @@ void consolidatePlaylistTrack (AudioEngine& engine, int track, bool fromSongStar
 
 std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int format)
 {
-    auto panel = std::make_unique<ExportPanel> (engine, juce::File(), "LYNX", false);
+    auto panel = std::make_unique<ExportPanel> (engine, juce::File(), "LYNX SHARE", false);
     panel->setFormatForSnapshot (format);
     return panel;
 }
 
 std::unique_ptr<juce::Component> makeExportPanelForTracks (AudioEngine& engine, const std::vector<int>& tracks)
 {
-    return std::make_unique<ExportPanel> (engine, juce::File(), "LYNX", false, 0, tracks);
+    return std::make_unique<ExportPanel> (engine, juce::File(), "LYNX SHARE", false, 0, tracks);
 }
 
 void showExportDialogForTracks (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName,
                                 const std::vector<int>& tracks)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX",
+    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX SHARE",
                                                                                  true, -1, tracks)).release());
     options.dialogTitle = tr ("Render mixer tracks to audio files");
     options.dialogBackgroundColour = theme::colour::bg2;
@@ -861,7 +861,7 @@ void showExportDialogForTracks (AudioEngine& engine, const juce::File& suggested
 void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName, int format)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX", true, format)).release());
+    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX SHARE", true, format)).release());
     options.dialogTitle = tr ("Export audio");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;

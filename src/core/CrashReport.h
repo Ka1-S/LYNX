@@ -113,7 +113,7 @@ struct IssueFields
 {
     std::string title, version, os, osDetails, audio, kind, steps, expected, plugins, logs;
 };
-constexpr const char* issueFormBase = "https://github.com/Ka1-S/LYNX/issues/new";
+constexpr const char* issueFormBase = "https://github.com/Ka1-S/LYNX-SHARE/issues/new";
 constexpr std::size_t defaultMaxUrl = 8000;
 
 // The new-issue URL with the form prefilled; at most `maxLength` bytes: the longest fields (logs, steps, plugins)

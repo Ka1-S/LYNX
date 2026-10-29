@@ -12,25 +12,25 @@ LYNX SHARE
 
 ## Description
 
-LYNX（在此以 LYNX SHARE 之名發佈）是一款免費開源的數位音訊工作站（DAW），讓你做 Beat、寫歌。它採用 Beatmaker 們最愛的 Pattern 式工作流程——步進音序器式的 Channel Rack、Pattern、Piano Roll、支援編曲段落的 Playlist，以及具備 Insert、Send 與側鏈的 Mixer——並且在任何電腦上都能保持輕巧流暢。
+LYNX SHARE是一款免費開源的數位音訊工作站（DAW），讓你做 Beat、寫歌。它採用 Beatmaker 們最愛的 Pattern 式工作流程——步進音序器式的 Channel Rack、Pattern、Piano Roll、支援編曲段落的 Playlist，以及具備 Insert、Send 與側鏈的 Mixer——並且在任何電腦上都能保持輕巧流暢。
 
 • 輕巧：無鎖音訊引擎將軌道與混音軌分散到所有 CPU 核心，自動略過閒置的軌道，長音訊則直接從硬碟串流讀取。
 • 完整：超過 100 款內建樂器與效果器——合成器、鼓機、取樣器、EQ、壓縮器、限幅器、殘響、延遲、音準修正、視覺化工具等等。
 • 你的外掛：支援 VST3、CLAP 與 VST2 樂器和效果器，每個外掛都可選擇在獨立的沙箱程序中執行，外掛當掉也不會拖垮整個工作階段。
 • 可開啟 FL Studio 專案（.flp），保留其中的 Pattern、音符、混音器、自動化與取樣，並可匯入 MIDI 檔案。
-• 低延遲：支援 ASIO（包括適用於任何裝置的 LYNX 自家 ASIO 驅動程式）以及 WASAPI 共用與獨占模式。
+• 低延遲：支援 ASIO（包括適用於任何裝置的 LYNX SHARE 自家 ASIO 驅動程式）以及 WASAPI 共用與獨占模式。
 • 錄製音訊與 MIDI、編輯音訊、自動化任何參數，輸出為 WAV、FLAC、MP3、OGG 或分軌（stems）。
 • 介面語言：繁體中文、簡體中文、英文、葡萄牙文、西班牙文、法文、德文、日文、韓文等 15 種語言。
 
-不需帳號、沒有訂閱、沒有廣告，也沒有遙測。LYNX 是自由軟體（GNU AGPL-3.0），原始碼公開於 GitHub。
+不需帳號、沒有訂閱、沒有廣告，也沒有遙測。LYNX SHARE 是自由軟體（GNU AGPL-3.0），原始碼公開於 GitHub。
 
-LYNX 是獨立專案，與 Image-Line 沒有任何關聯，也未獲得其認可。FL Studio 是 Image-Line Software 的商標。其他產品名稱均為其各自所有者的商標。
+LYNX SHARE 是獨立專案，與 Image-Line 沒有任何關聯，也未獲得其認可。FL Studio 是 Image-Line Software 的商標。其他產品名稱均為其各自所有者的商標。
 
-LYNX 目前為 Alpha 版：難免有不夠完善之處，遇到問題請到 GitHub 回報。
+LYNX SHARE 目前為 Alpha 版：難免有不夠完善之處，遇到問題請到 GitHub 回報。
 
 ## What's new
 
-LYNX 0.1.20：首次登上 Microsoft Store。Fruity WaveShaper 與自動化片段支援 FL 風格的節點編輯，新增五款與 FL 逐位元一致的 FL 效果器，Dashboard 控制項可傳送 MIDI，另有大量修正。
+LYNX SHARE 0.1.20：首次登上 Microsoft Store。Fruity WaveShaper 與自動化片段支援 FL 風格的節點編輯，新增五款與 FL 逐位元一致的 FL 效果器，Dashboard 控制項可傳送 MIDI，另有大量修正。
 
 ## Features
 
@@ -57,7 +57,7 @@ LYNX 0.1.20：首次登上 Microsoft Store。Fruity WaveShaper 與自動化片�
 
 ## Screenshot captions
 
-- 01-workspace.png — LYNX 工作區：瀏覽器、Playlist、Piano Roll、Channel Rack 與 Mixer
+- 01-workspace.png — LYNX SHARE 工作區：瀏覽器、Playlist、Piano Roll、Channel Rack 與 Mixer
 - 02-playlist.png — 在 Playlist 中編排 Pattern、音訊與自動化
 - 03-piano-roll.png — 在 Piano Roll 中寫旋律與和弦
 - 04-mixer.png — 用 Insert、Send、側鏈與內建效果器混音

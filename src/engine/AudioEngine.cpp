@@ -2495,7 +2495,7 @@ bool AudioEngine::finishFlpImport (PreparedFlp&& prepared, bool asEdit)
                                         [&] (const MissingPlugin& m) { return m.name == name && ! m.replacementArg.empty(); });
                 if (it == missingPluginDetails.end())
                     it = missingPluginDetails.insert (missingPluginDetails.end(),
-                                                      MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed). FL Studio plays a missing plugin's slot unprocessed: a substitute slot's menu › Bypass all LYNX substitutes of this project does the same"),
+                                                      MissingPlugin { name, {}, TR_NOOP ("LYNX SHARE substitute: {0} (the original plugin is used again once it is installed). FL Studio plays a missing plugin's slot unprocessed: a substitute slot's menu › Bypass all LYNX SHARE substitutes of this project does the same"),
                                                                       effectInfo (fx.kind).name });
                 const auto user = userOf (imported, t);
                 if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())

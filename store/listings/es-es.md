@@ -13,25 +13,25 @@ DAW gratuita y de código abierto con flujo de trabajo basado en patrones: Chann
 
 ## Description
 
-LYNX (publicado aquí como LYNX SHARE) es una estación de trabajo de audio digital (DAW) gratuita y de código abierto para crear beats y canciones. Sigue el flujo de trabajo basado en patrones que tanto gusta a los beatmakers —un Channel Rack con secuenciador por pasos, patrones, Piano Roll, una Playlist con arreglos y un Mixer con inserts, envíos y sidechain— y está pensado para seguir siendo ligero y rápido en cualquier PC.
+LYNX SHARE es una estación de trabajo de audio digital (DAW) gratuita y de código abierto para crear beats y canciones. Sigue el flujo de trabajo basado en patrones que tanto gusta a los beatmakers —un Channel Rack con secuenciador por pasos, patrones, Piano Roll, una Playlist con arreglos y un Mixer con inserts, envíos y sidechain— y está pensado para seguir siendo ligero y rápido en cualquier PC.
 
 • Ligero: un motor de audio sin bloqueos (lock-free) que reparte los canales y las pistas del mixer entre los núcleos de tu CPU, se salta los canales inactivos y lee el audio largo directamente desde el disco.
 • Completo: más de 100 instrumentos y efectos integrados —sintetizadores, cajas de ritmos, samplers, ecualizadores, compresores, limitadores, reverbs, delays, corrección de afinación, visualizadores y mucho más.
 • Tus plugins: carga instrumentos y efectos VST3, CLAP y VST2, cada uno opcionalmente en su propio proceso aislado (sandbox), para que un plugin que se cuelgue no tumbe tu sesión.
 • Abre proyectos de FL Studio (.flp) con sus patrones, notas, mixer, automatización y samples, e importa archivos MIDI.
-• Baja latencia: ASIO (incluido el driver ASIO propio de LYNX, para cualquier dispositivo) y WASAPI en modo compartido y exclusivo.
+• Baja latencia: ASIO (incluido el driver ASIO propio de LYNX SHARE, para cualquier dispositivo) y WASAPI en modo compartido y exclusivo.
 • Graba audio y MIDI, edita audio, automatiza cualquier parámetro y exporta a WAV, FLAC, MP3, OGG o stems.
 • Interfaz en 15 idiomas, entre ellos español, inglés, portugués, francés, alemán, italiano, neerlandés, polaco, ruso, turco, japonés, coreano y chino.
 
-Sin cuenta, sin suscripción, sin anuncios y sin telemetría. LYNX es software libre (GNU AGPL-3.0); el código fuente está en GitHub.
+Sin cuenta, sin suscripción, sin anuncios y sin telemetría. LYNX SHARE es software libre (GNU AGPL-3.0); el código fuente está en GitHub.
 
-LYNX es un proyecto independiente, no afiliado a Image-Line ni respaldado por ella. FL Studio es una marca comercial de Image-Line Software. Los demás nombres de productos son marcas comerciales de sus respectivos propietarios.
+LYNX SHARE es un proyecto independiente, no afiliado a Image-Line ni respaldado por ella. FL Studio es una marca comercial de Image-Line Software. Los demás nombres de productos son marcas comerciales de sus respectivos propietarios.
 
-LYNX está en fase alfa: puede tener asperezas; por favor, informa de cualquier problema en GitHub.
+LYNX SHARE está en fase alfa: puede tener asperezas; por favor, informa de cualquier problema en GitHub.
 
 ## What's new
 
-LYNX 0.1.20: primera versión en Microsoft Store. Edición de puntos al estilo de FL en Fruity WaveShaper y en los clips de automatización, cinco efectos de FL más idénticos bit a bit a los de FL, controles del Dashboard que envían MIDI y muchas correcciones.
+LYNX SHARE 0.1.20: primera versión en Microsoft Store. Edición de puntos al estilo de FL en Fruity WaveShaper y en los clips de automatización, cinco efectos de FL más idénticos bit a bit a los de FL, controles del Dashboard que envían MIDI y muchas correcciones.
 
 ## Features
 
@@ -58,7 +58,7 @@ LYNX 0.1.20: primera versión en Microsoft Store. Edición de puntos al estilo d
 
 ## Screenshot captions
 
-- 01-workspace.png — El espacio de trabajo de LYNX: navegador, Playlist, Piano Roll, Channel Rack y Mixer
+- 01-workspace.png — El espacio de trabajo de LYNX SHARE: navegador, Playlist, Piano Roll, Channel Rack y Mixer
 - 02-playlist.png — Organiza patrones, audio y automatización en la Playlist
 - 03-piano-roll.png — Escribe melodías y acordes en el Piano Roll
 - 04-mixer.png — Mezcla con inserts, envíos, sidechain y efectos integrados

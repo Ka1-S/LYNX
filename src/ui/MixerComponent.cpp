@@ -2133,7 +2133,7 @@ juce::String addableEffectName (EffectKind kind)
     // LYNX's own pitch / frequency effects sit next to FL's look-alikes (Pitch Shifter, Frequency Shifter, Pitcher)
     // in the lists: tell them apart (round 162, issue #7 review)
     if (kind == EffectKind::pitchShift || kind == EffectKind::freqShift || kind == EffectKind::pitchCorrect)
-        return tr ("{0} (LYNX)", { name });
+        return tr ("{0} (LYNX SHARE)", { name });
     if (const auto* e = natives::effectEngine (kind))
     {
         if (! natives::available (*e, flStudioAccess()))
@@ -2644,7 +2644,7 @@ void addItems (juce::PopupMenu& menu, AudioEngine& engine, bool newProjects)
         juce::PopupMenu chain;
         const std::pair<const char*, MasterChain> chains[] = { { TR_NOOP ("Empty (nothing on the Master)"), MasterChain::empty },
                                                                { TR_NOOP ("Soft clipper only"), MasterChain::clipper },
-                                                               { TR_NOOP ("LYNX default (limiter)"), MasterChain::lynxDefault } };
+                                                               { TR_NOOP ("LYNX SHARE default (limiter)"), MasterChain::lynxDefault } };
         for (const auto& [label, c] : chains)
             chain.addItem (tr (label), true, d.master == c, [c = c] {
                 newProjectDefaults().master = c;
@@ -3346,7 +3346,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.setColour (colour::info);
         g.setFont (font (type::caption));
         const auto original = juce::String::fromUTF8 (substituteOriginalName (slot).c_str());
-        textcache::drawText (g, engine.getSong().substitutesBypassed ? tr ("LYNX substitute for {0} (bypassed)", { original }) : tr ("LYNX substitute for {0}", { original }),
+        textcache::drawText (g, engine.getSong().substitutesBypassed ? tr ("LYNX SHARE substitute for {0} (bypassed)", { original }) : tr ("LYNX SHARE substitute for {0}", { original }),
                     10 + titleWidth + 10, titleY,
                     juce::jmax (0, titleRight - 20 - titleWidth), 20, juce::Justification::centredLeft, true);
     }
@@ -4161,7 +4161,7 @@ bool EffectsPanel::dropPreset (const juce::File& file, juce::Point<int> position
     if (! fx)
     {
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Preset"),
-                                                tr ("LYNX can't build an effect from this preset."));
+                                                tr ("LYNX SHARE can't build an effect from this preset."));
         return false;
     }
 
@@ -4337,7 +4337,7 @@ void EffectsPanel::showAddMenu (int)
                                      repaint();
                                  });
     if (equivalents.getNumItems() > 0)
-        menu.addSubMenu (tr ("LYNX equivalents"), equivalents);
+        menu.addSubMenu (tr ("LYNX SHARE equivalents"), equivalents);
 
     juce::PopupMenu plugins;
     addPluginItems (plugins, engine, false, [this] (PluginRef ref) {
@@ -4494,7 +4494,7 @@ void EffectsPanel::showSlotMenu (int slot)
         menu.addSubMenu (hasSpare ? tr ("A/B compare (B stored)") : tr ("A/B compare"), ab);
     }
     if ((*slots())[(std::size_t) slot].isSubstitute()) // A/B of every substitute of the project at once (round 113)
-        menu.addItem (tr ("Bypass all LYNX substitutes of this project"), true, engine.getSong().substitutesBypassed, [this] {
+        menu.addItem (tr ("Bypass all LYNX SHARE substitutes of this project"), true, engine.getSong().substitutesBypassed, [this] {
             engine.editSong ([] (Song& song) { song.substitutesBypassed = ! song.substitutesBypassed; });
             repaint();
         });

@@ -1,7 +1,7 @@
-# LYNX on the Microsoft Store (MSIX)
+# LYNX SHARE on the Microsoft Store (MSIX)
 
-Windows users who install LYNX from the Microsoft Store get no SmartScreen or antivirus warning: the Store signs the
-package with Microsoft's certificate after it passes certification, and keeps LYNX up to date. An individual developer
+Windows users who install LYNX SHARE from the Microsoft Store get no SmartScreen or antivirus warning: the Store signs the
+package with Microsoft's certificate after it passes certification, and keeps LYNX SHARE up to date. An individual developer
 account in Partner Center is free. The maintainer creates the account and does the submission clicks; everything else
 is in the repository:
 
@@ -22,23 +22,23 @@ is in the repository:
 - **Full-trust desktop app** (`Windows.FullTrustApplication`, capability `runFullTrust`): the same `LYNX.exe` as the
   installer and the zip, plus `lynx-asio.dll`, `Demo.lynx`, `LICENSE`, `THIRD_PARTY.md`, `PRIVACY.md`.
 - **Windows 10 1809 (build 17763) or newer, x64.**
-- **File types:** `.lynx` (LYNX project, with the project-file icon), `.flp` and `.mid`/`.midi` (offered in *Open
+- **File types:** `.lynx` (LYNX SHARE project, with the project-file icon), `.flp` and `.mid`/`.midi` (offered in *Open
   with*; Windows never changes an existing default program for an MSIX app). Single audio files are not associated:
-  LYNX opens projects and MIDI files from Explorer, not a lone `.wav`.
-- **Microphone** device capability: Windows asks once before LYNX records from a microphone / audio interface.
+  LYNX SHARE opens projects and MIDI files from Explorer, not a lone `.wav`.
+- **Microphone** device capability: Windows asks once before LYNX SHARE records from a microphone / audio interface.
 - **Execution alias** `lynx.exe` (`%LOCALAPPDATA%\Microsoft\WindowsApps\lynx.exe`): command-line options such as
   `lynx --selftest r.txt` run inside the package.
 - **Names:** the Store name is the one reserved in Partner Center, **LYNX SHARE** ("LYNX" was taken):
-  `Package/Properties/DisplayName` and the listing title. Start menu, taskbar, Explorer's *Open with* and the app
-  itself still say **LYNX** (`VisualElements DisplayName`). If certification ever asks for the reserved name there
-  too, change that attribute in the template.
+  `Package/Properties/DisplayName` and the listing title. Since v0.1.20 the product itself is named LYNX SHARE, so
+  Start menu, taskbar, Explorer's *Open with* and the app say **LYNX SHARE** too (`VisualElements DisplayName` /
+  `ShortName`); the Application Id, `LYNX.exe` and the settings folders keep "LYNX".
 - **Version:** `project(LYNX VERSION x.y.z)` → `x.y.z.0` (the Store requires the fourth part to be 0). Every
   submission needs a higher version than the last one.
 - **Identity:** Partner Center › the app › *Product management › Product identity* shows `Package/Identity/Name`,
   `Package/Identity/Publisher` and `Package/Properties/PublisherDisplayName`. Copy them into the repository variables
   (GitHub › Settings › Secrets and variables › Actions › *Variables*):
 
-  | Variable | Partner Center field | LYNX's value (set 2026-10-27) |
+  | Variable | Partner Center field | LYNX SHARE's value (set 2026-10-27) |
   |---|---|---|
   | `MSIX_IDENTITY_NAME` | Package/Identity/Name | `KA1WARE.LYNXSHARE` |
   | `MSIX_PUBLISHER` | Package/Identity/Publisher | `CN=BACBB786-A595-4AC3-9807-A70EAA268E4C` |
@@ -61,14 +61,14 @@ In the `package` job (Windows), after the self-test, the editor windows test and
    "unsigned package" OID `2.25.311729368913984317654407730594956997722` appended (`--test-identity`): that is what
    lets an unsigned package install at all, and it gives the test package its own family name, so it can never clash
    with the Store-signed one. Everything else (files, manifest, assets, resources.pri) is the Store package's. It is
-   installed with `Add-AppxPackage -AllowUnsigned`, then LYNX runs **inside the package** through its execution alias: `--packageinfo` must report the package identity and a settings folder on the real disk (checked
+   installed with `Add-AppxPackage -AllowUnsigned`, then LYNX SHARE runs **inside the package** through its execution alias: `--packageinfo` must report the package identity and a settings folder on the real disk (checked
    from outside the package, like Explorer would), and `--selftest` must pass. The package is removed afterwards.
 
-## LYNX inside a package
+## LYNX SHARE inside a package
 
 Windows virtualizes a packaged app's writes: new files under `%APPDATA%` / `%LOCALAPPDATA%` and every `HKCU` write go to
 a private per-package copy that only the package's own processes see ([Microsoft: how packaged desktop apps
-run](https://learn.microsoft.com/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)). LYNX detects the package
+run](https://learn.microsoft.com/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)). LYNX SHARE detects the package
 (`GetCurrentPackageFamilyName`) and changes only what that breaks:
 
 | Area | Store build | Why |
@@ -78,16 +78,16 @@ run](https://learn.microsoft.com/windows/msix/desktop/desktop-to-uwp-behind-the-
 | `.lynx` registration in `HKCU\Software\Classes` | skipped | The manifest declares the file types; HKCU writes would only reach the package's private registry. |
 | Relaunch through the 8.3 short path (folders with accents) | skipped | `WindowsApps` paths are ASCII; a packaged exe started by its path would lose the package identity. |
 | Restart after a language change | `shell:AppsFolder\<family>!LYNX` | Starts the app through the package. |
-| LYNX ASIO for other programs | not offered (the hint says to use the installer build) | The package folder changes with every update, so a registered driver path would break. LYNX itself uses LYNX ASIO as usual. |
-| Updates | the Store | LYNX has no self-updater on Windows; nothing to disable. |
+| LYNX ASIO for other programs | not offered (the hint says to use the installer build) | The package folder changes with every update, so a registered driver path would break. LYNX SHARE itself uses LYNX ASIO as usual. |
+| Updates | the Store | LYNX SHARE has no self-updater on Windows; nothing to disable. |
 
 Unchanged: plugin scanning (VST3 / CLAP / VST2 in Common Files, user folders; the `--scan-one` child process and the
 plugin sandbox run inside the package too), WASAPI / ASIO / DirectSound, FL Studio detection (reads only), drag & drop,
 opening files from Explorer, the opt-in crash report. A plugin that writes its own licence or presets under
-`%APPDATA%` while running inside LYNX may have them stored in the package's private copy (Windows' rule for packaged
+`%APPDATA%` while running inside LYNX SHARE may have them stored in the package's private copy (Windows' rule for packaged
 hosts); files that already exist there are read and updated in place.
 
-For a test on a PC without the package, `LYNX_SIMULATE_PACKAGE_FAMILY=<family name>` makes LYNX behave as if packaged
+For a test on a PC without the package, `LYNX_SIMULATE_PACKAGE_FAMILY=<family name>` makes LYNX SHARE behave as if packaged
 (`LYNX.exe --packageinfo out.txt` writes what it sees).
 
 ### Testing an installed package locally
@@ -106,7 +106,7 @@ Get-AppxPackage KA1WARE.LYNXSHARE | Remove-AppxPackage
 
 `store/listings/<locale>.md` holds the listing per language: `en-us`, `pt-br`, `es-es` (also usable for `es-mx`),
 `fr-fr`, `de-de`, `it-it`, `nl-nl`, `pl-pl`, `ru-ru`, `tr-tr`, `id-id`, `ja-jp`, `ko-kr`, `zh-cn` (Simplified) and
-`zh-tw` (Traditional). Since 0.1.20 LYNX's interface has these 15 languages (resources/i18n/, Settings › Language),
+`zh-tw` (Traditional). Since 0.1.20 LYNX SHARE's interface has these 15 languages (resources/i18n/, Settings › Language),
 and every listing says so.
 
 The package declares the same 15 languages (`<Resources>` in resources/msix/AppxManifest.xml.in, and makepri's `/dq`
@@ -125,11 +125,11 @@ over Partner Center's limits.
 ## Store policy check
 
 - **Open source (AGPL-3.0)** is allowed; the listing links the source and licence (*Additional license terms*).
-- **Third-party plugin hosting** is allowed: LYNX loads VST3 / CLAP / VST2 the user installed themself; it downloads
+- **Third-party plugin hosting** is allowed: LYNX SHARE loads VST3 / CLAP / VST2 the user installed themself; it downloads
   no code (Store policy 10.2.2: no dynamic code from the network).
 - **No surprises:** no telemetry, ads, accounts or purchases; the only network use is the crash report, **opt-in**
   (asked after a crash; *Settings › General › Crash reports*). Say so in the privacy questions.
-- **`runFullTrust`** is a restricted capability; the submission asks why. Answer: *"LYNX is a desktop digital audio
+- **`runFullTrust`** is a restricted capability; the submission asks why. Answer: *"LYNX SHARE is a desktop digital audio
   workstation (Win32/JUCE). It needs full trust to host the user's VST3/CLAP audio plugins, open ASIO/WASAPI audio
   drivers with low latency and read and write the user's project and sample files anywhere on disk."*
 - **Names of other products** (FL Studio, plugin vendors) appear only as compatibility facts with the trademark notice;
@@ -138,5 +138,5 @@ over Partner Center's limits.
 ## Updating the Store version
 
 1. Release as usual (`docs/RELEASE.md`); the workflow attaches `LYNX-<version>-store.msix`.
-2. Partner Center › LYNX › *Start update* → *Packages*: upload the new `.msix` (and remove the old one) → *What's new*
+2. Partner Center › LYNX SHARE › *Start update* → *Packages*: upload the new `.msix` (and remove the old one) → *What's new*
    from the release notes → *Submit to the Store*. Certification usually takes 1–3 working days.

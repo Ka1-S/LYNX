@@ -210,7 +210,7 @@ public:
         // LYNX equivalents of well-known third-party effects (the substitutes table): findable by the product's name
         for (const auto& entry : pluginSubstitutes())
             if (! entry.instrument)
-                effects.all.push_back ({ tr ("{0} (LYNX equivalent of {1})", { juce::String::fromUTF8 (effectInfo (entry.effect).name), juce::String::fromUTF8 (entry.product.c_str()) }),
+                effects.all.push_back ({ tr ("{0} (LYNX SHARE equivalent of {1})", { juce::String::fromUTF8 (effectInfo (entry.effect).name), juce::String::fromUTF8 (entry.product.c_str()) }),
                                          tr ("built-in") + " " + juce::String::fromUTF8 (entry.vendor.c_str()),
                                          [this, entry] { targets.addEffect (makeSubstituteSlot (entry)); } });
 

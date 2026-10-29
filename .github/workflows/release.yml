@@ -1,4 +1,4 @@
-# Release build of LYNX for Windows, macOS and Linux.
+# Release build of LYNX SHARE for Windows, macOS and Linux.
 #
 # Every published binary comes from this workflow, built from the tagged source on GitHub-hosted
 # runners, so anyone can trace a binary back to the commit and the run that produced it
@@ -184,7 +184,7 @@ jobs:
           $exe = Get-Item bin\LYNX.exe
           $v = $exe.VersionInfo
           $v | Format-List ProductName, CompanyName, FileVersion, ProductVersion, LegalCopyright
-          if ($v.ProductName -ne 'LYNX' -or $v.ProductVersion -ne $env:VERSION) { throw "version resource mismatch" }
+          if ($v.ProductName -ne 'LYNX SHARE' -or $v.ProductVersion -ne $env:VERSION) { throw "version resource mismatch" }
           $sig = Get-AuthenticodeSignature $exe.FullName
           "Authenticode: $($sig.Status) $($sig.SignerCertificate.Subject)"
           if ('${{ needs.sign.result }}' -eq 'success' -and $sig.Status -ne 'Valid') { throw "signed build is not validly signed" }
@@ -457,7 +457,7 @@ jobs:
         run: |
           tag="$GITHUB_REF_NAME"
           if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" --draft --prerelease --title "LYNX ${tag#v}" \
+            gh release create "$tag" --draft --prerelease --title "LYNX SHARE ${tag#v}" \
               --notes "Built from \`$GITHUB_SHA\` by [this workflow run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
           fi
           gh release upload "$tag" dist/* --clobber

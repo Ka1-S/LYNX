@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  LYNX's MSIX package manifest for the Microsoft Store (round 165n, docs/STORE.md).
+  LYNX SHARE's MSIX package manifest for the Microsoft Store (round 165n, docs/STORE.md).
   scripts/make-msix-layout.py fills the @...@ fields: the identity comes from Partner Center (Product identity page),
   through the repository variables MSIX_IDENTITY_NAME, MSIX_PUBLISHER and MSIX_PUBLISHER_DISPLAY, and the display
   Store name (Properties/DisplayName) must be the name reserved there (MSIX_DISPLAY_NAME, default "LYNX SHARE":
-  "LYNX" was taken). Start menu, taskbar and the app itself still say LYNX (VisualElements DisplayName).
+  "LYNX" was taken). Since v0.1.20 the product is LYNX SHARE everywhere: Start menu, taskbar and the app say it too
+  (VisualElements DisplayName / ShortName); the Application Id, LYNX.exe and the data folders keep "LYNX".
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -47,10 +48,10 @@
 
   <Applications>
     <Application Id="LYNX" Executable="LYNX.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="LYNX" Description="Free, open-source digital audio workstation"
+      <uap:VisualElements DisplayName="LYNX SHARE" Description="Free, open-source digital audio workstation"
         BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" Square71x71Logo="Assets\SmallTile.png"
-          Square310x310Logo="Assets\LargeTile.png" ShortName="LYNX" />
+          Square310x310Logo="Assets\LargeTile.png" ShortName="LYNX SHARE" />
       </uap:VisualElements>
       <Extensions>
         <!-- `lynx` on the command line (and the release workflow's packaged self-test) -->
@@ -63,7 +64,7 @@
              current default program) -->
         <uap:Extension Category="windows.fileTypeAssociation">
           <uap:FileTypeAssociation Name="lynxproject">
-            <uap:DisplayName>LYNX Project</uap:DisplayName>
+            <uap:DisplayName>LYNX SHARE Project</uap:DisplayName>
             <uap:Logo>Assets\ProjectFile.png</uap:Logo>
             <uap:InfoTip>LYNX project</uap:InfoTip>
             <uap:SupportedFileTypes>

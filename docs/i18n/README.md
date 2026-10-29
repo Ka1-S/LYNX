@@ -1,8 +1,8 @@
-# LYNX translations
+# LYNX SHARE translations
 
-LYNX's interface is written in English; every other language is a table in `resources/i18n/<id>.txt`
+LYNX SHARE's interface is written in English; every other language is a table in `resources/i18n/<id>.txt`
 (JUCE `LocalisedStrings` format) embedded in the executable. Settings › General › Language lists them, each in
-its own name; on the very first start LYNX uses the operating system's language when it has a table for it.
+its own name; on the very first start LYNX SHARE uses the operating system's language when it has a table for it.
 
 | id | Language | Glossary |
 |---|---|---|
@@ -22,7 +22,7 @@ its own name; on the very first start LYNX uses the operating system's language 
 | zh-Hant | 繁體中文 | [zh-Hant-glossary.md](zh-Hant-glossary.md) |
 
 The translations other than pt-BR are new in 0.1.20. If a term sounds wrong to producers in your language, please
-[open an issue](https://github.com/Ka1-S/LYNX/issues/new?title=Translation%20(xx)%3A%20) (Settings › General ›
+[open an issue](https://github.com/Ka1-S/LYNX-SHARE/issues/new?title=Translation%20(xx)%3A%20) (Settings › General ›
 Language has a link too) or send a pull request.
 
 ## The file format

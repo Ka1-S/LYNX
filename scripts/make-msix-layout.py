@@ -9,7 +9,7 @@ Usage:
 
 The identity defaults come from the environment (MSIX_IDENTITY_NAME, MSIX_PUBLISHER, MSIX_PUBLISHER_DISPLAY: the
 repository variables, copied from Partner Center › Product identity) and fall back to the same values; MSIX_DISPLAY_NAME
-is the app name reserved in Partner Center (default "LYNX SHARE"; Start menu and the app itself say LYNX). --test-identity
+is the app name reserved in Partner Center (default "LYNX SHARE"; Start menu, taskbar and the app itself say LYNX SHARE too). --test-identity
 appends Windows' "unsigned package" OID to the publisher, so `Add-AppxPackage -AllowUnsigned` installs the package
 for a test (it can then never clash with the Store-signed one). See docs/STORE.md.
 """

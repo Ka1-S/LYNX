@@ -2340,7 +2340,7 @@ private:
             ref.edit (engine, [s = *synth] (ChannelDef& channelDef) { channelDef.synth = s; });
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("FL presets"),
-                                                    tr ("This preset is not for a synth LYNX converts, or it could not be read."));
+                                                    tr ("This preset is not for a synth LYNX SHARE converts, or it could not be read."));
     }
     juce::Slider porta;
     juce::ComboBox filterTypeBox;

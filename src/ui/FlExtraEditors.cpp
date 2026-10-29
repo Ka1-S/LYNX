@@ -796,7 +796,7 @@ private:
         if (a.empty())
             note = tr ("No page. Choose a .html file with Browse, or type a web address and press Enter.");
         else if (fx::htmlnotebook::isWebAddress (a))
-            note = tr ("A web page: LYNX does not load web pages itself. Use \"Open in browser\".");
+            note = tr ("A web page: LYNX SHARE does not load web pages itself. Use \"Open in browser\".");
         else
         {
             const juce::File file (juce::String::fromUTF8 (a.c_str()));

@@ -621,7 +621,7 @@ private:
         load.setEnabled (validSlot());
         slave.setEnabled (validSlot());
         preview.setButtonText (previewing ? tr ("Stop") : tr ("Preview"));
-        juce::String text = tr ("(beta) LYNX's own analysis and pitch / time engines; FL's own edits are not reproduced exactly");
+        juce::String text = tr ("(beta) LYNX SHARE's own analysis and pitch / time engines; FL's own edits are not reproduced exactly");
         if (sample != nullptr)
         {
             const juce::File f (juce::String::fromUTF8 (samplePath.c_str()));
