@@ -1,9 +1,10 @@
 # Round 165r crash13: GitHub issue #13 (caiorobertcr7, 0.1.17, Windows 11, ASIO4ALL 64 samples)
 
 ## Where I stopped
-- 2026-10-28 19:40: fixes committed (driver panel helper + selftest "driver_panel", SerialJobs for audio-device.xml and
-  the glitch log, core tests tests/Crash13Tests.inc). 20:30 Linux froze (disk full, zig caches); rebuilding from scratch (ZIG cache ~/.cache/zig-crash13*). Big data now on /mnt/e/lynx-work/crash13 (0.1.17 exe+pdb, symbolized crash).
-  Next: Windows check of the build (panel buffer kept, no hang file from saveAudioDeviceState), land, notes, reply.
+- 2026-10-28 22:50: build-local with FL Data 0 failures (1787612 checks); Windows build OK, `--selftest` driver_panel=OK.
+  Windows GUI check of the fix done (below). Added the FL plugin database warm-up (3rd freeze source); Windows rebuild
+  running, then a short Settings-open check, land (merge lock + land.sh crash13), notes, reply (draft kept on
+  /mnt/e/lynx-work/crash13/reply13.md until it goes into tmp/coord/replies-0.1.20.md).
 
 ## Crash (LYNX.exe 0.1.17 + LYNX.pdb from /mnt/d/lynx-work/crash-reports/symbols/0.1.17, `LYNX.exe --symbolize`)
 ```
@@ -54,3 +55,13 @@ exactly there.
    there. restoreAudioDeviceState waits for the queue. Core tests: tests/Crash13Tests.inc.
 Not changed: the driver open itself stays on the message thread (ASIO drivers are COM objects tied to that thread;
 FL Studio blocks the same way while it opens a device).
+
+## Windows check of the fix (build-win-crash13, fresh profile prof2, test mode, FL Studio ASIO)
+- Driver settings… → FL ASIO panel → 512 → close: LYNX's buffer box shows **512 samples** (shot n4; before the fix it
+  stayed on 272, shot s12). audio-device.xml keeps no buffer attribute = the driver's preferred size on the next start.
+- 6 + 8 more open/close cycles of the panel: no crash, no hang file from them.
+- Hang files of the session (symbolized with this build's PDB): only the ASIO driver open (openDevice, 2.06 s) and
+  **readFlPluginDatabase ← PluginHost::pluginFolders ← SettingsPanel (Files page FolderList)**: 2.16 s the first time
+  Settings opens (FL's plugin database = hundreds of small files). No saveAudioDeviceState stall any more.
+3. Fix: PluginHost reads FL's plugin database on a thread 3 s after start (joined in the destructor); the first
+   Settings open finds it loaded.
