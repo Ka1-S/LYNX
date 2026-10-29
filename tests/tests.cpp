@@ -25,6 +25,7 @@
 #include "core/Simd.h"
 #endif
 
+#include "core/AutomationDisplay.h"
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
@@ -16471,7 +16472,9 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Fl165Tests.inc"
 #include "Perf165Tests.inc"
 #include "Issue12Tests.inc"
+#include "Issue12cTests.inc"
 #include "FlGran165Tests.inc"
+#include "GranDrop165Tests.inc"
 #include "Kepler165kTests.inc"
 #include "MixerLatency165Tests.inc"
 #include "Audit165Tests.inc"

@@ -10,6 +10,7 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include "core/AutomationDisplay.h"
 #include "core/HeldNotes.h"
 #include "core/Preferences.h"
 #include "core/LiveEventQueue.h"
@@ -393,6 +394,13 @@ public:
 
     // Document (UI thread)
     const Song& getSong() const noexcept { return song; }
+    // The values automation gives the controls at the playhead while the song plays (issue #12: knobs and faders move
+    // with their automation, as in FL). Refreshed at most once per UI frame, on the UI thread only; the audio thread
+    // does no extra work for it. An editor shows `shown (target, its Song value)` and repaints when the generation
+    // changes.
+    const AutomationDisplay& getAutomationDisplay();
+    // the time the last refresh took (ms), for --perf style measurements
+    double getAutomationDisplayMs() const noexcept { return automationDisplayCostMs; }
     void setSong (Song newSong); // new/opened project: clears the history
 
     // Edits the song and publishes it to audio. `undoable` edits go into the history;
@@ -598,6 +606,10 @@ private:
     void startAudioTake();
     void finishAudioTake();
     double estimatedPositionNow() const noexcept;
+    AutomationDisplay automationDisplay;
+    std::uint64_t songStamp = 1;            // + 1 at every publishSong (the display's tables follow the Song)
+    double automationDisplayAtMs = -1.0e9;  // when it was last refreshed
+    double automationDisplayCostMs = 0.0;
 
     void buildInitialGraph();
     void choosePreferredDriver(); // a first start on Linux: PipeWire, then JACK, then ALSA (round 161)

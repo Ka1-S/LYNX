@@ -563,9 +563,13 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             }
 
             const auto touched = knobDrag != Area::none && knobRow == row;
-            theme::drawKnob (g, controlBounds (Area::pan, row).toFloat().reduced (1.0f, 2.0f), (channel.pan + 1.0f) / 2.0f, true,
+            // (while the song plays an automated knob shows its automation's value, issue #12)
+            const auto& automated = engine.getAutomationDisplay();
+            theme::drawKnob (g, controlBounds (Area::pan, row).toFloat().reduced (1.0f, 2.0f),
+                             automated.shown ({ AutomationTargetKind::channelPan, row }, (channel.pan + 1.0f) / 2.0f), true,
                              touched && knobDrag == Area::pan ? accent : info, hovered (Area::pan) || (touched && knobDrag == Area::pan));
-            theme::drawKnob (g, controlBounds (Area::volume, row).toFloat().reduced (1.0f, 2.0f), channel.volume, false,
+            theme::drawKnob (g, controlBounds (Area::volume, row).toFloat().reduced (1.0f, 2.0f),
+                             automated.shown ({ AutomationTargetKind::channelVolume, row }, channel.volume), false,
                              touched && knobDrag == Area::volume ? accent : knobArc, hovered (Area::volume) || (touched && knobDrag == Area::volume));
 
             // small box with the mixer insert ("-" = straight to Master)
@@ -2415,6 +2419,22 @@ void ChannelRackComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void ChannelRackComponent::timerCallback()
 {
+    // the channels' volume / pan knobs follow their automation (issue #12): only the automated knobs repaint
+    if (const auto& shown = engine.getAutomationDisplay(); shown.getGeneration() != shownAutomation)
+    {
+        shownAutomation = shown.getGeneration();
+        std::vector<int> rows;
+        for (const auto& t : shown.automatedTargets())
+            if (t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan)
+                rows.push_back (t.index);
+        if (isShowing())
+            for (const auto list : { &rows, &automatedRows })
+                for (const auto r : *list)
+                    if (r >= 0 && r < (int) engine.getSong().channels.size())
+                        repaint (controlBounds (Area::pan, r).getUnion (controlBounds (Area::volume, r)).expanded (2));
+        automatedRows = std::move (rows);
+    }
+
     auto& transport = engine.getTransport();
     auto step = -1;
 

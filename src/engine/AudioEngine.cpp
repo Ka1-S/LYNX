@@ -2582,8 +2582,22 @@ void AudioEngine::keepRunningPlugins (PreparedFlp& prepared)
                  queue.end());
 }
 
+const AutomationDisplay& AudioEngine::getAutomationDisplay()
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    if (now - automationDisplayAtMs >= 12.0) // (editors ask from their own timers: once per frame is enough)
+    {
+        automationDisplayAtMs = now;
+        const auto playing = transport.playing.load (std::memory_order_relaxed);
+        automationDisplay.update (song, songStamp, estimatedPositionNow(), playing);
+        automationDisplayCostMs = juce::Time::getMillisecondCounterHiRes() - now;
+    }
+    return automationDisplay;
+}
+
 void AudioEngine::publishSong()
 {
+    ++songStamp;
     // diagnostics (round 149): with LYNX_TRACE_EDITS set, each publish's time goes to %APPDATA%\LYNX\edits.log
     static const bool traceEdits = std::getenv ("LYNX_TRACE_EDITS") != nullptr;
     const auto publishStart = juce::Time::getMillisecondCounterHiRes();
