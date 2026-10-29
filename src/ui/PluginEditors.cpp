@@ -6,6 +6,7 @@
 #include "ui/VisualEditors.h"
 #include "ui/FlExtraEditors.h"
 #include "ui/PluginEditors.h"
+#include "core/ShownEffectSlot.h"
 
 #include <cstring>
 #include <map>
@@ -127,9 +128,13 @@ public:
                     || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0 || std::strcmp (item.display, "hwping") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
-                startTimerHz (30);
+                liveDisplays = true;
                 break;
             }
+        if (! node.locate)
+            startTimerHz (30); // live displays, and the controls following their automation (cheap while nothing moves)
+        else if (liveDisplays)
+            startTimerHz (30);
         setSize ((int) std::ceil ((float) l.width * initialScale), (int) std::ceil ((float) l.height * initialScale + headerHeight + footerHeight()));
     }
 
@@ -143,7 +148,17 @@ public:
     // the design size (for the window's aspect ratio)
     juce::Point<int> designSize() const { return { activeLayout().width, activeLayout().height }; }
 
+    // The slot as shown: while the song plays, its automated parameters at their automation's value (issue #11 comment 4:
+    // Parametric EQ 2's handles, Fruity Filter's knobs... move with the automation, as in FL). Edits always go through
+    // setParams, so they change the Song's values.
     const EffectSlot* current() const
+    {
+        const auto* fx = stored();
+        return node.locate ? fx : shownSlot.get (engine.getAutomationDisplay(), fx, track, slot, juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown());
+    }
+
+    // the slot in the Song (or the Patcher node)
+    const EffectSlot* stored() const
     {
         if (node.locate)
         {
@@ -4321,6 +4336,9 @@ private:
     void timerCallback() override
     {
         if (! isShowing()) return; // a hidden editor costs nothing
+        if (! node.locate && shownSlot.changed (engine.getAutomationDisplay(), track, slot)) // the controls follow their automation
+            repaint();
+        if (! liveDisplays) return;
         learnScaleFromMidi();
         if (kind == EffectKind::hardwareInsert)
             hwPingTick();
@@ -4375,6 +4393,8 @@ private:
     skin::Animator anim;                            // hover fades (runs only while something moves)
     int quietFrames = 1000; // frames since the live meters last moved (the displays start at rest)
     float lastMeters = 0.0f;
+    bool liveDisplays = false;            // the layout has live meters / graphs (redrawn by the timer)
+    mutable ShownEffectSlot shownSlot;    // the slot with its automation's values (current())
     ui::ValueDrag drag;
     juce::String presetName;
     pluginheader::PresetBar bar { engine, track, slot }; // undo / redo, A / B, presets (round 129)

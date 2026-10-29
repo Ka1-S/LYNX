@@ -45,7 +45,27 @@ COMMON=(-target "$TARGET" -std=c++20 -O2 -DNDEBUG=1 -fno-sanitize=undefined
         -include "$OUT/JuceConfig.h" -include cmake/mingw/mingw_compat.h
         -I"$OUT/shim" -I"$JUCE_DIR/modules" -I"$JUCE_DIR/modules/juce_audio_processors/format_types/VST3_SDK" -Ithird_party/clap/include -Ithird_party/wavpack/include -Ithird_party/vorbis/include -Ithird_party/lame/include -Ithird_party/asiosdk/common -Ithird_party/sse2neon -Ithird_party/pocketpy -Isrc)
 
-export ZIG OUT JUCE_DIR TARGET
+# juce_gui_basics is compiled from a patched copy (cmake/LynxPatchJuce.cmake, issue #11: drag & drop fixes), so the
+# JUCE checkout itself is never modified. The copy is only replaced when its patched sources change (module cache).
+GUI_BASICS_SRC="$JUCE_DIR/modules/juce_gui_basics"
+CMAKE="${CMAKE:-$(command -v cmake || ls "$HOME"/opt/cmake-*/bin/cmake 2>/dev/null | head -n 1)}"
+if [[ -n "$CMAKE" ]]; then
+    rm -rf "$OUT/juce-patched.new"
+    mkdir -p "$OUT/juce-patched.new/modules"
+    cp -r "$JUCE_DIR/modules/juce_gui_basics" "$OUT/juce-patched.new/modules/"
+    "$CMAKE" -DJUCE_DIR="$OUT/juce-patched.new" -P cmake/LynxPatchJuce.cmake
+    if diff -rq "$OUT/juce-patched.new" "$OUT/juce-patched" >/dev/null 2>&1; then
+        rm -rf "$OUT/juce-patched.new"
+    else
+        rm -rf "$OUT/juce-patched" && mv "$OUT/juce-patched.new" "$OUT/juce-patched"
+        rm -f "$OUT/juce/juce_gui_basics.o"
+    fi
+    GUI_BASICS_SRC="$OUT/juce-patched/modules/juce_gui_basics"
+else
+    echo "warning: cmake not found; JUCE's drag & drop fixes (cmake/LynxPatchJuce.cmake) are not applied" >&2
+fi
+
+export ZIG OUT JUCE_DIR TARGET GUI_BASICS_SRC
 export COMMON_STR="${COMMON[*]}"
 
 echo "Compiling JUCE modules (cached)..."
@@ -57,7 +77,9 @@ for m in "${MODULES[@]}"; do echo "$m"; done | xargs -P "$JOBS" -I{} bash -c '
         # JUCE ASIO uses MSVC __try/__except: clang accepts it with -fms-extensions, but on MinGW it does not catch
         # (a driver crashing while being opened/closed is not contained in this build; the MSVC build keeps the guard)
         [[ "$m" == juce_audio_devices ]] && extra="-fms-extensions -DJUCE_DONT_AUTOLINK_TO_WIN32_LIBRARIES=1"
-        $ZIG c++ $COMMON_STR $extra -w -c "$JUCE_DIR/modules/$m/$m.cpp" -o "$obj"
+        src="$JUCE_DIR/modules/$m/$m.cpp"
+        [[ "$m" == juce_gui_basics ]] && src="$GUI_BASICS_SRC/$m.cpp"
+        $ZIG c++ $COMMON_STR $extra -w -c "$src" -o "$obj"
     fi'
 
 # Extra units that JUCE's CMake compiles along with the modules
@@ -148,7 +170,7 @@ APP_SOURCES+=(src/core/CrashReport.cpp src/ui/CrashReporter.cpp)
 # visual plugins: Wave Candy, Visualizer, video export (round 164c)
 APP_SOURCES+=(src/core/VisualFx.cpp src/ui/VisualEditors.cpp)
 # FL plugins LYNX lacked: Mute 2, Big Clock, Tuner, HTML NoteBook (round 165g)
-APP_SOURCES+=(src/core/FlExtraFx.cpp src/ui/FlExtraEditors.cpp src/core/VideoPlayer.cpp src/ui/VideoPlayerView.cpp)
+APP_SOURCES+=(src/core/FlExtraFx.cpp src/core/Scratcher.cpp src/ui/FlExtraEditors.cpp src/core/VideoPlayer.cpp src/ui/VideoPlayerView.cpp)
 APP_SOURCES+=(src/core/VisualFx.cpp src/core/FruityDance.cpp src/ui/VisualEditors.cpp src/ui/VisualGl.cpp src/ui/DanceView.cpp)
 
 echo "WavPack (decoder, C)..."

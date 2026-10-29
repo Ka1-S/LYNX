@@ -5641,10 +5641,27 @@ countries: fr be ch ca lu
 "Selects the sequence" = "Sélectionne la séquence"
 "Passed on" = "Transmis"
 "An incoming MIDI program change: ignored, selects the sequence (0 = the first), or goes on to the instruments after it" = "Un changement de programme MIDI entrant : ignoré, sélectionne la séquence (0 = la première) ou passe aux instruments qui suivent"
+"Backwards" = "En arrière"
+"Stopped" = "Arrêté"
+"Forwards" = "En avant"
+"The sample on the platter (or drop a file here)" = "L'échantillon sur le plateau (ou déposez un fichier ici)"
+"No sample: load one or drop a file" = "Pas d'échantillon : chargez-en un ou déposez un fichier"
+"Rotations" = "Tours"
+"Load sample" = "Charger un échantillon"
+"Wave position" = "Position dans l'onde"
+"Acceleration" = "Accélération"
+"Smooth 1" = "Lissage 1"
+"Smooth 2" = "Lissage 2"
+"Smooth 3" = "Lissage 3"
+"Smooth 4" = "Lissage 4"
+
+"Play / stop from the start of the song or pattern" = "Lecture / arrêt depuis le début du morceau ou du pattern"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) modes
+# --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Stéréo inversée"
 "Ping-pong" = "Ping-pong"
+
 # --- Not in pt-BR.txt (yet)
 "[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu" = "[LMB] ouvrir/fermer l'éditeur  [Alt]+[LMB] garder les autres ouverts  [Ctrl]+[LMB] écouter  [2xLMB] Piano Roll  [LMB] glisser haut/bas réordonne  [RMB] menu du canal"
 "Peak meter (left/right) with peak hold  [LMB] clears the clip light" = "Crêtemètre (gauche/droite) avec maintien de crête  [LMB] efface le voyant d'écrêtage"

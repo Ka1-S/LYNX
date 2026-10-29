@@ -26,6 +26,7 @@
 #endif
 
 #include "core/AutomationDisplay.h"
+#include "core/ShownEffectSlot.h"
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
@@ -16466,6 +16467,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "PerfMode165Tests.inc"
 #include "Patch165Tests.inc"
 #include "FlPlugins165Tests.inc"
+#include "FlScratch165Tests.inc"
 #include "VideoPlayer165Tests.inc"
 #include "Dash165Tests.inc"
 #include "LinuxMouse165Tests.inc"
@@ -16481,3 +16483,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Vfx165cTests.inc"
 #include "HarmorBeta165hTests.inc"
 #include "Crash13Tests.inc"
+#include "Issue11bTests.inc"
