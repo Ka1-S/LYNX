@@ -20,7 +20,8 @@ verdict MATCH / DIFFERENT / MISSING / UNVERIFIED. DIFFERENT / MISSING items that
 - 2026-10-29 19:55: part a2 (4.10 metronome FL-exact, coordinator's request): worktree ../lynx-wt-audit165z-a2
   (feature/audit165z-a2 from origin/main 6e67c278). FL measured (me0–me20, fl_met*.wav, Audio logger fits; FL's
   registry values restored afterwards), fix F done, Windows run mt0–mt12 + selftest OK (desktop clean, lock
-  released). Next: tests, land.
+  released). lynx_tests: 1887165 checks; the two fader checks of the new test expected a linear fader (fixed to FL's
+  fader curve, `audit165za2_*` 36 checks, 0 failures). Next: land.
 
 ## Evidence
 

@@ -129,11 +129,13 @@ TEST (audit165za2_metronome_plays_through_its_mixer_track)
     renderer.process (state.get(), false, 0.0, 256, l.data(), r.data());
     CHECK (std::abs (l[100]) < 1e-6f);
 
-    // through insert 3's fader (half the gain) and mute
+    // through insert 3's fader (half way to 0 dB, FL's fader curve) and mute
     song.mixer[3].volume = lynx::unityFader * 0.5f;
+    const auto halfFader = lynx::faderGain (lynx::unityFader * 0.5f);
+    CHECK (halfFader > 0.01f && halfFader < 0.9f);
     auto half = lynx::RackState::build (song, state.get(), 48000.0);
     run (half.get(), 3);
-    CHECK (std::abs (l[100] - 0.25f) < 2e-3f);
+    CHECK (std::abs (l[100] - 0.5f * halfFader) < 2e-3f);
     run (half.get(), 0); // (the Master is not insert 3)
     CHECK (std::abs (l[100] - 0.5f) < 1e-3f);
     song.mixer[3].muted = true;
@@ -146,5 +148,5 @@ TEST (audit165za2_metronome_plays_through_its_mixer_track)
     song.mixer[0].volume = lynx::unityFader * 0.5f;
     auto master = lynx::RackState::build (song, muted.get(), 48000.0);
     run (master.get(), 0);
-    CHECK (std::abs (l[100] - 0.25f) < 2e-3f);
+    CHECK (std::abs (l[100] - 0.5f * halfFader) < 2e-3f);
 }
