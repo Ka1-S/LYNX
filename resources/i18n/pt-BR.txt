@@ -5908,4 +5908,3 @@ countries: br
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Estéreo invertido"
-"Ping-pong" = "Pingue-pongue"
