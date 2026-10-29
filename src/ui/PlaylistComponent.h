@@ -32,7 +32,8 @@ namespace lynx
 //    cursor and the hint bar tell what a click would do (core/EditorGestures.h)
 //  - right click on a clip's name strip (or its menu button) opens its menu (split, make unique, etc.)
 //  - track header (FL's layout: name, group arrow, LED on the right): click selects the track, the LED mutes it
-//    (Ctrl+click or right-click on it: solo), the arrow of a group header folds / unfolds its group; right
+//    (Ctrl+click or right-click on it: solo), the arrow of a group header folds / unfolds its group; an audio
+//    track's record button arms / disarms its mixer track and its input button picks the input (FL 2026); right
 //    click elsewhere opens the track menu (FL's order); double click opens the source of the track's first
 //    clip; Shift+wheel moves the track up / down. Grouped tracks are indented under their header (REA round 104)
 //  - keys (via handleKey): Delete, Backspace (global grid on/off), Ctrl+A/C/X/V, Ctrl+B (repeats the
@@ -229,6 +230,11 @@ private:
     void openClipSource (int clip, bool other); // double click: the clip's pattern / automation (Alt: the other editor)
     juce::Rectangle<int> trackLed (int track) const;   // the mute LED on the right of a header
     juce::Rectangle<int> trackArrow (int track) const; // a group header's fold arrow (empty for other tracks)
+    // An audio track's buttons (FL 2026, issue #11), acting on its linked mixer track: "Arm/disarm recording" (left of
+    // the LED / arrow) and, on rows tall enough, "Audio input source" (with the monitoring choices). Empty for others.
+    juce::Rectangle<int> trackArm (int track) const;
+    juce::Rectangle<int> trackInput (int track) const;
+    static constexpr int inputButtonMinHeight = 52; // FL shows the row of buttons from 150 % of its track height
     void editTrack (int track, std::function<void (PlaylistTrack&)> change);
     int currentTrack = -1; // the track selected by a click on its header (FL marks it next to the LED)
     std::vector<int> selectedTracks; // Ctrl / Shift+click on headers: more selected tracks (round 165m)
@@ -300,12 +306,12 @@ private:
     {
         int clip = -1, track = -1;
         gesture::Target target = gesture::Target::empty;
-        bool header = false, led = false, arrow = false;
+        bool header = false, led = false, arrow = false, arm = false, input = false;
         int divider = -1; // the track whose bottom edge in the headers is under the mouse (resizes it)
         bool operator== (const Hover& o) const
         {
             return clip == o.clip && track == o.track && target == o.target && header == o.header && led == o.led && arrow == o.arrow
-                   && divider == o.divider;
+                   && arm == o.arm && input == o.input && divider == o.divider;
         }
     };
     Hover hover;
