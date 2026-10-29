@@ -389,7 +389,7 @@ juce::Rectangle<int> MixerStrips::tipArea (Part part, int t) const
         {
             const auto rail = faderRail (t);
             const auto& mixer = engine.getSong().mixer;
-            const auto v = t >= 0 && t < (int) mixer.size() ? mixer[(std::size_t) t].volume : 0.0f;
+            const auto v = t >= 0 && t < (int) mixer.size() ? shownVolume (t) : 0.0f;
             const auto capY = rail.getBottom() - (int) (v * (float) rail.getHeight());
             return { rail.getX(), capY - 6, rail.getWidth(), 12 };
         }
@@ -594,7 +594,8 @@ void MixerStrips::paint (juce::Graphics& g)
         }
 
         // pan and stereo separation
-        drawKnob (g, panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f), (track.pan + 1.0f) * 0.5f, true,
+        drawKnob (g, panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f),
+                  engine.getAutomationDisplay().shown (AutomationTarget { AutomationTargetKind::mixerPan, t }, (track.pan + 1.0f) * 0.5f), true,
                   dragging (Part::pan) ? colour::accent : colour::info, hovered (Part::pan) || dragging (Part::pan));
         drawKnob (g, stereoArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), (track.stereo + 1.0f) * 0.5f, true,
                   dragging (Part::stereo) ? colour::accent : colour::knobArc, hovered (Part::stereo) || dragging (Part::stereo));
@@ -684,7 +685,8 @@ void MixerStrips::paint (juce::Graphics& g)
 
             // fader track and 0 dB mark
             const auto railX = (float) fader.getCentreX();
-            const auto capY = (float) fader.getBottom() - track.volume * (float) fader.getHeight();
+            const auto volume = shownVolume (t); // (its automation's value while it plays: the fader moves, issue #12)
+            const auto capY = (float) fader.getBottom() - volume * (float) fader.getHeight();
             theme::fillRoundRect (g, { railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight() }, 2.0f, colour::bg0);
             theme::fillRoundRect (g, { railX - 2.0f, capY, 4.0f, juce::jmax (0.0f, (float) fader.getBottom() - capY) }, 2.0f, colour::bg6.brighter (0.15f).withAlpha (track.muted ? 0.4f : 1.0f));
             const auto unityY = (float) fader.getBottom() - unityFader * (float) fader.getHeight();
@@ -703,7 +705,7 @@ void MixerStrips::paint (juce::Graphics& g)
 
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption));
-            textcache::drawText (g, faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
+            textcache::drawText (g, faderToDb (volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
 
             // a hardware output target (REA round 156, optional): a small badge at the fader's top right
             if (mixeroutput::isCustom (engine, t))
@@ -741,7 +743,10 @@ void MixerStrips::paint (juce::Graphics& g)
 
                 // the route's level knob (FL's route knob), on the routes to inserts and to Master
                 if (on)
-                    drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), faderPosition (song.routeLevel (selected, t)), false,
+                    drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f),
+                              engine.getAutomationDisplay().shown (AutomationTarget { AutomationTargetKind::mixerSend, selected, t },
+                                                                   faderPosition (song.routeLevel (selected, t))),
+                              false,
                               dragging (Part::send) ? colour::accent : colour::accentHover, hovered (Part::send) || dragging (Part::send));
             }
             else if (feedsSelected) // this insert sends into the selected one
@@ -1993,10 +1998,48 @@ void MixerStrips::changeListenerCallback (juce::ChangeBroadcaster*)
     repaint();
 }
 
+float MixerStrips::shownVolume (int t) const
+{
+    const auto& mixer = engine.getSong().mixer;
+    const auto base = t >= 0 && t < (int) mixer.size() ? mixer[(std::size_t) t].volume : 0.0f;
+    return engine.getAutomationDisplay().shown (AutomationTarget { AutomationTargetKind::mixerVolume, t }, base);
+}
+
+void MixerStrips::repaintAutomatedStrips()
+{
+    // faders, pan and send knobs follow their automation while the song plays (issue #12): only the strips with an
+    // automated control repaint, and only when a shown value changed
+    const auto& shown = engine.getAutomationDisplay();
+    if (shown.getGeneration() == shownAutomation)
+        return;
+    shownAutomation = shown.getGeneration();
+
+    std::vector<int> strips;
+    for (const auto& t : shown.automatedTargets())
+    {
+        if (t.kind == AutomationTargetKind::mixerVolume || t.kind == AutomationTargetKind::mixerPan)
+            strips.push_back (t.index);
+        else if (t.kind == AutomationTargetKind::mixerSend && t.index == selected)
+            strips.push_back (t.slot); // (the route knob sits under the destination)
+    }
+    std::vector<int> all = strips;
+    all.insert (all.end(), automatedStrips.begin(), automatedStrips.end());
+    automatedStrips = std::move (strips);
+    if (! isShowing())
+        return;
+    std::sort (all.begin(), all.end());
+    all.erase (std::unique (all.begin(), all.end()), all.end());
+    const auto count = (int) engine.getSong().mixer.size();
+    for (const auto t : all)
+        if (t >= 0 && t < count)
+            repaint (stripX (t), 0, stripWidthOf (t), getHeight());
+}
+
 void MixerStrips::timerCallback()
 {
     auto& meters = engine.getMeters();
     const auto showing = isShowing();
+    repaintAutomatedStrips();
     const auto& mixer = engine.getSong().mixer;
     inputLevels.resize (mixer.size(), 0.0f);
 
