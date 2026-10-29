@@ -606,7 +606,8 @@ waves = DeEsser; DeEsser Stereo
 # list (measured on the official trial, REA_rodada113 §3c); without a readable state a gentle default (5.5 kHz,
 # -20 dBFS, at most 4 dB)
 translate = waves-deesser
-preset = Frequency=0.487; Threshold=0.667; Range=0.167
+# round 165x: 5.5 kHz on the extended law's 2 … 20 kHz scale (0.487 on the old one)
+preset = Frequency=0.4393; Threshold=0.667; Range=0.167
 
 [fabfilter-pro-ds]
 product = FabFilter Pro-DS
@@ -1419,6 +1420,13 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
     slot.params[g::analog] = analog == 0 ? 0.5f : analog == 1 ? 1.0f : 0.0f;
     slot.params[g::optoLaw] = 1.0f;
     slot.params[g::releaseLaw] = 1.0f; // round 165w: the measured release
+    // round 165x [EXEC] (REA_rodada165x §1): the trial's AUTO MAKEUP turns its own Gain knob (the saved Gain, index 38,
+    // already holds the make-up: 40 → 53.79 after Auto Makeup on at 46 and the dial to 80; the host's Gain parameter
+    // still reads 40), so the loaded dial is the make-up's reference (round 152 added the make-up again from 46)
+    slot.params[g::makeupRef] = slot.params[g::peakReduction];
+    // round 165x [EXEC]: 17 = VU DISPLAY (0 In, 1 GR, 2 Out; read back through the trial's own parameter)
+    const auto vu = std::lround (wavesValue (rw, 17).value_or (1.0));
+    slot.params[g::vuDisplay] = vu == 0 ? 0.5f : vu == 2 ? 1.0f : 0.0f;
     return 8;
 }
 
