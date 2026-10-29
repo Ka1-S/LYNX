@@ -14,15 +14,13 @@ Kostenlose Open-Source-DAW mit Pattern-basiertem Workflow: Channel Rack, Piano R
 
 LYNX (hier als LYNX SHARE veröffentlicht) ist eine kostenlose Open-Source-DAW (Digital Audio Workstation) zum Produzieren von Beats und Songs. Sie folgt dem Pattern-basierten Workflow, den Beatmaker lieben – ein Channel Rack mit Step-Sequencer, Patterns, eine Piano Roll, eine Playlist mit Arrangements und ein Mixer mit Inserts, Sends und Sidechain – und ist darauf ausgelegt, auf jedem PC schlank und schnell zu bleiben.
 
-Hinweis: Die Benutzeroberfläche von LYNX ist derzeit nur auf Englisch und Portugiesisch (Brasilien) verfügbar.
-
 • Schlank: eine Lock-free-Audio-Engine, die Kanäle und Mixer-Spuren auf deine CPU-Kerne verteilt, inaktive Kanäle überspringt und lange Audiodateien direkt von der Festplatte streamt.
 • Komplett: über 100 integrierte Instrumente und Effekte – Synthesizer, Drum Machines, Sampler, EQs, Kompressoren, Limiter, Reverbs, Delays, Tonhöhenkorrektur, Visualizer und mehr.
 • Deine Plugins: lädt VST3-, CLAP- und VST2-Instrumente und -Effekte, auf Wunsch jeweils in einem eigenen Sandbox-Prozess, damit ein abstürzendes Plugin nicht deine ganze Session mitreißt.
 • Öffnet FL Studio-Projekte (.flp) mit Patterns, Noten, Mixer, Automation und Samples und importiert MIDI-Dateien.
 • Niedrige Latenz: ASIO (einschließlich des eigenen ASIO-Treibers von LYNX für jedes Gerät), WASAPI im Shared- und Exclusive-Modus.
 • Audio und MIDI aufnehmen, Audio bearbeiten, alles automatisieren, als WAV, FLAC, MP3, OGG oder Stems rendern.
-• Oberfläche auf Englisch und brasilianischem Portugiesisch (weitere Sprachen geplant).
+• Oberfläche in 15 Sprachen, darunter Deutsch, Englisch, Französisch, Spanisch, Italienisch, Niederländisch, Polnisch, Russisch, Türkisch, Japanisch, Koreanisch und Chinesisch.
 
 Kein Konto, kein Abo, keine Werbung und keine Telemetrie. LYNX ist freie Software (GNU AGPL-3.0); der Quellcode liegt auf GitHub.
 
@@ -44,7 +42,7 @@ LYNX 0.1.20: erste Version im Microsoft Store. Punktbearbeitung im FL-Stil für 
 6. Multicore-Engine, die auch auf älteren PCs schlank bleibt
 7. Audio- und MIDI-Aufnahme, Audio-Editor, Automation-Clips
 8. Export als WAV, FLAC, MP3, OGG und Stems
-9. Oberfläche auf Englisch und brasilianischem Portugiesisch (weitere Sprachen geplant)
+9. Oberfläche in 15 Sprachen, darunter Deutsch
 10. Kostenlos und Open Source (AGPL-3.0): kein Konto, keine Werbung, keine Telemetrie
 
 ## Search terms

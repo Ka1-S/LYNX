@@ -54,9 +54,16 @@ struct Rows
     }
 
     // label + control (control width 0 = to the right edge)
+    // round 165o: a caption wider than the label column (a long translation) gets its own line above the control
     juce::Rectangle<int> row (juce::Label& label, int controlWidth = 260, int height = rowHeight)
     {
-        label.setBounds (area.getX(), y, labelWidth, height);
+        if (theme::labelColumnWidth ({ &label }, 0, 2000) > labelWidth + labelWidth / 10) // a slight squeeze is fine
+        {
+            label.setBounds (area.getX(), y, area.getWidth(), 18);
+            y += 18;
+        }
+        else
+            label.setBounds (area.getX(), y, labelWidth, height);
         auto r = juce::Rectangle<int> (area.getX() + labelWidth, y, controlWidth > 0 ? controlWidth : area.getWidth() - labelWidth, height);
         y += height + rowGap;
         return r;
@@ -90,7 +97,7 @@ public:
         if (hooks.getGeneral)
             options = hooks.getGeneral();
         else
-            options.language = "en";
+            options.language = i18n::current(); // --snapshot: the language of the run
 
         for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
                                                                  &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox, &menuLabel, &menuBox,
@@ -115,7 +122,14 @@ public:
             const auto index = languageBox.getSelectedId() - 1;
             if (juce::isPositiveAndBelow (index, (int) i18n::languages().size()))
                 change ([&] { options.language = i18n::languages()[(std::size_t) index].id; });
+            updateTranslationLink();
+            resized();
         };
+        // the translations added in 0.1.20: an invitation to improve them (GitHub issue form)
+        translationLink.setFont (juce::FontOptions (13.0f), false, juce::Justification::centredLeft);
+        translationLink.setColour (juce::HyperlinkButton::textColourId, theme::colour::accent);
+        add (translationLink);
+        updateTranslationLink();
 
         styleLabel (scaleLabel, tr ("Interface size"));
         for (auto percent : toolbarlayout::uiScales)
@@ -251,7 +265,9 @@ private:
         Rows r (width);
         r.section (languageTitle, true);
         languageBox.setBounds (r.row (languageLabel, 220));
-        languageNote.setBounds (r.indented (16).translated (0, -3));
+        languageNote.setBounds (r.indented (languageNote.getText().length() > 60 ? 32 : 16).translated (0, -3));
+        if (translationLink.isVisible())
+            translationLink.setBounds (r.indented (18).translated (0, -4).withWidth (juce::jmin (420, width - 40)));
         scaleBox.setBounds (r.row (scaleLabel, 120));
         menuBox.setBounds (r.row (menuLabel, 160));
         wavesBox.setBounds (r.row (wavesLabel, 0));
@@ -330,6 +346,25 @@ private:
             hooks.setGeneral (options);
     }
 
+    void updateTranslationLink()
+    {
+        // shown in the language just picked when it is already running, else in the current one
+        const auto id = options.language;
+        translationLink.setVisible (i18n::isNewTranslation (id));
+        // Linux without Noto CJK & co.: the language would show empty boxes
+        const auto noFont = theme::needsOwnFont (id) && theme::uiFontForLanguage (id).isEmpty();
+        languageNote.setText (noFont ? tr ("This language needs a Chinese / Japanese / Korean font: install the Noto Sans CJK fonts "
+                                           "(fonts-noto-cjk or google-noto-sans-cjk-fonts), then restart LYNX.")
+                                     : tr ("A new language is applied when LYNX restarts."),
+                              juce::dontSendNotification);
+        languageNote.setColour (juce::Label::textColourId, noFont ? theme::colour::accent : theme::colour::textDisabled);
+        translationLink.setButtonText (tr ("New translation — suggestions welcome"));
+        translationLink.setTooltip (tr ("Opens a GitHub issue to suggest a better translation"));
+        translationLink.setURL (juce::URL ("https://github.com/Ka1-S/LYNX/issues/new")
+                                    .withParameter ("title", "Translation (" + id + "): ")
+                                    .withParameter ("labels", "translation"));
+    }
+
     AudioEngine& engine;
     SettingsHooks hooks;
     bool persistent;
@@ -337,6 +372,7 @@ private:
     SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") };
     juce::Label languageLabel, languageNote, scaleLabel, menuLabel, wavesLabel, noteNamesLabel, blackNotesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
+    juce::HyperlinkButton translationLink;
     juce::ComboBox crashBox, languageBox, scaleBox, menuBox, wavesBox, noteNamesBox, blackNotesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
     juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, menuEntry, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };

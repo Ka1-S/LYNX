@@ -33,7 +33,7 @@ juce::String statusText (prefs::PluginStatus s)
         case prefs::PluginStatus::missingFile: return tr ("File not found");
         case prefs::PluginStatus::ok: break;
     }
-    return tr ("OK");
+    return trc ("@plugin status: OK");
 }
 
 // sample rows for --snapshot (free plugins; one failed, one moved away)
