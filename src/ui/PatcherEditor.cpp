@@ -1539,6 +1539,8 @@ private:
                 return "Misc";
             case EffectKind::scratcher: // round 165g (FL's Scratcher: a turntable, a generator in effect form)
                 return "Misc";
+            case EffectKind::transmitter: // round 165g (FL's Transmitter: transient shaping)
+                return "Dynamics";
             default:
                 return "Misc";
         }

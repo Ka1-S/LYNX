@@ -5837,6 +5837,15 @@ countries: id
 "Smooth 2" = "Penghalusan 2"
 "Smooth 3" = "Penghalusan 3"
 "Smooth 4" = "Penghalusan 4"
+"DETECTION" = "DETEKSI"
+"Smooth|Balanced|Dense" = "Halus|Seimbang|Padat"
+"TRANSIENT" = "TRANSIEN"
+"SUSTAIN" = "SUSTAIN"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "Saturasi|Pantulan|Difusi|Blur|Delay|Mati"
+"Warmth" = "Kehangatan"
+"Amp curve" = "Kurva amplitudo"
+"Delay curve" = "Kurva delay"
+"No settings" = "Tanpa pengaturan"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Stereo terbalik"

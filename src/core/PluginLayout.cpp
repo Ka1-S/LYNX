@@ -1010,6 +1010,75 @@ Layout fruityMute2Layout()
     return l;
 }
 
+Layout transmitterLayout()
+{
+    // round 165g (fltrans165), FL Studio 2026's arrangement: DETECTION along the top (sensitivity, hold, release, the
+    // envelope mode, lookahead and stereo link), then the TRANSIENT and SUSTAIN columns side by side, each with its
+    // on switch, level fader, tilt and one section effect whose knobs swap in place with the effect menu
+    Layout l;
+    l.fl = "Transmitter";
+    l.width = 620;
+    l.height = 344;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 620, 112, TR_NOOP ("DETECTION")));
+    v.push_back (knob (52, 52, 40, "Sensitivity", TR_NOOP ("Sensitivity"), 86, showValue));
+    v.push_back (knob (126, 52, 40, "Hold", TR_NOOP ("Hold"), 86, showValue));
+    v.push_back (knob (200, 52, 40, "Release", TR_NOOP ("Release"), 86, showValue));
+    v.push_back (label (262, 26, 190, 16, TR_NOOP ("Mode")));
+    v.push_back (tabs (262, 46, 190, 24, "Mode", TR_NOOP ("Smooth|Balanced|Dense")));
+    v.push_back (toggle (474, 34, 132, 22, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (toggle (474, 64, 132, 22, "Stereo link", TR_NOOP ("Stereo link")));
+
+    struct Part
+    {
+        float x;
+        const char *title, *on, *level, *tilt, *effect;
+        const char *satMix, *drive, *warmth, *bounceMix, *ampCurve, *delayCurve, *diffMix, *depth, *diffDelay;
+        const char *delayMix, *time, *synced, *feedback, *sync;
+    };
+    const Part parts[] = {
+        { 0, TR_NOOP ("TRANSIENT"), "Transient on", "Transient level", "Transient tilt", "Transient effect",
+          "Transient saturation mix", "Transient saturation drive", "Transient saturation warmth", "Transient bounce mix",
+          "Transient bounce amplitude curve", "Transient bounce delay curve", "Transient diffusion mix", "Transient diffusion depth",
+          "Transient diffusion delay", "Transient delay mix", "Transient delay time", "Transient delay synced time",
+          "Transient delay feedback", "Transient delay tempo sync" },
+        { 310, TR_NOOP ("SUSTAIN"), "Sustain on", "Sustain level", "Sustain tilt", "Sustain effect",
+          "Sustain saturation mix", "Sustain saturation drive", "Sustain saturation warmth", "Sustain bounce mix",
+          "Sustain bounce amplitude curve", "Sustain bounce delay curve", "Sustain diffusion mix", "Sustain diffusion depth",
+          "Sustain diffusion delay", "Sustain delay mix", "Sustain delay time", "Sustain delay synced time",
+          "Sustain delay feedback", "Sustain delay tempo sync" },
+    };
+    for (const auto& p : parts)
+    {
+        const float x = p.x;
+        v.push_back (section (x, 116, 310, 228, p.title));
+        v.push_back (toggle (x + 12, 146, 76, 22, p.on, TR_NOOP ("On")));
+        v.push_back (slider (Item::vslider, x + 30, 178, 32, 124, p.level, TR_NOOP ("Level")));
+        v.push_back (value (x + 8, 316, 82, 18, p.level, 0));
+        v.push_back (knob (x + 112, 196, 40, p.tilt, TR_NOOP ("Tilt"), 230, bipolar | showValue));
+        v.push_back (menuOf (x + 146, 146, 152, 24, p.effect, TR_NOOP ("Effect"), TR_NOOP ("Saturation|Bounce|Diffusion|Blur|Delay|Off")));
+        const float k1 = x + 172, k2 = x + 222, k3 = x + 272, ky = 214, cy = 248;
+        // Saturation [0, 0.1), Bounce [0.1, 0.3), Diffusion [0.3, 0.5), Blur [0.5, 0.7), Delay [0.7, 0.9), Off [0.9, 1]
+        v.push_back (when (knob (k1, ky, 36, p.satMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.0f, 0.1f));
+        v.push_back (when (knob (k2, ky, 36, p.drive, TR_NOOP ("Drive"), cy, showValue), p.effect, 0.0f, 0.1f));
+        v.push_back (when (knob (k3, ky, 36, p.warmth, TR_NOOP ("Warmth"), cy, showValue), p.effect, 0.0f, 0.1f));
+        v.push_back (when (knob (k1, ky, 36, p.bounceMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.1f, 0.3f));
+        v.push_back (when (knob (k2, ky, 36, p.ampCurve, TR_NOOP ("Amp curve"), cy, bipolar | showValue), p.effect, 0.1f, 0.3f));
+        v.push_back (when (knob (k3, ky, 36, p.delayCurve, TR_NOOP ("Delay curve"), cy, bipolar | showValue), p.effect, 0.1f, 0.3f));
+        v.push_back (when (knob (k1, ky, 36, p.diffMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.3f, 0.5f));
+        v.push_back (when (knob (k2, ky, 36, p.depth, TR_NOOP ("Depth"), cy, showValue), p.effect, 0.3f, 0.5f));
+        v.push_back (when (knob (k3, ky, 36, p.diffDelay, TR_NOOP ("Delay"), cy, showValue), p.effect, 0.3f, 0.5f));
+        v.push_back (when (label (x + 146, 204, 152, 20, TR_NOOP ("No settings"), dim), p.effect, 0.5f, 0.7f));
+        v.push_back (when (knob (k1, ky, 36, p.delayMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.7f, 0.9f));
+        v.push_back (when (when (knob (k2, ky, 36, p.time, TR_NOOP ("Time"), cy, showValue), p.effect, 0.7f, 0.9f), p.sync, 0.0f, 0.5f));
+        v.push_back (when (when (knob (k2, ky, 36, p.synced, TR_NOOP ("Time"), cy, showValue), p.effect, 0.7f, 0.9f), p.sync, 0.5f, 1.0f));
+        v.push_back (when (knob (k3, ky, 36, p.feedback, TR_NOOP ("Feedback"), cy, showValue), p.effect, 0.7f, 0.9f));
+        v.push_back (when (toggle (x + 150, 286, 148, 22, p.sync, TR_NOOP ("Tempo sync")), p.effect, 0.7f, 0.9f));
+        v.push_back (when (label (x + 146, 204, 152, 20, TR_NOOP ("No settings"), dim), p.effect, 0.9f, 1.0f));
+    }
+    return l;
+}
+
 Layout fruitySend()
 {
     // one row: DRY, the SEND TO box (the destination insert, a menu of the mixer's inserts), PAN and VOLUME
@@ -3318,7 +3387,7 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  // round 154
                                                  EffectKind::emphasizer,
                                                  // round 165g
-                                                 EffectKind::fruityMute2 };
+                                                 EffectKind::fruityMute2, EffectKind::transmitter };
     return kinds;
 }
 
@@ -3406,6 +3475,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::latticeMod: l = captionsAbove (latticeLayout()); break;
         case EffectKind::fruitySend: l = fruitySend(); break;
         case EffectKind::fruityMute2: l = fruityMute2Layout(); break;
+        case EffectKind::transmitter: l = transmitterLayout(); break;
         case EffectKind::crestCompressor: l = crestCompressor(); break;
         case EffectKind::prismMultiband: l = prismMultiband(); break;
         case EffectKind::sentryGate: l = sentryGate(); break;

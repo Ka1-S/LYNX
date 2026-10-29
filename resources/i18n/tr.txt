@@ -5837,6 +5837,15 @@ countries: tr
 "Smooth 2" = "Yumuşatma 2"
 "Smooth 3" = "Yumuşatma 3"
 "Smooth 4" = "Yumuşatma 4"
+"DETECTION" = "ALGILAMA"
+"Smooth|Balanced|Dense" = "Yumuşak|Dengeli|Yoğun"
+"TRANSIENT" = "TRANSIENT"
+"SUSTAIN" = "SUSTAIN"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "Doygunluk|Sekme|Difüzyon|Blur|Delay|Kapalı"
+"Warmth" = "Sıcaklık"
+"Amp curve" = "Genlik eğrisi"
+"Delay curve" = "Delay eğrisi"
+"No settings" = "Ayar yok"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Ters stereo"

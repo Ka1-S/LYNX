@@ -5837,6 +5837,15 @@ countries: kr
 "Smooth 2" = "스무딩 2"
 "Smooth 3" = "스무딩 3"
 "Smooth 4" = "스무딩 4"
+"DETECTION" = "감지"
+"Smooth|Balanced|Dense" = "스무스|밸런스|덴스"
+"TRANSIENT" = "트랜지언트"
+"SUSTAIN" = "서스테인"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "새추레이션|바운스|확산|블러|딜레이|끔"
+"Warmth" = "따뜻함"
+"Amp curve" = "진폭 커브"
+"Delay curve" = "딜레이 커브"
+"No settings" = "설정 없음"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "반전 스테레오"

@@ -1,5 +1,6 @@
 #include "core/Transmitter.h"
 
+#include "core/Denormals.h"
 #include "core/Effects.h"
 #include "core/IldspMath.h"
 
@@ -592,7 +593,7 @@ std::string paramText (int k, float v)
         case hold: case release: std::snprintf (buf, sizeof buf, "%.1f ms", e); break;
         case transientLevel: case sustainLevel: case transientTilt: case sustainTilt: case tSatDrive: case sSatDrive:
             std::snprintf (buf, sizeof buf, "%.1f dB", e); break;
-        case tDiffDelay: case sDiffDelay: std::snprintf (buf, sizeof buf, "%.2f ms", e); break;
+        case tDiffDelay: case sDiffDelay: std::snprintf (buf, sizeof buf, "%.2f s", e); break;
         case tDelayTime: case sDelayTime: std::snprintf (buf, sizeof buf, "%.3f s", e); break;
         case tDelaySynced: case sDelaySynced: std::snprintf (buf, sizeof buf, "%.2f steps", e); break;
         case mode: return modes[std::clamp (raw, 0, 2)];
@@ -695,8 +696,11 @@ int Engine::latency() const
     return impl->v[lookahead] > 0.5f ? (int) std::lround (impl->fs * 0.002f) : 0;
 }
 
-void Engine::process (const float* inL, const float* inR, float* outL, float* outR, int n)
+void Engine::process (const float* inL, const float* inR, float* outL, float* outR, int n, bool sidechain,
+                      const float* scL, const float* scR)
 {
+    // FL's front end renders with flush-to-zero / denormals-are-zero; the Diffusion's zero-crossing logic depends on it
+    const ScopedFlushDenormals ftz;
     auto& m = *impl;
     for (auto& b : m.buf)
         if ((int) b.size() < n)
@@ -710,7 +714,8 @@ void Engine::process (const float* inL, const float* inR, float* outL, float* ou
     const float hold = v[Param::hold] * 0.001f, rel = v[Param::release] * 0.001f;
     for (int i = 0; i < n; ++i)
     {
-        const float e = m.det.run ((inL[i] + inR[i]) * 0.5f, sensFactor, la, hold, rel);
+        const float d = ! sidechain ? (inL[i] + inR[i]) * 0.5f : scL != nullptr && scR != nullptr ? (scL[i] + scR[i]) * 0.5f : 0.0f;
+        const float e = m.det.run (d, sensFactor, la, hold, rel);
         const float xl = m.la[0].run (inL[i], la), xr = m.la[1].run (inR[i], la);
         tl[i] = xl * e; tr[i] = xr * e;
         sl[i] = xl * (1.0f - e); sr[i] = xr * (1.0f - e);
@@ -780,7 +785,16 @@ public:
                 engine.setRaw (k, rawFromParam (k, params[(std::size_t) k]));
             }
         first = false;
-        engine.process (left, right, left, right, n);
+        engine.process (left, right, left, right, n, hasSide, sideL, sideR);
+        hasSide = false;
+        sideL = sideR = nullptr;
+    }
+    // the slot's sidechain (FL's sidechain input feeds the detection), set before each process() when the slot has one
+    void setSidechain (const float* l, const float* r) noexcept override
+    {
+        hasSide = true;
+        sideL = l;
+        sideR = r;
     }
     int latencySamples() const noexcept override { return engine.latency(); }
 
@@ -788,7 +802,8 @@ private:
     Engine engine;
     std::array<float, count> last {};
     double rate = 44100, lastBpm = 0;
-    bool first = true;
+    bool first = true, hasSide = false;
+    const float *sideL = nullptr, *sideR = nullptr;
 };
 } // namespace
 

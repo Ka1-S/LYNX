@@ -1,6 +1,7 @@
 #include "core/FlpImport.h"
 #include "core/FlExtraFx.h"
 #include "core/Scratcher.h"
+#include "core/Transmitter.h"
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "core/XyController.h"
@@ -209,6 +210,7 @@ const std::pair<const char*, EffectKind> flEffectTable[] = {
         { "Fruity Mute 2", EffectKind::fruityMute2 }, { "Fruity Big Clock", EffectKind::bigClock }, // round 165g
         { "Tuner", EffectKind::tuner },              { "Fruity HTML NoteBook", EffectKind::htmlNotebook },
         { "Fruity Scratcher", EffectKind::scratcher }, // round 165g (flscratch165)
+        { "Transmitter", EffectKind::transmitter },  // round 165g (fltrans165)
 };
 } // namespace
 
@@ -271,6 +273,8 @@ std::optional<std::pair<int, int>> flRawRange (flp::ControlId id, const std::str
         return std::pair { convolver::ranges[(std::size_t) k].lo, convolver::ranges[(std::size_t) k].hi };
     if (plugin == "Fruity Scratcher" && k < scratcher::count) // the platter wheel 0…30000, Mute 0/1 (1 = muted), …
         return std::pair { scratcher::controlRange (k).lo, scratcher::controlRange (k).hi };
+    if (plugin == "Transmitter" && k < transmitter::count) // 0…10000 for the knobs, the switches / selectors raw
+        return std::pair { transmitter::controlRange (k).lo, transmitter::controlRange (k).hi };
     if (plugin == "LuxeVerb" && k < luxeVerbControlCount)
         return std::pair { luxeverb::ranges[(std::size_t) k].lo, luxeverb::ranges[(std::size_t) k].hi };
     return std::nullopt;
@@ -2752,6 +2756,17 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                             else
                                 ++options.report->converted[slot.plugin];
                         }
+                    }
+                }
+                else if (fx.kind == EffectKind::transmitter)
+                {
+                    // the detection follows FL's sidechain input when one is chosen (the inputs list, like the Limiter's);
+                    // the transient / sustain sends to other mixer tracks are not routed (the main output is exact)
+                    if (const auto st = transmitter::parse (slot.state))
+                    {
+                        fx.sidechain = sidechainSource (insert.index, st->sidechain);
+                        if (options.report != nullptr && (st->transientSend > 0 || st->sustainSend > 0))
+                            ++options.report->partialEffects["Transmitter (transient / sustain sends to other tracks not routed)"];
                     }
                 }
                 else if (fx.kind == EffectKind::newtone || fx.kind == EffectKind::newtime)

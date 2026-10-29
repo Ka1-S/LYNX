@@ -48,6 +48,7 @@
 #include "core/VisualFx.h"
 #include "core/FlExtraFx.h"
 #include "core/Scratcher.h"
+#include "core/Transmitter.h"
 #include "flp/Flp.h"
 
 namespace lynx
@@ -1244,6 +1245,14 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
                 slot.params[(std::size_t) i] = st->values[(std::size_t) i];
         return slot;
     }
+    if (pluginName == "Transmitter") // REA_rodada165g-fltrans165: the 42 controls (raw) of FL's state 0xD5
+    {
+        auto slot = makeEffectSlot (EffectKind::transmitter);
+        if (const auto st = transmitter::parse (state))
+            for (int i = 0; i < transmitter::count; ++i)
+                slot.params[(std::size_t) i] = transmitter::paramFromRaw (i, st->raw[(std::size_t) i]);
+        return slot;
+    }
     if (pluginName == "Fruity HTML NoteBook")
     {
         auto slot = makeEffectSlot (EffectKind::htmlNotebook);
@@ -1616,6 +1625,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::tuner: return { "Tuner" };
         case EffectKind::htmlNotebook: return { "Fruity HTML NoteBook" };
         case EffectKind::scratcher: return { "Fruity Scratcher" };
+        case EffectKind::transmitter: return { "Transmitter" };
         case EffectKind::visualizer: return { "ZGameEditor Visualizer" };
         case EffectKind::xyController: return { "Fruity X-Y Controller" };
         case EffectKind::xyzController: return {}; // (FL's X-Y-Z Controller: name from REA_rodada164a)
@@ -1714,6 +1724,9 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     // quantized to the control's steps like FL's
     if (is ("Fruity Scratcher") && k >= 0 && k < scratcher::count)
         return FlParamMap { k, [k] (float v) { return scratcher::quantize (k, std::clamp (v, 0.0f, 1.0f)); } };
+    // Transmitter: its 42 controls over their ranges (the switches and selectors on their steps)
+    if (is ("Transmitter") && k >= 0 && k < transmitter::count)
+        return FlParamMap { k, [k] (float v) { return transmitter::paramFromRaw (k, transmitter::rawFromParam (k, v)); } };
     // the exact Fruity Phaser likewise (its nine controls; FL normalises them over their ranges)
     if (is ("Fruity Phaser") && k >= 0 && k < phaserfx::params)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };

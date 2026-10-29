@@ -5837,6 +5837,15 @@ countries: pl
 "Smooth 2" = "Wygładzanie 2"
 "Smooth 3" = "Wygładzanie 3"
 "Smooth 4" = "Wygładzanie 4"
+"DETECTION" = "DETEKCJA"
+"Smooth|Balanced|Dense" = "Gładki|Zrównoważony|Gęsty"
+"TRANSIENT" = "TRANSJENT"
+"SUSTAIN" = "SUSTAIN"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "Nasycenie|Odbicia|Dyfuzja|Blur|Opóźnienie|Wył."
+"Warmth" = "Ciepło"
+"Amp curve" = "Krzywa amplitudy"
+"Delay curve" = "Krzywa opóźnienia"
+"No settings" = "Brak ustawień"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Odwrócone stereo"

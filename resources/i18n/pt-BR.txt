@@ -5921,5 +5921,16 @@ countries: br
 "Smooth 2" = "Suavização 2"
 "Smooth 3" = "Suavização 3"
 "Smooth 4" = "Suavização 4"
+
+# Transmitter (round 165g, fltrans165)
+"DETECTION" = "DETECÇÃO"
+"Smooth|Balanced|Dense" = "Suave|Equilibrado|Denso"
+"TRANSIENT" = "TRANSIENTE"
+"SUSTAIN" = "SUSTAIN"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "Saturação|Ricochete|Difusão|Desfoque|Delay|Desligado"
+"Warmth" = "Calor"
+"Amp curve" = "Curva de amplitude"
+"Delay curve" = "Curva do delay"
+"No settings" = "Sem ajustes"
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Estéreo invertido"

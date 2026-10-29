@@ -52,6 +52,7 @@
 #include "core/VisualFx.h"
 #include "core/FlExtraFx.h"
 #include "core/Scratcher.h"
+#include "core/Transmitter.h"
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
 
@@ -2978,6 +2979,58 @@ const EffectInfo& effectInfo (EffectKind kind)
             }();
             return info;
         }
+        case EffectKind::transmitter:
+        {
+            // FL's Default preset (core/Transmitter.h: the 42 controls in FL's order, each over its range)
+            static const EffectInfo info = [] {
+                const auto d = transmitter::defaults();
+                return EffectInfo { "Transmitter",
+                                    {
+                                      { "Sensitivity", d[0] },
+                                      { "Hold", d[1] },
+                                      { "Release", d[2] },
+                                      { "Transient level", d[3] },
+                                      { "Sustain level", d[4] },
+                                      { "Transient tilt", d[5] },
+                                      { "Sustain tilt", d[6] },
+                                      { "Transient diffusion mix", d[7] },
+                                      { "Transient diffusion depth", d[8] },
+                                      { "Transient diffusion delay", d[9] },
+                                      { "Sustain diffusion mix", d[10] },
+                                      { "Sustain diffusion depth", d[11] },
+                                      { "Sustain diffusion delay", d[12] },
+                                      { "Transient saturation mix", d[13] },
+                                      { "Transient saturation drive", d[14] },
+                                      { "Transient saturation warmth", d[15] },
+                                      { "Sustain saturation mix", d[16] },
+                                      { "Sustain saturation drive", d[17] },
+                                      { "Sustain saturation warmth", d[18] },
+                                      { "Transient bounce mix", d[19] },
+                                      { "Transient bounce amplitude curve", d[20] },
+                                      { "Transient bounce delay curve", d[21] },
+                                      { "Sustain bounce mix", d[22] },
+                                      { "Sustain bounce amplitude curve", d[23] },
+                                      { "Sustain bounce delay curve", d[24] },
+                                      { "Transient delay mix", d[25] },
+                                      { "Transient delay time", d[26] },
+                                      { "Transient delay synced time", d[27] },
+                                      { "Transient delay feedback", d[28] },
+                                      { "Sustain delay mix", d[29] },
+                                      { "Sustain delay time", d[30] },
+                                      { "Sustain delay synced time", d[31] },
+                                      { "Sustain delay feedback", d[32] },
+                                      { "Lookahead", d[33] },
+                                      { "Stereo link", d[34] },
+                                      { "Mode", d[35] },
+                                      { "Transient on", d[36] },
+                                      { "Sustain on", d[37] },
+                                      { "Transient effect", d[38] },
+                                      { "Sustain effect", d[39] },
+                                      { "Transient delay tempo sync", d[40] },
+                                      { "Sustain delay tempo sync", d[41] } } };
+            }();
+            return info;
+        }
         case EffectKind::waveCandy:
         {
             // round 164c (core/VisualFx.h wavecandy::Param): a new one shows the spectrum, like FL's Default preset's analyser
@@ -3535,6 +3588,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return {};
         case EffectKind::scratcher:
             return scratcher::paramText (param, v);
+        case EffectKind::transmitter:
+            return transmitter::paramText (param, v);
         case EffectKind::waveCandy:
             return visualfx::wavecandy::paramText (param, v);
         case EffectKind::visualizer:
@@ -3819,6 +3874,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::tuner:
         case EffectKind::htmlNotebook: return visualfx::make(); // round 165g: pass the sound, feed the editor's tap
         case EffectKind::scratcher: return scratcher::make (nullptr); // (with its sample: RackRenderer's buildEffect)
+        case EffectKind::transmitter: return transmitter::make();
         case EffectKind::waveCandy:
         case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
         case EffectKind::xyController:

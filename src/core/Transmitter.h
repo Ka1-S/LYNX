@@ -5,7 +5,7 @@
 // (docs/analise/REA_rodada165g-fltrans165.md). No Image-Line code here: an own implementation of the behaviour,
 // measured against FL's engine (EXEC goldens).
 //
-// Signal flow: the detection signal (the input, mono (L + R) / 2) drives an 8-band onset detector whose envelope
+// Signal flow: the detection signal (the input or the sidechain, mono (L + R) / 2) drives an 8-band onset detector whose envelope
 // e ∈ [0, 1] splits the input, delayed by the lookahead, into transient = x·e and sustain = x·(1 − e). Each part goes
 // through a tilt filter and one section effect (Saturation, Bounce, Diffusion, Blur, Delay or Off), then
 // output = transient · level · on + sustain · level · on.
@@ -71,8 +71,9 @@ public:
     void setRaw (int k, int raw);          // one FL control (raw value)
     void setValue (int k, float value);    // one engine value (FL's engine units: ms, dB, …)
     void setParams (const float* params);  // LYNX 0…1 parameters (all 42)
-    // in-place capable; detection = the input (no sidechain yet)
-    void process (const float* inL, const float* inR, float* outL, float* outR, int n);
+    // in-place capable; detection = the input, or with `sidechain` the side input (scL / scR, nullptr = silent)
+    void process (const float* inL, const float* inR, float* outL, float* outR, int n, bool sidechain = false,
+                  const float* scL = nullptr, const float* scR = nullptr);
     int latency() const;
     struct Impl;
 
