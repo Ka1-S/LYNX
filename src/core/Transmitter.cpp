@@ -326,6 +326,112 @@ struct Delay
     }
 };
 
+// ---- Diffusion: 16 modulated allpass stages per channel (normalized lattice, coefficient g glided). Each stage's
+// delay is its base (a fraction of a second times the Delay control) plus a random offset; a stage takes a new delay
+// only at a zero crossing of its output, and crossfades between two taps so the change is click-free.
+struct Diffuser
+{
+    static constexpr int stages = 16;
+    // per stage: base delay in seconds (× the Delay control), its jitter scale (seconds per LCG unit)
+    static constexpr float baseS[stages] = { 0.270204991f, 0.197686195f, 0.144630313f, 0.105813801f, 0.0774150267f,
+        0.0566380434f, 0.0414372794f, 0.030316161f, 0.0221797768f, 0.0162270721f, 0.0118719786f, 0.00868572574f,
+        0.0063546123f, 0.00464913389f, 0.00340137887f, 0.00248850207f };
+    static constexpr float jitS[stages] = { 1.25824004e-10f, 9.20548082e-11f, 6.73487377e-11f, 4.92733909e-11f,
+        3.6049181e-11f, 2.63741442e-11f, 1.92957369e-11f, 1.41170626e-11f, 1.03282634e-11f, 7.55631929e-12f,
+        5.52832086e-12f, 4.04460623e-12f, 2.95909694e-12f, 2.16492167e-12f, 1.58389046e-12f, 1.15879908e-12f };
+    static constexpr float maxDelayControl = 10.0f; // FL's control range is 0.1…10
+
+    struct Stage
+    {
+        std::vector<float> ring;
+        unsigned mask = 0;
+        float d = 0, yPrev = 0, lastNz = 0, held = 0, tapA = 0, tapB = 0;
+        int cnt = 0, cntPrev = 0;
+    };
+    float fs = 44100, c = 0, keep = 1, g = 0, fade = 0, rate = 0;
+    int lcg = 0;
+    unsigned w = 0;
+    float base[stages] {}, jit[stages] {};
+    Stage st[2][stages];
+
+    void prepare (float rate_)
+    {
+        fs = std::clamp (rate_, 1.0f, 192000.0f);
+        c = 44.0999985f / fs;
+        keep = 1.0f - c;
+        for (int k = 0; k < stages; ++k)
+        {
+            base[k] = fs * baseS[k];
+            jit[k] = fs * jitS[k];
+            const auto need = (std::size_t) (base[k] * maxDelayControl) + 4802;
+            std::size_t size = 1;
+            while (size < need) size <<= 1;
+            for (auto& ch : st)
+            {
+                ch[k] = Stage {};
+                ch[k].ring.assign (size, 0.0f);
+                ch[k].mask = (unsigned) size - 1;
+            }
+        }
+        g = fade = rate = 0;
+        lcg = 0;
+        w = 0;
+    }
+    void run (float* l, float* r, int n, float mix, float feedback, float delayControl)
+    {
+        const float dc = std::max (std::min (delayControl, maxDelayControl), 0.00999999978f);
+        float amp = (2.0f - dc) * 0.025f;
+        if (amp <= 0.0f) amp = 0.0f;
+        amp *= dc;
+        float b[stages], j[stages];
+        for (int k = 0; k < stages; ++k) { b[k] = dc * base[k]; j[k] = amp * jit[k]; }
+        const float target = feedback * c, dry = 1.0f - mix;
+        for (int i = 0; i < n; ++i)
+        {
+            g = g * keep + target;
+            const float cs = std::sqrt (1.0f - g * g);
+            const float r5 = std::max (std::min (1.0f - g * 5.0f, 1.0f), 0.0f);
+            const float fresh = 1.0f / (r5 * 112.0f + 16.0f);
+            rate = fade == 0.0f ? fresh : fade == 1.0f ? -fresh : rate;
+            fade = std::max (std::min (fade + rate, 1.0f), 0.0f);
+            const float a = 1.0f - fade;
+            lcg = (int) ((unsigned) lcg * 1103515245u + 12345u);
+            const float rnd = (float) lcg;
+            float cand[stages];
+            for (int k = 0; k < stages; ++k)
+                cand[k] = std::max (std::min (rnd * j[k], 4800.0f), -4800.0f) + b[k];
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                float* io = ch == 0 ? l : r;
+                const float in = io[i];
+                float x = in;
+                for (int k = 0; k < stages; ++k)
+                {
+                    Stage& s = st[ch][k];
+                    s.ring[w & s.mask] = x * cs - g * s.d;
+                    if (s.cntPrev > s.cnt) s.held = cand[k];   // the stage's counter restarted: take the new delay
+                    if (fade == 1.0f) s.tapA = s.held - 1.0f;
+                    if (fade == 0.0f) s.tapB = s.held - 1.0f;
+                    const int ta = (int) std::min (s.tapA > 0.0f ? s.tapA : 0.0f, 1920000.0f);
+                    const int tb = (int) std::min (s.tapB > 0.0f ? s.tapB : 0.0f, 1920000.0f);
+                    const float read = a * s.ring[(w - (unsigned) ta) & s.mask] + fade * s.ring[(w - (unsigned) tb) & s.mask];
+                    const float y = g * x + cs * s.d;
+                    const float nz = s.yPrev != 0.0f ? s.yPrev : s.lastNz;
+                    const int next = (s.lastNz * nz >= 0.0f || (float) s.cnt < b[k]) ? s.cnt + 1 : 0;
+                    s.lastNz = nz;
+                    s.yPrev = y;
+                    s.cntPrev = s.cnt;
+                    s.cnt = next;
+                    s.d = read;
+                    x = y;
+                }
+                io[i] = in * dry + x * mix;
+            }
+            ++w;
+        }
+    }
+};
+
 float dbToGain (float db) { return expF (db * 0.115129255f); }
 } // namespace
 
@@ -441,6 +547,7 @@ struct Engine::Impl
     Tilt tilt[2];
     Saturation sat[2];
     Delay delay[2];
+    Diffuser diff[2];
     float glideC = 0, gT = 0, gS = 0, onT = 1, onS = 1; // FL starts the level gains at 0 (they glide up)
     std::vector<float> buf[6];
 
@@ -472,6 +579,7 @@ void Engine::prepare (double sampleRate)
         m.tilt[c].fs = std::clamp (m.fs, 1.0f, 192000.0f);
         m.sat[c].prepare (m.fs);
         m.delay[c].prepare (m.fs);
+        m.diff[c].prepare (m.fs);
     }
     const float w = (float) ((double) (1.0f / m.fs) * 125.66370614359172);
     m.glideC = 1.0f / ((w * 0.5f + 1.0f) * w + 1.0f);
@@ -534,7 +642,10 @@ void Engine::process (const float* inL, const float* inR, float* outL, float* ou
                 m.delay[part].run (l, r, n, v[(std::size_t) (tDelayMix + d)], m.delayMs (part), v[(std::size_t) (tDelayFeedback + d)] * 100.0f);
                 break;
             }
-            default: break; // Bounce / Diffusion: not ported yet (REA §5); Blur and Off: the engine passes the part
+            case diffusion:
+                m.diff[part].run (l, r, n, v[(std::size_t) (tDiffMix + o)], v[(std::size_t) (tDiffFeedback + o)], v[(std::size_t) (tDiffDelay + o)]);
+                break;
+            default: break; // Bounce: not ported yet (REA §5); Blur and Off: the engine passes the part
         }
     }
     const float targetT = dbToGain (v[transientLevel]), targetS = dbToGain (v[sustainLevel]);
