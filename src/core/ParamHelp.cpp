@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "core/Effects.h"
+#include "core/EmberClassic.h"
+#include "core/MixSuite.h"
 
 #ifndef TR_NOOP
  #define TR_NOOP(text) text // marks a literal for translation (tools/i18n_keys.py scans core too)
@@ -308,11 +310,15 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::glowLeveler, "auto makeup" }, TR_NOOP ("Turns the gain up as the peak reduction rises") },
         { { K::glowLeveler, "analog" }, TR_NOOP ("The reference's analog hum and noise (50 or 60 Hz mains), added after the gain") },
         { { K::glowLeveler, "opto law" }, TR_NOOP ("Measured: the reference's Limit and Auto makeup; old: the law of projects saved before round 152") },
-        { { K::glowLeveler, "opto release" }, TR_NOOP ("Measured: the reference's gain recovery after loud passages; old: the slower tail of projects saved before round 165") },
+        { { K::glowLeveler, "opto release" }, TR_NOOP ("Measured: the reference's attack and gain recovery; old: the timing of projects saved before round 165") },
+        { { K::glowLeveler, "makeup ref" }, TR_NOOP ("The peak reduction where Auto makeup was switched on: the make-up follows the dial from there") },
         // Hush De-esser
         { { K::hushDeEsser, "frequency" }, TR_NOOP ("Where the sibilance is detected and reduced") },
         { { K::hushDeEsser, "input pan" }, TR_NOOP ("Balance of the input before the de-esser hears it") },
         { { K::hushDeEsser, "output pan" }, TR_NOOP ("Balance of the output") },
+        { { K::hushDeEsser, "range law" }, TR_NOOP ("Extended: levels from silence to +36 dB, the band up to 20 kHz and the reference's stereo link") },
+        { { K::hushDeEsser, "link only" }, TR_NOOP ("Stereo link past 100 %: the share processed on the mid (or side) signal only") },
+        { { K::hushDeEsser, "link only side" }, TR_NOOP ("Which signal the processing past 100 % link acts on alone: the mid or the side") },
         { { K::hushDeEsser, "threshold" }, TR_NOOP ("Level of sibilance above which the de-esser works") },
         { { K::hushDeEsser, "range" }, TR_NOOP ("The most the sibilance is turned down") },
         { { K::hushDeEsser, "wideband" }, TR_NOOP ("Turns the whole signal down instead of only the sibilant band") },
@@ -665,6 +671,20 @@ int modeParam (EffectKind kind)
 
 Summary summary (EffectKind kind, const EffectParams& params)
 {
+    // round 165x: Ember's Classic voicing has its own one-screen panel and its own five styles; the footer names the
+    // Classic style (Ember's own Style is not on that panel)
+    if (kind == K::ember && params[(std::size_t) mixsuite::ember::voicing] > 0.5f)
+    {
+        Summary s;
+        s.param = (int) mixsuite::ember::classicStyle;
+        static const char* texts[] = { TR_NOOP ("a tape preamp: warm, rounded, the gentlest of the five"),
+                                       TR_NOOP ("a vintage console channel: bright and forward"),
+                                       TR_NOOP ("a transformer console input: thick, punchy mids"),
+                                       TR_NOOP ("a triode valve: smooth, rich even harmonics"),
+                                       TR_NOOP ("a pentode valve: the most aggressive, with an edge") };
+        s.text = texts[emberclassic::styleOf (params[(std::size_t) mixsuite::ember::classicStyle])];
+        return s;
+    }
     const auto p = modeParam (kind);
     if (p < 0)
         return {};

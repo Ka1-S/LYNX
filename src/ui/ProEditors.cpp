@@ -573,7 +573,7 @@ public:
     }
 
 private:
-    enum { idThreshold = 1, idFreq, idMeterThreshold, idDisplay, idExternal, idOutMeter, idGrMeter };
+    enum { idThreshold = 1, idFreq, idMeterThreshold, idDisplay, idExternal, idOutMeter, idGrMeter, idLink };
     float grHoldDb = 0.0f;     // round 144: the attenuation meter's infinite peak hold (DeEsser's Attn meter), click to reset
     float outPeakDb = -100.0f; // round 135w: the output meter's highest peak since the last click (DeEsser's read-out)
     static constexpr float waveH = 194.0f; // the waveform display (DISPLAY hides it and the window shrinks)
@@ -581,7 +581,31 @@ private:
     // which handle of the frequency slider is being dragged: 0 = high-pass (Frequency), 1 = low-pass
     int dragHandle = 0;
     static float freqPos (double hz) { return (float) (std::log (hz / 2000.0) / std::log (10.0)); } // 2 .. 20 kHz
-    float hpPos() const { return freqPos (mixsuite::hush::hz (v (pFreq()))); }
+    // round 165x: the extended law's high-pass reaches 20 kHz (the old law and the classic voicing: 16 kHz)
+    bool ext() const { return v (P ("Range law")) >= 0.5f && v (P ("Voicing")) < 0.5f; }
+    double hpHz() const { return mixsuite::hush::hpHz (v (pFreq()), ext()); }
+    float hpPos() const { return freqPos (hpHz()); }
+    // round 165x: the 0 … 200 % link knob as one 0 … 1 position (Stereo link fills the first half, Link only the second)
+    float linkPos() const { return 0.5f * (v (P ("Stereo link")) + (v (P ("Stereo link")) >= 0.999f ? v (P ("Link only")) : 0.0f)); }
+    void setLinkPos (double u)
+    {
+        u = juce::jlimit (0.0, 1.0, u);
+        set ({ { P ("Stereo link"), (float) juce::jmin (1.0, 2.0 * u) }, { P ("Link only"), (float) juce::jmax (0.0, 2.0 * u - 1.0) } });
+    }
+    juce::String linkText() const
+    {
+        const auto u = linkPos();
+        if (u <= 0.5f)
+            return juce::String (juce::roundToInt (200.0f * u)) + " %";
+        return "100 %, " + juce::String (juce::roundToInt (200.0f * u - 100.0f)) + " % " + (v (P ("Link only side")) >= 0.5f ? tr ("side only") : tr ("mid only"));
+    }
+    ui::ValueSpec linkSpec() const
+    {
+        auto spec = ui::percentSpec (tr ("Stereo link"), 0.5);
+        spec.toText = [] (double u) { return u <= 0.5 ? juce::String (juce::roundToInt (200.0 * u)) + " %" : juce::String (juce::roundToInt (200.0 * u)) + " % (100 % + " + juce::String (juce::roundToInt (200.0 * u - 100.0)) + " %)"; };
+        spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
+        return spec;
+    }
     float lpPos() const { return v (P ("Low-pass freq.")) >= 0.999f ? 1.0f : freqPos (mixsuite::hush::lowPassHz (v (P ("Low-pass freq.")))); }
 
     juce::String title() const override { return "Hush De-esser"; }
@@ -657,10 +681,24 @@ private:
         out.push_back (tabs ({ mx, y0 + 96.0f, 190.0f, 28.0f }, P ("Wideband"), "Wide band|Split band", { 1.0f, 0.0f }));
         out.push_back (custom ({ mx + 90.0f, y0 + 148.0f, 100.0f, 26.0f }, idExternal, P ("External SC"), tr ("Side chain: detect this signal (In) or another track (Ext)")));
         // right: stereo link (with MID) and look-ahead (with its power button)
-        out.push_back (knob ({ 512.0f, y0 + 2.0f, 84.0f, 90.0f }, P ("Stereo link"), tr ("Stereo link")));
-        auto mid = toggle ({ 522.0f, y0 + 96.0f, 64.0f, 18.0f }, P ("Link mid"), "MID");
-        mid.hint = tr ("Mid: detect on the middle of the stereo image only");
-        out.push_back (mid);
+        if (ext())
+        {
+            // round 165x: the reference's link knob runs 0 … 200 %: up to 100 % the channels share their detection (100 % =
+            // the mid), past it a share of the processing acts on the mid (or side) signal only — one knob over Stereo link
+            // and Link only
+            out.push_back (custom ({ 512.0f, y0 + 2.0f, 84.0f, 90.0f }, idLink, P ("Stereo link"),
+                                   tr ("Stereo link: up to 100 % the channels share their detection; past 100 % a share of the processing acts on the mid (or side) signal only")));
+            auto ms = tabs ({ 516.0f, y0 + 96.0f, 76.0f, 18.0f }, P ("Link only side"), "Mid|Side", { 0.0f, 1.0f });
+            ms.hint = tr ("Which signal the processing past 100 % link acts on alone: the mid or the side");
+            out.push_back (ms);
+        }
+        else
+        {
+            out.push_back (knob ({ 512.0f, y0 + 2.0f, 84.0f, 90.0f }, P ("Stereo link"), tr ("Stereo link")));
+            auto mid = toggle ({ 522.0f, y0 + 96.0f, 64.0f, 18.0f }, P ("Link mid"), "MID");
+            mid.hint = tr ("Mid: detect on the middle of the stereo image only");
+            out.push_back (mid);
+        }
         out.push_back (knob ({ 512.0f, y0 + 120.0f, 84.0f, 90.0f }, P ("Lookahead time"), tr ("Lookahead")));
         auto la = toggle ({ 522.0f, y0 + 214.0f, 64.0f, 18.0f }, P ("Lookahead"), tr ("On"));
         la.hint = tr ("Look-ahead on / off");
@@ -735,6 +773,16 @@ private:
             repaint();
             return;
         }
+        if (c.id == idLink) // round 165x: the 0 … 200 % link knob
+        {
+            if (ui::isResetClick (e))
+                setLinkPos (0.5);
+            else if (e.mods.isPopupMenu())
+                ui::showValueMenu (*this, nullptr, linkSpec(), linkPos(), [this] (double x) { setLinkPos (x); });
+            else
+                valueDrag.begin (e, linkPos());
+            return;
+        }
         if (c.id == idExternal)
         {
             const auto* fx = current();
@@ -766,6 +814,15 @@ private:
     {
         if (c.id == idOutMeter || c.id == idGrMeter)
             return;
+        if (c.id == idLink)
+        {
+            if (valueDrag.isActive())
+            {
+                setLinkPos (valueDrag.update (e, linkSpec()));
+                ui::showValueTip (*this, c.r.toNearestInt(), linkText());
+            }
+            return;
+        }
         if (c.id == idFreq)
         {
             const auto tr_ = freqTrack();
@@ -774,12 +831,12 @@ private:
             if (dragHandle == 1)
             {
                 const auto lp = P ("Low-pass freq.");
-                set ({ { lp, x >= 0.985 ? 1.0f : invert ([] (float y) { return mixsuite::hush::lowPassHz (y); }, juce::jmax (hz, mixsuite::hush::hz (v (pFreq())))) } });
+                set ({ { lp, x >= 0.985 ? 1.0f : invert ([] (float y) { return mixsuite::hush::lowPassHz (y); }, juce::jmax (hz, hpHz())) } });
                 ui::showValueTip (*this, tr_.toNearestInt(), tr ("Low pass") + " " + text (lp));
             }
             else
             {
-                set ({ { pFreq(), invert ([] (float y) { return mixsuite::hush::hz (y); }, juce::jmin (hz, 16000.0)) } });
+                set ({ { pFreq(), mixsuite::hush::hpValue (juce::jmin (hz, ext() ? 20000.0 : 16000.0), ext()) } });
                 ui::showValueTip (*this, tr_.toNearestInt(), tr ("Frequency") + " " + text (pFreq()));
             }
             return;
@@ -835,6 +892,27 @@ private:
             const auto lpOff = v (P ("Low-pass freq.")) >= 0.999f;
             g.drawText (lpOff ? juce::String ("20 kHz") : text (P ("Low-pass freq.")), juce::Rectangle<float> (tr_.getRight() - 64.0f, tr_.getBottom() + 10.0f, 70.0f, 14.0f),
                         juce::Justification::centredRight, false);
+        }
+        else if (c.id == idLink)
+        {
+            const auto d = juce::jmin (c.r.getWidth() - 10.0f, c.r.getHeight() - 34.0f);
+            const auto knobR = juce::Rectangle<float> (c.r.getCentreX() - d / 2.0f, c.r.getY() + 2.0f, d, d);
+            const auto hover = c.r.contains (mouse), active = valueDrag.isActive() && pressed.id == idLink;
+            skin::KnobLook look;
+            look.value = linkPos();
+            look.accent = accent;
+            look.hover = hover ? 1.0f : 0.0f;
+            look.active = active;
+            look.enabled = current() == nullptr || current()->enabled;
+            skin::knob (g, knobR, look);
+            g.setColour (skin::captionColour().interpolatedWith (colour::textPrimary, hover ? 0.5f : 0.0f));
+            g.setFont (font (type::caption, true));
+            g.drawText (caps (tr ("Stereo link")), juce::Rectangle<float> (c.r.getX() - 14.0f, knobR.getBottom() + 3.0f, c.r.getWidth() + 28.0f, 14.0f),
+                        juce::Justification::centred, false);
+            g.setColour (skin::valueColour (active || hover));
+            g.setFont (font (type::small, false));
+            g.drawText (linkText(), juce::Rectangle<float> (c.r.getX() - 24.0f, knobR.getBottom() + 17.0f, c.r.getWidth() + 48.0f, 14.0f),
+                        juce::Justification::centred, false);
         }
         else if (c.id == idExternal)
         {

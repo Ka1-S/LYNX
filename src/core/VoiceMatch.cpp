@@ -889,10 +889,13 @@ void DeEsser::prepare (double sampleRate) noexcept
 
 void DeEsser::reset() noexcept
 {
-    for (auto* b : { &hp1, &hp2, &lp1, &lp2, &low1, &low2, &split1, &split2 })
+    for (auto* b : { &hp1, &hp2, &lp1, &lp2, &low1, &low2, &split1, &split2, &bhp1, &bhp2, &blp1, &blp2, &blow1, &blow2 })
         b->reset();
     eh = qh = ql = sm = 0.0;
-    open = false;
+    beh = bqh = bql = bsm = 0.0;
+    open = bopen = false;
+    blevel.fill (-300.0f);
+    bratio.fill (-300.0f);
     dl.fill (0.0f);
     dr.fill (0.0f);
     level.fill (-300.0f);
@@ -913,6 +916,9 @@ void DeEsser::design (const Settings& s) noexcept
     lp1.filter (sr, 0, lo, 0.54119610); lp2.filter (sr, 0, lo, 1.30656296);
     low1.filter (sr, 0, h, 0.54119610); low2.filter (sr, 0, h, 1.30656296);
     split1.filter (sr, 0, h, 0.70710678); split2 = split1;
+    bhp1 = hp1; bhp2 = hp2; blp1 = lp1; blp2 = lp2; blow1 = low1; blow2 = low2;
+    for (auto* b : { &bhp1, &bhp2, &blp1, &blp2, &blow1, &blow2 })
+        b->reset();
 }
 
 void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
@@ -924,10 +930,26 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
     const int ahead = std::clamp ((int) std::lround ((s.lookahead ? std::clamp (s.lookaheadMs, 0.0, 15.0) + extraAheadMs : 0.0) * 0.001 * sr), 0, latency);
     constexpr std::int64_t m = ring - 1;
     float maxGr = 0.0f, maxDet = -300.0f;
+    // round 165x: the reference's link (two lanes when the channels hear different signals)
+    const double lk = std::clamp (s.link, 0.0, 1.0), lm = lk >= 1.0 ? std::clamp (s.linkOnly, 0.0, 1.0) : 0.0;
+    const bool pro = s.proLink && (lk < 1.0 || lm > 0.0), perChannel = pro && lm <= 0.0, sideLane = pro && lm > 0.0 && s.linkSide;
+    const bool two = perChannel || sideLane;
     for (int i = 0; i < n; ++i)
     {
         const float a = l[i], b = r[i];
-        const double x = 0.5 * ((double) a + (double) b); // the mid signal (her states: stereo link 100 %, mid)
+        double x = 0.5 * ((double) a + (double) b); // the mid signal (her states: stereo link 100 %, mid)
+        double xb = x;
+        if (perChannel)
+        {
+            x = (1.0 - 0.5 * lk) * a + 0.5 * lk * b;
+            xb = 0.5 * lk * a + (1.0 - 0.5 * lk) * b;
+        }
+        else if (sideLane) // round 165x [EXEC]: each channel detects on (1 − m) mid ∓ m side (L −, R +)
+        {
+            const double sd = 0.5 * ((double) a - (double) b);
+            xb = (1.0 - lm) * x + lm * sd;
+            x = (1.0 - lm) * x - lm * sd;
+        }
         const double h = lp2.process (lp1.process (hp2.process (hp1.process ((float) x, 0), 0), 0), 0);
         const double lw = low2.process (low1.process ((float) x, 0), 0);
         const double ph = h * h, pl = lw * lw;
@@ -937,6 +959,17 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
         const auto w = (std::size_t) (pos & m);
         level[w] = (float) (10.0 * std::log10 (2.0 * eh + 1e-30));
         ratio[w] = (float) (10.0 * std::log10 ((qh + 1e-30) / (ql + 1e-30)));
+        if (two)
+        {
+            const double hb = blp2.process (blp1.process (bhp2.process (bhp1.process ((float) xb, 0), 0), 0), 0);
+            const double lb = blow2.process (blow1.process ((float) xb, 0), 0);
+            const double pbh = hb * hb, pbl = lb * lb;
+            beh = pbh > beh ? ca * beh + (1.0 - ca) * pbh : cr * beh + (1.0 - cr) * pbh;
+            bqh = cq * bqh + (1.0 - cq) * pbh;
+            bql = cq * bql + (1.0 - cq) * pbl;
+            blevel[w] = (float) (10.0 * std::log10 (2.0 * beh + 1e-30));
+            bratio[w] = (float) (10.0 * std::log10 ((bqh + 1e-30) / (bql + 1e-30)));
+        }
         dl[w] = a;
         dr[w] = b;
         // the sample played now entered `latency` samples ago; its gain looks `ahead` samples past it
@@ -953,10 +986,52 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
             sm = t > sm ? ga * sm + (1.0 - ga) * t : gr * sm + (1.0 - gr) * t;
             gainDb = -sm;
             maxDet = std::max (maxDet, (float) la);
+            if (two)
+            {
+                const double lb = blevel[(std::size_t) ((now + ahead) & m)], rb = bratio[(std::size_t) (now & m)];
+                if (! bopen && lb >= thr + openDb && rb >= openRatioDb)
+                    bopen = true;
+                else if (bopen && (lb < thr + closeDb || rb < closeRatioDb))
+                    bopen = false;
+                const double tb = bopen ? std::clamp (range * (lb - thr + 4.1) / (0.1 - thr), 0.0, range) : 0.0;
+                bsm = tb > bsm ? ga * bsm + (1.0 - ga) * tb : gr * bsm + (1.0 - gr) * tb;
+                maxDet = std::max (maxDet, (float) lb);
+            }
         }
         const auto rd = (std::size_t) (std::max<std::int64_t> (now, 0) & m);
         const float da = now >= 0 ? dl[rd] : 0.0f, db = now >= 0 ? dr[rd] : 0.0f;
         const auto g = (float) std::pow (10.0, gainDb / 20.0);
+        if (pro && ! s.listen)
+        {
+            // round 165x: the change of the band (the whole signal, or above the split) per the reference's link
+            const double g0 = g, g1 = two ? std::pow (10.0, -bsm / 20.0) : g0;
+            double ba = da, bb = db, pa = da, pb = db;
+            if (! s.wideband)
+            {
+                const auto la2 = split1.process (da, 0), lb2 = split2.process (db, 1);
+                ba = da - la2;
+                bb = db - lb2;
+            }
+            double oa, ob;
+            if (perChannel) { oa = (g0 - 1.0) * ba; ob = (g1 - 1.0) * bb; }
+            else if (! s.linkSide)
+            {
+                const double mid = 0.5 * (ba + bb);
+                oa = (g0 - 1.0) * ((1.0 - lm) * ba + lm * mid);
+                ob = (g0 - 1.0) * ((1.0 - lm) * bb + lm * mid);
+            }
+            else // and processes (1 − m) itself ± m side (L +, R −)
+            {
+                const double sd = 0.5 * (ba - bb);
+                oa = (g0 - 1.0) * ((1.0 - lm) * ba + lm * sd);
+                ob = (g1 - 1.0) * ((1.0 - lm) * bb - lm * sd);
+            }
+            l[i] = (float) (pa + oa);
+            r[i] = (float) (pb + ob);
+            maxGr = std::max (maxGr, (float) std::max (sm, bsm));
+            ++pos;
+            continue;
+        }
         if (s.listen)
         {
             l[i] = lp2.process (lp1.process (hp2.process (hp1.process (da, 1), 1), 1), 1); // (the band, on the spare state)
@@ -1000,12 +1075,30 @@ namespace
 // 10 s at −24 … 0 dBFS, then a −40 dBFS probe for 25 s; Compress at peak reduction 46 / 62.6 / 80, Limit at 62.6). The
 // trial recovers the same after 0.5, 2 or 10 s of reduction (no long memory) and is back within 0.1 dB after ≈ 10 s;
 // round 123's slow conductance kept ≈ 0.8 dB for many seconds. Each conductance releases as dC/dt = −a Cⁿ − b C.
-struct ReleaseLaw { double a, n, share, slowAttackMs, a2, n2, b, b2; };
+// round 165x: the fast cell's attack is part of the law — round 123's log-domain approach (tau / (1 + C)^beta), or the
+// measured one: a linear-domain approach (tau / (1 + C)^beta) whose rise is limited to rate · (1 + C)^rateBeta per ms,
+// and the fast cell's drive capped at ctMax; the slow cell takes its own cap (ctMaxSlow), in Limit through a low-pass (slowLpMs), so
+// Limit's steep cell still builds the deep slow reduction of round 152a's stairs without slamming the onset
+struct ReleaseLaw
+{
+    double a, n, share, slowAttackMs, a2, n2, b, b2;
+    double attackTauMs = attackMs, attackPow = attackBeta, rate = 0.0, ratePow = 0.0, ctMax = 0.0, ctMaxSlow = 0.0, slowLpMs = 0.0; // rate 0: round 123's
+    bool linearAttack = false;
+};
 constexpr ReleaseLaw release123 { releaseA, releaseN, slowShare, attackSlowMs, releaseA2, releaseN2, 0.0, 0.0 };
 // fitted (glowfit, Nelder-Mead on 18 trajectories, 10 ms windows, the first 3 s of each recovery weighted ×10): rms 0.61 →
 // 0.24 dB overall, the recovery 0.03 … 0.15 dB rms (round 123: 0.08 … 0.84); held out, round 152's 0.5 s stairs (falling
 // half, Compress 46 / 62.6 / 80): 0.52 / 0.76 / 0.65 → 0.35 / 0.39 / 0.45 dB
-constexpr ReleaseLaw release165 { 3.77134, 1.8446, 0.626219, 4622.87, 8.63099, 3.36638, 4.51261, 0.337878 };
+// round 165x [EXEC] (REA_rodada165x §1): the attack fitted (attfit, Nelder-Mead, 1 ms windows of the first 100 ms of
+// 30 onsets: 1 kHz bursts 0 / −6 / −12 / −24 dBFS and a −12 → 0 dBFS step, Compress and Limit at 46 / 62.6 / 80), then
+// checked against round 165w's recoveries and round 152a's Limit stairs. The trial lets the transient through: its gain
+// falls ≈ 2 dB per ms whatever the drive (−0.9 / −2.9 / −4.8 / −7.9 / −13 dB at 0 / 1 / 2 / 4 / 10 ms in Limit 80); the
+// round-123 attack clamped Limit within the first millisecond. The slow cell's drive is capped (ctMaxSlow); in Limit it
+// is also smoothed (slowLpMs: the steep cell's rectified drive, averaged, builds the stairs' deep slow reduction —
+// in Compress the smoothing would deepen the recovery after loud bursts). First 50 ms of the 30 onsets: rms
+// 2.36 → 0.91 dB overall (Limit 80 at 0 dBFS: 14.8 → 2.2 dB)
+constexpr ReleaseLaw release165 { 3.77134, 1.8446, 0.626219, 4622.87, 8.63099, 3.36638, 4.51261, 0.337878,
+                                  66.76061, 1.484398, 0.2006814, 0.3369957, 45.57088, 250.0, 48.29348, true };
 } // namespace
 
 void Leveler::prepare (double sampleRate) noexcept
@@ -1016,7 +1109,7 @@ void Leveler::prepare (double sampleRate) noexcept
 
 void Leveler::reset() noexcept
 {
-    cf = cs = el = mem = 0.0;
+    cf = cs = el = mem = ctl = 0.0;
     for (int c = 0; c < 2; ++c)
     {
         yc[c] = fx1[c] = fy1[c] = xp[c] = 0.0;
@@ -1039,9 +1132,10 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
     const double shift = sensitivityDb (s.peakReduction, s.hiFreq) + (s.limit ? (ml ? limitShiftDb152 : limitShiftDb) : 0.0);
     const double Y0 = dbToGain (y0Db + shift), Yt = dbToGain (ytDb + shift), gam = s.limit ? (ml ? limitGamma152 : limitGamma) : gamma;
     const double ff = ml ? limitFeedForward : 0.0, gFloor = ml ? dbToGain (-limitFloorDb) : 0.0;
-    const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb + (s.measured && s.autoMakeup ? autoMakeupDb (s.peakReduction) : 0.0));
+    const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb + (s.measured && s.autoMakeup ? autoMakeupDb (s.peakReduction) - autoMakeupDb (s.makeupRef) : 0.0));
     const auto& rl = s.measuredRelease ? release165 : release123;
     const double cA = 1.0 - std::exp (-dt * 1000.0 / rl.slowAttackMs), mUp = 1.0 - std::exp (-dt * 1000.0 / memUpMs), mDn = 1.0 - std::exp (-dt * 1000.0 / memDownMs);
+    const double slowLp = rl.slowLpMs > 0.0 && ml ? 1.0 - std::exp (-dt * 1000.0 / rl.slowLpMs) : 1.0; // (Limit only)
     const double K = 2.0 * sr;
     // the idle response measured at 48 kHz; other rates take its bilinear analog prototype (approximate)
     const double* tb = idleB;
@@ -1051,9 +1145,29 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
     {
         const double e0 = sc.process ((float) (yc[0] + ff * xp[0]), 0), e1 = sc.process ((float) (yc[1] + ff * xp[1]), 1);
         el = std::max (std::abs (e0), std::abs (e1)); // the light follows the drive within the sample (fitted)
-        const double ct = (el > Yt ? std::pow ((el - Yt) / Y0, gam) : 0.0) * (1.0 + memGain * mem);
-        const double ctf = (1.0 - rl.share) * ct, cts = rl.share * ct;
-        if (ctf > cf)
+        double ct = (el > Yt ? std::pow ((el - Yt) / Y0, gam) : 0.0) * (1.0 + memGain * mem);
+        const double ctf = (1.0 - rl.share) * (rl.ctMax > 0.0 ? std::min (ct, rl.ctMax) : ct);
+        const double cts0 = rl.share * (rl.ctMaxSlow > 0.0 ? std::min (ct, rl.ctMaxSlow) : ct);
+        if (slowLp < 1.0)
+            ctl += slowLp * (cts0 - ctl);
+        else
+            ctl = cts0;
+        const double cts = ctl;
+        if (ctf > cf && rl.rate > 0.0)
+        {
+            // round 165x: the measured attack (round 123's log-domain approach, or a linear one; the rise rate-limited)
+            double up;
+            if (rl.linearAttack)
+                up = cf + (ctf - cf) * (1.0 - std::exp (-dt * 1000.0 * std::pow (1.0 + cf, rl.attackPow) / rl.attackTauMs));
+            else
+            {
+                double cd = std::log1p (cf);
+                cd += (std::log1p (ctf) - cd) * (1.0 - std::exp (-dt * 1000.0 * std::pow (1.0 + cf, rl.attackPow) / rl.attackTauMs));
+                up = std::expm1 (cd);
+            }
+            cf = std::min (up, cf + rl.rate * dt * 1000.0 * std::pow (1.0 + cf, rl.ratePow));
+        }
+        else if (ctf > cf)
         {
             double cd = std::log1p (cf);
             cd += (std::log1p (ctf) - cd) * (1.0 - std::exp (-dt * 1000.0 * std::pow (1.0 + cf, attackBeta) / attackMs));

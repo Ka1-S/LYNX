@@ -286,7 +286,8 @@ private:
 // --- the tree (and, flat, the search results) ---------------------------------------------------------
 
 class BrowserComponent::FileTree final : public juce::Component,
-                                         public ui::HintSource
+                                         public ui::HintSource,
+                                         public juce::FileDragAndDropTarget
 {
 public:
     static constexpr int rowHeight = 22;
@@ -842,6 +843,12 @@ public:
             }
         }
 
+        if (juce::isPositiveAndBelow (dropRow, (int) rows.size())) // files from the system would go here
+        {
+            g.setColour (accent);
+            g.drawRect (juce::Rectangle<int> (0, dropRow * rowHeight, getWidth(), rowHeight), 2);
+        }
+
         if (rows.empty() && status.isNotEmpty())
         {
             g.setColour (textDisabled);
@@ -854,6 +861,97 @@ public:
     {
         const auto row = y / rowHeight;
         return y >= 0 && row < (int) rows.size() ? row : -1;
+    }
+
+    // --- files dragged in from the system (issue #12): copied into the folder under the mouse ----------------------
+    // The folder row a drop at y lands in: a folder on disk, or a file's own folder; -1 = nowhere to copy to.
+    int dropFolderRow (int y) const
+    {
+        auto row = rowAt (y);
+        if (row < 0)
+            return -1;
+        const Node* n = rows[(std::size_t) row];
+        if (n->kind == Kind::file)
+            n = n->parent;
+        if (n == nullptr || n->kind != Kind::fsFolder || ! n->file.isDirectory())
+            return -1;
+        const auto it = std::find (rows.begin(), rows.end(), n);
+        return it != rows.end() ? (int) (it - rows.begin()) : -1;
+    }
+
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        // the files the Browser lists (samples, MIDI, projects, presets): an other file would not show in the folder
+        return ! flat && std::any_of (files.begin(), files.end(), [] (const juce::String& f) {
+            const juce::File file (f);
+            return file.existsAsFile() && isListed (file);
+        });
+    }
+
+    void fileDragMove (const juce::StringArray&, int, int y) override
+    {
+        if (const auto row = dropFolderRow (y); row != dropRow)
+        {
+            dropRow = row;
+            repaint();
+        }
+    }
+
+    void fileDragExit (const juce::StringArray&) override
+    {
+        dropRow = -1;
+        repaint();
+    }
+
+    void filesDropped (const juce::StringArray& files, int, int y) override
+    {
+        dropRow = -1;
+        repaint();
+        const auto row = dropFolderRow (y);
+        if (row < 0)
+        {
+            browser.showNote (tr ("Drop the files on a folder to copy them there"));
+            return;
+        }
+        auto* folderNode = rows[(std::size_t) row];
+        const auto folder = folderNode->file;
+        int copied = 0;
+        juce::File first;
+        for (const auto& path : files)
+        {
+            const juce::File source (path);
+            if (! source.existsAsFile() || ! isListed (source) || source.getParentDirectory() == folder)
+                continue;
+            // never over a file that is there: "Kick (2).wav"
+            auto target = folder.getChildFile (source.getFileName());
+            if (target.exists())
+                target = folder.getNonexistentChildFile (source.getFileNameWithoutExtension(), source.getFileExtension(), true);
+            if (source.copyFileTo (target))
+            {
+                ++copied;
+                if (first == juce::File())
+                    first = target;
+            }
+        }
+        if (copied == 0)
+        {
+            browser.showNote (tr ("Nothing was copied to {0}", { folder.getFileName() }));
+            return;
+        }
+        // the folder lists again, open, with the first copy selected
+        folderNode->children.clear();
+        folderNode->loaded = false;
+        folderNode->expanded = true;
+        load (*folderNode);
+        rebuild();
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(std::size_t) i]->file == first)
+            {
+                select (i, false);
+                break;
+            }
+        browser.showNote (copied == 1 ? tr ("Copied 1 file to {0}", { folder.getFileName() })
+                                      : tr ("Copied {0} files to {1}", { juce::String (copied), folder.getFileName() }));
     }
 
     void mouseMove (const juce::MouseEvent& e) override { setHovered (rowAt (e.y)); }
@@ -1675,6 +1773,7 @@ private:
     juce::Array<juce::File> bases;
     juce::String status, pendingKey;
     int selected = -1, hovered = -1, pressedRow = -1;
+    int dropRow = -1; // the folder files dragged in from the system would be copied to
     bool dragStarted = false;
 };
 
@@ -2905,6 +3004,20 @@ void BrowserComponent::addSystemItems (juce::PopupMenu& menu, const juce::File& 
     system.addSeparator();
     system.addItem (tr ("Delete file..."), file.existsAsFile(), false, [this, file] { confirmDeleteFile (file); });
     menu.addSubMenu (tr ("File"), system);
+}
+
+void BrowserComponent::showNote (const juce::String& text)
+{
+    const auto relayout = text.isEmpty() != statusLine.isEmpty();
+    statusLine = text;
+    if (relayout)
+        resized();
+    repaint();
+    // it goes away by itself (unless something else wrote there meanwhile)
+    juce::Timer::callAfterDelay (5000, [safe = juce::Component::SafePointer<BrowserComponent> (this), text] {
+        if (safe != nullptr && safe->statusLine == text)
+            safe->showNote ({});
+    });
 }
 
 void BrowserComponent::confirmDeleteFile (const juce::File& file)

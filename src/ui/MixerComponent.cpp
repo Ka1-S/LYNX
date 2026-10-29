@@ -879,7 +879,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             juce::PopupMenu menu;
             const auto spec = specFor (Part::send, t);
             menu.addSectionHeader (spec.name + ": " + spec.text (valueOf (Part::send, t)));
-            ui::addValueItems (menu, *this, nullptr, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
+            ui::addValueItems (menu, *this, &engine, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
             menu.addSeparator();
             menu.addItem (t == 0 ? tr ("Remove the route to Master") : tr ("Remove this send"),
                           [this, from, t] { engine.editSong ([from, t] (Song& s) { s.setRoute (from, t, false); }); });
@@ -1092,7 +1092,11 @@ ui::ValueSpec MixerStrips::specFor (Part part, int t) const
         return stereoSpec (name + " - " + tr ("Stereo separation"));
 
     if (part == Part::send)
-        return sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + (t == 0 ? tr ("Level to Master") : tr ("Send level")));
+    {
+        auto spec = sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + (t == 0 ? tr ("Level to Master") : tr ("Send level")));
+        spec.target = AutomationTarget { AutomationTargetKind::mixerSend, selected, t }; // automatable (issue #12)
+        return spec;
+    }
 
     auto spec = ui::faderSpec (name + " - " + tr ("Volume"), unityFader);
     spec.pixelsForRange = juce::jmax (60, faderRail (juce::jmax (0, t)).getHeight());
