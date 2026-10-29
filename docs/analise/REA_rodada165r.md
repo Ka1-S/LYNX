@@ -65,3 +65,5 @@ FL Studio blocks the same way while it opens a device).
   Settings opens (FL's plugin database = hundreds of small files). No saveAudioDeviceState stall any more.
 3. Fix: PluginHost reads FL's plugin database on a thread 3 s after start (joined in the destructor); the first
    Settings open finds it loaded.
+- After the warm-up (fresh profile prof3): Settings opened within 0.7 s, no hang file in the whole session; closed
+  normally, desktop clean.
