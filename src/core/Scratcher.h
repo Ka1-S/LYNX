@@ -25,6 +25,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/Song.h"
@@ -142,6 +143,10 @@ private:
     float invSpan = 0.0f, motorScale = 0.0f;
     int span = 0;
 };
+
+// Whether a file dropped on the editor (an OS file drop or a drag from LYNX's Browser) is loaded onto the platter:
+// LYNX's sample files (core/SampleFiles.h, the list SampleLibrary::isSampleFile and the Browser use), by extension
+bool loadsDroppedFile (std::string_view path) noexcept;
 
 // The slot's effect: `sample` may be null (no sample / not found → the input passes)
 std::unique_ptr<Effect> make (std::shared_ptr<const SampleData> sample);

@@ -6,6 +6,8 @@ Scratcher_x64.dll` (clean-room: behaviour only), [DFM] the editor form `TSYNTHED
 (why it stayed unported: FL's Ogg decoder — solved in round 77 — and the pattern events' scale — solved here).
 
 ## Where I stopped
+- 2026-10-28 22:35: full core build OK; pattern events on the Scratcher's controls now map (they were dropped:
+  effectParamFromFl had no entry); LYNX's full-path renders vs FL documented (§6). Next: Windows build + editor shot, land.
 - 2026-10-28 21:40: LYNX's engine alone (harness) matches FL to 1 LSB in every crafted project (§6). Waiting for a
   build slot for the full core build (tests + renderwav: import + renderer path) and the Windows build (queued).
 - 2026-10-28 21:15: the decoded engine (Python model) matches FL's renders to the 16-bit level (§6). Waiting for a build
@@ -95,6 +97,15 @@ Findings:
   same way, during the song (0.5 … 1.7 s): motor forwards / backwards / slow **96.6 % / 96.5 % / 99.0 % of the samples
   equal to FL's 16-bit output and 100 % within 1 LSB**; hold still 99.5 % equal (−83 dB), hold Rotations 10 99.95 %
   equal (−78 dB) [FL render][TEST harness, E:\lynx-work\flscratch165\c_*.raw]. Muted: silent in both.
+- **LYNX's full path** (FL's .flp imported, rendered by renderwav: import + rack + mixer, blocks of 256) gives the same
+  numbers: motor forwards per 0.1 s window −53…−85 dB until the song's end; hold still 99.52 % of the samples equal to
+  FL's (−83 dB as 16-bit, max 1.2 LSB), hold Rotations 10 99.95 % (−78 dB, max 0.7 LSB); muted silent.
+- **The render test** (the platter moved by 259 pattern events): level envelopes per 0.1 s follow FL's (correlation 0.82,
+  mean 1.4 dB apart; the first 0.3 s differ by FL's pre-roll). The waveform matches FL's within FL's own spread from one
+  run to the next (−14…−27 dB per window, FL vs FL −18…−20 dB) once shifted by ~100…170 samples: FL's events reach the
+  platter that much later than LYNX's (LYNX applies them at their own sample, the engine reads Wave position at the
+  next block, like FL). The shift depends on LYNX's block size (64: 168, 256: 108, 512: 96 samples), so it is FL's chunk
+  grid, which moves with FL's pre-roll [HYP]: not reproduced (2…4 ms).
 
 ## 7. LYNX
 `EffectKind::scratcher` (project id `fruityScratcher`), core/Scratcher.h (engine, state, the host's 16-bit copy), the

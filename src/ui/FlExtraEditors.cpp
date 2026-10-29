@@ -12,6 +12,7 @@
 #include "core/VisualFx.h"
 #include "engine/AudioEngine.h"
 #include "platform/Paths.h"
+#include "ui/BrowserComponent.h"
 #include "ui/I18n.h"
 #include "ui/PluginEditors.h"
 #include "ui/PluginSkin.h"
@@ -868,7 +869,12 @@ private:
     VisualTarget target;
 };
 
-class ScratcherEditor final : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
+// (a sample dropped on the editor loads onto the platter, from the OS or from LYNX's Browser, so it never falls through
+// to the Playlist as an audio clip)
+class ScratcherEditor final : public juce::Component,
+                              public juce::FileDragAndDropTarget,
+                              public juce::DragAndDropTarget,
+                              private juce::Timer
 {
 public:
     ScratcherEditor (const VisualTarget& t, bool demoMode)
@@ -994,6 +1000,12 @@ public:
             g.drawEllipse (platter.reduced (2.0f), 3.0f);
         }
 
+        if (dropHover)
+        {
+            g.setColour (theme::colour::accent);
+            g.drawRect (getLocalBounds(), 2);
+        }
+
         g.setFont (theme::font (theme::type::caption));
         g.setColour (skin::captionColour());
         g.drawText (tr ("Smoothing"), smoothArea.removeFromTop (16), juce::Justification::centred);
@@ -1063,16 +1075,46 @@ public:
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override
     {
-        return files.size() == 1 && target.engine != nullptr && target.engine->getSampleLibrary().wildcard().containsIgnoreCase (juce::File (files[0]).getFileExtension());
+        return files.size() == 1 && scratcher::loadsDroppedFile (files[0].toStdString());
     }
 
     void filesDropped (const juce::StringArray& files, int, int) override
     {
-        if (! files.isEmpty())
+        dropHover = false;
+        if (isInterestedInFileDrag (files))
             useSample (juce::File (files[0]));
+        repaint();
+    }
+
+    void fileDragEnter (const juce::StringArray&, int, int) override { setDropHover (true); }
+    void fileDragExit (const juce::StringArray&) override { setDropHover (false); }
+
+    // a sample dragged from LYNX's Browser
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        return BrowserComponent::isBrowserDrag (details)
+               && scratcher::loadsDroppedFile (BrowserComponent::draggedFile (details).getFullPathName().toStdString());
+    }
+
+    void itemDragEnter (const SourceDetails&) override { setDropHover (true); }
+    void itemDragExit (const SourceDetails&) override { setDropHover (false); }
+
+    void itemDropped (const SourceDetails& details) override
+    {
+        dropHover = false;
+        const auto file = BrowserComponent::draggedFile (details);
+        if (file.existsAsFile())
+            useSample (file);
+        repaint();
     }
 
 private:
+    void setDropHover (bool on)
+    {
+        dropHover = on;
+        repaint();
+    }
+
     float position() const
     {
         if (demo)
@@ -1170,7 +1212,7 @@ private:
     std::string shownPath;
     juce::String sampleName;
     std::unique_ptr<juce::FileChooser> chooser;
-    bool holding = false;
+    bool holding = false, dropHover = false;
     float holdBefore = 0.0f, dragStartPos = 0.0f;
     int dragTurns = 9;
     juce::Point<float> dragFrom;

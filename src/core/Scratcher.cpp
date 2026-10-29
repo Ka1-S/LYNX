@@ -11,6 +11,7 @@
 
 #include "core/Effects.h"
 #include "core/Instruments.h"
+#include "core/SampleFiles.h"
 
 namespace lynx::scratcher
 {
@@ -452,6 +453,14 @@ void Engine::process (float* left, float* right, int n) noexcept
         }
         volTarget = 0.0f;
     }
+}
+
+bool loadsDroppedFile (std::string_view path) noexcept
+{
+    const auto slash = path.find_last_of ("/\\");
+    const auto name = slash == std::string_view::npos ? path : path.substr (slash + 1);
+    const auto dot = name.find_last_of ('.');
+    return dot != std::string_view::npos && dot + 1 < name.size() && isSampleExtension (name.substr (dot + 1));
 }
 
 // ------------------------------------------------------------------------------------------------ the slot's effect

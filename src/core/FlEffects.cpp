@@ -1678,6 +1678,10 @@ std::optional<FlParamMap> effectParamFromFl (const std::string& pluginName, int 
     if ((is ("Fruity Fast Dist") && k >= 0 && k < fastdistfx::params) || (is ("Fruity Flangus") && k >= 0 && k < flangusfx::params)
         || (is ("Fruity Flanger") && k >= 0 && k < flangerfx::params))
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };
+    // the Scratcher's fourteen controls over their ranges (the platter wheel 0…30000, REA_rodada165g-flscratch165 §5);
+    // quantized to the control's steps like FL's
+    if (is ("Fruity Scratcher") && k >= 0 && k < scratcher::count)
+        return FlParamMap { k, [k] (float v) { return scratcher::quantize (k, std::clamp (v, 0.0f, 1.0f)); } };
     // the exact Fruity Phaser likewise (its nine controls; FL normalises them over their ranges)
     if (is ("Fruity Phaser") && k >= 0 && k < phaserfx::params)
         return FlParamMap { k, [] (float v) { return std::clamp (v, 0.0f, 1.0f); } };

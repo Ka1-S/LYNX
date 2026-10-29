@@ -241,7 +241,8 @@ TEST (flscr165_render_test_import)
         return;
     const auto& fx = song.mixer[1].effects[0];
     using namespace lynx::scratcher;
-    CHECK (fx.kind == lynx::EffectKind::scratcher && fx.params[hold] == 1.0f && rawOfValue (wavePos, fx.params[wavePos]) == 3330);
+    // the state holds Wave position 3330, but the song's start values (0xD8) set it to 0, as FL does when the song starts
+    CHECK (fx.kind == lynx::EffectKind::scratcher && fx.params[hold] == 1.0f && rawOfValue (wavePos, fx.params[wavePos]) == 0);
     CHECK (fx.samplePath.find ("DL Breaker.wav") != std::string::npos);
     CHECK (report.converted["Fruity Scratcher"] == 1 && report.droppedEffects.count ("Fruity Scratcher") == 0);
     // the platter's events: a lane on parameter 0 in the wheel's scale (the highest, 131, is 131 / 30000)
@@ -258,4 +259,15 @@ TEST (flscr165_render_test_import)
             top = std::max (top, e.value);
         CHECK (lane->events.size() > 200 && std::abs (top - 131.0f / 30000.0f) < 1e-6f);
     }
+}
+
+TEST (flscr165_editor_takes_sample_drops)
+{
+    // the editor loads a dropped sample (OS drop or LYNX's Browser) instead of letting it fall to the Playlist: the
+    // same list as SampleLibrary::isSampleFile (core/SampleFiles.h), FL's .wv packs included, any case
+    using lynx::scratcher::loadsDroppedFile;
+    for (const char* ok : { "C:\\Samples\\DL Breaker.wav", "/home/u/loop.WAV", "kick.aiff", "pad.flac", "x.ogg", "y.mp3", "C:\\FL\\Packs\\a.wv", "b.aif" })
+        CHECK (loadsDroppedFile (ok));
+    for (const char* no : { "song.flp", "beat.mid", "C:\\dir.wav\\readme", "noext", "trailing.", "preset.fst", "" })
+        CHECK (! loadsDroppedFile (no));
 }
