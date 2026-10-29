@@ -5,10 +5,18 @@ of audio files into the Playlist (and the Channel Rack) from the file manager do
 
 ## Where I stopped
 
-- 03:10 item 1 done in code. Item 3: four JUCE fixes in cmake/LynxPatchJuce.cmake (CMake builds patch the fetched
-  JUCE; scripts/build-windows-zig.sh compiles a patched copy of juce_gui_basics). Item 2: feature/issue12c (not landed
-  yet) merged into this branch; core/ShownEffectSlot.h used by the native effect editors (Parametric EQ 2 and every
-  FL-style layout) and Facet EQ. Next: Linux build + tests, GUI checks (Linux, Windows), land.
+- 03:30 all three items done and verified (Linux Xvfb + emulator, Windows GUI). Landing.
+
+## Verification
+
+- Linux (Xvfb, emulated GNOME XWayland drag: XDND 5, GTK 4 type order, percent-encoded paths): an unsupported .txt
+  dropped first, then .wav (path with a space), .mp3, .flac, .ogg (vorbis), .wv each became a Playlist clip on the
+  row under the drop; three files at once landed on three rows; an XDND 3 drop too; two files on the Channel Rack
+  replaced the channel under the drop and added a channel.
+- Parametric EQ 2 on the Kick insert with automation clips on band 1's parameters (Linux and Windows builds): the band
+  handle, its slider and the curve move while the song plays and go back to the stored values on stop.
+- Shift+Space (Windows and Linux): stopped → plays from 1:1:1; playing → stops at 1:1:1.
+- lynx_tests: 0 failures (issue11b_shift_space..., issue11b_effect_editor_shows_its_automation).
 
 ## 2. Effect editors following their automation
 
