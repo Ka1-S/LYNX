@@ -1510,7 +1510,7 @@ private:
             case EffectKind::delay: case EffectKind::reverb: case EffectKind::epochVerb: case EffectKind::atrium: case EffectKind::foilPlate:
             case EffectKind::nebula: case EffectKind::halo: case EffectKind::horizon: case EffectKind::echoform: case EffectKind::spiralEcho:
             case EffectKind::reeverb2: case EffectKind::reeverb1: case EffectKind::fruityDelay2: case EffectKind::fruityDelay3:
-            case EffectKind::fruityDelayBank: case EffectKind::luxeVerb: case EffectKind::multibandDelay: case EffectKind::convolver:
+            case EffectKind::fruityDelayBank: case EffectKind::luxeVerb: case EffectKind::multibandDelay: case EffectKind::flDelay1: case EffectKind::convolver:
                 return "Delay reverb";
             case EffectKind::distortion: case EffectKind::lofi: case EffectKind::fruityWaveShaper: case EffectKind::fruitySoftClipper:
             case EffectKind::fruityBloodOverdrive: case EffectKind::fruityFastDist: case EffectKind::hardcore: case EffectKind::distructor:
@@ -1524,6 +1524,7 @@ private:
             case EffectKind::eq: case EffectKind::parametricEq: case EffectKind::facetEq: case EffectKind::filter: case EffectKind::fruityFastLP:
             case EffectKind::fruityFreeFilter: case EffectKind::fruityFilter: case EffectKind::equo: case EffectKind::lovePhilter:
             case EffectKind::vocoder: case EffectKind::vocodex: case EffectKind::aether: case EffectKind::flLowLifter:
+            case EffectKind::flCenter: case EffectKind::flBassBoost: case EffectKind::fl7BandEq:
                 return "Filter";
             case EffectKind::chorus: case EffectKind::fruityChorus: case EffectKind::hyperChorus: case EffectKind::vintageChorus:
             case EffectKind::fruityFlangus: case EffectKind::fruityFlanger: case EffectKind::fruityPhaser: case EffectKind::vintagePhaser:

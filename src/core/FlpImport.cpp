@@ -2129,6 +2129,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Fruity Send" && fx.kind != EffectKind::fruitySend)
                  || (plugin == "Fruity Blood Overdrive" && fx.kind != EffectKind::fruityBloodOverdrive))
             ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
+        else if ((plugin == "Fruity Phase Inverter" && fx.kind != EffectKind::flPhaseInverter)
+                 || (plugin == "Fruity Center" && fx.kind != EffectKind::flCenter)
+                 || (plugin == "Fruity Bass Boost" && fx.kind != EffectKind::flBassBoost)
+                 || (plugin == "Fruity 7 Band EQ" && fx.kind != EffectKind::fl7BandEq)
+                 || (plugin == "Fruity Delay" && fx.kind != EffectKind::flDelay1))
+            ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast LP" && fx.kind != EffectKind::fruityFastLP)
                  || (plugin == "Fruity Free Filter" && fx.kind != EffectKind::fruityFreeFilter)
                  || (plugin == "Fruity Filter" && fx.kind != EffectKind::fruityFilter))

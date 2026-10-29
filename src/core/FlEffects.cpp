@@ -30,6 +30,7 @@
 #include "core/FlangusFastDist.h"
 #include "core/FruityPhaser.h"
 #include "core/EmphasizerFx.h"
+#include "core/FlLegacyFx.h"
 #include "core/FreqShifterFl.h"
 #include "core/LowLifterFl.h"
 #include "core/SytrusEngine.h"
@@ -1262,6 +1263,32 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             slot.state = visualfx::scene::toState (*scene);
         return slot;
     }
+    {
+        // REA_rodada165k: the legacy Fruity Phase Inverter, Center, Bass Boost, 7 Band EQ and Delay (v1) on FL's own engines (the
+        // generic approximations remain for states that cannot be read); FL 3 presets spell some names in lower case
+        std::string lname = pluginName;
+        std::transform (lname.begin(), lname.end(), lname.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+        auto exact = [] (EffectKind kind, const auto& s) {
+            auto slot = makeEffectSlot (kind);
+            fllegacy::toParams (s, slot.params.data());
+            return slot;
+        };
+        if (lname == "fruity phase inverter")
+            if (const auto s = fllegacy::parsePhaseInverter (state))
+                return exact (EffectKind::flPhaseInverter, *s);
+        if (lname == "fruity center")
+            if (const auto s = fllegacy::parseCenter (state))
+                return exact (EffectKind::flCenter, *s);
+        if (lname == "fruity bass boost")
+            if (const auto s = fllegacy::parseBassBoost (state))
+                return exact (EffectKind::flBassBoost, *s);
+        if (lname == "fruity 7 band eq")
+            if (const auto s = fllegacy::parseEq7 (state))
+                return exact (EffectKind::fl7BandEq, *s);
+        if (lname == "fruity delay")
+            if (const auto s = fllegacy::parseDelay1 (state))
+                return exact (EffectKind::flDelay1, *s);
+    }
     if (pluginName == "Low Lifter") // REA_rodada154 §5: FL's own engine
         if (const auto s = lowlifter::parse (state))
         {
@@ -1578,6 +1605,11 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::emphasizer: return { "Emphasizer" };
         case EffectKind::flFrequencyShifter: return { "Frequency Shifter" };
         case EffectKind::flLowLifter: return { "Low Lifter" };
+        case EffectKind::flPhaseInverter: return { "Fruity Phase Inverter" };
+        case EffectKind::flCenter: return { "Fruity Center" };
+        case EffectKind::flBassBoost: return { "Fruity Bass Boost" };
+        case EffectKind::fl7BandEq: return { "Fruity 7 Band EQ" };
+        case EffectKind::flDelay1: return { "Fruity Delay" };
         case EffectKind::waveCandy: return { "Wave Candy" };
         case EffectKind::fruityMute2: return { "Fruity Mute 2" };
         case EffectKind::bigClock: return { "Fruity Big Clock" };

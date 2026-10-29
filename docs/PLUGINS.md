@@ -66,7 +66,7 @@ LYNX ships **native** plugins inspired by the third-party plugins producers use 
 | Complete Access (role) saturators (Slate Heatwave / Revival, SSL Fusion Vintage Drive / X-Saturator, Harrison Tape Saturator) | **Ember Saturator** | native LYNX engine · auto-opens | Tube, tape, transistor and fuzz saturation with tone tilt, auto gain and up to 8x oversampling; up to four bands, each with its own style and drive. |
 | Complete Access (role) pitch correction (Slate MetaTune) | **LYNX Tune** | native LYNX engine · auto-opens | Real-time vocal pitch correction: key and scale, retune from natural to the hard robot effect, formant preserve, MIDI target notes. |
 | Complete Access (role) vintage compressor models (Slate FG-116 / FG-76 / FG-401 / FG-A / FG-Dynamics, SSL X-ValveComp) | **Compressor** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
-| FL Studio | **69 FL Studio natives** | Exact / Near-exact | 3x Osc, FL Keys, Gross Beat, Fruity Limiter, Parametric EQ, Soundgoodizer, Maximus, Fruity Delay 3, Reeverb 2, Fruity Compressor, Epoch Verb, Nebula, Atrium, Foil Plate, Echoform, Crest Compressor, Prism Multiband, Sentry Gate … ([all of them](#fl-studio-natives)) |
+| FL Studio | **75 FL Studio natives** | Exact / Near-exact | 3x Osc, FL Keys, Gross Beat, Fruity Limiter, Parametric EQ, Soundgoodizer, Maximus, Fruity Delay 3, Reeverb 2, Fruity Compressor, Epoch Verb, Nebula, Atrium, Foil Plate, Echoform, Crest Compressor, Prism Multiband, Sentry Gate … ([all of them](#fl-studio-natives)) |
 
 <sub>Product and company names are trademarks of their respective owners. They are used only to describe compatibility and the role each LYNX engine plays. LYNX is not affiliated with, endorsed or sponsored by any of them and contains none of their code, presets, graphics or audio.</sub>
 <!-- inspired:end -->
@@ -136,7 +136,7 @@ saved settings are translated and the original stays in the project byte for byt
 | Type | Exact | Near-exact | Close | Approximate | Placeholder | Entries |
 |---|---:|---:|---:|---:|---:|---:|
 | Generators | 12 | 10 | 7 | 1 | 2 | 32 |
-| Effects | 37 | 10 | 1 | 6 | 1 | 55 |
+| Effects | 43 | 10 | 1 | 2 | 1 | 57 |
 
 (Some entries cover several FL plugins that share one LYNX engine, e.g. the sampler or Parametric EQ / EQ 2.)
 
@@ -224,6 +224,12 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Low Lifter | Low Lifter | Insert | Exact | the library's Faust engine (crossovers, look-ahead limiter, Chebyshev harmonics, diffuser, low cut): all 11 installation states and 12 random ones at 44.1–96 kHz bit-identical, FL's one-second silence gate included (round 154) |
 | Frequency Shifter | Frequency Shifter | Insert | Exact | bit-identical on the installation's 14 states and on random ones with control changes at 44.1–96 kHz, except the Tempo range at 48/96 kHz (−85 dB); while the song plays the Tempo range gets the song position in beats (FL's unit not confirmed); the ring modulator's side chain is not routed (round 154) |
 | Emphasizer | Emphasizer | Insert | Exact | every state, 22.05–96 kHz, with control changes; against FL's own renders 98–99.97 % of the 16-bit samples identical (FL's warm-up before a render varies) (round 154) |
+| Fruity Phaser | Fruity Phaser | Insert | Exact | all 27 presets at 44.1–96 kHz bit-identical (round 105) |
+| Fruity 7 Band EQ | Fruity 7 Band EQ | Insert | Exact | all 13 installation states and 40 random ones with control changes at 22.05–96 kHz bit-identical; designed at 44.1 kHz whatever the rate, as FL (round 165k) |
+| Fruity Bass Boost | Fruity Bass Boost | Insert | Exact | all 3 installation states and 40 random ones at 22.05–96 kHz bit-identical (round 165k) |
+| Fruity Delay (v1) | Fruity Delay | Insert | Exact | all 7 installation states and 40 random ones (three modes, host / fixed tempo, control changes, 1–512-frame calls) at 22.05–96 kHz bit-identical; Tempo = host follows the song tempo (round 165k) |
+| Fruity Center | Fruity Center | Insert | Exact | bit-identical at 22.05–96 kHz (round 165k) |
+| Fruity Phase Inverter | Fruity Phase Inverter | Insert | Exact | bit-identical; FL's default inverts the right side only (round 165k) |
 | Gross Beat | Gross Beat | Import | Exact | all 41 states; MIDI control of the slots and spline curves missing |
 | Squeeze | Fruity Squeeze | Import | Near-exact | within 5·10⁻⁹ of the reference model, which is bit-exact with FL |
 | Effector | Effector | Insert | Near-exact | all 12 algorithms; reverb −100 dB |
@@ -237,10 +243,6 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Newtone | Newtone | Import | Close | pass-through as FL; in slave mode the note edits (pitch offsets and transitions, drift, vibrato, formant, volume, timing, disabled notes) rendered by LYNX's own pitch engine; tremolo / ramps and FL's sample re-alignment after edits missing |
 | Newtime | Newtime | Import | Placeholder | pass-through (as FL) + the source sample in slave mode; time warping not reproduced |
 | Utility | Transporter | Insert | Approximate | mapped to a utility stage |
-| EQ | Fruity 7 Band EQ, Fruity Bass Boost | Insert | Approximate | settings mapped to LYNX's EQs |
-| Delay | Fruity Delay (v1) | Insert | Approximate | |
-| Chorus | Fruity Phaser | Insert | Approximate | |
-| Utility | Fruity Center, Fruity Phase Inverter | Insert | Approximate | |
 | Limiter | Emphasis | Insert | Approximate | not ported yet |
 
 **Windows.** Every native effect opens its own window (double-click its Mixer slot, or the **Editor** button over its

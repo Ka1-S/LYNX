@@ -5739,3 +5739,6 @@ countries: br
 "Smooth 2" = "Suavização 2"
 "Smooth 3" = "Suavização 3"
 "Smooth 4" = "Suavização 4"
+# --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
+"Inverted stereo" = "Estéreo invertido"
+"Ping-pong" = "Pingue-pongue"
