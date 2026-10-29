@@ -5893,3 +5893,7 @@ countries: fr be ch ca lu
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "{0} notes. Mode coupe : cliquez sur une note pour la couper, Ctrl+clic pour la recoller à la précédente (C : quitter)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "{0} notes. Glisser : hauteur (Alt : libre), Ctrl+glisser : temps, Maj+clic / glisser dans le vide : sélectionner, règle : fixer la hauteur, clic droit : menu"
 "Auto scrolling" = "Défilement automatique"
+"Play the sample preview" = "Lire la pré-écoute du sample"
+"Set image wallpaper..." = "Définir une image de fond..."
+"Remove image wallpaper" = "Retirer l'image de fond"
+"Set background color..." = "Définir la couleur de fond..."

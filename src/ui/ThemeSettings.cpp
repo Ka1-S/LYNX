@@ -688,29 +688,10 @@ private:
 
     void chooseImage()
     {
-        chooser = std::make_unique<juce::FileChooser> (tr ("Workspace image"), backgroundsFolder(), "*.png;*.jpg;*.jpeg;*.gif");
         juce::Component::SafePointer<ThemePage> safe (this);
-        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe] (const juce::FileChooser& fc) {
-            if (safe == nullptr || ! fc.getResult().existsAsFile())
-                return;
-            if (! juce::ImageFileFormat::loadFrom (fc.getResult()).isValid())
-            {
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Workspace image"), tr ("LYNX SHARE can't read this image (PNG, JPEG or GIF)."));
-                return;
-            }
-            // kept in the Backgrounds folder (issue #12): a copy, unless it is there already (the same file under that
-            // name is reused)
-            auto file = fc.getResult();
-            const auto folder = backgroundsFolder();
-            if (! file.isAChildOf (folder))
-            {
-                auto copy = folder.getChildFile (file.getFileName());
-                if (copy.existsAsFile() && ! copy.hasIdenticalContentTo (file))
-                    copy = folder.getNonexistentChildFile (file.getFileNameWithoutExtension(), file.getFileExtension(), true);
-                if (copy.existsAsFile() || file.copyFileTo (copy))
-                    file = copy;
-            }
-            safe->edit ([path = imagePathFor (file)] (themes::Spec& s) { s.image = path; });
+        chooseWorkspaceImage ([safe] (const juce::File& file) {
+            if (safe != nullptr)
+                safe->edit ([path = imagePathFor (file)] (themes::Spec& s) { s.image = path; });
         });
     }
 
@@ -764,6 +745,50 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
 };
 } // namespace
+
+void chooseWorkspaceImage (std::function<void (const juce::File&)> done)
+{
+    static std::unique_ptr<juce::FileChooser> chooser;
+    chooser = std::make_unique<juce::FileChooser> (tr ("Workspace image"), backgroundsFolder(), "*.png;*.jpg;*.jpeg;*.gif");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [done] (const juce::FileChooser& fc) {
+        if (! fc.getResult().existsAsFile())
+            return;
+        if (! juce::ImageFileFormat::loadFrom (fc.getResult()).isValid())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Workspace image"), tr ("LYNX SHARE can't read this image (PNG, JPEG or GIF)."));
+            return;
+        }
+        // kept in the Backgrounds folder (issue #12): a copy, unless it is there already (the same file under that
+        // name is reused)
+        auto file = fc.getResult();
+        const auto folder = backgroundsFolder();
+        if (! file.isAChildOf (folder))
+        {
+            auto copy = folder.getChildFile (file.getFileName());
+            if (copy.existsAsFile() && ! copy.hasIdenticalContentTo (file))
+                copy = folder.getNonexistentChildFile (file.getFileNameWithoutExtension(), file.getFileExtension(), true);
+            if (copy.existsAsFile() || file.copyFileTo (copy))
+                file = copy;
+        }
+        done (file);
+    });
+}
+
+void setImageWallpaper()
+{
+    chooseWorkspaceImage ([] (const juce::File& file) {
+        auto spec = current();
+        spec.image = imagePathFor (file);
+        apply (spec);
+    });
+}
+
+void removeImageWallpaper()
+{
+    auto spec = current();
+    spec.image.clear();
+    apply (spec);
+}
 
 std::unique_ptr<juce::Component> makeThemePage()
 {

@@ -1856,6 +1856,49 @@ public:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); } // the spectral waveform is ready
 
+    // FL 2026's preview strip (audit round 165z-a): over the waveform, bottom left, a Play / Stop toggle and the preview
+    // volume slider; they show while the mouse is over the strip or a sample plays
+    void adoptControls()
+    {
+        addChildComponent (browser.stopButton);
+        addChildComponent (browser.previewVolume);
+        updateControls();
+    }
+
+    void updateControls()
+    {
+        const auto playing = isPlaying();
+        const auto show = isAudio (file) && (playing || isMouseOver (true));
+        browser.stopButton.setIcon (playing ? Icon::stop : Icon::play);
+        browser.stopButton.setPrimary (playing);
+        const auto text = playing ? tr ("Stop the sample preview") : tr ("Play the sample preview");
+        browser.stopButton.setTooltip (text);
+        ui::setHint (browser.stopButton, text, true);
+        browser.stopButton.setVisible (show);
+        browser.previewVolume.setVisible (show);
+        if (show && ! isTimerRunning())
+            startTimerHz (30); // (hides them again when the mouse leaves)
+    }
+
+    void resized() override
+    {
+        auto row = getLocalBounds().reduced (8, 6).removeFromBottom (14);
+        browser.stopButton.setBounds (row.removeFromLeft (20));
+        row.removeFromLeft (6);
+        browser.previewVolume.setBounds (row.removeFromLeft (juce::jmin (90, juce::jmax (40, row.getWidth() / 2))));
+    }
+
+    void mouseEnter (const juce::MouseEvent&) override { updateControls(); }
+    void mouseExit (const juce::MouseEvent&) override { updateControls(); }
+
+    void togglePlay()
+    {
+        if (isPlaying())
+            browser.stopPreview();
+        else if (isAudio (file))
+            browser.fileSelected (file, true);
+    }
+
     void show (const juce::File& f, bool playing)
     {
         if (f != file)
@@ -1901,6 +1944,7 @@ public:
             startedAt = juce::Time::getMillisecondCounterHiRes();
             startTimerHz (30);
         }
+        updateControls();
         repaint();
     }
 
@@ -2002,8 +2046,10 @@ public:
 
     void stop()
     {
-        stopTimer();
         startedAt = 0.0;
+        if (! isMouseOver (true))
+            stopTimer();
+        updateControls();
         repaint();
     }
 
@@ -2017,12 +2063,15 @@ private:
 
     void timerCallback() override
     {
-        if (position() >= 1.0)
+        if (startedAt > 0.0 && position() >= 1.0)
         {
             stop();
             browser.tree->repaint(); // the "playing" colour goes
             browser.results->repaint();
         }
+        updateControls();
+        if (startedAt <= 0.0 && ! browser.stopButton.isVisible())
+            stopTimer();
         repaint();
     }
 
@@ -2137,14 +2186,15 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
                                 "OR, -word (not), \"exact phrase\", * and ? wildcards  [Enter] to the results  [Esc] clear"));
     addAndMakeVisible (searchBox);
 
-    // FL's Browser has a way to silence the preview too: a Stop button beside the preview volume (issue #9)
+    // FL's Browser has a way to silence the preview too (issue #9): a Play / Stop toggle on the preview strip, beside
+    // the preview volume, as in FL 2026 (audit round 165z-a); the strip adopts both below
     stopButton.setFlat (true);
     stopButton.setWantsKeyboardFocus (false);
     stopButton.setMouseClickGrabsKeyboardFocus (false);
-    stopButton.setTooltip (tr ("Stop the sample preview"));
-    ui::setHint (stopButton, tr ("Stop the sample preview"), true);
-    stopButton.onClick = [this] { stopPreview(); };
-    addAndMakeVisible (stopButton);
+    stopButton.onClick = [this] {
+        if (strip != nullptr)
+            strip->togglePlay();
+    };
 
     // what this Browser shows (round 163): content filter, folders shown, the Sample browser window
     viewButton.setFlat (true);
@@ -2154,7 +2204,8 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
     viewButton.onClick = [this] { showViewMenu(); };
     addAndMakeVisible (viewButton);
 
-    // the sample preview volume (FL's Browser has one too): a small knob at the end of the search row
+    // the sample preview volume (FL's Browser has one too): a slider on the preview strip, as in FL 2026
+    previewVolume.setSliderStyle (juce::Slider::LinearHorizontal);
     previewVolume.setRange (0.0, controls::maxUtilityVolume, 0.01);
     previewVolume.setDoubleClickReturnValue (true, 1.0);
     previewVolume.textFromValueFunction = [] (double v) { return ui::utilityVolumeText (v); };
@@ -2168,7 +2219,6 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
         if (onPreviewVolumeChanged != nullptr)
             onPreviewVolumeChanged();
     };
-    addAndMakeVisible (previewVolume);
     refreshPreviewVolume();
 
     tree = std::make_unique<FileTree> (*this, false);
@@ -2188,6 +2238,7 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
 
     strip = std::make_unique<PreviewStrip> (*this);
     addAndMakeVisible (*strip);
+    strip->adoptControls();
     details = std::make_unique<DetailsBox>();
     addChildComponent (*details);
 
@@ -2907,8 +2958,6 @@ void BrowserComponent::resized()
     area.removeFromTop (4);
     {
         auto row = area.removeFromTop (24);
-        previewVolume.setBounds (row.removeFromRight (24));
-        stopButton.setBounds (row.removeFromRight (22));
         viewButton.setBounds (row.removeFromRight (22));
         row.removeFromRight (4);
         searchBox.setBounds (row);

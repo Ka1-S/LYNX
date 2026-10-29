@@ -5893,3 +5893,7 @@ countries: tr
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "{0} nota. Kesme modu: kesmek için bir notaya tıklayın, öncekine yapıştırmak için Ctrl+tıklayın (C: çık)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "{0} nota. Sürükle: perde (Alt: serbest), Ctrl+sürükle: zaman, Shift+tıkla / boş alanda sürükle: seç, cetvel: perde ayarla, sağ tık: menü"
 "Auto scrolling" = "Otomatik kaydırma"
+"Play the sample preview" = "Sample önizlemeyi çal"
+"Set image wallpaper..." = "Arka plan resmi ayarla..."
+"Remove image wallpaper" = "Arka plan resmini kaldır"
+"Set background color..." = "Arka plan rengini ayarla..."

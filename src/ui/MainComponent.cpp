@@ -4661,6 +4661,14 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addSeparator();
         menu.addItem (tr ("Typing keyboard as a piano") + shortcutText ("view.typingPiano"), true, typingPiano, [this] { setTypingPiano (! typingPiano); });
         menu.addItem (tr ("Touch keyboard"), true, isTouchKeyboardOpen(), [this] { toggleTouchKeyboard (engine); });
+        {
+            // FL's View › Background (audit round 165z-a): the workspace image and colour of Options › Theme
+            juce::PopupMenu background;
+            background.addItem (tr ("Set image wallpaper..."), [] { themeui::setImageWallpaper(); });
+            background.addItem (tr ("Remove image wallpaper"), ! themeui::current().image.empty(), false, [] { themeui::removeImageWallpaper(); });
+            background.addItem (tr ("Set background color..."), [this] { openSettings ((int) SettingsPage::theme); });
+            menu.addSubMenu (tr ("Background"), background);
+        }
         menu.addSeparator();
         // FL's "Auto scrolling" (round 162, issue #9)
         menu.addItem (tr ("Playlist follows the playhead (auto scrolling)") + shortcutText ("playlist.follow"), true,
