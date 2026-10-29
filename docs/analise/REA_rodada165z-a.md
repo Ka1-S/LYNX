@@ -13,6 +13,10 @@ verdict MATCH / DIFFERENT / MISSING / UNVERIFIED. DIFFERENT / MISSING items that
   running; next: Windows LYNX session (ly/*.png), then land.
 - 2026-10-29 17:57: Windows session done (§ Windows run below, all looked at; desktop clean, lock released). Small
   follow-up: the preview strip updates its button only on state changes. Next: tests, land.
+- 2026-10-29 19:12: DONE. lynx_tests 1887130 checks, 0 failures (with FL Data); landed as 6e67c278 (selftest OK).
+  The landed LYNX.exe re-checked by hand: preview strip Stop → Play, hides when the mouse leaves, shows on hover,
+  Play restarts (ly/m0–m4). Replies (#4/#9 follow-up, #2/#3/#5–#8 no reply needed) and release-note bullets added
+  to the coordinator's drafts. Left: §"Left for the next version".
 
 ## Evidence
 
