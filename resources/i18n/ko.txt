@@ -5892,3 +5892,8 @@ countries: kr
 "(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly" = "(베타) LYNX SHARE 자체 타임 엔진. FL의 워핑은 정확히 재현되지 않습니다"
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "노트 {0}개. 자르기 모드: 노트를 클릭하면 자르고, Ctrl+클릭하면 앞 노트에 붙입니다 (C: 나가기)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "노트 {0}개. 드래그: 피치 (Alt: 자유), Ctrl+드래그: 시간, Shift+클릭 / 빈 곳 드래그: 선택, 눈금자: 피치 설정, 오른쪽 클릭: 메뉴"
+"Auto scrolling" = "자동 스크롤"
+"Play the sample preview" = "샘플 미리 듣기 재생"
+"Set image wallpaper..." = "배경 이미지 설정..."
+"Remove image wallpaper" = "배경 이미지 제거"
+"Set background color..." = "배경 색상 설정..."

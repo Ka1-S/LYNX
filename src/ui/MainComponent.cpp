@@ -4666,6 +4666,14 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addSeparator();
         menu.addItem (tr ("Typing keyboard as a piano") + shortcutText ("view.typingPiano"), true, typingPiano, [this] { setTypingPiano (! typingPiano); });
         menu.addItem (tr ("Touch keyboard"), true, isTouchKeyboardOpen(), [this] { toggleTouchKeyboard (engine); });
+        {
+            // FL's View › Background (audit round 165z-a): the workspace image and colour of Options › Theme
+            juce::PopupMenu background;
+            background.addItem (tr ("Set image wallpaper..."), [] { themeui::setImageWallpaper(); });
+            background.addItem (tr ("Remove image wallpaper"), ! themeui::current().image.empty(), false, [] { themeui::removeImageWallpaper(); });
+            background.addItem (tr ("Set background color..."), [this] { openSettings ((int) SettingsPage::theme); });
+            menu.addSubMenu (tr ("Background"), background);
+        }
         menu.addSeparator();
         // FL's "Auto scrolling" (round 162, issue #9)
         menu.addItem (tr ("Playlist follows the playhead (auto scrolling)") + shortcutText ("playlist.follow"), true,
@@ -4712,6 +4720,18 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         });
         menu.addItem (tr ("Metronome volume ({0})...", { ui::utilityVolumeText (engine.getTransport().metronomeVolume.load()) }),
                       [this] { showMetronomeVolume(); });
+        {
+            // FL's Options › "Auto scrolling" (audit round 165z-a): one switch for every editor's Follow (Playlist,
+            // Piano roll, Channel rack, Audio editor); each window's own Follow button still sets just that window
+            auto& globals = EditorGlobals::get();
+            const auto on = globals.isFollowing (false) && globals.isFollowing (true);
+            menu.addItem (tr ("Auto scrolling"), true, on, [on] {
+                auto& g = EditorGlobals::get();
+                for (auto v : { EditorGlobals::FollowView::playlist, EditorGlobals::FollowView::pianoRoll,
+                                EditorGlobals::FollowView::channelRack, EditorGlobals::FollowView::audioEditor })
+                    g.setFollowingView (v, ! on);
+            });
+        }
         {
             juce::PopupMenu recording;
             addRecordOptions (recording);

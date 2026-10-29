@@ -5892,3 +5892,8 @@ countries: jp
 "(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly" = "(ベータ) LYNX SHARE 独自のタイムエンジン。FL のワーピングは正確には再現されません"
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "{0} 個のノート。カットモード: ノートをクリックで分割、Ctrl+クリックで前のノートと結合 (C: 終了)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "{0} 個のノート。ドラッグ: ピッチ (Alt: 自由)、Ctrl+ドラッグ: 時間、Shift+クリック / 空白をドラッグ: 選択、ルーラー: ピッチ設定、右クリック: メニュー"
+"Auto scrolling" = "自動スクロール"
+"Play the sample preview" = "サンプルプレビューを再生"
+"Set image wallpaper..." = "背景画像を設定..."
+"Remove image wallpaper" = "背景画像を削除"
+"Set background color..." = "背景色を設定..."

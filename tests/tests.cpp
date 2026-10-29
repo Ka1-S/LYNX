@@ -3335,7 +3335,7 @@ TEST (song_scheduler_plays_clips_with_offset_and_cut)
     c.length = 2 * lynx::ppq;
     c.offset = 2 * lynx::ppq;
     s.playlist.push_back (c);
-    CHECK (s.songLength() == 8 * lynx::ppq);
+    CHECK (s.songLength() == 6 * lynx::ppq); // FL: the song ends where the last clip ends
 
     const double sr = 48000.0;
     const auto tps = lynx::ticksPerSample (120.0, sr); // 1 beat = 24000 samples
@@ -4577,6 +4577,8 @@ TEST (audio_clips_trigger_cut_and_resume)
     clip.length = 2 * lynx::ppq; // lasts 2 beats
     clip.offset = lynx::ppq;     // skips the first beat of the audio
     s.playlist.push_back (clip);
+    // an empty pattern clip over the whole bar: the song ends at beat 4 (FL loops at the last clip's exact end)
+    s.playlist.push_back (lynx::Clip { 0, 1, 0, 4 * lynx::ppq, 0 });
     s.mode = lynx::PlayMode::song;
 
     const auto tps = lynx::ticksPerSample (120.0, 48000.0);
@@ -16519,3 +16521,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Issue11bTests.inc"
 #include "Issue11cTests.inc"
 #include "FlNewt165Tests.inc"
+#include "Audit165zATests.inc"

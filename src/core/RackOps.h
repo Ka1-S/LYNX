@@ -137,6 +137,11 @@ bool moveChannels (Song& song, std::vector<int>& selection, int delta);
 // (or the next free number). Returns the new index.
 int cloneChannel (Song& song, int index);
 
+// FL (audit round 165z-a): a generator dropped from the Plugin database onto an existing channel replaces that
+// channel's instrument; the channel keeps its place, notes, mixer insert, volume, pan, mute, colour, group and swing.
+// Returns false when `index` is out of range.
+bool replaceGenerator (Song& song, int index, ChannelDef generator);
+
 // Inserts `channel` at `index` (shifting the others down). Returns the index.
 int insertChannel (Song& song, int index, ChannelDef channel);
 

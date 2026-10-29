@@ -5892,3 +5892,8 @@ countries: es mx ar co cl pe ve
 "(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly" = "(beta) Motor de tiempo propio de LYNX SHARE; el warping de FL no se reproduce exactamente"
 "{0} notes. Cut mode: click a note to slice it, Ctrl+click to glue it to the one before (C: leave)" = "{0} notas. Modo corte: clic en una nota para cortarla, Ctrl+clic para pegarla a la anterior (C: salir)"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, Shift+click / drag on empty space: select, ruler: set pitch, right-click: menu" = "{0} notas. Arrastrar: tono (Alt: libre), Ctrl+arrastrar: tiempo, Mayús+clic / arrastrar en vacío: seleccionar, regla: fijar tono, clic derecho: menú"
+"Auto scrolling" = "Desplazamiento automático"
+"Play the sample preview" = "Reproducir la preescucha del sample"
+"Set image wallpaper..." = "Establecer imagen de fondo..."
+"Remove image wallpaper" = "Quitar imagen de fondo"
+"Set background color..." = "Establecer color de fondo..."
