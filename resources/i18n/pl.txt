@@ -5644,6 +5644,9 @@ countries: pl
 
 "Play / stop from the start of the song or pattern" = "Odtwórz / zatrzymaj od początku utworu lub patternu"
 
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
+"Inverted stereo" = "Odwrócone stereo"
+"Ping-pong" = "Ping-pong"
 # --- Not in pt-BR.txt (yet)
 "[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu" = "[LMB] otwórz/zamknij edytor  [Alt]+[LMB] nie zamykaj innych  [Ctrl]+[LMB] odsłuch  [2xLMB] Piano Roll  [LMB] przeciągnij w górę/dół zmienia kolejność  [RMB] menu kanału"
 "Peak meter (left/right) with peak hold  [LMB] clears the clip light" = "Miernik szczytowy (lewy/prawy) z podtrzymaniem  [LMB] gasi lampkę przesterowania"

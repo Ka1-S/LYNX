@@ -5644,6 +5644,9 @@ countries: cn sg
 
 "Play / stop from the start of the song or pattern" = "从歌曲或样式的开头播放/停止"
 
+# --- FL legacy effects (round 165k): Fruity Delay (v1) modes
+"Inverted stereo" = "反相立体声"
+"Ping-pong" = "乒乓"
 # --- Not in pt-BR.txt (yet)
 "[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu" = "[LMB] 打开/关闭编辑器  [Alt]+[LMB] 保持其他编辑器打开  [Ctrl]+[LMB] 试听  [2xLMB] 钢琴卷帘  [LMB] 上下拖动重新排序  [RMB] 通道菜单"
 "Peak meter (left/right) with peak hold  [LMB] clears the clip light" = "峰值电平表（左/右）带峰值保持  [LMB] 清除削波指示灯"

@@ -13,6 +13,11 @@ bool playsSampleFile (InstrumentKind kind) noexcept
     return kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip || kind == InstrumentKind::granulizer;
 }
 
+bool pluginWindowTakesSample (InstrumentKind kind) noexcept
+{
+    return kind == InstrumentKind::granulizer;
+}
+
 std::string insertName (const Song& song, int track)
 {
     if (track >= 0 && track < (int) song.mixer.size() && ! song.mixer[(std::size_t) track].name.empty())
