@@ -20,6 +20,7 @@
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
+#include "engine/Metronome.h"
 #include "engine/AudioLogger.h"
 #include "engine/DllAsioDevice.h"
 #include "engine/PipeWireDevice.h"
@@ -1843,11 +1844,61 @@ private:
         }
         const auto nativesOk = nativesResult == "OK";
 
+        // The metronome as FL 2026 plays it (round 165z-a2): FL's five sounds from its install, the downbeat at
+        // 0.9404 × the Tick two semitones up, into the Master ("---") by default; insert 2 as its track plays it through
+        // insert 2 (muted: silent); never in an export
+        juce::String metronomeResult = "OK";
+        int metronomeFlSounds = 0;
+        float metronomeMaster = 0.0f;
+        {
+            const auto& flData = lynx::flStudioAccess().roots.data;
+            const auto sounds = lynx::Metronome::loadSounds (flData.empty() ? juce::File() : lynx::platform::localFile (flData));
+            for (const auto& s : sounds)
+                metronomeFlSounds += s.fromFl ? 1 : 0;
+            auto renderClick = [] (int track, bool muteInsert, bool include) {
+                auto song = lynx::Song::makeDefault();
+                song.channels.clear();
+                song.playlist.clear();
+                for (auto& p : song.patterns)
+                    p.notes.clear();
+                song.mixer[0].effects.clear(); // (the default Master limiter)
+                song.mixer[2].muted = muteInsert;
+                lynx::AudioEngine player (false);
+                player.setSong (std::move (song));
+                player.dispatchPendingMessages();
+                auto& t = player.getTransport();
+                t.metronome = true;
+                t.metronomeSound = 1; // Tick
+                t.metronomeTrack = track;
+                lynx::AudioEngine::RenderOptions o;
+                o.seconds = 0.25;
+                o.sampleRate = 44100.0;
+                o.pluginWarmUp = false;
+                o.includeMetronome = include;
+                return player.renderOffline (o);
+            };
+            metronomeMaster = renderClick (0, false, true);
+            const auto insert = renderClick (2, false, true);
+            const auto muted = renderClick (2, true, true);
+            const auto exported = renderClick (0, false, false);
+            // FL's Tick peaks at 1.0: its downbeat at most 0.9404 (the interpolation may land between peaks)
+            const auto expectHigh = metronomeFlSounds == lynx::metronome::soundCount ? lynx::metronome::downbeatGain + 1.0e-3f : 1.0f;
+            if (! (metronomeMaster > 0.5f && metronomeMaster < expectHigh))
+                metronomeResult = "ERROR master " + juce::String (metronomeMaster, 4);
+            else if (std::abs (insert - metronomeMaster) > 2.0e-3f)
+                metronomeResult = "ERROR insert " + juce::String (insert, 4);
+            else if (muted > 1.0e-4f)
+                metronomeResult = "ERROR muted insert " + juce::String (muted, 4);
+            else if (exported > 1.0e-4f)
+                metronomeResult = "ERROR in export " + juce::String (exported, 4);
+        }
+        const auto metronomeOk = metronomeResult == "OK";
+
         // Settings › Audio "Driver settings…" with a fake driver panel (issue #13's crash, the panel's buffer kept)
         const auto driverPanel = lynx::AudioEngine::driverPanelSelfTest();
 
         const auto ok = audioOk && projectOk && richOk && hwOutOk && latencyOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
-                        && wavpack != "ERROR" && effectsOk && driverPanel == "OK";
+                        && wavpack != "ERROR" && effectsOk && driverPanel == "OK" && metronomeOk;
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
@@ -1866,6 +1917,8 @@ private:
                << "wavpack=" << wavpack << "\n"
                << "effects=" << (effectsOk ? "OK" : "NONFINITE") << "\n"
                << "driver_panel=" << driverPanel << "\n"
+               << "metronome=" << metronomeResult << " (FL sounds " << metronomeFlSounds << "/" << lynx::metronome::soundCount
+               << ", downbeat peak " << juce::String (metronomeMaster, 4) << ")\n"
                << "result=" << (ok ? "OK" : "FAILED") << "\n";
 
         if (reportPath.isNotEmpty())

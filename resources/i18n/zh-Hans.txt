@@ -5897,3 +5897,7 @@ countries: cn sg
 "Set image wallpaper..." = "设置背景图片..."
 "Remove image wallpaper" = "移除背景图片"
 "Set background color..." = "设置背景颜色..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "节拍器轨道"
+"Metronome target mixer track" = "节拍器的目标混音器轨道"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "节拍器经由的混音器轨道（--- 为主控）。节拍声永远不会进入导出。"

@@ -5897,3 +5897,7 @@ countries: tw hk mo
 "Set image wallpaper..." = "設定背景圖片..."
 "Remove image wallpaper" = "移除背景圖片"
 "Set background color..." = "設定背景顏色..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "節拍器軌道"
+"Metronome target mixer track" = "節拍器的目標混音器軌道"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "節拍器經由的混音器軌道（--- 為主控）。節拍聲永遠不會進入匯出。"

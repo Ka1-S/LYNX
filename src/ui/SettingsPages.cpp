@@ -9,6 +9,7 @@
 #include "platform/LinuxRealtime.h"
 #include "ui/AutomationUi.h"
 #include "ui/I18n.h"
+#include "ui/MixerComponent.h"
 #include "ui/PluginSkin.h"
 
 namespace lynx
@@ -392,9 +393,11 @@ public:
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
                                                                  &bufferNote, &panelButton, &testButton, &status, &load, &outputChannels, &realtime, &recordInput, &recordNote, &inputChannels,
                                                                  &formatLabel, &formatBox, &takeNames, &latencyTitle, &latencyText, &pingOutLabel, &pingOutBox,
-                                                                 &pingInLabel, &pingInBox, &measureButton, &pingNote, &useMeasured, &offsetLabel, &offsetSlider, &offsetNote })
+                                                                 &pingInLabel, &pingInBox, &measureButton, &pingNote, &useMeasured, &offsetLabel, &offsetSlider, &offsetNote,
+                                                                 &mixerTitle, &metronomeTrackLabel, &metronomeTrackBox, &metronomeTrackNote })
             add (*c);
         setupRecordingControls();
+        setupMixerControls();
 
         styleLabel (driverLabel, tr ("Driver"));
         styleLabel (outputLabel, tr ("Output device"));
@@ -511,7 +514,33 @@ private:
         useMeasured.setBounds (r.full (24));
         offsetSlider.setBounds (r.row (offsetLabel, 200));
         offsetNote.setBounds (r.full (32).translated (0, -3));
+        r.section (mixerTitle);
+        metronomeTrackBox.setBounds (r.row (metronomeTrackLabel, 260));
+        metronomeTrackNote.setBounds (r.full (32).translated (0, -3));
         return r.bottom();
+    }
+
+    // FL's Settings › Audio › Mixer › "Metronome track" (round 165z-a2): "---" = the Master, else an insert. A global
+    // setting, like FL's; a song without that insert plays the click on the Master.
+    void setupMixerControls()
+    {
+        styleLabel (metronomeTrackLabel, tr ("Metronome track"));
+        styleCombo (metronomeTrackBox);
+        metronomeTrackBox.setTooltip (tr ("Metronome target mixer track"));
+        styleNote (metronomeTrackNote, tr ("The mixer track the metronome plays through (--- is the Master). The click is never in an export."));
+        const auto& mixer = engine.getSong().mixer;
+        metronomeTrackBox.addItem ("---", 1);
+        for (int t = 1; t < maxMixerTracks; ++t)
+        {
+            const auto name = t < (int) mixer.size() ? juce::String (mixer[(std::size_t) t].name) : juce::String();
+            metronomeTrackBox.addItem (name.isEmpty() ? juce::String (t) : juce::String (t) + "  " + name, t + 1);
+        }
+        metronomeTrackBox.setSelectedId (engine.getTransport().metronomeTrack.load() + 1, juce::dontSendNotification);
+        metronomeTrackBox.onChange = [this] {
+            engine.getTransport().metronomeTrack.store (juce::jmax (0, metronomeTrackBox.getSelectedId() - 1));
+            if (mixeroptions::changed)
+                mixeroptions::changed(); // (ui-options.txt)
+        };
     }
 
     void apply (const std::function<void (juce::AudioDeviceManager::AudioDeviceSetup&)>& change)
@@ -907,6 +936,9 @@ private:
     juce::Slider offsetSlider;
     bool measuring = false;
     juce::String pingResult;
+    SectionTitle mixerTitle { tr ("Mixer") };
+    juce::Label metronomeTrackLabel, metronomeTrackNote;
+    juce::ComboBox metronomeTrackBox;
 };
 
 // ================================================================================================================

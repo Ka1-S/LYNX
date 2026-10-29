@@ -5897,3 +5897,7 @@ countries: ru by kz
 "Set image wallpaper..." = "Установить фоновое изображение..."
 "Remove image wallpaper" = "Убрать фоновое изображение"
 "Set background color..." = "Установить цвет фона..."
+# round 165z-a2 (FL metronome)
+"Metronome track" = "Дорожка метронома"
+"Metronome target mixer track" = "Целевая дорожка микшера для метронома"
+"The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Дорожка микшера, через которую звучит метроном (--- — это Мастер). Щелчок никогда не попадает в экспорт."

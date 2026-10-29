@@ -343,8 +343,10 @@ void AudioEngine::buildInitialGraph()
         rackProcessor->setLiveInput (&liveInput);
         rackProcessor->setHardwareOutput (&hwOutput);
         rackProcessor->setPerformance (performanceLive.get());
+        // FL's own metronome sounds from its install (Data\System), LYNX's stand-ins without it (round 165z-a2)
+        const auto& flData = flStudioAccess().roots.data;
+        rackProcessor->setMetronome (std::make_unique<Metronome> (transport, flData.empty() ? juce::File() : platform::localFile (flData)));
     }
-    auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
     auto previewOwned = std::make_unique<PreviewPlayer>();
     preview = previewOwned.get();
     preview->setVolume (controls::previewGain (previewVolume));
@@ -354,11 +356,10 @@ void AudioEngine::buildInitialGraph()
     for (int channel = 0; channel < 2; ++channel)
     {
         graph.addConnection ({ { rack->nodeID, channel }, { output->nodeID, channel } });
-        graph.addConnection ({ { metronome->nodeID, channel }, { output->nodeID, channel } });
         graph.addConnection ({ { previewNode->nodeID, channel }, { output->nodeID, channel } });
     }
 
-    jassert (graph.getConnections().size() == 6);
+    jassert (graph.getConnections().size() == 4);
 }
 
 float AudioEngine::renderOffline (const RenderOptions& options)
@@ -416,7 +417,10 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     }
 
     if (rackProcessor != nullptr)
+    {
         rackProcessor->setMetering (false); // nobody looks at the meters during the render
+        rackProcessor->setMetronomeAllowed (options.includeMetronome);
+    }
 
     lastRenderStats = {};
     // FL's init list first (play() would do it at the first block), so the plugins settle on those values too
@@ -492,7 +496,10 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     stop();
 
     if (rackProcessor != nullptr)
+    {
         rackProcessor->setMetering (true);
+        rackProcessor->setMetronomeAllowed (true);
+    }
 
     graph.releaseResources();
     setPluginsRenderMode (false);
