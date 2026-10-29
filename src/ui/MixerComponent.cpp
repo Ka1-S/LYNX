@@ -4776,29 +4776,22 @@ void showMenu (AudioEngine& engine, int track, juce::Component* target, std::fun
     menu.showMenuAsync (options);
 }
 
-void toggleArm (AudioEngine& engine, int track, juce::Component* target)
+void toggleArm (AudioEngine& engine, int track, juce::Component* /*target*/)
 {
-    if (engine.isInsertArmed (track))
+    if (track < 0 || track >= (int) engine.getSong().mixer.size())
+        return;
+
+    // FL 2026: arms at once, also without an input source (the recording start reports a missing input)
+    switch (armClick (track, engine.isInsertArmed (track)))
     {
-        engine.setInsertArmed (track, false);
-        return;
+        case ArmClick::none: return;
+        case ArmClick::disarm: engine.setInsertArmed (track, false); return;
+        case ArmClick::arm:
+            engine.setInsertArmed (track, true);
+            if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none)
+                explain (notice);
+            return;
     }
-
-    const auto& mixer = engine.getSong().mixer;
-    if (track <= 0 || track >= (int) mixer.size())
-        return;
-
-    if (mixer[(std::size_t) track].inputChannel >= 0)
-    {
-        engine.setInsertArmed (track, true);
-        if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none)
-            explain (notice);
-        return;
-    }
-
-    // FL: "Audio input needed - Please select an audio input first." Here the input menu opens right away
-    ui::postHint ({ tr ("Audio input needed: choose this insert's input, then it is armed"), {}, false, false }, 4000);
-    showMenu (engine, track, target, [&engine, track] { engine.setInsertArmed (track, true); });
 }
 } // namespace mixerinput
 

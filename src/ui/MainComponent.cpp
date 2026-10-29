@@ -2196,7 +2196,12 @@ void MainComponent::armSelectedInsertForAudio()
 
     showPanel (Panel::mixer);
     this->mixer.selectTrack (target);
-    if (! engine.isInsertArmed (target))
+    if (engine.isInsertArmed (target))
+        return;
+    // this menu item says "(choose its input)": without one, the input menu comes first and arms after the choice
+    if (mixer[(std::size_t) target].inputChannel < 0)
+        mixerinput::showMenu (engine, target, &this->mixer, [this, target] { engine.setInsertArmed (target, true); });
+    else
         mixerinput::toggleArm (engine, target, &this->mixer);
 }
 

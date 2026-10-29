@@ -85,6 +85,17 @@ inline bool inputMonitored (InputMonitor mode, bool armed, bool playing, bool re
     return false;
 }
 
+// What a left-click on an insert's arm switch (the Mixer's, or an audio track's record button in the Playlist) does.
+// FL 2026 (measured, round 165 issue11d): it arms at once, with or without an audio input source — no prompt, the file
+// name is automatic; the missing input is reported when recording starts. A second click disarms. The Master has none.
+enum class ArmClick { none, arm, disarm };
+inline ArmClick armClick (int track, bool armed) noexcept
+{
+    if (track <= 0)
+        return ArmClick::none;
+    return armed ? ArmClick::disarm : ArmClick::arm;
+}
+
 // Device input channels an insert's source uses: { first, count } (count 0 = none or not available).
 inline std::pair<int, int> inputChannelsOf (const MixerTrack& track, int deviceChannels) noexcept
 {
