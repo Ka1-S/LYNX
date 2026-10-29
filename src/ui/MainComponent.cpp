@@ -1168,6 +1168,7 @@ bool MainComponent::runAction (const std::string& id)
 
     if (is ("transport.playStop")) playStop();
     else if (is ("transport.pause")) playPause();
+    else if (is ("transport.playFromStart")) playFromStart();
     else if (is ("transport.toggleMode")) toggleMode();
     else if (is ("view.typingPiano")) setTypingPiano (! typingPiano);
     else if (is ("view.toolbar"))
@@ -1652,6 +1653,19 @@ void MainComponent::playPause()
         playStartTicks = engine.getTransport().positionTicks.load();
         engine.startPlayback();
     }
+}
+
+void MainComponent::playFromStart()
+{
+    // FL's Shift+Space: playing (or waiting / counting in) -> stop at the start of the song or pattern; stopped -> play
+    // from there. Unlike Space it ignores where playback started and the position set on a ruler (issue #11).
+    const auto wasPlaying = engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn();
+    engine.stop();
+    engine.rewind();
+    playStartTicks = 0.0;
+
+    if (! wasPlaying)
+        engine.startPlayback();
 }
 
 void MainComponent::stopAndRewind (bool toStart)

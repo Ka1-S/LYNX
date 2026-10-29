@@ -134,6 +134,7 @@ private:
     // transport
     void playStop();     // Space: play, or stop and go back to where playback started
     void playPause();    // Ctrl+Space: pause / resume where it is
+    void playFromStart(); // Shift+Space (FL): play / stop from the start of the song or pattern
     void stopAndRewind (bool toStart = false); // toStart: the very start, ignoring "Remember seek time"
     void showStopMenu(); // right-click on Stop: "remember seek time", panic // the Stop button
     double playStartTicks = 0.0;
