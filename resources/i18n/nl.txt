@@ -5837,6 +5837,15 @@ countries: nl be
 "Smooth 2" = "Afvlakking 2"
 "Smooth 3" = "Afvlakking 3"
 "Smooth 4" = "Afvlakking 4"
+"DETECTION" = "DETECTIE"
+"Smooth|Balanced|Dense" = "Zacht|Gebalanceerd|Dicht"
+"TRANSIENT" = "TRANSIËNT"
+"SUSTAIN" = "SUSTAIN"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "Verzadiging|Bounce|Diffusie|Blur|Delay|Uit"
+"Warmth" = "Warmte"
+"Amp curve" = "Amplitudecurve"
+"Delay curve" = "Delaycurve"
+"No settings" = "Geen instellingen"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Omgekeerde stereo"

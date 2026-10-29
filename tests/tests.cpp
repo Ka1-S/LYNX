@@ -16468,6 +16468,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Patch165Tests.inc"
 #include "FlPlugins165Tests.inc"
 #include "FlScratch165Tests.inc"
+#include "FlTrans165Tests.inc"
 #include "VideoPlayer165Tests.inc"
 #include "Dash165Tests.inc"
 #include "LinuxMouse165Tests.inc"

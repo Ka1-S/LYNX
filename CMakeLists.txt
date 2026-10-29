@@ -94,6 +94,7 @@ add_library(lynx_core STATIC
     src/core/VisualFx.cpp
     src/core/FlExtraFx.cpp
     src/core/Scratcher.cpp
+    src/core/Transmitter.cpp
     src/core/VideoPlayer.cpp
     src/core/FruityDance.cpp
     src/core/Reeverb2.cpp

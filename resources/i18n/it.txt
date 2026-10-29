@@ -5837,6 +5837,15 @@ countries: it ch sm
 "Smooth 2" = "Smussatura 2"
 "Smooth 3" = "Smussatura 3"
 "Smooth 4" = "Smussatura 4"
+"DETECTION" = "RILEVAMENTO"
+"Smooth|Balanced|Dense" = "Morbido|Bilanciato|Denso"
+"TRANSIENT" = "TRANSIENTE"
+"SUSTAIN" = "SUSTAIN"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "Saturazione|Rimbalzo|Diffusione|Sfocatura|Delay|Off"
+"Warmth" = "Calore"
+"Amp curve" = "Curva d'ampiezza"
+"Delay curve" = "Curva del delay"
+"No settings" = "Nessuna impostazione"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Stereo invertito"

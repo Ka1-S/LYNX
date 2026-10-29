@@ -72,20 +72,13 @@ FL Studio Mobile channels keep LYNX's synth substitute with a note saying why; R
 of their own) are imported muted, with the note (Fruity Video Player: §7 since batch 2).
 
 ## 6. Left for a next round (groundwork)
-- Transmitter, round 165g batch 2 [DECOMP Transmitter_x64.dll]: CreatePlugInstance 0x7145c0 builds the class at VMT
-  0x714360 (slot 3 SaveRestoreState 0x7157e0, slot 7 Eff_Render 0x717600). The render hands the block to a separate
-  engine object (+0x154): its vtable +0x30 processes (n, in, out, the transient / sustain envelope buffers +0x134 /
-  +0x13c), +0x48 returns the two chains' buffers; the sidechain input (+0x230) and the two envelope sends (+0x234 /
-  +0x238) are mixer tracks read / written through the host (+0x120 / +0x128). The editor's 64 controls (DFM hints):
-  Sensitivity, Lookahead, Stereo link, Hold / Release times, Detection mode and sidechain track, Transient / Sustain
-  level, amplitude, tilt, and per section Saturation (drive, warmth, mix), Diffuser (delay, depth, mix), Bounce (delay
-  curve, amp curve, mix) and Delay (time ×2 with tempo-based time, feedback, mix). A faithful port of this engine is a
-  round of its own; not started.
-- Transmitter [DATA 34 presets, tmp scratch tr.py]: state = i32 version 3 + 47 ints. Ints 1–33 are controls 0…10000
-  (Default: 7475, 1968, 1968, 8743, 8743, 5000, 5000, 10000, 9112, 0, 5000, 5051, …), 34–42 flags/selectors (34–38
-  0/1 enables: "Transient only" clears 38, "Sustain only" clears 37; 39–40 selectors 0…5; 41–42 0/1), 46 = 49…90,
-  47 = 257 / 65793 (bytes). The DSP (transient / sustain split, Saturation / Bounce / Diffusion / Delay per section) needs
-  a decompile of Transmitter.dll before LYNX can reproduce it; until then an imported Transmitter is reported as unsupported.
+- Transmitter: **done** in sub-round fltrans165 (REA_rodada165g-fltrans165.md): the front end's 42 controls and state,
+  the engine in Shared\ildsp_x64.dll (TransmitterImpl) rebuilt — the 8-band onset detector and its hold / release, the
+  lookahead, the transient / sustain split, tilt, levels, and every section effect (Saturation, Bounce, Diffusion, Blur,
+  Delay) — checked against FL's engine run as a black box (EXEC harness): detector, split, levels, Delay and Diffusion
+  bit-exact; Saturation −140 dB, Bounce −137…−141 dB (float order); the sidechain input drives the detection; FL-arranged
+  editor. Left: the transient / sustain sends to other mixer tracks (reported as not routed on import), FL's steps:ticks
+  text of the synced delay, its envelope display, bit-exact tanh / logf (Dense mode with a high sensitivity: −81 dB).
 - Fruity Scratcher: **done** in sub-round flscratch165 (REA_rodada165g-flscratch165.md): FL's engine (motor / hold,
   smoothing, rotations, DC blocker, gain / pan glides), FL's 16-bit copy of the sample, state + sample path + pattern
   events imported, editor (scratch with the mouse, Browser / desktop drops). LYNX's renders vs FL's: motor within 1 LSB

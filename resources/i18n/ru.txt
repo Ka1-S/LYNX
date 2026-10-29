@@ -5837,6 +5837,15 @@ countries: ru by kz
 "Smooth 2" = "Сглаживание 2"
 "Smooth 3" = "Сглаживание 3"
 "Smooth 4" = "Сглаживание 4"
+"DETECTION" = "ДЕТЕКЦИЯ"
+"Smooth|Balanced|Dense" = "Мягкий|Сбаланс.|Плотный"
+"TRANSIENT" = "ТРАНЗИЕНТ"
+"SUSTAIN" = "СУСТЕЙН"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "Насыщение|Отскок|Диффузия|Размытие|Задержка|Выкл."
+"Warmth" = "Теплота"
+"Amp curve" = "Кривая амплитуды"
+"Delay curve" = "Кривая задержки"
+"No settings" = "Нет настроек"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "Инвертированное стерео"

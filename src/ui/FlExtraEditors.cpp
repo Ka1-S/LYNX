@@ -9,6 +9,7 @@
 #include "core/Effects.h"
 #include "core/FlExtraFx.h"
 #include "core/Scratcher.h"
+#include "core/Transmitter.h"
 #include "core/VisualFx.h"
 #include "engine/AudioEngine.h"
 #include "platform/Paths.h"
@@ -1406,6 +1407,26 @@ bool runFlExtraShots (AudioEngine& engine, const juce::File& folder)
         auto e = makeEffectSlot (EffectKind::fruityMute2);
         e.params[flextra::mute2::mute] = mute;
         e.params[flextra::mute2::channel] = channel;
+        setSlot (e);
+        if (auto editor = makeNativeEffectEditor (engine, 1, 0))
+            save (*editor, name);
+        else
+        {
+            ok = false;
+            report << name << " FAILED (no editor)\n";
+        }
+    }
+    // Transmitter (fltrans165): the plugin layout editor with FL's Default preset (Saturation / Diffusion), then Bounce /
+    // Delay (tempo-synced) and Blur / Off
+    for (const auto& [name, effectT, effectS, sync] : std::vector<std::tuple<juce::String, int, int, float>> {
+             { "transmitter-default", transmitter::saturation, transmitter::diffusion, 0.0f },
+             { "transmitter-bounce-delay", transmitter::bounce, transmitter::delay, 1.0f },
+             { "transmitter-blur-off", transmitter::blur, transmitter::off, 0.0f } })
+    {
+        auto e = makeEffectSlot (EffectKind::transmitter);
+        e.params[transmitter::transientEffect] = transmitter::paramFromRaw (transmitter::transientEffect, effectT);
+        e.params[transmitter::sustainEffect] = transmitter::paramFromRaw (transmitter::sustainEffect, effectS);
+        e.params[transmitter::sDelaySync] = sync;
         setSlot (e);
         if (auto editor = makeNativeEffectEditor (engine, 1, 0))
             save (*editor, name);

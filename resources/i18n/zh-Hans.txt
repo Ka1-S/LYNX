@@ -5837,6 +5837,15 @@ countries: cn sg
 "Smooth 2" = "平滑 2"
 "Smooth 3" = "平滑 3"
 "Smooth 4" = "平滑 4"
+"DETECTION" = "检测"
+"Smooth|Balanced|Dense" = "平滑|均衡|密集"
+"TRANSIENT" = "瞬态"
+"SUSTAIN" = "延音"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "饱和|弹跳|扩散|模糊|延时|关"
+"Warmth" = "温暖度"
+"Amp curve" = "幅度曲线"
+"Delay curve" = "延时曲线"
+"No settings" = "无设置"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "反相立体声"

@@ -34,7 +34,7 @@ std::unique_ptr<juce::Component> makeFlExtraEditor (const VisualTarget& target, 
 
 // LYNX.exe --flextrashot <folder>: PNGs of every editor of round 165g in its states (Big Clock's three displays, the Tuner's
 // Basic / Dial on test tones, the HTML NoteBook on FL's DefaultHtml.html or a built-in page, Mute 2's layout, the
-// Scratcher in motor and hold views).
+// Scratcher in motor and hold views, the Transmitter with its section effects).
 // Writes report.txt; true when every picture was made.
 bool runFlExtraShots (AudioEngine& engine, const juce::File& folder);
 } // namespace lynx

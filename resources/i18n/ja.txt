@@ -5837,6 +5837,15 @@ countries: jp
 "Smooth 2" = "スムーズ 2"
 "Smooth 3" = "スムーズ 3"
 "Smooth 4" = "スムーズ 4"
+"DETECTION" = "検出"
+"Smooth|Balanced|Dense" = "スムーズ|バランス|デンス"
+"TRANSIENT" = "トランジェント"
+"SUSTAIN" = "サステイン"
+"Saturation|Bounce|Diffusion|Blur|Delay|Off" = "サチュレーション|バウンス|ディフュージョン|ブラー|ディレイ|オフ"
+"Warmth" = "ウォームス"
+"Amp curve" = "振幅カーブ"
+"Delay curve" = "ディレイカーブ"
+"No settings" = "設定なし"
 
 # --- FL legacy effects (round 165k): Fruity Delay (v1) value texts
 "Inverted stereo" = "反転ステレオ"
