@@ -14526,6 +14526,38 @@ TEST (granulizer_engine)
         CHECK (inst->idle()); // the 10 ms end fade of the plugin's voice processor
     }
 
+    // tempo-synced grains follow the song position in LYNX's 960-PPQ ticks: an instance fed setSongPosition every
+    // block while playing must stay in phase with one that free-runs its own tick clock from 0 (it was 10x off)
+    {
+        auto smp = std::make_shared<lynx::SampleData> (granulizerTestSample (20000, 2));
+        lynx::ChannelDef def;
+        def.instrument = lynx::InstrumentKind::granulizer;
+        def.pluginState = n5;
+        auto fed = lynx::makeInstrument (lynx::InstrumentKind::granulizer, smp);
+        auto free = lynx::makeInstrument (lynx::InstrumentKind::granulizer, smp);
+        for (auto* g : { fed.get(), free.get() })
+        {
+            g->configure (def, 140.0);
+            g->prepare (44100.0);
+            g->noteOn (60, 0.8f);
+        }
+        const auto tps = 140.0 * lynx::ppq / (60.0 * 44100.0);
+        std::vector<float> l1 (300), r1 (300), l2 (300), r2 (300);
+        double diff = 0.0, energy = 0.0;
+        for (int block = 0, done = 0; block < 60; ++block, done += 300)
+        {
+            fed->setSongPosition ((double) done * tps);
+            std::fill (l1.begin(), l1.end(), 0.0f), std::fill (r1.begin(), r1.end(), 0.0f);
+            std::fill (l2.begin(), l2.end(), 0.0f), std::fill (r2.begin(), r2.end(), 0.0f);
+            fed->render (l1.data(), r1.data(), 300, 1.0f, 1.0f);
+            free->render (l2.data(), r2.data(), 300, 1.0f, 1.0f);
+            for (int j = 0; j < 300; ++j)
+                diff = std::max (diff, (double) std::fabs (l1[(std::size_t) j] - l2[(std::size_t) j])),
+                energy += (double) l2[(std::size_t) j] * l2[(std::size_t) j];
+        }
+        CHECK (energy > 1.0 && diff < 1e-4);
+    }
+
     // import: a Fruity Granulizer channel plays on the exact engine with its sample
     {
         FlpBuilder b;
