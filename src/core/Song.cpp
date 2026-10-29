@@ -26,9 +26,6 @@ std::int64_t Pattern::effectiveLength (int beatsPerBar) const noexcept
     for (auto& n : notes)
         end = std::max (end, n.start + std::max<std::int64_t> (n.length, 1));
 
-    // FL: Song mode loops at the exact end of the last clip (a clip ending at 3:05 loops at 3:05), not at the bar end
-    if (! playlist.empty() && end > 0)
-        return end;
     return std::max<std::int64_t> (bar, (end + bar - 1) / bar * bar);
 }
 
@@ -70,6 +67,9 @@ std::int64_t Song::songLength() const noexcept
     if (playlist.empty() && currentPattern >= 0 && currentPattern < (int) patterns.size())
         end = patterns[(std::size_t) currentPattern].effectiveLength (beatsPerBar);
 
+    // FL: Song mode loops at the exact end of the last clip (a clip ending at 3:05 loops at 3:05), not at the bar end
+    if (! playlist.empty() && end > 0)
+        return end;
     return std::max<std::int64_t> (bar, (end + bar - 1) / bar * bar);
 }
 
