@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <thread>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -358,6 +359,10 @@ private:
 
     class BackgroundScan;
     std::unique_ptr<BackgroundScan> background;
+    // reads FL's plugin database a few seconds after start, off the message thread: it took 2 s (hundreds of small
+    // .fst / .nfo files) the first time Settings opened, and froze the window (issue #13 investigation)
+    std::atomic<bool> warmupQuit { false };
+    std::thread flDbWarmup;
     mutable std::mutex failuresLock;
     juce::StringArray loadFailures;
     mutable std::mutex stateLock;

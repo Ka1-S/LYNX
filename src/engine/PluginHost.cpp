@@ -713,10 +713,20 @@ PluginHost::PluginHost (bool keep)
             retried.replaceWithText ("2\n");
         }
     }
+    if (persistent)
+        flDbWarmup = std::thread ([this] {
+            for (int i = 0; i < 60 && ! warmupQuit; ++i) // after the start-up's own disk work
+                std::this_thread::sleep_for (std::chrono::milliseconds (50));
+            if (! warmupQuit)
+                flPluginDatabase();
+        });
 }
 
 PluginHost::~PluginHost()
 {
+    warmupQuit = true;
+    if (flDbWarmup.joinable())
+        flDbWarmup.join();
     background = nullptr; // stops the scan (the child being examined is killed)
 }
 
