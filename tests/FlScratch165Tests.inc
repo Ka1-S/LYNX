@@ -212,3 +212,50 @@ TEST (flscr165_hold_mute_pan)
         CHECK (flscr165::rms (pl) < 1e-6 && flscr165::rms (pr) > 0.2);
     }
 }
+
+TEST (flscr165_render_test_import)
+{
+    // FL's own render test (Data/System/Render tests/Fruity Scratcher.flp): insert 1 slot 0, Hold on, the platter moved
+    // by 259 pattern events on Wave position (raw 0…131 of the wheel's 0…30000), DL Breaker.wav from the factory data
+    namespace fs = std::filesystem;
+    if (realFlpDir.empty())
+        return;
+    const auto path = fs::path (realFlpDir) / "System" / "Render tests" / "Fruity Scratcher.flp";
+    std::ifstream in (path, std::ios::binary);
+    const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+    if (file.empty())
+        return;
+    const auto local = [] (std::string p) {
+        std::replace (p.begin(), p.end(), '\\', '/');
+        return lynx::existingPathIgnoringCase (p);
+    };
+    lynx::FlpImportReport report;
+    lynx::FlpImportOptions options;
+    options.report = &report;
+    options.roots.data = fs::path (realFlpDir).string();
+    options.roots.factoryData = fs::path (realFlpDir).parent_path().string();
+    options.fileExists = [local] (const std::string& p) { return fs::is_regular_file (local (p)); };
+    const auto song = lynx::importFlp (flp::parseProject (file), options);
+    CHECK (song.mixer.size() > 1 && ! song.mixer[1].effects.empty());
+    if (song.mixer.size() < 2 || song.mixer[1].effects.empty())
+        return;
+    const auto& fx = song.mixer[1].effects[0];
+    using namespace lynx::scratcher;
+    CHECK (fx.kind == lynx::EffectKind::scratcher && fx.params[hold] == 1.0f && rawOfValue (wavePos, fx.params[wavePos]) == 3330);
+    CHECK (fx.samplePath.find ("DL Breaker.wav") != std::string::npos);
+    CHECK (report.converted["Fruity Scratcher"] == 1 && report.droppedEffects.count ("Fruity Scratcher") == 0);
+    // the platter's events: a lane on parameter 0 in the wheel's scale (the highest, 131, is 131 / 30000)
+    const lynx::PatternEvents* lane = nullptr;
+    for (const auto& p : song.patterns)
+        for (const auto& l : p.events)
+            if (l.target.kind == lynx::AutomationTargetKind::effectParam && l.target.index == 1 && l.target.slot == 0 && l.target.param == 0)
+                lane = &l;
+    CHECK (lane != nullptr);
+    if (lane != nullptr)
+    {
+        float top = 0.0f;
+        for (const auto& e : lane->events)
+            top = std::max (top, e.value);
+        CHECK (lane->events.size() > 200 && std::abs (top - 131.0f / 30000.0f) < 1e-6f);
+    }
+}

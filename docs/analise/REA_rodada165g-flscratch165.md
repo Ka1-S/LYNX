@@ -6,6 +6,10 @@ Scratcher_x64.dll` (clean-room: behaviour only), [DFM] the editor form `TSYNTHED
 (why it stayed unported: FL's Ogg decoder — solved in round 77 — and the pattern events' scale — solved here).
 
 ## Where I stopped
+- 2026-10-28 21:40: LYNX's engine alone (harness) matches FL to 1 LSB in every crafted project (§6). Waiting for a
+  build slot for the full core build (tests + renderwav: import + renderer path) and the Windows build (queued).
+- 2026-10-28 21:15: the decoded engine (Python model) matches FL's renders to the 16-bit level (§6). Waiting for a build
+  slot for LYNX's own build (tests + renderwav) to compare LYNX's renders the same way.
 - 2026-10-28 21:10: core (`src/core/Scratcher.{h,cpp}`), effect wiring, import (state, sample path, pattern-event
   ranges), editor (`ui/FlExtraEditors.cpp`), tests (`tests/FlScratch165Tests.inc`) written; first core build running;
   FL renders of 7 crafted projects running (E:\lynx-work\flscratch165\r). Next: LYNX renders of the same projects,
@@ -68,7 +72,31 @@ values 0…131. [FL render vs model] those are the control's raw integers (/3000
 follows FL's level envelope window by window (0.1 s windows, e.g. 0.088 / 0.085, 0.120 / 0.127, 0.133 / 0.133), /3000
 and /1000 do not.
 
-## 6. LYNX
+## 6. FL's renders [FL render]
+Seven projects made from FL's render test (insert 1, slot 0; same sample, DL Breaker.wav, an Ogg WAV): the test itself,
+motor forwards (1×), backwards (Speed 0.8, Acc 0.6, Pan −64, Volume 255), slow (Speed 0.3, Acc 0.1, Pan +102,
+Volume 128), muted, hold on a still platter (Wave position 3330), hold with Rotations 10 and other Smooth values. The
+pattern events were moved to Sensitivity (which the render ignores) so the songs keep their length (4 beats at 140 BPM).
+Findings:
+- **FL runs the plugin before its render starts** ("pre-roll"): the output at FL's sample 0 is the plugin's sample P of a
+  fresh start, P = 75 + 544 k (1707, 2251, 2795 seen) and it changes from one run to the next (two renders of the motor
+  project: the same sound shifted by 1360 samples; two renders of the render test differ by −18…−20 dB since its pattern
+  events then hit the platter at other moments). So FL's renders are compared after aligning: FL[i] ≈ LYNX[i + P].
+- **At the song's end FL stops the platter**: the motor's sound fades out like a stopped transport (as FL's reset sets
+  it), then starts again ~0.5 s later. That is FL's host stopping / resetting the plugin, not the engine; LYNX's
+  tail keeps the platter turning (not reproduced; in live use an effect never stops).
+- Mute: silent (FL's "sound" flag 0 = muted, after the double re-apply of §2).
+- Python model of §4 (my reading of the DLL, float/double as the DLL computes) vs FL, during the song (0.5 … 1.7 s),
+  per 0.1 s window: motor forwards −53…−84 dB, backwards −52…−84 dB, slow −42…−78 dB; hold still −82 dB as 16-bit
+  (98.8 % of the samples equal to FL's), hold Rotations 10 −77 dB (99.9 % equal). That is FL's 16-bit rounding: the
+  engine is exact.
+
+- **LYNX's engine** (core/Scratcher.cpp alone, blocks of 256, on LYNX's own decoding of DL Breaker.wav) vs FL, aligned the
+  same way, during the song (0.5 … 1.7 s): motor forwards / backwards / slow **96.6 % / 96.5 % / 99.0 % of the samples
+  equal to FL's 16-bit output and 100 % within 1 LSB**; hold still 99.5 % equal (−83 dB), hold Rotations 10 99.95 %
+  equal (−78 dB) [FL render][TEST harness, E:\lynx-work\flscratch165\c_*.raw]. Muted: silent in both.
+
+## 7. LYNX
 `EffectKind::scratcher` (project id `fruityScratcher`), core/Scratcher.h (engine, state, the host's 16-bit copy), the
 sample in `EffectSlot::samplePath` (loaded off the audio thread by the rack builder, like Newtone's), import of FL's
 state + path (%FLStudioFactoryData% resolved, missing files reported, DVS noted), pattern-event / automation ranges,

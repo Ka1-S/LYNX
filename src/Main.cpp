@@ -786,7 +786,7 @@ public:
 
         if (args.contains ("--flextrashot"))
         {
-            // LYNX.exe --flextrashot <folder>: pictures of the editors of round 165g (Big Clock, Tuner, HTML NoteBook, Mute 2)
+            // LYNX.exe --flextrashot <folder>: pictures of the editors of round 165g (Big Clock, Tuner, HTML NoteBook, Mute 2, Scratcher)
             const auto i = args.indexOf ("--flextrashot");
             juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
             lynx::AudioEngine shotEngine (false);
