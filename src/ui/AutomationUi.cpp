@@ -730,6 +730,10 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
             else if (t.kind == AutomationTargetKind::channelParam && t.index >= 0 && t.index < (int) song.channels.size()
                      && song.channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0 && t.param < voltage::paramCount)
                 param = voltageParamLabel (t.param);
+            else if (t.kind == AutomationTargetKind::channelParam && t.index >= 0 && t.index < (int) song.channels.size()
+                     && song.channels[(std::size_t) t.index].instrument == InstrumentKind::sampler && t.param >= 0
+                     && t.param < samplerparam::count) // (issue #12)
+                param = tr (samplerparam::name (t.param));
             else if (t.kind == AutomationTargetKind::effectParam && t.index < (int) song.mixer.size()
                      && t.slot < (int) song.mixer[(std::size_t) t.index].effects.size())
             {
@@ -743,6 +747,11 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
         }
 
         case AutomationTargetKind::tempo: return tr ("Tempo");
+        case AutomationTargetKind::mixerSend: // (issue #12)
+        {
+            const auto destination = t.slot >= 0 && t.slot < (int) song.mixer.size() ? nameOf (song.mixer[(std::size_t) t.slot].name) : juce::String ("?");
+            return trackName + juce::String::fromUTF8 (" \xe2\x86\x92 ") + destination + " - " + (t.slot == 0 ? tr ("Level to Master") : tr ("Send level"));
+        }
         case AutomationTargetKind::effectMix:
         {
             juce::String effect = "FX " + juce::String (t.slot + 1);

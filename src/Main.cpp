@@ -1122,7 +1122,13 @@ public:
         addDriverFileDeviceType();
 
         if (startupOptions.sound)
-            engine->previewSample (lynx::makeStartupSample());
+        {
+            // Options › Theme › Startup sound (issue #12): the user's file, else (or when it can't be read) LYNX's own
+            std::shared_ptr<const lynx::SampleData> sound;
+            if (const auto& own = lynx::themeui::current().startupSound; ! own.empty() && juce::File (juce::String::fromUTF8 (own.c_str())).existsAsFile())
+                sound = engine->getSampleLibrary().load (juce::String::fromUTF8 (own.c_str()));
+            engine->previewSample (sound != nullptr ? sound : lynx::makeStartupSample());
+        }
         startupTrace.mark ("startup sound");
 
         // a project given on the command line: its slow plugin modules (a Waves shell) start now, on their own
