@@ -8,7 +8,7 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
   build-local 1 781 828 checks, 0 failures; Windows --videoshot with the user's ffmpeg 8.1 [SHOT]: frames at song
   0 / 1.5 / 3.25 s (delay 0.5 s) = ffmpeg's own frames at video 0 (held before the delay) / 1.0 / 2.75 s; landing.
   Harmor's presets run as sub-round flbeta165h. Left: Transmitter port (§6), Kepler Exo, Newtime /
-  Newtone. (Scratcher: landed by sub-round flscratch165, §6.)
+  Newtone (Newtone: out of beta in flnewt165; Newtime: beta, §6). (Scratcher: landed by sub-round flscratch165, §6.)
 - 2026-10-28 12:50 (resume after the 2nd BSOD): batch 2 for 0.1.20, one sub-round at a time. (1) Kepler
   (feature/flbeta165k, out of beta, verified in REA_rodada165g-flbeta165k.md) merged with main, build-local running;
   (2) Granulizer engine (feature/flgran165, out of beta, REA_rodada165g-flgran165.md) merged with main (pt-BR conflict:
@@ -86,6 +86,14 @@ of their own) are imported muted, with the note (Fruity Video Player: §7 since 
   FL's stop / reset of the platter at the song's end and its render pre-roll, FL's chunk grid for pattern events
   (2…4 ms), the resampling of non-44.1 kHz samples [HYP].
 - Fruity Video Player: done in batch 2 (§7).
+- Newtone / Newtime: sub-round flnewt165 (REA_rodada165g-flnewt165.md). **Newtone out of beta**: its engine against
+  FL's own Newtone engine (EXEC harness, 135 states): per-note level within 0.4 dB (was 62 of 135 within 0.5 dB, worst
+  8.8 dB: FL's grain size and no gain correction), median pitch within 9 c, FL's tremolo and pitch ramps added, unedited
+  notes bit-identical; editor with FL's tools (Cut / glue, Center / Variation / Transition, Snap to scale, per-note
+  ramps / vibrato / tremolo, multi-select, undo, Score to piano roll / MIDI). Left: legato glides with long smooth times
+  (up to 40 c), FL's sample re-alignment after edits, Sync / Snap to grid / clipboard / Send to Playlist in the editor.
+  **Newtime stays beta**: FL's warp markers are not imported and zplane's élastique stretch is not reproduced (next
+  version: parse the markers, then fit LYNX's stretch to FL's renders as for Newtone).
 
 ## 7. Fruity Video Player [DECOMP Fruity Video Player_x64.dll][DATA Default.fst]
 What FL's plugin is (DFM forms + handlers): a generator that shows a video and plays its sound track, slaved to the

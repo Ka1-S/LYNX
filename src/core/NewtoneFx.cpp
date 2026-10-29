@@ -100,6 +100,7 @@ bool noteEdited (const std::string& xml, std::size_t tag)
            || differs (n ("fAdditionalPitchOffset", 0.0), 0.0) || differs (n ("fDrift", 1.0), 1.0)
            || differs (n ("fCurInvStretchFactor", 1.0), 1.0) || differs (n ("fTremAmp", 0.0), 0.0)
            || differs (n ("fVibAmpStart", 0.0), 0.0) || differs (n ("fTimeVariationOffset", 0.0), 0.0)
+           || differs (n ("fRampIn", 0.0), 0.0) || differs (n ("fRampOut", 0.0), 0.0)
            || n ("bIsEnabled", 1.0) == 0.0;
 }
 
@@ -156,6 +157,8 @@ void readTracks (State& s)
                 p.drift = v ("fDrift", 1.0);
                 p.smoothIn = v ("fPitchSmoothInTime", 0.0);
                 p.smoothOut = v ("fPitchSmoothOutTime", 0.0);
+                p.origSmoothIn = v ("fOrigPitchSmoothInTime", p.smoothIn);
+                p.origSmoothOut = v ("fOrigPitchSmoothOutTime", p.smoothOut);
                 p.fadeInTime = v ("fVolumeFadeInTime", 0.0);
                 p.fadeOutTime = v ("fVolumeFadeOutTime", 0.0);
                 p.fadeInGain = v ("fVolumeFadeInGain", 1.0);
@@ -164,6 +167,8 @@ void readTracks (State& s)
                 p.vibAmpStart = v ("fVibAmpStart", 0.0);
                 p.vibAmpEnd = v ("fVibAmpEnd", 0.0);
                 p.tremAmp = v ("fTremAmp", 0.0);
+                p.rampIn = v ("fRampIn", 0.0);
+                p.rampOut = v ("fRampOut", 0.0);
                 p.enabled = v ("bIsEnabled", 1.0) != 0.0;
                 if (! std::isfinite (p.stretch) || p.stretch <= 0.0)
                     p.stretch = 1.0;
@@ -285,7 +290,8 @@ bool Note::edited (double globalFormant) const noexcept
 {
     return differs (shift, 0.0) || differs (drift, 1.0) || differs (stretch, 1.0) || curStart != origStart
            || differs (volume, 1.0) || differs (formant * globalFormant, 1.0) || ! enabled || vibPeriod > 0.0
-           || differs (tremAmp, 0.0) || differs (fadeInGain, 1.0) || differs (fadeOutGain, 1.0);
+           || differs (tremAmp, 0.0) || differs (fadeInGain, 1.0) || differs (fadeOutGain, 1.0) || differs (rampIn, 0.0)
+           || differs (rampOut, 0.0);
 }
 
 namespace
@@ -430,6 +436,12 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
             if (t >= b - 0.5 * p.smoothOut && t < b)
                 s = p.shift + 0.0435 * (notes[k + 1].shift - p.shift);
         }
+        // pitch ramps [EXEC flnewt165]: rampIn semitones at the start, linear to 0 over smoothIn; rampOut reached
+        // at the end, linear from 0 over the last smoothOut
+        if (p.rampIn != 0.0 && p.smoothIn > 0.0 && t >= (double) p.curStart && t < (double) p.curStart + p.smoothIn)
+            s += p.rampIn * (1.0 - (t - (double) p.curStart) / p.smoothIn);
+        if (p.rampOut != 0.0 && p.smoothOut > 0.0 && t < (double) p.curEnd && t >= (double) p.curEnd - p.smoothOut)
+            s += p.rampOut * (1.0 - ((double) p.curEnd - t) / p.smoothOut);
         if (p.vibPeriod > 0.0 && p.curEnd > p.curStart)
         {
             const auto u = (t - (double) p.curStart) / (double) (p.curEnd - p.curStart);
@@ -476,13 +488,19 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
                 const auto semis = shiftAt (k, ts) + (p.drift - 1.0) * (mk->note - centre[k]);
                 r = std::exp2 (std::clamp (semis, -36.0, 36.0) / 12.0);
                 f = formant;
+                // the local period: the distance to the next mark (they lock to the waveform's peaks, so they follow
+                // a glide that the pitch frames smear)
                 ha = mk->period;
-                hs = ha / f;
+                if (const auto next = mk + 1; next < marks.data() + marks.size() && next->voiced)
+                    ha = std::clamp (next->pos - mk->pos, 0.5 * mk->period, 2.0 * mk->period);
+                // FL's grains [EXEC, round 165g flnewt165]: no gain correction; the window spans two periods of the
+                // output pitch, at most three source periods, and is shortened by a formant factor above 1
+                hs = ha * std::min (1.0 / r, 1.5) / std::max (1.0, f);
                 ta = mk->pos;
             }
             else
                 ha = hs = unvoicedHop;
-            const auto gain = (float) (f / r);
+            const auto gain = 1.0f;
             // bounds clamped as doubles before the conversion (the grain never reaches outside [from, to))
             const auto o0 = (std::int64_t) std::max ((double) from, std::ceil (ts - hs));
             const auto o1 = (std::int64_t) std::min ((double) (to - 1), std::floor (ts + hs));
@@ -498,6 +516,7 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
             }
             ts += voiced ? ha / r : ha;
         }
+        const auto tremPeak = std::max (std::abs (p.vibAmpStart), std::abs (p.vibAmpEnd));
         // the note's gain: volume, fade-in from fadeInGain over fadeInTime, fade-out to fadeOutGain [model]
         for (auto t = a; t < b; ++t)
         {
@@ -507,6 +526,14 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
                 g *= p.fadeInGain + (1.0 - p.fadeInGain) * since / p.fadeInTime;
             if (p.fadeOutTime > 0.0 && until < p.fadeOutTime)
                 g *= p.fadeOutGain + (1.0 - p.fadeOutGain) * until / p.fadeOutTime;
+            // tremolo [EXEC flnewt165]: 1 + tremAmp·sin, in step with the vibrato, its depth following the vibrato's
+            // start → end envelope normalised to its peak (FL's engine gives NaN when both ends are 0; LYNX: none)
+            if (p.tremAmp != 0.0 && p.vibPeriod > 0.0 && tremPeak > 0.0)
+            {
+                const auto u = std::clamp (since / (double) std::max<std::int64_t> (1, p.curEnd - p.curStart), 0.0, 1.0);
+                const auto depth = (p.vibAmpStart + (p.vibAmpEnd - p.vibAmpStart) * u) / tremPeak;
+                g *= 1.0 + p.tremAmp * depth * std::sin (twoPi * since / (p.vibPeriod * fs));
+            }
             for (int c = 0; c < channels; ++c)
             {
                 const auto v = (float) g * sum[c][t - from];
@@ -680,7 +707,8 @@ struct Reader
     }
 };
 
-constexpr std::uint32_t nativeVersion = 1;
+constexpr std::uint32_t nativeVersion = 2; // 2 (round 165g): + the editor's knobs, the notes' pitch ramps and analysed smooth times
+constexpr std::uint32_t warpVersion = 1;
 
 double median (std::vector<double> v)
 {
@@ -741,7 +769,7 @@ Track analyseNotes (const SampleData& source)
         if (p.origEnd <= p.origStart)
             return;
         p.origPitch = median (v);
-        p.smoothIn = p.smoothOut = smoothTime;
+        p.smoothIn = p.smoothOut = p.origSmoothIn = p.origSmoothOut = smoothTime;
         t.pitches.push_back (p);
     };
 
@@ -780,12 +808,172 @@ Track analyseNotes (const SampleData& source)
     return t;
 }
 
+// ------------------------------------------------------------------------------------------------- editor tools
+namespace
+{
+template <typename F>
+void forNotes (Track& track, const std::vector<int>& which, F&& f)
+{
+    if (which.empty())
+        for (auto& p : track.pitches)
+            f (p);
+    else
+        for (const auto k : which)
+            if (k >= 0 && k < (int) track.pitches.size())
+                f (track.pitches[(std::size_t) k]);
+}
+
+void refreshEdited (Track& t)
+{
+    t.notes = (int) t.pitches.size();
+    t.edited = std::any_of (t.pitches.begin(), t.pitches.end(), [&t] (const Note& p) { return p.edited (t.globalFormant); });
+}
+} // namespace
+
+bool splitNote (Track& track, std::size_t k, std::int64_t at, double (*pitchOf) (const void*, std::int64_t, std::int64_t), const void* context)
+{
+    if (k >= track.pitches.size())
+        return false;
+    auto& p = track.pitches[k];
+    if (at <= p.curStart || at >= p.curEnd)
+        return false;
+    const auto src = std::clamp<std::int64_t> (p.origStart + (std::int64_t) std::llround ((double) (at - p.curStart) * p.stretch), p.origStart + 1, p.origEnd - 1);
+    if (src <= p.origStart || src >= p.origEnd)
+        return false;
+    Note b = p;
+    p.curEnd = at;
+    p.origEnd = src;
+    b.curStart = at;
+    b.origStart = src;
+    // the cut is a hard boundary: no pitch ramp across it, and each half's own ramps stay at its outer end
+    p.rampOut = 0.0;
+    b.rampIn = 0.0;
+    if (pitchOf != nullptr)
+    {
+        if (const auto v = pitchOf (context, p.origStart, p.origEnd); v > 0.0)
+            p.origPitch = v;
+        if (const auto v = pitchOf (context, b.origStart, b.origEnd); v > 0.0)
+            b.origPitch = v;
+        // (the shift stays: each half sounds as before; origPitch is what the editor shows and snaps)
+    }
+    track.pitches.insert (track.pitches.begin() + (std::ptrdiff_t) k + 1, b);
+    refreshEdited (track);
+    return true;
+}
+
+bool glueNote (Track& track, std::size_t k)
+{
+    if (k == 0 || k >= track.pitches.size())
+        return false;
+    auto& a = track.pitches[k - 1];
+    const auto& b = track.pitches[k];
+    if (a.curEnd != b.curStart || a.origEnd != b.origStart || differs (a.stretch, b.stretch))
+        return false;
+    const auto la = (double) (a.origEnd - a.origStart), lb = (double) (b.origEnd - b.origStart);
+    if (a.origPitch > 0.0 && b.origPitch > 0.0 && la + lb > 0.0)
+        a.origPitch = (a.origPitch * la + b.origPitch * lb) / (la + lb);
+    a.curEnd = b.curEnd;
+    a.origEnd = b.origEnd;
+    a.rampOut = b.rampOut;
+    a.smoothOut = b.smoothOut;
+    a.origSmoothOut = b.origSmoothOut;
+    track.pitches.erase (track.pitches.begin() + (std::ptrdiff_t) k);
+    refreshEdited (track);
+    return true;
+}
+
+void applyCentre (Track& track, double amount, const std::vector<int>& which)
+{
+    amount = std::clamp (amount, 0.0, 1.0);
+    forNotes (track, which, [amount] (Note& p) {
+        if (p.origPitch <= 0.0)
+            return;
+        const auto target = std::round (p.origPitch + p.shift);      // the semitone the note is on now
+        const auto detune = p.origPitch - std::round (p.origPitch); // how far it was sung from its own semitone
+        p.shift = target - p.origPitch + (1.0 - amount) * detune;
+    });
+    if (which.empty())
+        track.centre = amount;
+    refreshEdited (track);
+}
+
+void applyVariation (Track& track, double amount, const std::vector<int>& which)
+{
+    amount = std::clamp (amount, 0.0, 1.0);
+    forNotes (track, which, [amount] (Note& p) { p.drift = amount; });
+    if (which.empty())
+        track.variation = amount;
+    refreshEdited (track);
+}
+
+void applyTransition (Track& track, double factor, const std::vector<int>& which)
+{
+    factor = std::clamp (factor, 0.0, 2.0);
+    forNotes (track, which, [factor] (Note& p) {
+        p.smoothIn = p.origSmoothIn * factor;
+        p.smoothOut = p.origSmoothOut * factor;
+    });
+    if (which.empty())
+        track.transition = factor;
+    refreshEdited (track);
+}
+
+double nearestInScale (double pitch, int key, std::uint16_t mask) noexcept
+{
+    mask &= 0xFFF;
+    if (mask == 0)
+        mask = 0xFFF;
+    const auto base = std::floor (pitch);
+    double best = std::round (pitch), dist = 1e9;
+    for (int d = -12; d <= 12; ++d)
+    {
+        const auto m = base + d;
+        const auto cls = (((int) m - key) % 12 + 12) % 12;
+        if ((mask >> cls & 1u) == 0)
+            continue;
+        const auto e = std::abs (m - pitch);
+        if (e < dist - 1e-9)
+            best = m, dist = e;
+    }
+    return best;
+}
+
+void snapToScale (Track& track, int key, std::uint16_t mask, const std::vector<int>& which)
+{
+    forNotes (track, which, [key, mask] (Note& p) {
+        if (p.origPitch > 0.0)
+            p.shift = nearestInScale (p.origPitch + p.shift, key, mask) - p.origPitch;
+    });
+    refreshEdited (track);
+}
+
+std::vector<ScoreNote> score (const Track& track, double sampleRate)
+{
+    std::vector<ScoreNote> out;
+    if (sampleRate <= 0.0)
+        return out;
+    for (const auto& p : track.pitches)
+        if (p.enabled && p.origPitch > 0.0 && p.curEnd > p.curStart)
+        {
+            ScoreNote n;
+            n.start = (double) p.curStart / sampleRate;
+            n.length = (double) (p.curEnd - p.curStart) / sampleRate;
+            n.key = std::clamp ((int) std::lround (p.origPitch + p.shift), 0, 127);
+            n.velocity = (float) std::clamp (0.78 * p.volume, 0.0, 1.0);
+            out.push_back (n);
+        }
+    return out;
+}
+
 std::vector<std::uint8_t> writeNative (const Track& track)
 {
     std::vector<std::uint8_t> out { 'L', 'X', 'N', 'T' };
     put (out, nativeVersion);
     put (out, (std::int64_t) track.frames);
     put (out, track.globalFormant);
+    put (out, track.centre);
+    put (out, track.variation);
+    put (out, track.transition);
     put (out, (std::uint32_t) track.pitches.size());
     for (const auto& p : track.pitches)
     {
@@ -795,6 +983,10 @@ std::vector<std::uint8_t> writeNative (const Track& track)
                               p.fadeInGain, p.fadeOutGain, p.vibPeriod, p.vibAmpStart, p.vibAmpEnd, p.tremAmp })
             put (out, v);
         put (out, (std::uint8_t) (p.enabled ? 1 : 0));
+        put (out, p.rampIn);
+        put (out, p.rampOut);
+        put (out, p.origSmoothIn);
+        put (out, p.origSmoothOut);
     }
     return out;
 }
@@ -804,11 +996,18 @@ std::optional<Track> parseNative (const std::vector<std::uint8_t>& state)
     if (state.size() < 8 || std::memcmp (state.data(), "LXNT", 4) != 0)
         return std::nullopt;
     Reader r { state, 4 };
-    if (r.get<std::uint32_t>() != nativeVersion)
+    const auto version = r.get<std::uint32_t>();
+    if (version < 1 || version > nativeVersion)
         return std::nullopt;
     Track t;
     t.frames = r.get<std::int64_t>();
     t.globalFormant = r.get<double>();
+    if (version >= 2)
+    {
+        t.centre = r.get<double>();
+        t.variation = r.get<double>();
+        t.transition = r.get<double>();
+    }
     const auto count = r.get<std::uint32_t>();
     if (! r.ok || count > 100000)
         return std::nullopt;
@@ -821,6 +1020,18 @@ std::optional<Track> parseNative (const std::vector<std::uint8_t>& state)
                          &p.fadeInGain, &p.fadeOutGain, &p.vibPeriod, &p.vibAmpStart, &p.vibAmpEnd, &p.tremAmp })
             *v = r.get<double>();
         p.enabled = r.get<std::uint8_t>() != 0;
+        if (version >= 2)
+        {
+            p.rampIn = r.get<double>();
+            p.rampOut = r.get<double>();
+            p.origSmoothIn = r.get<double>();
+            p.origSmoothOut = r.get<double>();
+        }
+        else
+        {
+            p.origSmoothIn = p.smoothIn;
+            p.origSmoothOut = p.smoothOut;
+        }
         t.pitches.push_back (p);
     }
     if (! r.ok || r.at != state.size())
@@ -842,7 +1053,7 @@ std::optional<Track> trackOf (const std::vector<std::uint8_t>& state)
 std::vector<std::uint8_t> writeWarp (const WarpMap& map)
 {
     std::vector<std::uint8_t> out { 'L', 'X', 'N', 'W' };
-    put (out, nativeVersion);
+    put (out, warpVersion);
     put (out, (std::int64_t) map.frames);
     put (out, (std::uint32_t) map.markers.size());
     for (const auto& m : map.markers)
@@ -858,7 +1069,7 @@ std::optional<WarpMap> parseWarp (const std::vector<std::uint8_t>& state)
     if (state.size() < 8 || std::memcmp (state.data(), "LXNW", 4) != 0)
         return std::nullopt;
     Reader r { state, 4 };
-    if (r.get<std::uint32_t>() != nativeVersion)
+    if (r.get<std::uint32_t>() != warpVersion)
         return std::nullopt;
     WarpMap m;
     m.frames = r.get<std::int64_t>();

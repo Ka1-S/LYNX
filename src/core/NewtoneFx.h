@@ -40,8 +40,10 @@ struct Note
     double stretch = 1.0;                    // fCurInvStretchFactor: source samples per output sample
     double volume = 1.0, formant = 1.0, drift = 1.0;   // fCurVolume, fCurFormantFactor, fDrift
     double smoothIn = 0.0, smoothOut = 0.0;            // fPitchSmoothInTime / fPitchSmoothOutTime (samples)
+    double origSmoothIn = 0.0, origSmoothOut = 0.0;    // fOrigPitchSmooth*Time: the analysed ones (the Transition knob scales them)
     double fadeInTime = 0.0, fadeOutTime = 0.0, fadeInGain = 1.0, fadeOutGain = 1.0;
     double vibPeriod = 0.0, vibAmpStart = 0.0, vibAmpEnd = 0.0, tremAmp = 0.0; // fVibFreq is a period in seconds
+    double rampIn = 0.0, rampOut = 0.0;      // fRampIn / fRampOut: semitones at the note's start / end, gone after smoothIn / before smoothOut
     bool enabled = true;
 
     // the render differs from the source over this note
@@ -60,6 +62,9 @@ struct Track
     bool edited = false;          // a note or a global setting differs from the analysis (pitch, time, volume, formant...)
     std::vector<Note> pitches;    // the notes, in order
     double globalFormant = 1.0;   // GlobalFormantShift (the one global the render reads)
+    // the editor's global knobs as last set (FL folds them into the notes when it saves; so does LYNX): Center 0..1
+    // (pull toward the note's semitone), Variation 0..1 (the notes' drift), Transition 0..2 (× the analysed times)
+    double centre = 0.0, variation = 1.0, transition = 1.0;
 };
 
 // The plugin's saved state (record 0xD5 of a mixer slot), REA_rodada73 §2
@@ -103,6 +108,38 @@ std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& 
 // LYNX's note analysis of a sample (YIN pitch track, core/VocalPitch.h): voiced stretches of steady pitch become
 // notes (Note.origPitch = their median pitch; nothing edited). Newtone: timeWarp = false.
 Track analyseNotes (const SampleData& source);
+
+// ------------------------------------------------------------------------------------------------------------------
+// LYNX's Newtone editor tools (round 165g, FL's workflow interpreted: Cut mode / glue, the Center / Variation /
+// Transition knobs, snap to scale, score export). `which` = the notes to change; empty = every note.
+
+// Cut mode: note k becomes two at output sample `at` (strictly inside it); the halves keep every edit. `pitchOf`
+// gives the source's median pitch over a source range (each half's origPitch); null keeps the note's.
+bool splitNote (Track& track, std::size_t k, std::int64_t at, double (*pitchOf) (const void*, std::int64_t, std::int64_t) = nullptr,
+                const void* context = nullptr);
+// Glue: note k joins the note before it (adjacent in the source and in time, same stretch); the joined note keeps
+// the earlier one's edits, its pitch = the length-weighted mean.
+bool glueNote (Track& track, std::size_t k);
+// Center: every chosen note lands on its semitone by `amount` (0 = as sung, 1 = exactly), keeping the semitone it
+// was moved to. Variation: their drift (0 = flat, 1 = as sung). Transition: their smooth times = analysed × factor.
+void applyCentre (Track& track, double amount, const std::vector<int>& which = {});
+void applyVariation (Track& track, double amount, const std::vector<int>& which = {});
+void applyTransition (Track& track, double factor, const std::vector<int>& which = {});
+// The nearest allowed note to `pitch` (MIDI) in a scale: `mask` bit n = pitch class (key + n) % 12 allowed;
+// 0xFFF = chromatic. Ties go down.
+double nearestInScale (double pitch, int key, std::uint16_t mask) noexcept;
+// Snap to scale: the chosen notes move to the nearest allowed note (whole semitones, the sung detune removed)
+void snapToScale (Track& track, int key, std::uint16_t mask, const std::vector<int>& which = {});
+
+// The track's notes as a score (FL's Create Score / Save as MIDI): enabled voiced notes, key = the semitone they
+// sound at, times in seconds
+struct ScoreNote
+{
+    double start = 0.0, length = 0.0;
+    int key = 60;
+    float velocity = 0.78f;
+};
+std::vector<ScoreNote> score (const Track& track, double sampleRate);
 
 // Newtone: the track's notes. "LXNT" + version + frames + global formant + the notes.
 std::vector<std::uint8_t> writeNative (const Track& track);
