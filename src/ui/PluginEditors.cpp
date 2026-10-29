@@ -349,6 +349,12 @@ public:
                 setParams (edits);
                 return;
             }
+        if (kind == EffectKind::glowLeveler) // round 165x: AUTO MAKEUP's reference point and its make-up kept when off
+            if (const auto edits = mixsuite::glow::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
         if (kind == EffectKind::ember) // round 165: the Classic voicing's Auto moves Output with Drive
             if (const auto edits = mixsuite::ember::linkedEdit (current()->params, param, value); edits.size() > 1)
             {
@@ -2506,25 +2512,11 @@ public:
             g.drawText (tapBpm > 0.0 ? caps (tr ("Tap")) + "  " + juce::String (tapBpm, 1) : caps (tr ("Tap")), r, juce::Justification::centred, false);
             return;
         }
-        else if (id == "vusel") // round 129: the VU display selector, INPUT | GR | OUTPUT (the reference's VU DISPLAY knob)
-        {
-            static constexpr int order[] = { 1, 0, 2 };
-            const char* names[] = { TR_NOOP ("Input"), TR_NOOP ("GR"), TR_NOOP ("Output") };
-            const auto w = r.getWidth() / 3.0f;
-            for (int k = 0; k < 3; ++k)
-            {
-                const auto cell = juce::Rectangle<float> (r.getX() + w * (float) k, r.getY(), w, r.getHeight()).reduced (1.5f * s, 0.0f);
-                skin::button (g, cell, vuMode == order[k], false, accent, radius::sm * s);
-                g.setColour (vuMode == order[k] ? colour::textPrimary : colour::textSecondary);
-                g.setFont (font (juce::jmax (7.0f, 9.5f * s), true));
-                g.drawText (caps (tr (names[k])), cell, juce::Justification::centred, false);
-            }
-            return;
-        }
         else if (id == "vumeter") // round 114: an analog-style VU needle showing the gain reduction (the optical leveler)
         {
             // gain reduction (needle down from 0 VU) or the output level (0 VU = −18 dBFS), like the reference's selector
-            // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (the "vusel" item)
+            // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (round 165x: the "VU display" parameter)
+            syncVuMode();
             const auto level = liveMeter (vuMode == 1 ? 2 : 3);
             const auto target = vuMode != 0 ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, level)) + 18.0f))
                                             : -juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
@@ -2591,7 +2583,7 @@ public:
         else if (id == "hushband") // the detector's filter (high-pass or band) at the frequency, 1 .. 20 kHz
         {
             grid (8, 4);
-            const auto f0 = mixsuite::hush::hz (param01 ("Frequency"));
+            const auto f0 = mixsuite::hush::hpHz (param01 ("Frequency"), param01 ("Range law") >= 0.5f && param01 ("Voicing") < 0.5f); // round 165x
             const auto band = param01 ("Band detector") >= 0.5f;
             strokeCurve ([f0, band] (float x) {
                 const auto u = 1000.0 * std::pow (20.0, (double) x) / f0;
@@ -3654,7 +3646,7 @@ public:
         }
         if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output / input
         {
-            vuMode = (vuMode + 1) % 3;
+            setVuMode ((vuMode + 1) % 3);
             repaint();
             return;
         }
@@ -3708,14 +3700,6 @@ public:
                 setParams (changes);
             }
             lastTap = now;
-            repaint();
-            return;
-        }
-        if (item.type == Item::display && juce::String (item.display) == "vusel") // round 129: INPUT | GR | OUTPUT
-        {
-            const auto r = rectOf (item);
-            static constexpr int order[] = { 1, 0, 2 };
-            vuMode = order[juce::jlimit (0, 2, (int) ((e.position.x - r.getX()) / r.getWidth() * 3.0f))];
             repaint();
             return;
         }
@@ -4163,8 +4147,6 @@ public:
             return { tr ("Output limiter: lit while it keeps the output under 0 dBFS"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "outmeter")
             return { tr ("Output level (peak, dBFS): the lamp lights when the output clips, the number holds the highest peak; click to reset"), {}, false, false };
-        if (item.type == Item::display && juce::String (item.display) == "vusel")
-            return { tr ("VU display: what the meter shows (input level, gain reduction, output level)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
             return { tr ("Drag the point: both values at once"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "tunekeys") // round 147
@@ -4435,6 +4417,19 @@ private:
     std::vector<double> tapIntervals;
     double tapBpm = 0.0; // the "iometer" display: input and output (round 129)
     int vuMode = 0;            // what the VU shows: 0 gain reduction, 1 input level, 2 output level (0 VU = −18 dBFS)
+    // round 165x: Glow keeps the VU display as a parameter (saved with the project, translated from the reference's state)
+    void syncVuMode()
+    {
+        if (kind == EffectKind::glowLeveler)
+            if (const auto* fx = current(); fx != nullptr && fx->params.size() > (std::size_t) mixsuite::glow::vuDisplay)
+                vuMode = mixsuite::glow::vuModeOf (fx->params[(std::size_t) mixsuite::glow::vuDisplay]);
+    }
+    void setVuMode (int mode)
+    {
+        vuMode = mode;
+        if (kind == EffectKind::glowLeveler && current() != nullptr)
+            setParams ({ { mixsuite::glow::vuDisplay, mode == 1 ? 0.5f : mode == 2 ? 1.0f : 0.0f } });
+    }
     juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
 

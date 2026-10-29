@@ -5,6 +5,8 @@
 #include "ui/DanceView.h"
 #include "ui/Controllers164.h"
 #include "ui/VoltageEditor.h"
+#include "ui/AutomationUi.h"
+#include "ui/BrowserComponent.h"
 
 #include "core/MixerOps.h"
 
@@ -37,6 +39,7 @@
 #include "core/SytrusEngine.h"
 #include "core/SynthPresets.h"
 #include "core/PluginLayout.h"
+#include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "core/RackOps.h"
 #include "ui/ControllerEditors.h"
@@ -1555,7 +1558,39 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
+// A Sampler knob: right-click opens its automation menu instead of moving it (issue #12)
+class MenuSlider final : public juce::Slider
+{
+public:
+    std::function<void()> onMenu;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        menuClick = e.mods.isPopupMenu() && onMenu != nullptr;
+        if (menuClick)
+            onMenu();
+        else
+            juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! menuClick)
+            juce::Slider::mouseDrag (e);
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! menuClick)
+            juce::Slider::mouseUp (e);
+        menuClick = false;
+    }
+
+private:
+    bool menuClick = false;
+};
+
 class SettingsPanel final : public juce::Component,
+                            public juce::DragAndDropTarget,
+                            public juce::FileDragAndDropTarget,
                             private juce::ChangeListener
 {
 public:
@@ -1621,6 +1656,26 @@ public:
             b->onClick = [this] { apply(); };
         }
 
+        // the knobs an automation clip can drive (samplerparam, issue #12): right-click = FL's parameter menu; a move
+        // is a tweak (Last tweaked, automation recording)
+        for (auto [slider, param] : { std::pair { &attack, (int) samplerparam::attack }, { &decay, (int) samplerparam::decay },
+                                      { &sustain, (int) samplerparam::sustain }, { &release, (int) samplerparam::release },
+                                      { &cutoff, (int) samplerparam::cutoff }, { &resonance, (int) samplerparam::resonance },
+                                      { &regionStart, (int) samplerparam::start }, { &regionEnd, (int) samplerparam::end } })
+        {
+            if (ref.index < 0) // (a Patcher node: no automation target)
+                break;
+            const auto target = [this, param] { return AutomationTarget { AutomationTargetKind::channelParam, ref.index, 0, param }; };
+            slider->onMenu = [this, slider, target] {
+                juce::PopupMenu menu;
+                addAutomationItem (menu, engine, target(), true);
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (slider));
+            };
+            slider->onDragStart = [this, target] { engine.noteTweaked (target(), true); };
+            slider->onDragEnd = [this, target] { engine.tweakReleased (target()); };
+            tweakTargets.push_back ({ slider, param });
+        }
+
         wave.setEmptyText (tr ("No sample loaded"));
         wave.setTooltip (tr ("The sample: colours show where it is bass-heavy (warm) or bright (cool); outside Start/End is dimmed"));
         addAndMakeVisible (wave);
@@ -1650,8 +1705,8 @@ public:
 
         auto top = area.removeFromTop (110);
         {
-            // Gain, Pitch, Stretch and the keep-pitch switch in four columns
-            const auto w4 = top.getWidth() / 4;
+            // Gain, Pitch, Stretch and the keep-pitch switch (a third of the width: its text is long)
+            const auto w4 = top.getWidth() * 2 / 9;
             for (auto [slider, label] : { std::pair { &gain, &gainLabel }, { &pitch, &pitchLabel }, { &stretch, &stretchLabel } })
             {
                 auto column = top.removeFromLeft (w4);
@@ -1691,7 +1746,66 @@ public:
 
     int getChannel() const noexcept { return ref.index; }
 
+    // A sample dropped on the waveform (from the Browser or the system) replaces the channel's sample (issue #12)
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        return BrowserComponent::isBrowserDrag (details) && SampleLibrary::isSampleFile (BrowserComponent::draggedFile (details));
+    }
+    void itemDragEnter (const SourceDetails&) override { setDropHighlight (true); }
+    void itemDragExit (const SourceDetails&) override { setDropHighlight (false); }
+    void itemDropped (const SourceDetails& details) override
+    {
+        setDropHighlight (false);
+        replaceSample (BrowserComponent::draggedFile (details));
+    }
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        return files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
+    }
+    void fileDragEnter (const juce::StringArray&, int, int) override { setDropHighlight (true); }
+    void fileDragExit (const juce::StringArray&) override { setDropHighlight (false); }
+    void filesDropped (const juce::StringArray& files, int, int) override
+    {
+        setDropHighlight (false);
+        replaceSample (juce::File (files[0]));
+    }
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (dropHighlight)
+        {
+            g.setColour (theme::colour::accent);
+            g.drawRect (wave.getBounds().expanded (2), 2);
+        }
+    }
+
 private:
+    void setDropHighlight (bool on)
+    {
+        if (dropHighlight != on)
+        {
+            dropHighlight = on;
+            repaint (wave.getBounds().expanded (4));
+        }
+    }
+
+    // the new sample plays with the same settings; slices of the old one no longer apply, the channel takes its name
+    void replaceSample (const juce::File& file)
+    {
+        if (current() == nullptr || ! file.existsAsFile())
+            return;
+        if (engine.getSampleLibrary().load (file.getFullPathName()) == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Sample"), tr ("Could not read {0}", { file.getFileName() }));
+            return;
+        }
+        ref.edit (engine, [path = file.getFullPathName().toStdString(), name = file.getFileNameWithoutExtension().toStdString()] (ChannelDef& d) {
+            d.samplePath = path;
+            d.zones.clear();
+            d.sampler.slices.clear();
+            d.name = name;
+        });
+    }
+
     void setup (juce::Slider& s, juce::Label& label, const char* name, double lo, double hi, double step, const char* suffix)
     {
         s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
@@ -1785,7 +1899,11 @@ private:
         if (s == current()->sampler)
             return;
 
+        const auto before = current()->sampler;
         ref.edit (engine, [s] (ChannelDef& channelDef) { channelDef.sampler = s; });
+        for (const auto& [slider, param] : tweakTargets)
+            if (std::abs (samplerparam::get (before, param) - samplerparam::get (s, param)) > 1.0e-6f)
+                engine.noteTweaked ({ AutomationTargetKind::channelParam, ref.index, 0, param });
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
@@ -1806,7 +1924,10 @@ private:
     AudioEngine& engine;
     ChannelRef ref;
     bool updating = false;
-    juce::Slider pitch, gain, attack, release, decay, sustain, stretch, regionStart, regionEnd, cutoff, resonance;
+    juce::Slider pitch, gain, stretch;
+    MenuSlider attack, release, decay, sustain, regionStart, regionEnd, cutoff, resonance;
+    std::vector<std::pair<MenuSlider*, int>> tweakTargets; // knob -> samplerparam
+    bool dropHighlight = false;
     juce::Label pitchLabel, gainLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
         cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch, porta;
@@ -2247,9 +2368,10 @@ public:
                          isMouseOverOrDragging() ? theme::colour::accent : theme::colour::knobArc, isMouseOver());
         g.setFont (theme::font (theme::type::caption));
         g.setColour (theme::colour::textPrimary);
-        g.drawText (spec.text (getter()), valueArea, juce::Justification::centred);
+        // squeezed (down to 65 %) before an ellipsis: translated captions are often longer (round 165o)
+        g.drawFittedText (spec.text (getter()), valueArea.toNearestInt(), juce::Justification::centred, 1, 0.65f);
         g.setColour (theme::colour::textSecondary);
-        g.drawText (theme::caps (label), caption, juce::Justification::centred);
+        g.drawFittedText (theme::caps (label), caption.toNearestInt(), juce::Justification::centred, 1, 0.65f);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -2656,7 +2778,7 @@ public:
         fullPorta.onClick = [this] { edit ([on = fullPorta.getToggleState()] (ChannelDef& d) { d.misc.fullPorta = on; }); };
         // Vol / Key tracking
         trackVol.setButtonText (tr ("Vol"));
-        trackKey.setButtonText (tr ("Key"));
+        trackKey.setButtonText (trc ("@key tracking: Key"));
         for (auto* b : { &trackVol, &trackKey })
         {
             b->setClickingTogglesState (true);
@@ -2960,10 +3082,11 @@ public:
         {
             auto rootRow = section (area.removeFromTop (74), tr ("Root note"));
             rootSection = (int) sections.size() - 1;
-            auto toggles = rootRow.removeFromLeft (150);
+            const auto resetWidth = theme::buttonWidth (rootReset, 50, 96); // long "Reset" translations
+            auto toggles = rootRow.removeFromLeft (100 + resetWidth);
             mainPitch.setBounds (toggles.removeFromTop (22));
             auto line = toggles.removeFromTop (22);
-            rootReset.setBounds (line.removeFromRight (50).reduced (0, 1));
+            rootReset.setBounds (line.removeFromRight (resetWidth).reduced (0, 1));
             addToKey.setBounds (line);
             auto fine = rootRow.removeFromLeft (58);
             row (fine, { fineTune });

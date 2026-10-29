@@ -26,7 +26,7 @@ void forEachSlot (std::vector<EffectSlot>& slots, Fn&& fn)
 bool isTrackTarget (AutomationTargetKind k) noexcept
 {
     return k == AutomationTargetKind::mixerVolume || k == AutomationTargetKind::mixerPan || k == AutomationTargetKind::effectParam
-           || k == AutomationTargetKind::effectMix;
+           || k == AutomationTargetKind::effectMix || k == AutomationTargetKind::mixerSend;
 }
 } // namespace
 
@@ -60,6 +60,8 @@ void swapTracks (Song& song, int a, int b)
     song.forEachTarget ([&map] (AutomationTarget& t) {
         if (isTrackTarget (t.kind))
             t.index = map (t.index);
+        if (t.kind == AutomationTargetKind::mixerSend && t.slot > 0) // (the route's destination)
+            t.slot = map (t.slot);
     });
 
     for (auto& automation : song.automations)

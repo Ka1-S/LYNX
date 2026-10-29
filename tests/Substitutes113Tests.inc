@@ -169,7 +169,7 @@ TEST (gentle_defaults_of_unreadable_vocal_substitutes_round113)
         CHECK (std::abs (mixsuite::hush::classicThresholdDb (slot.params[mixsuite::hush::threshold]) + 24.2) < 0.01);
         CHECK (slot.params[mixsuite::hush::voicing] == 1.0f);
         const auto plain = makeSubstituteSlot (*e);
-        CHECK (std::abs (mixsuite::hush::hz (plain.params[mixsuite::hush::frequency]) - 5500.0) < 60.0);
+        CHECK (std::abs (mixsuite::hush::hpHz (plain.params[mixsuite::hush::frequency], mixsuite::hush::extended (plain.params)) - 5500.0) < 60.0); // (round 165x: the extended law's scale)
         CHECK (std::abs (mixsuite::hush::thresholdDb (plain.params[mixsuite::hush::threshold]) + 20.0) < 0.1);
         CHECK (std::abs (mixsuite::hush::rangeDb (plain.params[mixsuite::hush::range]) - 4.0) < 0.1);
     }

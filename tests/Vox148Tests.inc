@@ -271,7 +271,7 @@ TEST (pro_ds_translates_onto_hush_vocal_voicing_round148)
     const auto& p = slot.params;
     CHECK (slot.kind == EffectKind::hushDeEsser && n == 20 && h::vocal (p));
     CHECK (std::abs (h::thresholdDb (p[h::threshold]) + 43.71) < 0.01 && std::abs (h::rangeDb (p[h::range]) - 6.0) < 1e-4);
-    CHECK (std::abs (h::hz (p[h::frequency]) - 7000.0) < 2.0 && std::abs (h::lowPassHz (p[h::lowPass]) - 14000.0) < 5.0);
+    CHECK (std::abs (h::hpHz (p[h::frequency], h::extended (p)) - 7000.0) < 2.0 && std::abs (h::lowPassHz (p[h::lowPass]) - 14000.0) < 5.0);
     CHECK (p[h::mode] > 0.5f && p[h::lookahead] > 0.5f && std::abs (h::lookaheadTimeMs (p[h::lookaheadTime]) - 12.0) < 0.01);
     // Allround keeps Hush's own engine in its allround mode
     auto all = vox148::herProDs;

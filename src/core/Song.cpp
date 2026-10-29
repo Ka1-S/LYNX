@@ -176,7 +176,8 @@ bool Song::insertInUse (int t) const
         return true;
     return std::any_of (automations.begin(), automations.end(), [t] (const Automation& a) {
         const auto onTrack = a.target.kind == AutomationTargetKind::mixerVolume || a.target.kind == AutomationTargetKind::mixerPan
-                             || a.target.kind == AutomationTargetKind::effectParam || a.target.kind == AutomationTargetKind::effectMix;
+                             || a.target.kind == AutomationTargetKind::effectParam || a.target.kind == AutomationTargetKind::effectMix
+                             || a.target.kind == AutomationTargetKind::mixerSend;
         return a.source.track == t || (onTrack && a.target.index == t);
     });
 }
@@ -790,6 +791,92 @@ float* surfaceOutputValue (std::vector<SurfaceControl>& controls, int k) noexcep
 }
 } // namespace
 
+namespace samplerparam
+{
+namespace
+{
+#ifndef TR_NOOP
+ #define TR_NOOP(text) text
+#endif
+struct Range
+{
+    const char* name;
+    float lo, hi, mid; // mid < 0: linear (else the knob's skew from its mid point, like juce::Slider)
+};
+constexpr Range ranges[count] = { { TR_NOOP ("Attack"), 0.0f, 2.0f, 0.2f },    { TR_NOOP ("Decay"), 0.0f, 10.0f, 0.5f },
+                                  { TR_NOOP ("Sustain"), 0.0f, 1.0f, -1.0f },  { TR_NOOP ("Release"), 0.0f, 4.0f, 0.4f },
+                                  { TR_NOOP ("Cutoff"), 20.0f, 20000.0f, 1000.0f }, { TR_NOOP ("Resonance"), 0.0f, 1.0f, -1.0f },
+                                  { TR_NOOP ("Start"), 0.0f, 1.0f, -1.0f },    { TR_NOOP ("End"), 0.0f, 1.0f, -1.0f } };
+
+double skewOf (const Range& r) noexcept
+{
+    return r.mid < 0.0f ? 1.0 : std::log (0.5) / std::log ((double) (r.mid - r.lo) / (double) (r.hi - r.lo));
+}
+} // namespace
+
+const char* name (int param) noexcept
+{
+    return param >= 0 && param < count ? ranges[param].name : "";
+}
+
+float toValue (int param, float natural) noexcept
+{
+    if (param < 0 || param >= count)
+        return 0.0f;
+    const auto& r = ranges[param];
+    const auto p = std::clamp ((double) (natural - r.lo) / (double) (r.hi - r.lo), 0.0, 1.0);
+    return (float) std::pow (p, skewOf (r));
+}
+
+float toNatural (int param, float value) noexcept
+{
+    if (param < 0 || param >= count)
+        return 0.0f;
+    const auto& r = ranges[param];
+    const auto v = std::clamp ((double) value, 0.0, 1.0);
+    const auto p = v <= 0.0 ? 0.0 : std::exp (std::log (v) / skewOf (r));
+    return (float) (r.lo + (r.hi - r.lo) * p);
+}
+
+float get (const SamplerSettings& s, int param) noexcept
+{
+    switch (param)
+    {
+        case attack: return toValue (param, s.attack);
+        case decay: return toValue (param, s.decay);
+        case sustain: return toValue (param, s.sustain);
+        case release: return toValue (param, s.release);
+        case cutoff: return toValue (param, s.cutoff);
+        case resonance: return toValue (param, s.resonance);
+        case start: return toValue (param, s.regionStart);
+        case end: return toValue (param, s.regionEnd);
+        default: return 0.0f;
+    }
+}
+
+void set (SamplerSettings& s, int param, float value) noexcept
+{
+    const auto x = toNatural (param, value);
+    switch (param)
+    {
+        case attack: s.attack = x; break;
+        case decay: s.decay = x; break;
+        case sustain: s.sustain = x; break;
+        case release: s.release = x; break;
+        case cutoff: s.cutoff = x; break;
+        case resonance: s.resonance = x; break;
+        case start: s.regionStart = x; break;
+        case end: s.regionEnd = x; break;
+        default: return;
+    }
+    // like editing the knob by hand: the envelope / filter replace FL's imported voice (REA_rodada69 §3, REA_rodada76)
+    if (param <= release)
+        s.flVolumeEnvelope.clear();
+    if (param <= resonance)
+        s.flChannel.clear();
+}
+} // namespace samplerparam
+
 float Song::targetValue (const AutomationTarget& t) const noexcept
 {
     const auto validChannel = t.index >= 0 && t.index < (int) channels.size();
@@ -822,7 +909,12 @@ float Song::targetValue (const AutomationTarget& t) const noexcept
             if (channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0 && t.param < voltage::paramCount)
                 if (const auto vs = voltage::parse (channels[(std::size_t) t.index].pluginState))
                     return voltage::paramValue (*vs, t.param);
+            // the Sampler's knobs (issue #12)
+            if (channels[(std::size_t) t.index].instrument == InstrumentKind::sampler && t.param >= 0 && t.param < samplerparam::count)
+                return samplerparam::get (channels[(std::size_t) t.index].sampler, t.param);
             return 0.5f;
+        case AutomationTargetKind::mixerSend:
+            return validTrack && routes (t.index, t.slot) ? faderPosition (routeLevel (t.index, t.slot)) : -1.0f;
         case AutomationTargetKind::effectMix:
             return validTrack && t.slot >= 0 && t.slot < (int) mixer[(std::size_t) t.index].effects.size()
                        ? mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].mix
@@ -847,6 +939,11 @@ bool Song::setTargetValue (const AutomationTarget& t, float v) noexcept
         case AutomationTargetKind::mixerVolume: if (! validTrack) return false; mixer[(std::size_t) t.index].volume = v; return true;
         case AutomationTargetKind::mixerPan: if (! validTrack) return false; mixer[(std::size_t) t.index].pan = v * 2.0f - 1.0f; return true;
         case AutomationTargetKind::tempo: bpm = tempoFromValue (v); return true;
+        case AutomationTargetKind::mixerSend:
+            if (! validTrack || ! routes (t.index, t.slot))
+                return false;
+            setRouteLevel (t.index, t.slot, faderGain (v));
+            return true;
         case AutomationTargetKind::effectMix:
             if (! validTrack || t.slot < 0 || t.slot >= (int) mixer[(std::size_t) t.index].effects.size())
                 return false;
@@ -883,6 +980,12 @@ bool Song::setTargetValue (const AutomationTarget& t, float v) noexcept
                     channels[(std::size_t) t.index].pluginState = voltage::write (*vs);
                     return true;
                 }
+            if (validChannel && channels[(std::size_t) t.index].instrument == InstrumentKind::sampler && t.param >= 0
+                && t.param < samplerparam::count)
+            {
+                samplerparam::set (channels[(std::size_t) t.index].sampler, t.param, v);
+                return true;
+            }
             return false;
         case AutomationTargetKind::none: break;
     }

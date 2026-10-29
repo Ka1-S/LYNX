@@ -626,22 +626,29 @@ int fromProDS (const State& s, EffectSlot& slot)
     p[threshold] = clamp01 (s.at (1));
     p[range] = linValue (s.at (2), 0.0, 24.0);
     p[mode] = s.at (3) >= 0.5f ? 0.0f : 1.0f; // wide band = Hush's "wideband" mode
-    p[linkMid] = s.at (5) < 0.5f ? 1.0f : 0.0f;
-    p[stereoLink] = 1.0f;
+    // round 165x [EXEC] (REA_rodada165x §2): 4 Stereo Link is the parameter's own 0 … 1 (0.5 = 100 %; above, "100 %, n %
+    // Mid-only" — or Side-only with 5 = Side — up to 1 = 200 %); Hush's extended law links the same way
+    p[rangeLaw] = 1.0f;
+    const auto link = std::clamp ((double) s.at (4), 0.0, 1.0);
+    p[stereoLink] = (float) std::min (1.0, 2.0 * link);
+    p[linkOnly] = (float) std::max (0.0, 2.0 * link - 1.0);
+    p[linkSide] = s.at (5) >= 0.5f ? 1.0f : 0.0f;
+    p[linkMid] = 0.0f; // (Hush's own mid detection: the extended link detects on the mid signal at 100 %)
     p[lookaheadTime] = lookaheadTimeValue (std::clamp ((double) s.at (6), 0.0, 15.0));
     p[lookahead] = s.at (7) >= 0.5f ? 1.0f : 0.0f;
     p[listen] = s.at (8) >= 0.5f ? 1.0f : 0.0f;
     p[external] = s.at (9) >= 0.5f ? 1.0f : 0.0f;
     const auto hpHz = 2000.0 * std::pow (10.0, std::clamp ((double) s.at (10), 0.0, 1.0));
     const auto lpHz = 2000.0 * std::pow (10.0, std::clamp ((double) s.at (11), 0.0, 1.0));
-    p[frequency] = (float) std::clamp (std::log (std::clamp (hpHz, 2000.0, 16000.0) / 2000.0) / std::log (8.0), 0.0, 1.0);
+    p[frequency] = hpValue (hpHz, true); // round 165x: 2 … 20 kHz
     p[lowPass] = lpHz >= 19999.0 ? 1.0f : (float) std::clamp (std::log (lpHz / 2000.0) / std::log (10.0), 0.0, 0.998);
     // round 165w [EXEC] (a state saved by the trial at +7.2 dB input, pans −0.5 / +0.75, 2x): the levels are stored as
     // 2 v − 1 of the parameter (0 dB = 0, +36 dB = 1), i.e. 36 dB per unit above −18 dB (the old reading took them as
     // dB, so +7.2 dB came back as +0.2); Hush's input / output reach ±12 dB (beyond: clamped). The input / output pans
     // (−1 … +1, a balance in both) and the oversampling (Off / 2x / 4x; Hush's own engine, i.e. Allround)
-    p[output] = linValue (std::clamp (36.0 * s.at (17), -12.0, 12.0), -12.0, 12.0);
-    p[input] = linValue (std::clamp (36.0 * s.at (15), -12.0, 12.0), -12.0, 12.0);
+    // round 165x: the whole −∞ … +36 dB range on the extended law (the parameter's own value is (stored + 1) / 2)
+    p[output] = (float) std::clamp (0.5 * (s.at (17) + 1.0), 0.0, 1.0);
+    p[input] = (float) std::clamp (0.5 * (s.at (15) + 1.0), 0.0, 1.0);
     p[inputPan] = linValue (std::clamp ((double) s.at (16), -1.0, 1.0), -1.0, 1.0);
     p[outputPan] = linValue (std::clamp ((double) s.at (18), -1.0, 1.0), -1.0, 1.0);
     p[oversampling] = (float) std::clamp (roundIndex (s.at (14)), 0, 2) / 3.0f;

@@ -187,6 +187,7 @@ private:
     void searchAnswered (const search::SearchResult& result, const juce::String& query, const juce::Array<juce::File>& scope);
     void indexStatusChanged();
     juce::String statusLine; // under the search box: indexing progress / what the search found
+    void showNote (const juce::String& text); // a short note there (files copied in), gone after a few seconds
     juce::Rectangle<int> statusArea;
     void rebuildRoots();
     void rebuildTree();

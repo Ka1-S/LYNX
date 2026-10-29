@@ -17,6 +17,7 @@
 #include "ui/BrowserComponent.h"
 #include "ui/ExportDialog.h"
 
+#include <cmath>
 #include <complex>
 
 #include "core/Biquad.h"
@@ -879,7 +880,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             juce::PopupMenu menu;
             const auto spec = specFor (Part::send, t);
             menu.addSectionHeader (spec.name + ": " + spec.text (valueOf (Part::send, t)));
-            ui::addValueItems (menu, *this, nullptr, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
+            ui::addValueItems (menu, *this, &engine, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
             menu.addSeparator();
             menu.addItem (t == 0 ? tr ("Remove the route to Master") : tr ("Remove this send"),
                           [this, from, t] { engine.editSong ([from, t] (Song& s) { s.setRoute (from, t, false); }); });
@@ -1092,7 +1093,11 @@ ui::ValueSpec MixerStrips::specFor (Part part, int t) const
         return stereoSpec (name + " - " + tr ("Stereo separation"));
 
     if (part == Part::send)
-        return sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + (t == 0 ? tr ("Level to Master") : tr ("Send level")));
+    {
+        auto spec = sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + (t == 0 ? tr ("Level to Master") : tr ("Send level")));
+        spec.target = AutomationTarget { AutomationTargetKind::mixerSend, selected, t }; // automatable (issue #12)
+        return spec;
+    }
 
     auto spec = ui::faderSpec (name + " - " + tr ("Volume"), unityFader);
     spec.pixelsForRange = juce::jmax (60, faderRail (juce::jmax (0, t)).getHeight());
@@ -2468,13 +2473,20 @@ void EffectsPanel::paintEq (juce::Graphics& g)
             }
         }
 
+        // the knob captions take the width their (translated) text needs, the title gives way (round 165o)
+        const juce::Font captionFont (font (type::caption));
+        const auto captionWidth = juce::jlimit (32, 70, (int) std::ceil (juce::jmax (juce::GlyphArrangement::getStringWidth (captionFont, tr ("Freq")),
+                                                                                     juce::GlyphArrangement::getStringWidth (captionFont, tr ("Width")))) + 2);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::title));
-        textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
-        g.setFont (font (type::caption));
+        textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 8 - captionWidth, 20,
+                             juce::Justification::centredLeft);
+        g.setFont (captionFont);
         g.setColour (colour::textDisabled);
-        textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
-        textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+        textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 2 - captionWidth, eqKnobBounds (0, 1).getY(), captionWidth, 22,
+                             juce::Justification::centredRight);
+        textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 2 - captionWidth, eqKnobBounds (0, 2).getY(), captionWidth, 22,
+                             juce::Justification::centredRight);
     }
 
     // the audio output target
