@@ -290,6 +290,7 @@ public:
 
         // interface language: saved in %APPDATA%\LYNX\language.txt; --lang pt-BR overrides it for this run
         lynx::i18n::initialise (args);
+        lookAndFeel.applyLanguageFont (lynx::i18n::current());
 
         if (args.contains ("--showcase"))
         {
@@ -1832,8 +1833,11 @@ private:
         }
         const auto nativesOk = nativesResult == "OK";
 
+        // Settings › Audio "Driver settings…" with a fake driver panel (issue #13's crash, the panel's buffer kept)
+        const auto driverPanel = lynx::AudioEngine::driverPanelSelfTest();
+
         const auto ok = audioOk && projectOk && richOk && hwOutOk && latencyOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
-                        && wavpack != "ERROR" && effectsOk;
+                        && wavpack != "ERROR" && effectsOk && driverPanel == "OK";
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
@@ -1851,6 +1855,7 @@ private:
                << "package=" << (packageOk ? "OK" : "ERROR") << "\n"
                << "wavpack=" << wavpack << "\n"
                << "effects=" << (effectsOk ? "OK" : "NONFINITE") << "\n"
+               << "driver_panel=" << driverPanel << "\n"
                << "result=" << (ok ? "OK" : "FAILED") << "\n";
 
         if (reportPath.isNotEmpty())
@@ -6162,6 +6167,7 @@ private:
                 frame.setOpaque (true);
                 frame.addAndMakeVisible (*c);
                 c->setTopLeftPosition (0, 0);
+                checkTextFit (*c, name.fromFirstOccurrenceOf ("-", false, false).upToLastOccurrenceOf (".", false, false));
                 juce::Image image (juce::Image::ARGB, frame.getWidth(), frame.getHeight(), true);
                 {
                     juce::Graphics g (image);
@@ -6856,6 +6862,9 @@ private:
                 saveSnapshot (ui, prefix + "-browser-preview.png");
             }
         }
+        // round 165o: every Label / button / tick box whose text the drawing squeezes below its minimum scale or cuts
+        // (an ellipsis), per language: `LYNX --lang de --snapshot shots/de` -> shots/de-textfit.txt
+        juce::File (prefix + "-textfit.txt").replaceWithText (textFitLog().joinIntoString ("\n") + "\n");
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();
     }
@@ -7180,8 +7189,79 @@ private:
         savePng (sheet, prefix + "-tips-sheet.png");
     }
 
+    static juce::StringArray& textFitLog()
+    {
+        static juce::StringArray log;
+        return log;
+    }
+
+    // drawFittedText would shrink `text` below `minScale` or cut it: fewer visible glyphs than the text has
+    static bool textIsCut (const juce::Font& font, const juce::String& text, juce::Rectangle<int> area, int maxLines, float minScale)
+    {
+        if (text.trim().isEmpty() || area.getWidth() <= 4 || area.getHeight() <= 4)
+            return false;
+        auto visible = [] (juce::GlyphArrangement& ga) {
+            int n = 0;
+            for (int i = 0; i < ga.getNumGlyphs(); ++i)
+                n += ga.getGlyph (i).isWhitespace() ? 0 : 1;
+            return n;
+        };
+        juce::GlyphArrangement fitted, full;
+        fitted.addFittedText (font, text, 0.0f, 0.0f, (float) area.getWidth(), (float) area.getHeight(), juce::Justification::centredLeft,
+                              juce::jmax (1, maxLines), minScale);
+        full.addLineOfText (font, text, 0.0f, 0.0f);
+        return visible (fitted) < visible (full);
+    }
+
+    // walks the visible components under `root` and logs the texts that don't fit (labels, text buttons, tick boxes)
+    static void checkTextFit (juce::Component& root, const juce::String& where)
+    {
+        std::function<void (juce::Component&)> visit = [&] (juce::Component& c) {
+            if (! c.isVisible() || c.getWidth() <= 0 || c.getHeight() <= 0)
+                return;
+            juce::String text;
+            bool cut = false;
+            if (auto* label = dynamic_cast<juce::Label*> (&c); label != nullptr && ! label->isBeingEdited())
+            {
+                const auto font = label->getLookAndFeel().getLabelFont (*label);
+                const auto area = label->getBorderSize().subtractedFrom (label->getLocalBounds());
+                text = label->getText();
+                cut = textIsCut (font, text, area, juce::jmax (1, (int) ((float) area.getHeight() / font.getHeight())),
+                                 label->getMinimumHorizontalScale());
+            }
+            else if (auto* toggle = dynamic_cast<juce::ToggleButton*> (&c))
+            {
+                const auto tick = juce::jmin (16.0f, (float) c.getHeight() - 4.0f);
+                text = toggle->getButtonText();
+                cut = textIsCut (juce::Font (lynx::theme::font (juce::jmin ((float) lynx::theme::type::body, (float) c.getHeight() * 0.75f))), text,
+                                 c.getLocalBounds().withTrimmedLeft (juce::roundToInt (tick) + 8).withTrimmedRight (2), 2, 0.85f);
+            }
+            else if (auto* button = dynamic_cast<juce::TextButton*> (&c);
+                     button != nullptr && (int) button->getProperties().getWithDefault (lynx::theme::LookAndFeel::iconProperty, 0) == 0)
+            {
+                text = button->getButtonText();
+                cut = textIsCut (button->getLookAndFeel().getTextButtonFont (*button, button->getHeight()), text,
+                                 button->getLocalBounds().reduced (juce::jmin (8, button->getWidth() / 6), 0), 2, 0.85f);
+            }
+            if (cut)
+            {
+                juce::String path;
+                for (auto* p = &c; p != nullptr && p != &root; p = p->getParentComponent())
+                    if (p->getName().isNotEmpty())
+                        path = p->getName() + (path.isEmpty() ? "" : "/") + path;
+                const auto line = where + " | " + juce::String (c.getWidth()) + "x" + juce::String (c.getHeight()) + " | " + text.replace ("\n", "\\n")
+                                  + (path.isEmpty() ? juce::String() : " | " + path);
+                textFitLog().addIfNotAlreadyThere (line);
+            }
+            for (auto* child : c.getChildren())
+                visit (*child);
+        };
+        visit (root);
+    }
+
     static void saveSnapshot (juce::Component& c, const juce::String& path)
     {
+        checkTextFit (c, juce::File (path).getFileNameWithoutExtension());
         const juce::File file (path);
         file.deleteFile();
         juce::PNGImageFormat png;

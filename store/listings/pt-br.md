@@ -27,7 +27,7 @@ compressores, limitadores, reverbs, delays, afinação de voz, visualizadores e 
 • Baixa latência: ASIO (inclusive o driver ASIO do próprio LYNX, para qualquer dispositivo), WASAPI compartilhado e
 exclusivo.
 • Grave áudio e MIDI, edite áudio, automatize qualquer parâmetro, exporte em WAV, FLAC, MP3, OGG ou stems.
-• Interface em português do Brasil e inglês.
+• Interface em 15 idiomas: português do Brasil, inglês, espanhol, francês, alemão, italiano, holandês, polonês, russo, turco, indonésio, japonês, coreano e chinês (simplificado e tradicional).
 
 Sem conta, sem assinatura, sem anúncios e sem telemetria. O LYNX é software livre (GNU AGPL-3.0); o código-fonte
 está no GitHub.
@@ -52,7 +52,7 @@ de automação, mais cinco efeitos do FL idênticos ao FL, controles do Dashboar
 6. Motor multinúcleo que continua leve em PCs mais antigos
 7. Gravação de áudio e MIDI, editor de áudio, clipes de automação
 8. Exporta WAV, FLAC, MP3, OGG e stems
-9. Interface em português do Brasil e inglês
+9. Interface em 15 idiomas, incluindo português do Brasil
 10. Gratuito e de código aberto (AGPL-3.0): sem conta, sem anúncios, sem telemetria
 
 ## Search terms
