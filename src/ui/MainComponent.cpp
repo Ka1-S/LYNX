@@ -1657,15 +1657,24 @@ void MainComponent::playPause()
 
 void MainComponent::playFromStart()
 {
-    // FL's Shift+Space: playing (or waiting / counting in) -> stop at the start of the song or pattern; stopped -> play
-    // from there. Unlike Space it ignores where playback started and the position set on a ruler (issue #11).
+    // FL 2026's Shift+Space (measured in FL, issue #11): playing, recording, waiting or counting in -> stop at the start
+    // of the time selection (Song mode) or else of the song / pattern; stopped -> play from the current position, as
+    // Space does (a later Space goes back there).
     const auto wasPlaying = engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn();
-    engine.stop();
-    engine.rewind();
-    playStartTicks = 0.0;
-
     if (! wasPlaying)
-        engine.startPlayback();
+    {
+        playStop();
+        return;
+    }
+
+    engine.stop();
+    const auto& song = engine.getSong();
+    const auto target = transportedit::shiftSpaceStopTarget (song.mode == PlayMode::song, song.hasLoop(), song.loopStart);
+    if (target > 0)
+        engine.seek ((double) target);
+    else
+        engine.rewind();
+    playStartTicks = (double) target;
 }
 
 void MainComponent::stopAndRewind (bool toStart)

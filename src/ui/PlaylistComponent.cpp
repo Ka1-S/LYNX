@@ -21,6 +21,7 @@
 #include "core/TempoDetect.h"
 #include "core/TakeRecording.h"
 #include "ui/ExportDialog.h"
+#include "ui/MixerComponent.h"
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
 #include "ui/AutomationUi.h"
@@ -1066,6 +1067,47 @@ void PlaylistComponent::paint (juce::Graphics& g)
             }
 
             auto textRight = led.getX() - 2.0f;
+
+            // an audio track's record arm (and, on tall rows, input) button: red while its mixer track is armed (FL 2026)
+            if (const auto armBox = trackArm (t); ! armBox.isEmpty())
+            {
+                const auto insert = trackmodes::armableInsert (song, t);
+                const auto armed = engine.isInsertArmed (insert);
+                const auto b = armBox.toFloat();
+                const auto lit = hovered && hover.arm;
+                if (armed)
+                {
+                    g.setColour (colour::record);
+                    g.fillEllipse (b.withSizeKeepingCentre (10.0f, 10.0f));
+                }
+                else
+                {
+                    g.setColour ((lit ? colour::textPrimary : colour::textSecondary).withAlpha (muted ? 0.5f : 1.0f));
+                    g.fillEllipse (b.withSizeKeepingCentre (4.0f, 4.0f));
+                }
+                g.setColour (armed ? colour::record.brighter (lit ? 0.4f : 0.0f) : (lit ? colour::textPrimary : colour::textSecondary.withAlpha (0.7f)));
+                g.drawEllipse (b.withSizeKeepingCentre (10.0f, 10.0f), 1.2f);
+                textRight = b.getX() - 2.0f;
+
+                if (const auto inBox = trackInput (t); ! inBox.isEmpty())
+                {
+                    // "Audio input source": an arrow into a bar, lit when the mixer track has an input
+                    const auto r = inBox.toFloat().reduced (1.5f);
+                    const auto hasInput = song.mixer[(std::size_t) insert].inputChannel >= 0;
+                    g.setColour (hovered && hover.input ? colour::textPrimary : (hasInput ? colour::accent : colour::textSecondary));
+                    juce::Path in;
+                    const auto cy = r.getCentreY();
+                    in.startNewSubPath (r.getX(), cy);
+                    in.lineTo (r.getRight() - 3.5f, cy);
+                    in.startNewSubPath (r.getRight() - 6.5f, cy - 3.0f);
+                    in.lineTo (r.getRight() - 3.5f, cy);
+                    in.lineTo (r.getRight() - 6.5f, cy + 3.0f);
+                    g.strokePath (in, juce::PathStrokeType (1.2f));
+                    g.fillRect (juce::Rectangle<float> (r.getRight() - 1.5f, r.getY(), 1.3f, r.getHeight()));
+                    textRight = r.getX() - 2.0f;
+                }
+            }
+
             if (const auto arrow = trackArrow (t); ! arrow.isEmpty())
             {
                 const auto collapsed = t < (int) song.playlistTracks.size() && song.playlistTracks[(std::size_t) t].collapsed;
@@ -1077,7 +1119,7 @@ void PlaylistComponent::paint (juce::Graphics& g)
                     tri.addTriangle (a.getX(), a.getBottom(), a.getRight(), a.getBottom(), a.getCentreX(), a.getY());
                 g.setColour (hovered && hover.arrow ? colour::textPrimary : colour::textSecondary);
                 g.fillPath (tri);
-                textRight = (float) arrow.getX();
+                textRight = juce::jmin (textRight, (float) arrow.getX());
             }
 
             g.setColour (muted ? colour::textDisabled : (custom ? colour::textPrimary : colour::textSecondary));
@@ -1793,6 +1835,24 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
         const auto onLed = trackLed (track).expanded (3).contains (e.getPosition());
         const auto onArrow = trackArrow (track).contains (e.getPosition());
+
+        // an audio track's buttons (FL 2026): [LMB] on the record button arms / disarms its mixer track, on the input
+        // button opens the input source menu; a right-click on them does nothing in FL (no track menu either)
+        const auto onArm = trackArm (track).expanded (2).contains (e.getPosition());
+        const auto onInput = trackInput (track).expanded (2).contains (e.getPosition());
+        if (onArm || onInput)
+        {
+            const auto insert = trackmodes::armableInsert (engine.getSong(), track);
+            if (! e.mods.isPopupMenu() && insert > 0)
+            {
+                if (onArm)
+                    mixerinput::toggleArm (engine, insert, this);
+                else
+                    mixerinput::showMenu (engine, insert, this);
+            }
+            repaint (0, headerHeight, headerWidth, getHeight() - headerHeight);
+            return;
+        }
 
         if (onLed && (e.mods.isPopupMenu() || e.mods.isCtrlDown()))
             engine.editSong ([track, count = numTracks()] (Song& s) { noteedit::soloTrack (s, track, count); });
@@ -2889,6 +2949,24 @@ juce::Rectangle<int> PlaylistComponent::trackArrow (int track) const
 
     const auto led = trackLed (track);
     return { led.getX() - 15, led.getY() - 1, 13, led.getHeight() + 2 };
+}
+
+juce::Rectangle<int> PlaylistComponent::trackArm (int track) const
+{
+    if (trackmodes::armableInsert (engine.getSong(), track) < 0 || noteedit::isFoldedAway (engine.getSong(), track))
+        return {};
+
+    const auto arrow = trackArrow (track);
+    const auto led = trackLed (track);
+    return { (arrow.isEmpty() ? led.getX() : arrow.getX()) - 15, led.getY(), 12, 12 };
+}
+
+juce::Rectangle<int> PlaylistComponent::trackInput (int track) const
+{
+    const auto arm = trackArm (track);
+    if (arm.isEmpty() || heightOf (track) < inputButtonMinHeight)
+        return {};
+    return arm.translated (-15, 0);
 }
 
 bool PlaylistComponent::isTrackSelected (int track) const
@@ -4215,6 +4293,8 @@ PlaylistComponent::Hover PlaylistComponent::hoverAt (juce::Point<int> p) const
         const auto folded = noteedit::isFoldedAway (engine.getSong(), h.track);
         h.led = ! folded && h.divider < 0 && trackLed (h.track).expanded (3).contains (p);
         h.arrow = ! folded && h.divider < 0 && trackArrow (h.track).contains (p);
+        h.arm = ! folded && h.divider < 0 && trackArm (h.track).expanded (2).contains (p);
+        h.input = ! folded && h.divider < 0 && trackInput (h.track).expanded (2).contains (p);
         return h;
     }
 
@@ -4280,7 +4360,7 @@ void PlaylistComponent::updateCursor (juce::ModifierKeys mods)
         return;
     }
     if (hover.header)
-        cursor = hover.led || hover.arrow ? gesture::Cursor::point : gesture::Cursor::normal;
+        cursor = hover.led || hover.arrow || hover.arm || hover.input ? gesture::Cursor::point : gesture::Cursor::normal;
     else if (gridArea().contains (p))
     {
         const gesture::Mods m { mods.isShiftDown(), mods.isCtrlDown(), mods.isAltDown() };
@@ -4321,14 +4401,16 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
 
     if (h.header)
     {
-        hint.text = h.led     ? tr ("Track: [LMB] mute / unmute  [Ctrl][LMB] or [RMB] solo")
+        hint.text = h.arm     ? tr ("Audio track: [LMB] arm / disarm recording (its mixer track)")
+                    : h.input ? tr ("Audio track: [LMB] audio input source and monitoring (its mixer track)")
+                    : h.led   ? tr ("Track: [LMB] mute / unmute  [Ctrl][LMB] or [RMB] solo")
                     : h.arrow ? tr ("Track group: [LMB] collapse / expand the grouped tracks")
                               : tr ("Track: [LMB] select  [Ctrl][LMB] add / remove  [Shift][LMB] range  [RMB] menu  [2xLMB] open the clip source  [Shift][Wheel] move up / down");
         hint.value = trackName (h.track);
         if (const auto mode = trackmodes::describe (song, h.track); ! mode.empty()) // FL's "(Instrument track)" / "(Audio track, ...)"
             hint.value += " " + (mode.rfind ("(Audio", 0) == 0 ? tr ("(Audio track, linked to mixer track {0})", { juce::String (song.playlistTracks[(std::size_t) h.track].mixerTrack) })
                                                                  : tr ("(Instrument track)"));
-        hint.hasMenu = ! h.led && ! h.arrow;
+        hint.hasMenu = ! h.led && ! h.arrow && ! h.arm && ! h.input;
         return hint;
     }
 
@@ -4394,7 +4476,8 @@ void PlaylistComponent::mouseDoubleClick (const juce::MouseEvent& e)
     {
         const auto track = yToTrack (e.y);
 
-        if (trackLed (track).expanded (3).contains (e.getPosition()) || trackArrow (track).contains (e.getPosition()))
+        if (trackLed (track).expanded (3).contains (e.getPosition()) || trackArrow (track).contains (e.getPosition())
+            || trackArm (track).expanded (2).contains (e.getPosition()) || trackInput (track).expanded (2).contains (e.getPosition()))
             return;
 
         const auto& playlist = engine.getSong().playlist;

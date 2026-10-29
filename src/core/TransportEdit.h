@@ -134,4 +134,13 @@ inline std::int64_t stopTarget (bool alreadyStopped, bool rememberSeek, std::int
         return 0;
     return rememberSeek && seekMark > 0 ? seekMark : 0;
 }
+
+// FL 2026's Shift+Space (measured in FL, round 165 issue11c, issue #11): while playing or recording it stops and puts
+// the position at the start of the time selection (Song mode with a time selection) or else of the song / pattern —
+// not where playback started and not where Shift+Space was pressed. While stopped it plays from the current position,
+// like Space (FL ignores neither the ruler mark nor the time selection there).
+inline std::int64_t shiftSpaceStopTarget (bool songMode, bool hasTimeSelection, std::int64_t selectionStart) noexcept
+{
+    return songMode && hasTimeSelection ? std::max<std::int64_t> (0, selectionStart) : 0;
+}
 } // namespace lynx::transportedit

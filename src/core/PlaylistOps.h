@@ -129,6 +129,10 @@ int instrumentTrackPattern (Song& song, int track);
 // The text FL's hint bar adds for a track header: "(Audio track, linked to mixer track N)" / "(Instrument track)";
 // empty for an unassigned track.
 std::string describe (const Song& song, int track);
+// The mixer track an audio track's record button arms (FL 2026, issue #11: the header of an audio track has "Audio input
+// source", "Recording / Monitoring" and "Arm/disarm recording" buttons that act on its linked mixer track; unassigned and
+// instrument tracks have none). -1 when `track` is not an audio track linked to an existing insert.
+int armableInsert (const Song& song, int track);
 // Audio clips on an audio track play through its mixer track: each one's channel is routed there; a channel that
 // also plays clips elsewhere gets a copy of its own first (FL: "make this instance unique and then route it to this
 // audio track"). Returns how many clips were changed.
