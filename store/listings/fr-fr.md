@@ -14,15 +14,13 @@ DAW gratuite et open source au workflow basé sur les patterns : Channel Rack, P
 
 LYNX (publié ici sous le nom LYNX SHARE) est une station de travail audionumérique (DAW) gratuite et open source pour composer des beats et des morceaux. Elle reprend le workflow basé sur les patterns qu'adorent les beatmakers — un Channel Rack avec séquenceur pas à pas, des patterns, un Piano Roll, une Playlist avec arrangements et un Mixer avec inserts, sends et sidechain — et elle est conçue pour rester légère et rapide sur n'importe quel PC.
 
-Pour l'instant, l'interface de LYNX est disponible uniquement en anglais et en portugais (Brésil).
-
 • Légère : un moteur audio sans verrous (lock-free) qui répartit les canaux et les pistes du mixer sur les cœurs de votre processeur, ignore les canaux inactifs et lit les longs fichiers audio directement depuis le disque.
 • Complète : plus de 100 instruments et effets intégrés — synthés, boîtes à rythmes, samplers, égaliseurs, compresseurs, limiteurs, reverbs, delays, correction de hauteur, visualiseurs et bien plus.
 • Vos plugins : charge des instruments et effets VST3, CLAP et VST2, chacun pouvant tourner dans son propre processus isolé (sandbox), pour qu'un plugin qui plante ne fasse pas tomber votre session.
 • Ouvre les projets FL Studio (.flp) avec leurs patterns, notes, mixer, automations et samples, et importe les fichiers MIDI.
 • Faible latence : ASIO (y compris le pilote ASIO de LYNX, compatible avec n'importe quel périphérique), WASAPI en modes partagé et exclusif.
 • Enregistrez de l'audio et du MIDI, éditez l'audio, automatisez tout et exportez en WAV, FLAC, MP3, OGG ou en stems.
-• Interface en anglais et en portugais du Brésil (d'autres langues sont prévues).
+• Interface en 15 langues, dont le français, l'anglais, l'espagnol, l'allemand, l'italien, le néerlandais, le polonais, le russe, le turc, le japonais, le coréen et le chinois.
 
 Sans compte, sans abonnement, sans publicité et sans télémétrie. LYNX est un logiciel libre (GNU AGPL-3.0) ; le code source est sur GitHub.
 
@@ -44,7 +42,7 @@ LYNX 0.1.20 : première version sur le Microsoft Store. Édition de points à la
 6. Moteur multicœur qui reste léger sur les PC plus anciens
 7. Enregistrement audio et MIDI, éditeur audio, clips d'automation
 8. Export en WAV, FLAC, MP3, OGG et stems
-9. Interface en anglais et en portugais du Brésil (d'autres langues sont prévues)
+9. Interface en 15 langues, dont le français
 10. Gratuit et open source (AGPL-3.0) : sans compte, sans publicité, sans télémétrie
 
 ## Search terms

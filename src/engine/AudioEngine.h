@@ -18,6 +18,7 @@
 #include "core/Recorder.h"
 #include "core/TakeRecording.h"
 #include "core/WorkerPool.h"
+#include "core/SerialJobs.h"
 #include "engine/MidiSyncIo.h"
 #include "core/RackRenderer.h"
 #include "core/RtStats.h"
@@ -561,6 +562,15 @@ public:
     // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
     juce::String describeRealtime (bool withUnits = true) const;
 
+    // Settings › Audio "Driver settings…": shows the device's own panel (ASIO) and, when the driver says its settings
+    // changed, reopens it with them. The device object is replaced (its driver re-read), so the old pointer is never
+    // used after the close (0.1.17 / 0.1.18 called the deleted device: issues #12 and #13), and the buffer size the
+    // panel chose is kept (the reopen asks for the driver's preferred size instead of the size LYNX had before, which
+    // silently undid an ASIO4ALL / FL ASIO buffer change). Returns true when the device was reopened. Message thread.
+    static bool showDriverPanel (juce::AudioDeviceManager& devices);
+    // --selftest "driver_panel": showDriverPanel with a fake device whose panel changes its buffer (and one whose panel
+    // changes nothing). "OK" or what went wrong.
+    static juce::String driverPanelSelfTest();
     // %APPDATA%\LYNX\audio-glitches.log: a line each time callbacks run over their deadline (at most every 2 s).
     static juce::File glitchLogFile();
 
@@ -708,6 +718,9 @@ private:
     mutable juce::SpinLock scoreLogLock;             // MIDI thread and UI thread write, the UI reads
     scorelog::Log scoreLog;
     std::map<std::tuple<int, int, int, int, int, int>, prefs::PickupState> pickups; // (cc, channel, target) -> takeover
+    // settings / log files written off the message thread (issue #13's freezes); declared before the saver so it
+    // outlives it, and its destructor writes what is still queued
+    SerialJobs fileJobs;
     struct DeviceStateSaver;
     std::unique_ptr<DeviceStateSaver> deviceStateSaver;
 

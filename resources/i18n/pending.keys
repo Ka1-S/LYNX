@@ -1,0 +1,4 @@
+# English keys of pt-BR.txt that the other language tables may still lack (one "English" per line).
+# A new UI string needs its pt-BR translation right away; if you can't translate it into the other languages,
+# list it here so the tests pass — the table maintainers translate the pending keys and empty this file.
+# python3 tools/i18n_tool.py pending   rewrites this file with every key some table still lacks.

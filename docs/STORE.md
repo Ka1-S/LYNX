@@ -55,7 +55,7 @@ is in the repository:
 In the `package` job (Windows), after the self-test, the editor windows test and the installer:
 
 1. `make-msix-layout.py` builds the layout; `makepri` indexes the scale / target-size assets into `resources.pri`
-   (languages `en-US`, `pt-BR`); `makeappx pack` writes **`LYNX-<label>-store.msix`** (unsigned — the Store signs it).
+   (the 15 interface languages); `makeappx pack` writes **`LYNX-<label>-store.msix`** (unsigned — the Store signs it).
    It goes into the release assets and `SHA256SUMS.txt` like every other file.
 2. **Install test:** the same layout and identity name (`KA1WARE.LYNXSHARE`), except that the publisher gets Windows'
    "unsigned package" OID `2.25.311729368913984317654407730594956997722` appended (`--test-identity`): that is what
@@ -106,14 +106,16 @@ Get-AppxPackage KA1WARE.LYNXSHARE | Remove-AppxPackage
 
 `store/listings/<locale>.md` holds the listing per language: `en-us`, `pt-br`, `es-es` (also usable for `es-mx`),
 `fr-fr`, `de-de`, `it-it`, `nl-nl`, `pl-pl`, `ru-ru`, `tr-tr`, `id-id`, `ja-jp`, `ko-kr`, `zh-cn` (Simplified) and
-`zh-tw` (Traditional). LYNX's interface is English and Portuguese (Brazil) only, and every other listing says so near
-the top of its description.
+`zh-tw` (Traditional). Since 0.1.20 LYNX's interface has these 15 languages (resources/i18n/, Settings › Language),
+and every listing says so.
 
-The package declares only `en-us` and `pt-br` (`<Resources>`): those are the languages the app really has. Partner
-Center accepts listings in languages the package does not declare (*Store listings › Manage additional languages*,
+The package declares the same 15 languages (`<Resources>` in resources/msix/AppxManifest.xml.in, and makepri's `/dq`
+list in the release workflow): `en-us`, `pt-br`, `es-es`, `fr-fr`, `de-de`, `it-it`, `nl-nl`, `pl-pl`, `ru-ru`,
+`tr-tr`, `id-id`, `ja-jp`, `ko-kr`, `zh-cn`, `zh-tw`. Partner Center also accepts listings in languages the package
+does not declare (`es-mx` here; *Store listings › Manage additional languages*,
 [Microsoft: create Store listings](https://learn.microsoft.com/windows/apps/publish/publish-your-app/msix/create-app-store-listing));
-such a listing needs a Title (the reserved name, **LYNX SHARE**), a Description and a screenshot. Declaring languages
-in the manifest that the app does not have would be misleading, so the manifest stays as it is.
+such a listing needs a Title (the reserved name, **LYNX SHARE**), a Description and a screenshot. Add a language to
+the manifest only when the app really has it.
 
 Fastest way in: Partner Center › app overview › *Store listings* › **Export listing** (a CSV with Partner Center's
 field IDs) → `python scripts/store-listing-csv.py <exported.csv> lynx-listings` → **Import listings › Import folder** →

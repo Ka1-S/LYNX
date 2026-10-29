@@ -25,7 +25,7 @@ def escape(s):
 
 def source_keys():
     keys = {}
-    call = re.compile(r'(?<![A-Za-z0-9_])(tr|TR_NOOP)\s*\(\s*')
+    call = re.compile(r'(?<![A-Za-z0-9_])(tr|trc|TR_NOOP)\s*\(\s*')
     literal = re.compile(r'"((?:[^"\\\n]|\\.)*)"\s*')
     for path in sorted(list((root / "src").rglob("*.cpp")) + list((root / "src").rglob("*.h"))):
         text = path.read_text(encoding="utf-8", errors="replace")
