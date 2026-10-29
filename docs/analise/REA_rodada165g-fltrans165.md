@@ -8,7 +8,8 @@ analysed), clean-room: behaviour only; [EXEC] a small Windows harness that loads
 ## Where I stopped
 - 2026-10-29 08:05: every section ported (§3) and checked against FL's engine (§4); wired into LYNX (effect kind
   `transmitter`, FL import with the sidechain, FL-arranged layout editor, i18n in the 14 languages, tests/FlTrans165Tests.inc).
-  Running: the core tests build and the Windows build; then the editor screenshots, landing.
+  Windows build OK; editor screenshots (--flextrashot transmitter-default / -bounce-delay / -blur-off) checked, layout
+  fine; fltrans165 tests 196 checks / 0 failures. Next: full suite result, landing on main for 0.1.20.
 
 Method note: the decompile is read for behaviour only (structure, constants, parameter mappings, routing). LYNX's
 engine is an own implementation of that behaviour; it is checked numerically against FL's DLL run as a black box by
