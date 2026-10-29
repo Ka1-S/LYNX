@@ -121,3 +121,20 @@ display (H:M:S:Ms and 14 SMPTE rates, menu tags = the saved index), Send audio t
 - Verified [TEST] video165_* (FL's Default.fst bytes round-trip, SMPTE drop frame, clock, the instrument's track at
   the delay / volume / mute); [SHOT] `LYNX.exe --videoshot prefix clip.mp4` on Windows with ffmpeg 8.1 (fresh
   profile): the editor's frames equal ffmpeg's frames at the same video times.
+
+## 8. Drops on the plugin windows (audit 165)
+- Bug: a sample dropped on the Fruity Granulizer's window fell through to the Playlist under it and made an audio clip
+  (switching to Song mode). FL's Granulizer takes the drop and plays the sample. Fix: the plugin page (ui/ChannelSettings
+  ModelPanel) is a Browser and OS drop target when projectcontents::pluginWindowTakesSample (the Granulizer), for the
+  files SampleLibrary::isSampleFile accepts (core/SampleFiles.h, .wv included); the drop sets the channel's sample,
+  keeps the knobs and the channel name (one undo step), with an accent frame while hovering. The Patcher node's Sample...
+  button takes the same file types now.
+- [TEST] grandrop165_granulizer_window_takes_a_dropped_sample: the drop's edit rebuilds the channel's instrument, which
+  then renders the new sample exactly (and not the old one).
+- [SHOT] Windows, fresh profile, real input (FL's "Render tests/Fruity Granulizer.flp"): Browser › Packs › Loops ›
+  DL Breaker dragged onto the Granulizer window → no new channel, no clip, Pattern mode kept, Current project › Audio
+  files = DL Breaker (808 Kick gone), History "Channel: 808 Kick". Explorer drag of DropLoop.wav onto the same window →
+  Audio files = DropLoop. (Before the fix, the same Browser drag made a "DL Breaker" audio clip channel and switched
+  to Song.)
+- Video Player: takes video files dropped from the system (the Browser lists no videos). Fruity Scratcher: its sub-round
+  (flscratch165) was asked to give its window the same drop target.

@@ -16471,6 +16471,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Perf165Tests.inc"
 #include "Issue12Tests.inc"
 #include "FlGran165Tests.inc"
+#include "GranDrop165Tests.inc"
 #include "Kepler165kTests.inc"
 #include "MixerLatency165Tests.inc"
 #include "Audit165Tests.inc"
