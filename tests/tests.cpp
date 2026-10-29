@@ -25,6 +25,7 @@
 #include "core/Simd.h"
 #endif
 
+#include "core/AutomationDisplay.h"
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
@@ -92,6 +93,7 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/EmphasizerFx.h"
+#include "core/FlLegacyFx.h"
 #include "core/FreqShifterFl.h"
 #include "core/LowLifterFl.h"
 #include "core/Reeverb2.h"
@@ -16224,6 +16226,112 @@ TEST (emphasizer_matches_fl_engine)
     CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 2, 1.0f, 120.0) == "Soft");
 }
 
+TEST (fl_legacy_fx_match_fl_engines)
+{
+    // REA_rodada165k: FL's Fruity Phase Inverter, Center, Bass Boost, 7 Band EQ and Delay (v1) through the import (state → slot →
+    // effect) against goldens of the installation's DLLs (rate set before the state, 512-frame calls): FNV-1a of the
+    // output's float bits (x87 hosts) and ten output samples (every platform, within the x87 tolerance)
+    struct Case { const char* name; int rate; std::vector<int> raw; std::uint64_t hash; std::array<float, 10> pts; };
+    const Case cases[] {
+        { "Fruity Phase Inverter", 44100, { 1024 }, 0xd397f60e2df38284ull, { 0.0363710076f, -0.0391986258f, -0.013737631f, 1.81496143e-05f, -2.10248637f, 1.46080184f, 0.0f, -0.0f, -1.1587677f, 0.471242905f } },
+        { "Fruity Phase Inverter", 44100, { 400 }, 0xda4a63932df38284ull, { -0.0363710076f, 0.0391986258f, 0.013737631f, -1.81496143e-05f, 2.10248637f, -1.46080184f, -0.0f, 0.0f, 1.1587677f, -0.471242905f } },
+        { "Fruity Phase Inverter", 44100, { 100 }, 0xe5593cda2df38284ull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.10248637f, -1.46080184f, 0.0f, 0.0f, -1.1587677f, -0.471242905f } },
+        { "Fruity Phase Inverter", 48000, { 100 }, 0xe5593cda2df38284ull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.10248637f, -1.46080184f, 0.0f, 0.0f, -1.1587677f, -0.471242905f } },
+        { "Fruity Center", 44100, { 1 }, 0x3bf5f676fa605f15ull, { 0.0366865396f, 0.0394224077f, -0.0162539873f, 0.00418465072f, -2.09711552f, -1.46810758f, 0.00764796557f, -0.00145012443f, -1.15346813f, -0.472040445f } },
+        { "Fruity Center", 48000, { 1 }, 0x4a8ec21dbef0f963ull, { 0.0366563909f, 0.0394078083f, -0.0160636567f, 0.00388090475f, -2.09756589f, -1.46745622f, 0.00721568894f, -0.00133169827f, -1.15359187f, -0.472001195f } },
+        { "Fruity Center", 44100, { 0 }, 0xe5593cda2df38284ull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.10248637f, -1.46080184f, 0.0f, 0.0f, -1.1587677f, -0.471242905f } },
+        { "Fruity Center", 48000, { 0 }, 0xe5593cda2df38284ull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.10248637f, -1.46080184f, 0.0f, 0.0f, -1.1587677f, -0.471242905f } },
+        { "Fruity Bass Boost", 44100, { 512, 768 }, 0x18162c85cf8081c1ull, { 0.0119505953f, 0.0342054106f, -0.13173604f, -0.137279794f, -2.28246212f, -1.31898761f, 0.01532559f, 0.048792243f, -0.967867851f, -0.387037605f } },
+        { "Fruity Bass Boost", 48000, { 512, 768 }, 0x882a7fa498a70215ull, { 0.00987694506f, 0.036732085f, -0.12154711f, -0.134889036f, -2.26724982f, -1.32030582f, 0.0145790791f, 0.0490387827f, -0.998028994f, -0.401082516f } },
+        { "Fruity Bass Boost", 44100, { 0, 1024 }, 0x928bfcf5bf6de195ull, { -0.00218012393f, 0.0478172116f, 0.0580603182f, -0.12624f, -2.2277863f, -1.17777693f, -0.0367000513f, 0.0577705353f, -1.24190557f, -0.492130041f } },
+        { "Fruity Bass Boost", 48000, { 0, 1024 }, 0x6c5ab3f609af2c3cull, { 0.0024052544f, 0.0460729003f, 0.0709654391f, -0.1167804f, -2.22533989f, -1.18373549f, -0.0448203459f, 0.053043291f, -1.24824715f, -0.494166315f } },
+        { "Fruity Bass Boost", 44100, { 1024, 300 }, 0xb246920f1ff60b3ull, { 0.0356629528f, 0.0353008583f, -0.0425309055f, -0.0178884063f, -2.15630841f, -1.42872798f, 0.00398741197f, 0.00680476194f, -1.08475125f, -0.437377959f } },
+        { "Fruity Bass Boost", 48000, { 1024, 300 }, 0x89122d0b3fa096baull, { 0.034816049f, 0.0356596299f, -0.0426218137f, -0.0213548262f, -2.15343547f, -1.42917442f, 0.00368365366f, 0.00760280434f, -1.08964729f, -0.439649194f } },
+        { "Fruity 7 band EQ", 44100, { 0, 0, 0, 0, 0, 0, 0 }, 0x3acef8692df38284ull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.10248637f, -1.46080184f, 0.0f, 0.0f, -1.1587677f, -0.471242905f } },
+        { "Fruity 7 band EQ", 44100, { 1800, -1800, 900, 0, -450, 1200, -1700 }, 0x968d9fdd0e5c53fdull, { 0.0559784994f, -0.0457369909f, -0.20320268f, -0.583957613f, -0.555740654f, -0.159529299f, 0.26959905f, -0.0863189623f, 1.0195893f, -0.781531453f } },
+        { "Fruity 7 band EQ", 44100, { -1200, 0, 0, 600, 0, 0, 1800 }, 0x96f6b413d4fc2b65ull, { -0.396190405f, 0.381581873f, 0.639778018f, 2.95740342f, -15.632513f, 0.385985613f, -1.42023098f, 0.503577054f, -9.11049557f, 1.05593979f } },
+        { "Fruity Delay", 44100, { 600, 700, 900, 1024, 4, 0 }, 0x3b93cd8ce56d8c32ull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.11485457f, -1.40214801f, 0.333820492f, -0.0261738673f, -0.786855578f, -1.16315055f } },
+        { "Fruity Delay", 48000, { 600, 700, 900, 1024, 4, 0 }, 0xc8e499107ccc6eeeull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.08610582f, -1.45314789f, 0.441712886f, 0.50612998f, -1.54570627f, 0.225791931f } },
+        { "Fruity Delay", 44100, { 700, 1024, 64, 800, 2, 600 }, 0x4b5cb4d05f1013cdull, { 0.0363710076f, 0.0391986258f, -0.014354689f, 0.0176514238f, -2.10405254f, -1.38042021f, -0.000323641405f, -0.0877400041f, -1.13004076f, -0.513286889f } },
+        { "Fruity Delay", 48000, { 700, 1024, 64, 800, 2, 600 }, 0x834a89d0aaa9a96eull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.1319468f, -1.44643033f, 0.00283452589f, -0.00713274023f, -1.14618802f, -0.506712079f } },
+        { "Fruity Delay", 44100, { 500, 900, 500, 512, 3, 1000 }, 0x2080bc496fcffb2cull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.10248637f, -1.46080184f, -0.0331584699f, -0.26390475f, -1.16307354f, -0.476940066f } },
+        { "Fruity Delay", 48000, { 500, 900, 500, 512, 3, 1000 }, 0x4c19478535905bb1ull, { 0.0363710076f, 0.0391986258f, -0.013737631f, -1.81496143e-05f, -2.10248637f, -1.46080184f, 0.0120966472f, 0.0150470948f, -1.15484953f, -0.475222349f } },
+    };
+    for (const auto& c : cases)
+    {
+        std::vector<std::uint8_t> state (4 + 4 * c.raw.size(), 0);
+        const std::int32_t version = 1;
+        std::memcpy (state.data(), &version, 4);
+        std::memcpy (state.data() + 4, c.raw.data(), 4 * c.raw.size());
+        const auto slot = lynx::effectFromFl (c.name, state);
+        CHECK (slot && slot->kind != lynx::EffectKind::utility && slot->kind != lynx::EffectKind::eq
+               && slot->kind != lynx::EffectKind::parametricEq);
+        if (! slot)
+            continue;
+        auto fx = lynx::makeEffect (slot->kind);
+        fx->prepare ((double) c.rate);
+        std::vector<float> l (24000), r (24000);
+        std::uint32_t s = 12345;
+        const float amps[] { 0.3f, 1.5f, 0.05f, 3.0f, 0.8f, 0.0f, 2.0f, 0.4f };
+        for (int i = 0; i < 24000; ++i)
+        {
+            const float a = amps[(i / 3000) % 8];
+            s = s * 1664525u + 1013904223u;
+            l[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+            s = s * 1664525u + 1013904223u;
+            r[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+        }
+        // host blocks of 512 like the goldens' DLL calls (the Center / Bass Boost / 7 Band EQ round their state to double at
+        // the end of each call, as FL does, so other block sizes differ in the last bits; checked below)
+        const auto input = std::make_pair (l, r);
+        for (int i = 0; i < 24000; i += 512)
+            fx->process (l.data() + i, r.data() + i, std::min (512, 24000 - i), slot->params, 120.0);
+        {
+            auto other = lynx::makeEffect (slot->kind);
+            other->prepare ((double) c.rate);
+            auto l2 = input.first, r2 = input.second;
+            for (int i = 0; i < 24000; i += 1000)
+                other->process (l2.data() + i, r2.data() + i, 1000, slot->params, 120.0);
+            float worst = 0.0f;
+            for (std::size_t i = 0; i < 24000; ++i)
+                worst = std::max ({ worst, std::abs (l2[i] - l[i]) / std::max (1.0f, std::abs (l[i])), std::abs (r2[i] - r[i]) / std::max (1.0f, std::abs (r[i])) });
+            CHECK (worst <= 1.0e-4f); // (measured: ≤ 3.5e-5, the Bass Boost at 20 Hz)
+        }
+        for (int k = 0; k < 5; ++k)
+        {
+            const auto i = (std::size_t) (1500 + 4500 * k);
+            CHECK (std::abs (l[i] - c.pts[(std::size_t) (2 * k)]) <= x87Tolerance() * std::max (1.0f, std::abs (c.pts[(std::size_t) (2 * k)])));
+            CHECK (std::abs (r[i] - c.pts[(std::size_t) (2 * k + 1)]) <= x87Tolerance() * std::max (1.0f, std::abs (c.pts[(std::size_t) (2 * k + 1)])));
+        }
+#if defined(__x86_64__) || defined(__i386__)
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (int i = 0; i < 24000; ++i)
+            for (float v : { l[(std::size_t) i], r[(std::size_t) i] })
+            {
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                h = (h ^ u) * 0x100000001b3ull;
+            }
+        CHECK (h == c.hash);
+#endif
+    }
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flPhaseInverter, 0, 0.3f, 120.0) == "None");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flPhaseInverter, 0, 0.5f, 120.0) == "Left");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flPhaseInverter, 0, 1.0f, 120.0) == "Right");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flBassBoost, 0, 0.5f, 120.0) == "60 Hz");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fl7BandEq, 3, 1.0f, 120.0) == "+18.0 dB");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::fl7BandEq, 3, 0.5f, 120.0) == "+0.0 dB");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flDelay1, 3, 0.0f, 120.0) == "Host");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flDelay1, 3, 1.0f, 120.0) == "280 BPM");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flDelay1, 4, 2.0f / 15.0f, 120.0) == "3/16");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flDelay1, 5, 1.0f, 120.0) == "Ping-pong");
+    CHECK (lynx::effectFromFl ("Fruity Delay", { 1, 0, 0, 0 }) == std::nullopt
+           || lynx::effectFromFl ("Fruity Delay", { 1, 0, 0, 0 })->kind != lynx::EffectKind::flDelay1);
+    // the default Phase Inverter of FL inverts the right side only (LYNX's old import inverted both)
+    CHECK (lynx::fllegacy::phaseInverterMode (1024) == 2 && lynx::fllegacy::phaseInverterMode (341) == 0
+           && lynx::fllegacy::phaseInverterMode (342) == 1 && lynx::fllegacy::phaseInverterMode (683) == 2);
+}
+
 TEST (fl_frequency_shifter_matches_fl_engine)
 {
     // REA_rodada154 §4: FL's Frequency Shifter (import → slot → effect) against goldens of the installation's
@@ -16364,7 +16472,9 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Fl165Tests.inc"
 #include "Perf165Tests.inc"
 #include "Issue12Tests.inc"
+#include "Issue12cTests.inc"
 #include "FlGran165Tests.inc"
+#include "GranDrop165Tests.inc"
 #include "Kepler165kTests.inc"
 #include "MixerLatency165Tests.inc"
 #include "Audit165Tests.inc"

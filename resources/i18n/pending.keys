@@ -147,7 +147,6 @@
 "Limits how fast the envelope may rise (attack) and fall (release)."
 "Step levels (each point = a step; drag to 0 for a break)"
 "8 steps"
-"Ping-pong"
 "Randomize"
 "Writes a gated step pattern into the envelope ({0} beats)."
 "Load an impulse response"
