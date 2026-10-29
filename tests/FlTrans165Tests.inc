@@ -209,6 +209,21 @@ TEST (fltrans165_latency_and_sidechain)
     };
     const auto open = run (false), sided = run (true);
     CHECK (open > 0.05 && sided < open * 1e-4);
+
+    // reset (the audio thread's, after a non-finite block): the delay lines and the Diffusion / Bounce taps fall silent
+    raw = fltrans165::defaultRaw();
+    raw[transientEffect] = bounce;
+    raw[sustainEffect] = delay;
+    set();
+    std::vector<float> a, b;
+    fltrans165::input (a, b);
+    for (int s = 0; s < 44100; s += 512)
+        fx->process (a.data() + s, b.data() + s, std::min (512, 44100 - s), p, 120.0);
+    fx->reset();
+    std::vector<float> zl (4096, 0.0f), zr (4096, 0.0f);
+    for (int s = 0; s < 4096; s += 512)
+        fx->process (zl.data() + s, zr.data() + s, 512, p, 120.0);
+    CHECK (fltrans165::rms (zl) == 0.0 && fltrans165::rms (zr) == 0.0);
 }
 
 TEST (fltrans165_flp_import)

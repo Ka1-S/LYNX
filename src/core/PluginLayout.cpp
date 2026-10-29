@@ -1010,6 +1010,8 @@ Layout fruityMute2Layout()
     return l;
 }
 
+LayoutItem menuOf (float x, float y, float w, float h, const char* param, const char* caption, const char* options); // (below)
+
 Layout transmitterLayout()
 {
     // round 165g (fltrans165), FL Studio 2026's arrangement: DETECTION along the top (sensitivity, hold, release, the
@@ -1021,9 +1023,9 @@ Layout transmitterLayout()
     l.height = 344;
     auto& v = l.items;
     v.push_back (section (0, 0, 620, 112, TR_NOOP ("DETECTION")));
-    v.push_back (knob (52, 52, 40, "Sensitivity", TR_NOOP ("Sensitivity"), 86, showValue));
-    v.push_back (knob (126, 52, 40, "Hold", TR_NOOP ("Hold"), 86, showValue));
-    v.push_back (knob (200, 52, 40, "Release", TR_NOOP ("Release"), 86, showValue));
+    v.push_back (knob (52, 52, 40, "Sensitivity", TR_NOOP ("Sensitivity"), 92, showValue));
+    v.push_back (knob (126, 52, 40, "Hold", TR_NOOP ("Hold"), 92, showValue));
+    v.push_back (knob (200, 52, 40, "Release", TR_NOOP ("Release"), 92, showValue));
     v.push_back (label (262, 26, 190, 16, TR_NOOP ("Mode")));
     v.push_back (tabs (262, 46, 190, 24, "Mode", TR_NOOP ("Smooth|Balanced|Dense")));
     v.push_back (toggle (474, 34, 132, 22, "Lookahead", TR_NOOP ("Lookahead")));
@@ -1055,9 +1057,9 @@ Layout transmitterLayout()
         v.push_back (toggle (x + 12, 146, 76, 22, p.on, TR_NOOP ("On")));
         v.push_back (slider (Item::vslider, x + 30, 178, 32, 124, p.level, TR_NOOP ("Level")));
         v.push_back (value (x + 8, 316, 82, 18, p.level, 0));
-        v.push_back (knob (x + 112, 196, 40, p.tilt, TR_NOOP ("Tilt"), 230, bipolar | showValue));
+        v.push_back (knob (x + 112, 196, 40, p.tilt, TR_NOOP ("Tilt"), 236, bipolar | showValue));
         v.push_back (menuOf (x + 146, 146, 152, 24, p.effect, TR_NOOP ("Effect"), TR_NOOP ("Saturation|Bounce|Diffusion|Blur|Delay|Off")));
-        const float k1 = x + 172, k2 = x + 222, k3 = x + 272, ky = 214, cy = 248;
+        const float k1 = x + 172, k2 = x + 222, k3 = x + 272, ky = 214, cy = 252;
         // Saturation [0, 0.1), Bounce [0.1, 0.3), Diffusion [0.3, 0.5), Blur [0.5, 0.7), Delay [0.7, 0.9), Off [0.9, 1]
         v.push_back (when (knob (k1, ky, 36, p.satMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.0f, 0.1f));
         v.push_back (when (knob (k2, ky, 36, p.drive, TR_NOOP ("Drive"), cy, showValue), p.effect, 0.0f, 0.1f));

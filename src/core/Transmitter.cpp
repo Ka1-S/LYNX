@@ -199,6 +199,12 @@ struct Lookahead
     Glide glide;
     float fs = 44100;
     void prepare (float rate) { fs = std::clamp (rate, 1.0f, 192000.0f); glide.setup (fs, 10.0f); }
+    void clear()
+    {
+        std::fill (ring.begin(), ring.end(), 0.0f);
+        w = 0;
+        glide.s = 0;
+    }
     float run (float x, float seconds)
     {
         ring[w & 0xffff] = x;
@@ -299,6 +305,16 @@ struct Delay
         glideA = expF (-4.0f / fs);
         glideB = (1.0f - glideA) * fs * 0.001f;
     }
+    void clear()
+    {
+        for (auto& c : ch)
+        {
+            std::fill (c.ring.begin(), c.ring.end(), 0.0f);
+            c.prevIn = c.hp = c.lp = c.out = 0;
+        }
+        w = 0;
+        timeS = 0;
+    }
     void run (float* l, float* r, int n, float mix, float ms, float feedbackPct)
     {
         const float fb = feedbackPct * 0.01f, dry = 1.0f - mix;
@@ -374,6 +390,19 @@ struct Diffuser
                 ch[k].mask = (unsigned) size - 1;
             }
         }
+        g = fade = rate = 0;
+        lcg = 0;
+        w = 0;
+    }
+    void clear()
+    {
+        for (auto& ch : st)
+            for (auto& s : ch)
+            {
+                std::fill (s.ring.begin(), s.ring.end(), 0.0f);
+                s.d = s.yPrev = s.lastNz = s.held = s.tapA = s.tapB = 0;
+                s.cnt = s.cntPrev = 0;
+            }
         g = fade = rate = 0;
         lcg = 0;
         w = 0;
@@ -468,6 +497,17 @@ struct Bounce
                 gainNeg[k][j] = n64 == 64 ? 0.0f : curveC (n64 / 64.0);
                 gainPos[k][j] = n64 == 64 ? 1.0f : curveC (1.0 - n64 / 64.0);
             }
+        }
+        mixG = ampG = fade = rate = 0;
+        w = 0;
+    }
+    void clear()
+    {
+        for (auto& c : ch)
+        {
+            std::fill (c.ring.begin(), c.ring.end(), 0.0f);
+            std::fill (std::begin (c.tapA), std::end (c.tapA), 0.0f);
+            std::fill (std::begin (c.tapB), std::end (c.tapB), 0.0f);
         }
         mixG = ampG = fade = rate = 0;
         w = 0;
@@ -660,7 +700,12 @@ Engine::~Engine() = default;
 void Engine::prepare (double sampleRate)
 {
     auto& m = *impl;
-    m = Impl { .fs = (float) sampleRate, .bpm = m.bpm, .v = m.v };
+    const float bpm = m.bpm;
+    const auto v = m.v;
+    m = Impl {};
+    m.fs = (float) sampleRate;
+    m.bpm = bpm;
+    m.v = v;
     m.det.prepare (m.fs);
     for (int c = 0; c < 2; ++c)
     {
@@ -673,6 +718,26 @@ void Engine::prepare (double sampleRate)
     }
     const float w = (float) ((double) (1.0f / m.fs) * 125.66370614359172);
     m.glideC = 1.0f / ((w * 0.5f + 1.0f) * w + 1.0f);
+}
+
+void Engine::reset()
+{
+    // the state back to silence, without allocating (an effect's reset runs on the audio thread)
+    auto& m = *impl;
+    m.det = Detector {};
+    m.det.prepare (m.fs);
+    for (int c = 0; c < 2; ++c)
+    {
+        m.la[c].clear();
+        m.tilt[c].s[0] = m.tilt[c].s[1] = 0;
+        m.sat[c] = Saturation {};
+        m.sat[c].prepare (m.fs);
+        m.delay[c].clear();
+        m.diff[c].clear();
+        m.bounce[c].clear();
+    }
+    m.gT = m.gS = 0;
+    m.onT = m.onS = 1;
 }
 
 void Engine::setTempo (double bpm) { impl->bpm = (float) std::max (10.0, bpm); }
@@ -770,7 +835,7 @@ class TransmitterEffect final : public Effect
 {
 public:
     void prepare (double sampleRate) noexcept override { rate = sampleRate; engine.prepare (sampleRate); first = true; }
-    void reset() noexcept override { engine.prepare (rate); first = true; }
+    void reset() noexcept override { engine.reset(); first = true; }
     void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override
     {
         if (bpm > 0 && bpm != lastBpm)

@@ -2761,7 +2761,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 else if (fx.kind == EffectKind::transmitter)
                 {
                     // the detection follows FL's sidechain input when one is chosen (the inputs list, like the Limiter's);
-                    // the transient / sustain sends to other mixer tracks are not routed (the main output is exact)
+                    // the transient / sustain parts sent to other mixer tracks are not routed (the main output is exact)
                     if (const auto st = transmitter::parse (slot.state))
                     {
                         fx.sidechain = sidechainSource (insert.index, st->sidechain);

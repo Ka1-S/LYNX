@@ -67,6 +67,7 @@ public:
     Engine();
     ~Engine();
     void prepare (double sampleRate);
+    void reset();                          // back to silence (no allocation)
     void setTempo (double bpm);
     void setRaw (int k, int raw);          // one FL control (raw value)
     void setValue (int k, float value);    // one engine value (FL's engine units: ms, dB, …)
