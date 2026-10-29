@@ -432,6 +432,93 @@ struct Diffuser
     }
 };
 
+// ---- Bounce: 32 taps per channel like a bouncing ball. Tap t (left: odd 64ths, right: even 64ths up to 1) sits at
+// 2 s · (1 − e^(k·t)) / (1 − e^k), k = −10 · Delay Curve, and has the gain (1 − |a|) + |a| · c(t) (c(1 − t) for a > 0),
+// c(t) = (e^(−10t) − e^(−10)) / (1 − e^(−10)), a = 0.95 · Amplitude Curve (glided). Taps change through a 50 ms
+// crossfade.
+struct Bounce
+{
+    static constexpr int taps = 32;
+    float fs = 44100, c = 0, keep = 1, step = 0, mixG = 0, ampG = 0, fade = 0, rate = 0;
+    unsigned w = 0, mask = 0;
+    float gainNeg[2][taps] {}, gainPos[2][taps] {}, tt[2][taps] {};
+    struct Ch { std::vector<float> ring; float tapA[taps] {}, tapB[taps] {}; } ch[2];
+
+    void prepare (float rate_)
+    {
+        fs = std::clamp (rate_, 1.0f, 192000.0f);
+        const float inv = 1.0f / fs;
+        c = inv * 44.0999985f;
+        keep = 1.0f - c;
+        step = inv * 20.0f;
+        std::size_t size = 1;
+        while (size < (std::size_t) (fs * 2.0f) + 2) size <<= 1;
+        mask = (unsigned) size - 1;
+        const double e10 = std::exp (-10.0);
+        auto curveC = [e10] (double t) { return (float) ((std::exp (-10.0 * t) - e10) / (1.0 - e10)); };
+        for (int k = 0; k < 2; ++k)
+        {
+            ch[k] = Ch {};
+            ch[k].ring.assign (size, 0.0f);
+            for (int j = 0; j < taps; ++j)
+            {
+                const int n64 = k == 0 ? 2 * j + 1 : 2 * j + 2;
+                tt[k][j] = (float) n64 / 64.0f;
+                gainNeg[k][j] = n64 == 64 ? 0.0f : curveC (n64 / 64.0);
+                gainPos[k][j] = n64 == 64 ? 1.0f : curveC (1.0 - n64 / 64.0);
+            }
+        }
+        mixG = ampG = fade = rate = 0;
+        w = 0;
+    }
+    void run (float* l, float* r, int n, float mix, float ampCurve, float delayCurve)
+    {
+        // the tap positions (seconds), from the delay curve
+        float k = delayCurve * -10.0f;
+        if (k <= 0.0f) { if (k >= -9.99999997e-07f) k = -9.99999997e-07f; }
+        else if (k <= 9.99999997e-07f) k = 9.99999997e-07f;
+        const float norm = 1.0f / (1.0f - expF (k));
+        float pos[2][taps];
+        for (int q = 0; q < 2; ++q)
+            for (int j = 0; j < taps; ++j)
+            {
+                if (tt[q][j] == 1.0f) { pos[q][j] = 2.0f; continue; }
+                const float v = (1.0f - expF (k * tt[q][j])) * norm;
+                pos[q][j] = v + v;
+            }
+        const float a = ampCurve * 0.949999988f, cm = c * mix;
+        float* io[2] = { l, r };
+        for (int i = 0; i < n; ++i)
+        {
+            mixG = keep * mixG + cm;
+            ampG = keep * ampG + c * a;
+            const float mag = std::fabs (ampG);
+            rate = fade == 0.0f ? step : fade == 1.0f ? -step : rate;
+            fade = std::max (std::min (fade + rate, 1.0f), 0.0f);
+            const float rest = 1.0f - fade;
+            for (int q = 0; q < 2; ++q)
+            {
+                Ch& s = ch[q];
+                const float x = io[q][i];
+                s.ring[w & mask] = x;
+                float sum = 0.0f;
+                for (int j = 0; j < taps; ++j)
+                {
+                    const float d = fs * pos[q][j];
+                    if (fade == 1.0f) s.tapA[j] = d;
+                    if (fade == 0.0f) s.tapB[j] = d;
+                    const int ta = (int) std::min (s.tapA[j] > 0.0f ? s.tapA[j] : 0.0f, 1920000.0f);
+                    const int tb = (int) std::min (s.tapB[j] > 0.0f ? s.tapB[j] : 0.0f, 1920000.0f);
+                    const float g = ampG <= 0.0f ? mag * gainNeg[q][j] + ampG + 1.0f : mag * gainPos[q][j] + (1.0f - ampG);
+                    sum += (fade * s.ring[(w - (unsigned) tb) & mask] + rest * s.ring[(w - (unsigned) ta) & mask]) * g;
+                }
+                io[q][i] = sum * mixG + (1.0f - mixG) * x;
+            }
+            ++w;
+        }
+    }
+};
+
 float dbToGain (float db) { return expF (db * 0.115129255f); }
 } // namespace
 
@@ -548,6 +635,7 @@ struct Engine::Impl
     Saturation sat[2];
     Delay delay[2];
     Diffuser diff[2];
+    Bounce bounce[2];
     float glideC = 0, gT = 0, gS = 0, onT = 1, onS = 1; // FL starts the level gains at 0 (they glide up)
     std::vector<float> buf[6];
 
@@ -580,6 +668,7 @@ void Engine::prepare (double sampleRate)
         m.sat[c].prepare (m.fs);
         m.delay[c].prepare (m.fs);
         m.diff[c].prepare (m.fs);
+        m.bounce[c].prepare (m.fs);
     }
     const float w = (float) ((double) (1.0f / m.fs) * 125.66370614359172);
     m.glideC = 1.0f / ((w * 0.5f + 1.0f) * w + 1.0f);
@@ -645,7 +734,13 @@ void Engine::process (const float* inL, const float* inR, float* outL, float* ou
             case diffusion:
                 m.diff[part].run (l, r, n, v[(std::size_t) (tDiffMix + o)], v[(std::size_t) (tDiffFeedback + o)], v[(std::size_t) (tDiffDelay + o)]);
                 break;
-            default: break; // Bounce: not ported yet (REA §5); Blur and Off: the engine passes the part
+            case bounce:
+            {
+                const int d = part == 0 ? 0 : 3;
+                m.bounce[part].run (l, r, n, v[(std::size_t) (tBounceMix + d)], v[(std::size_t) (tBounceAmpCurve + d)], v[(std::size_t) (tBounceDelayCurve + d)]);
+                break;
+            }
+            default: break; // Blur and Off: the engine passes the part
         }
     }
     const float targetT = dbToGain (v[transientLevel]), targetS = dbToGain (v[sustainLevel]);
