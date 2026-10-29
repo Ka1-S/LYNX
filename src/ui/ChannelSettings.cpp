@@ -49,6 +49,10 @@
 #include "ui/SoundFontEditor.h"
 #include "ui/VfxEditors.h"
 #include "ui/VideoPlayerView.h"
+#include "ui/BrowserComponent.h"
+#include "engine/SampleLibrary.h"
+#include "core/SampleFiles.h"
+#include "core/ProjectContents.h"
 
 namespace lynx
 {
@@ -424,7 +428,9 @@ private:
 };
 
 // Physical-model channels (Sakura, Drumpad; REA_rodada28): knobs for the main raw FL parameters (0..1)
-class ModelPanel final : public juce::Component
+class ModelPanel final : public juce::Component,
+                         public juce::DragAndDropTarget,
+                         public juce::FileDragAndDropTarget
 {
 public:
     ModelPanel (AudioEngine& e, ChannelRef c)
@@ -1031,15 +1037,15 @@ public:
             const auto path = juce::String::fromUTF8 (def.samplePath.c_str());
             ui::setHint (sampleButton, path.isEmpty() ? tr ("Choose the sample the Granulizer plays") : path);
             sampleButton.onClick = [this] {
-                chooser = std::make_unique<juce::FileChooser> (tr ("Sample"), juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+                juce::StringArray patterns;
+                for (const auto e : sampleFileExtensions)
+                    patterns.add ("*." + juce::String (std::string (e)));
+                chooser = std::make_unique<juce::FileChooser> (tr ("Sample"), juce::File(), patterns.joinIntoString (";"));
                 chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                       [safe = juce::Component::SafePointer<ModelPanel> (this)] (const juce::FileChooser& fc) {
                                           if (safe == nullptr || fc.getResult() == juce::File())
                                               return;
-                                          const auto file = fc.getResult();
-                                          safe->ref.edit (safe->engine, [path = file.getFullPathName().toStdString()] (ChannelDef& d) { d.samplePath = path; });
-                                          ui::setHint (safe->sampleButton, file.getFullPathName());
-                                          safe->repaint();
+                                          safe->loadGranulizerSample (fc.getResult());
                                       });
             };
             addAndMakeVisible (sampleButton);
@@ -1467,7 +1473,71 @@ public:
         }
     }
 
+    // FL's Granulizer takes a sample dropped on its window (from the Browser or the system) and plays it; before, the
+    // drop fell through to the Playlist under the window and made an audio clip (audit 165)
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        return takesSample() && BrowserComponent::isBrowserDrag (details) && SampleLibrary::isSampleFile (BrowserComponent::draggedFile (details));
+    }
+    void itemDragEnter (const SourceDetails&) override { setDropHighlight (true); }
+    void itemDragExit (const SourceDetails&) override { setDropHighlight (false); }
+    void itemDropped (const SourceDetails& details) override
+    {
+        setDropHighlight (false);
+        loadGranulizerSample (BrowserComponent::draggedFile (details));
+    }
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        return takesSample() && files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
+    }
+    void fileDragEnter (const juce::StringArray&, int, int) override { setDropHighlight (true); }
+    void fileDragExit (const juce::StringArray&) override { setDropHighlight (false); }
+    void filesDropped (const juce::StringArray& files, int, int) override
+    {
+        setDropHighlight (false);
+        loadGranulizerSample (juce::File (files[0]));
+    }
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (dropHighlight)
+        {
+            g.setColour (theme::colour::accent);
+            g.drawRect (getLocalBounds(), 2);
+        }
+    }
+
 private:
+    bool takesSample() const
+    {
+        const auto* c = ref.get (engine);
+        return c != nullptr && projectcontents::pluginWindowTakesSample (c->instrument);
+    }
+    void setDropHighlight (bool on)
+    {
+        if (dropHighlight != on)
+        {
+            dropHighlight = on;
+            repaint();
+        }
+    }
+
+    // the Granulizer plays the new sample with the same settings (FL keeps the knobs and the channel's name)
+    void loadGranulizerSample (const juce::File& file)
+    {
+        if (! takesSample() || ! file.existsAsFile())
+            return;
+        if (engine.getSampleLibrary().load (file.getFullPathName()) == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Sample"), tr ("Could not read {0}", { file.getFileName() }));
+            return;
+        }
+        ref.edit (engine, [path = file.getFullPathName().toStdString()] (ChannelDef& d) { d.samplePath = path; });
+        if (sampleButton.isVisible())
+            ui::setHint (sampleButton, file.getFullPathName());
+        repaint();
+    }
+    bool dropHighlight = false;
+
     // Fruity Granulizer: what the keys move (Key to), where the slices come from (Transients), tempo lock and the beat
     // count it uses (REA_rodada165g-flgran165)
     void setupGranulizerModes (const ChannelDef& def)

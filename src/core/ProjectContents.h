@@ -36,6 +36,9 @@ struct Item
 
 // Does this instrument play `ChannelDef::samplePath` as audio (and not as the path of an engine file)?
 bool playsSampleFile (InstrumentKind kind) noexcept;
+// Built-in plugins whose own window takes a dropped sample (Browser or system) and plays it, as FL's do: the Granulizer
+// (audit 165: the drop fell through to the Playlist). The Sampler's waveform has its own drop target.
+bool pluginWindowTakesSample (InstrumentKind kind) noexcept;
 
 std::vector<Item> patterns (const Song& song);
 // Every audio file used by a channel (sample, audio clip, sampler zones) or an effect (source sample), once, in the
