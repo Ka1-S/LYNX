@@ -17,7 +17,7 @@ FileExtensions:
 ReleaseDate: <YYYY-MM-DD>
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/Ka1-S/LYNX/releases/download/v<VERSION>/LYNX-<VERSION>-setup-x64.exe
+    InstallerUrl: https://github.com/Ka1-S/LYNX-SHARE/releases/download/v<VERSION>/LYNX-<VERSION>-setup-x64.exe
     InstallerSha256: <SHA256 FROM SHA256SUMS.txt>
 ManifestType: installer
 ManifestVersion: 1.6.0

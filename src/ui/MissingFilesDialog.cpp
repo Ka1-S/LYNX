@@ -251,7 +251,7 @@ private:
             lines.add (tr ("{0} sample(s) used by {1} could not be found on this PC.",
                            { juce::String ((int) info.files.size()), info.projectName.isNotEmpty() ? info.projectName : tr ("this project") }));
         if (! info.plugins.empty())
-            lines.add (tr ("{0} plugin(s) will not sound as in FL Studio (not installed, not loaded, or without their settings): see what LYNX did with each.",
+            lines.add (tr ("{0} plugin(s) will not sound as in FL Studio (not installed, not loaded, or without their settings): see what LYNX SHARE did with each.",
                            { juce::String ((int) info.plugins.size()) }));
         if (! info.autoRelocated.empty())
             lines.add (tr ("{0} file(s) were found automatically in another folder.", { juce::String ((int) info.autoRelocated.size()) }));

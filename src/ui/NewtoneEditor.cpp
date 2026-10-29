@@ -1127,7 +1127,7 @@ private:
         load.setEnabled (validSlot());
         slave.setEnabled (validSlot());
         preview.setButtonText (previewing ? tr ("Stop") : tr ("Preview"));
-        juce::String text = warpMode() ? tr ("(beta) LYNX's own time engine; FL's own warping is not reproduced exactly") : juce::String();
+        juce::String text = warpMode() ? tr ("(beta) LYNX SHARE's own time engine; FL's own warping is not reproduced exactly") : juce::String();
         if (sample != nullptr)
         {
             const juce::File f (juce::String::fromUTF8 (samplePath.c_str()));

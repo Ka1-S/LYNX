@@ -1444,7 +1444,7 @@ private:
         program.setValue (s.program, juce::dontSendNotification);
         if (channel < 0) // inside a Patcher (round 162)
         {
-            listeners.setText (tr ("Inside a Patcher: cable its \"MIDI out\" pin to an instrument or to a \"MIDI port\" pin of \"To LYNX\"; "
+            listeners.setText (tr ("Inside a Patcher: cable its \"MIDI out\" pin to an instrument or to a \"MIDI port\" pin of \"To LYNX SHARE\"; "
                                    "its notes go out on this MIDI channel."),
                                juce::dontSendNotification);
             return;

@@ -57,9 +57,9 @@ if [[ ! -x "$TOOL" ]]; then
     chmod +x "$TOOL"
 fi
 # no FUSE needed to run the tool itself (containers, CI)
-# update information (AppImageUpdate): the newest release of Ka1-S/LYNX, pre-releases included; appimagetool writes
+# update information (AppImageUpdate): the newest release of Ka1-S/LYNX-SHARE, pre-releases included; appimagetool writes
 # the matching .zsync next to the AppImage, and the release job attaches it with the other files in dist/
-UPDATE_INFO="${UPDATE_INFO-gh-releases-zsync|Ka1-S|LYNX|latest-all|LYNX-*-$ARCH.AppImage.zsync}"
+UPDATE_INFO="${UPDATE_INFO-gh-releases-zsync|Ka1-S|LYNX-SHARE|latest-all|LYNX-*-$ARCH.AppImage.zsync}"
 APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" ${UPDATE_INFO:+-u "$UPDATE_INFO"} "$APPDIR" "$OUTDIR/$APPIMAGE" \
     > "$WORK/appimagetool.log" 2>&1 || { cat "$WORK/appimagetool.log"; exit 1; }
 if [[ -n "$UPDATE_INFO" && ! -f "$OUTDIR/$APPIMAGE.zsync" ]]; then

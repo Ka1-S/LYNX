@@ -2972,7 +2972,7 @@ public:
     {
         g.setColour (theme::colour::textSecondary);
         g.setFont (theme::font (theme::type::body));
-        g.drawFittedText (tr ("LYNX keeps this plugin's settings (from FL Studio) and passes its notes through unchanged."),
+        g.drawFittedText (tr ("LYNX SHARE keeps this plugin's settings (from FL Studio) and passes its notes through unchanged."),
                           getLocalBounds().reduced (14, 8), juce::Justification::topLeft, 3);
     }
 };
@@ -3025,7 +3025,7 @@ public:
         addAndMakeVisible (*body);
 
         presetButton.onClick = [this] { showPresetMenu(); };
-        ui::setHint (presetButton, tr ("Presets: LYNX's own and, with FL Studio installed, FL's factory presets"));
+        ui::setHint (presetButton, tr ("Presets: LYNX SHARE's own and, with FL Studio installed, FL's factory presets"));
         addAndMakeVisible (presetButton);
         for (auto* b : { &prev, &next })
         {

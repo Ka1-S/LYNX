@@ -497,7 +497,7 @@ private:
     void confirmResetAll()
     {
         juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, tr ("Reset all shortcuts"),
-                                            tr ("Every shortcut goes back to LYNX's default keys."), tr ("Reset all"), tr ("Cancel"), this,
+                                            tr ("Every shortcut goes back to LYNX SHARE's default keys."), tr ("Reset all"), tr ("Cancel"), this,
                                             juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<ShortcutPanel> (this)] (int result) {
                                                 if (safe == nullptr || result != 1)
                                                     return;

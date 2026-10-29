@@ -6,17 +6,17 @@
   <id>com.lynx_share.LYNX</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-or-later</project_license>
-  <name>LYNX</name>
+  <name>LYNX SHARE</name>
   <summary>A lightweight digital audio workstation, fully open source</summary>
   <summary xml:lang="pt-BR">Uma estação de trabalho de áudio digital leve e totalmente open-source</summary>
   <description>
     <p>
-      LYNX is a pattern-based digital audio workstation for making beats and songs: a channel rack with a step
+      LYNX SHARE is a pattern-based digital audio workstation for making beats and songs: a channel rack with a step
       sequencer, a piano roll, a playlist, a mixer with effect inserts and sends, automation, and built-in
       instruments and effects. It hosts VST3, CLAP, LV2 and VST2 plugins and opens FL Studio projects (.flp).
     </p>
     <p xml:lang="pt-BR">
-      LYNX é uma estação de trabalho de áudio digital baseada em padrões para fazer beats e músicas: channel rack
+      LYNX SHARE é uma estação de trabalho de áudio digital baseada em padrões para fazer beats e músicas: channel rack
       com step sequencer, piano roll, playlist, mixer com inserts de efeitos e envios, automação, e instrumentos e
       efeitos próprios. Carrega plugins VST3, CLAP, LV2 e VST2 e abre projetos do FL Studio (.flp).
     </p>
@@ -24,10 +24,10 @@
   <launchable type="desktop-id">com.lynx_share.LYNX.desktop</launchable>
   <icon type="stock">lynx</icon>
   <url type="homepage">https://lynx-share.com</url>
-  <url type="bugtracker">https://github.com/Ka1-S/LYNX/issues</url>
-  <url type="vcs-browser">https://github.com/Ka1-S/LYNX</url>
+  <url type="bugtracker">https://github.com/Ka1-S/LYNX-SHARE/issues</url>
+  <url type="vcs-browser">https://github.com/Ka1-S/LYNX-SHARE</url>
   <developer id="com.lynx_share">
-    <name>LYNX contributors</name>
+    <name>LYNX SHARE contributors</name>
   </developer>
   <categories>
     <category>AudioVideo</category>
@@ -42,16 +42,16 @@
   </keywords>
   <screenshots>
     <screenshot type="default">
-      <caption>The LYNX workspace: channel rack, playlist and mixer</caption>
-      <image>https://raw.githubusercontent.com/Ka1-S/LYNX/main/docs/img/workspace.png</image>
+      <caption>The LYNX SHARE workspace: channel rack, playlist and mixer</caption>
+      <image>https://raw.githubusercontent.com/Ka1-S/LYNX-SHARE/main/docs/img/workspace.png</image>
     </screenshot>
     <screenshot>
       <caption>Piano roll</caption>
-      <image>https://raw.githubusercontent.com/Ka1-S/LYNX/main/docs/img/piano-roll.png</image>
+      <image>https://raw.githubusercontent.com/Ka1-S/LYNX-SHARE/main/docs/img/piano-roll.png</image>
     </screenshot>
     <screenshot>
       <caption>Mixer</caption>
-      <image>https://raw.githubusercontent.com/Ka1-S/LYNX/main/docs/img/mixer.png</image>
+      <image>https://raw.githubusercontent.com/Ka1-S/LYNX-SHARE/main/docs/img/mixer.png</image>
     </screenshot>
   </screenshots>
   <provides>

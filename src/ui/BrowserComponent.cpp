@@ -423,7 +423,7 @@ public:
         // Generators
         {
             auto gens = folder (root.get(), tr ("Generators"), Icon::keyboard);
-            auto lynxGens = folder (gens.get(), "LYNX", Icon::folder);
+            auto lynxGens = folder (gens.get(), "LYNX SHARE", Icon::folder);
             auto flGens = folder (gens.get(), tr ("FL engines"), Icon::folder);
             // FL's VFX note processors (round 164b): channels with no sound, they play other channels / Patcher nodes
             auto vfxGens = folder (gens.get(), tr ("VFX (note effects)"), Icon::folder);
@@ -446,7 +446,7 @@ public:
         // Effects
         {
             auto fxs = folder (root.get(), tr ("Effects"), Icon::mixer);
-            auto lynxFx = folder (fxs.get(), "LYNX", Icon::folder);
+            auto lynxFx = folder (fxs.get(), "LYNX SHARE", Icon::folder);
             auto flFx = folder (fxs.get(), tr ("FL engines"), Icon::folder);
             auto installed = folder (fxs.get(), tr ("Installed"), Icon::folder);
             Node* folders[] = { lynxFx.get(), flFx.get(), installed.get(), installed.get() };
@@ -1114,7 +1114,7 @@ public:
             case Kind::item:
                 return itemHint (n);
             case Kind::plugins:
-                h.text = tr ("Plugin database: LYNX's built-in generators and effects, FL's engines and the installed plugins") + "  "
+                h.text = tr ("Plugin database: LYNX SHARE's built-in generators and effects, FL's engines and the installed plugins") + "  "
                          + (n.expanded ? tr ("[LMB] close") : tr ("[LMB] open"));
                 h.value = n.detail;
                 return h;
@@ -2590,7 +2590,7 @@ std::vector<BrowserComponent::FolderEntry> BrowserComponent::folderEntries() con
     std::vector<FolderEntry> out;
     out.push_back ({ browserview::projectRootId, tr ("Current project"), tr ("the project's patterns, channels, samples and history"),
                      view.shows (browserview::projectRootId), false, false });
-    out.push_back ({ browserview::pluginsRootId, tr ("Plugin database"), tr ("LYNX's, FL's and your installed plugins"),
+    out.push_back ({ browserview::pluginsRootId, tr ("Plugin database"), tr ("LYNX SHARE's, FL's and your installed plugins"),
                      view.shows (browserview::pluginsRootId), false, false });
     for (int i = 0; i < allRoots.size(); ++i)
     {
@@ -3503,7 +3503,7 @@ void BrowserComponent::loadSelected()
     {
         // Enter: into the selected LYNX Soundfont channel, else a new one
         if (! openSoundFontFile (engine, file, engine.getSelectedChannel()))
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX can read."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX SHARE can read."));
         return;
     }
     if (! onLoadIntoChannel || ! onLoadIntoChannel (file))
@@ -3572,7 +3572,7 @@ void BrowserComponent::openFile (const juce::File& file)
     if (file.hasFileExtension ("sf2;sf3"))
     {
         if (! openSoundFontFile (engine, file))
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX can read."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX SHARE can read."));
         return;
     }
     if (isAudio (file))
@@ -3616,7 +3616,7 @@ void BrowserComponent::openFile (const juce::File& file)
         }
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Preset"),
-                                                    tr ("LYNX reads presets from 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun and Sakura."));
+                                                    tr ("LYNX SHARE reads presets from 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun and Sakura."));
         return;
     }
 

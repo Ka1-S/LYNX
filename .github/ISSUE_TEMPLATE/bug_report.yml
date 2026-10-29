@@ -5,13 +5,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing LYNX! The more of this you fill in, the faster we can fix it.
+        Thanks for testing LYNX SHARE! The more of this you fill in, the faster we can fix it.
         Sound differences against a plugin or FL Studio have their own template ("Sound / plugin difference").
 
   - type: input
     id: version
     attributes:
-      label: LYNX version
+      label: LYNX SHARE version
       description: Help › About, or the file name you downloaded.
       placeholder: "0.1.16-alpha"
     validations:
@@ -50,8 +50,8 @@ body:
     attributes:
       label: What happened?
       options:
-        - LYNX closed (crash)
-        - LYNX froze (not responding)
+        - LYNX SHARE closed (crash)
+        - LYNX SHARE froze (not responding)
         - Wrong or bad sound
         - A project / file doesn't open correctly
         - A plugin doesn't load or work
@@ -68,7 +68,7 @@ body:
       placeholder: |
         1. Open my project (FL Studio .flp)
         2. Double-click the EQ on mixer insert 1
-        3. LYNX freezes
+        3. LYNX SHARE freezes
     validations:
       required: true
 
@@ -95,7 +95,7 @@ body:
         - **Windows:** `%APPDATA%\LYNX\autosave\crash *.txt` and `hang *.txt`, plus `%APPDATA%\LYNX\crash-history.log`
         - **macOS:** `~/Library/Application Support/LYNX/autosave/` (crash / hang files) and `crash-history.log`
         - **Linux:** `~/.config/LYNX/autosave/` (crash / hang files) and `~/.config/LYNX/crash-history.log`
-        For slowness, start LYNX with `LYNX_TRACE_UI=1` and attach `ui.log` from the same folder.
+        For slowness, start LYNX SHARE with `LYNX_TRACE_UI=1` and attach `ui.log` from the same folder.
       placeholder: Attach the files or paste their contents.
 
   - type: textarea

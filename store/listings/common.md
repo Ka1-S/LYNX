@@ -10,15 +10,15 @@ KA1WARE
 
 ## CopyrightTrademarkInfo
 
-© 2026 LYNX contributors. LYNX is free software under the GNU AGPL-3.0. FL Studio is a trademark of Image-Line Software; LYNX is not affiliated with Image-Line.
+© 2026 LYNX SHARE contributors. LYNX SHARE is free software under the GNU AGPL-3.0. FL Studio is a trademark of Image-Line Software; LYNX SHARE is not affiliated with Image-Line.
 
 ## AdditionalLicenseTerms
 
-GNU Affero General Public License v3.0 or later: https://github.com/Ka1-S/LYNX/blob/main/LICENSE — third-party components: https://github.com/Ka1-S/LYNX/blob/main/THIRD_PARTY.md
+GNU Affero General Public License v3.0 or later: https://github.com/Ka1-S/LYNX-SHARE/blob/main/LICENSE — third-party components: https://github.com/Ka1-S/LYNX-SHARE/blob/main/THIRD_PARTY.md
 
 ## PrivacyPolicy
 
-https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md
+https://github.com/Ka1-S/LYNX-SHARE/blob/main/PRIVACY.md
 
 ## WebsiteURL
 
@@ -26,7 +26,7 @@ https://lynx-share.com
 
 ## SupportContactInfo
 
-https://github.com/Ka1-S/LYNX/issues
+https://github.com/Ka1-S/LYNX-SHARE/issues
 
 ## MinimumHardwareReq1
 

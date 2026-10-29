@@ -12,25 +12,25 @@ DAW gratis dan open source dengan alur kerja berbasis pattern: Channel Rack, Pia
 
 ## Description
 
-LYNX (dipublikasikan di sini sebagai LYNX SHARE) adalah digital audio workstation (DAW) gratis dan open source untuk membuat beat dan lagu. LYNX mengikuti alur kerja berbasis pattern yang disukai para beatmaker — Channel Rack dengan step sequencer, pattern, Piano Roll, Playlist dengan aransemen, dan Mixer dengan insert, send, serta sidechain — dan dirancang agar tetap ringan dan cepat di PC apa pun.
+LYNX SHARE adalah digital audio workstation (DAW) gratis dan open source untuk membuat beat dan lagu. LYNX SHARE mengikuti alur kerja berbasis pattern yang disukai para beatmaker — Channel Rack dengan step sequencer, pattern, Piano Roll, Playlist dengan aransemen, dan Mixer dengan insert, send, serta sidechain — dan dirancang agar tetap ringan dan cepat di PC apa pun.
 
 • Ringan: mesin audio lock-free yang membagi channel dan track mixer ke seluruh core CPU, melewati channel yang tidak aktif, dan melakukan streaming audio panjang langsung dari disk.
 • Lengkap: lebih dari 100 instrumen dan efek bawaan — synth, drum machine, sampler, EQ, compressor, limiter, reverb, delay, koreksi pitch, visualizer, dan banyak lagi.
 • Plugin Anda: mendukung instrumen dan efek VST3, CLAP, dan VST2, masing-masing opsional berjalan di proses sandbox tersendiri sehingga plugin yang crash tidak bisa merusak sesi Anda.
 • Membuka proyek FL Studio (.flp) lengkap dengan pattern, not, mixer, otomasi, dan sample, serta mengimpor file MIDI.
-• Latensi rendah: ASIO (termasuk driver ASIO milik LYNX sendiri untuk perangkat apa pun), WASAPI mode shared dan exclusive.
+• Latensi rendah: ASIO (termasuk driver ASIO milik LYNX SHARE sendiri untuk perangkat apa pun), WASAPI mode shared dan exclusive.
 • Rekam audio dan MIDI, edit audio, otomatisasi apa saja, render ke WAV, FLAC, MP3, OGG, atau stem.
 • Antarmuka dalam 15 bahasa, termasuk bahasa Indonesia, Inggris, Portugis, Spanyol, Prancis, Jerman, Italia, Belanda, Polandia, Rusia, Turki, Jepang, Korea, dan Tionghoa.
 
-Tanpa akun, tanpa langganan, tanpa iklan, dan tanpa telemetri. LYNX adalah perangkat lunak bebas (GNU AGPL-3.0); kode sumbernya ada di GitHub.
+Tanpa akun, tanpa langganan, tanpa iklan, dan tanpa telemetri. LYNX SHARE adalah perangkat lunak bebas (GNU AGPL-3.0); kode sumbernya ada di GitHub.
 
-LYNX adalah proyek independen, tidak berafiliasi dengan maupun didukung oleh Image-Line. FL Studio adalah merek dagang Image-Line Software. Nama produk lainnya adalah merek dagang dari pemiliknya masing-masing.
+LYNX SHARE adalah proyek independen, tidak berafiliasi dengan maupun didukung oleh Image-Line. FL Studio adalah merek dagang Image-Line Software. Nama produk lainnya adalah merek dagang dari pemiliknya masing-masing.
 
-LYNX masih dalam tahap alfa: mungkin masih ada kekurangan di sana-sini, jadi silakan laporkan masalah di GitHub.
+LYNX SHARE masih dalam tahap alfa: mungkin masih ada kekurangan di sana-sini, jadi silakan laporkan masalah di GitHub.
 
 ## What's new
 
-LYNX 0.1.20: rilis pertama di Microsoft Store. Pengeditan titik ala FL untuk Fruity WaveShaper dan klip otomasi, lima efek FL lagi yang identik hingga level bit dengan FL, kontrol Dashboard yang mengirim MIDI, dan banyak perbaikan.
+LYNX SHARE 0.1.20: rilis pertama di Microsoft Store. Pengeditan titik ala FL untuk Fruity WaveShaper dan klip otomasi, lima efek FL lagi yang identik hingga level bit dengan FL, kontrol Dashboard yang mengirim MIDI, dan banyak perbaikan.
 
 ## Features
 
@@ -57,7 +57,7 @@ LYNX 0.1.20: rilis pertama di Microsoft Store. Pengeditan titik ala FL untuk Fru
 
 ## Screenshot captions
 
-- 01-workspace.png — Ruang kerja LYNX: browser, Playlist, Piano Roll, Channel Rack, dan Mixer
+- 01-workspace.png — Ruang kerja LYNX SHARE: browser, Playlist, Piano Roll, Channel Rack, dan Mixer
 - 02-playlist.png — Susun pattern, audio, dan otomasi di Playlist
 - 03-piano-roll.png — Tulis melodi dan akor di Piano Roll
 - 04-mixer.png — Mixing dengan insert, send, sidechain, dan efek bawaan

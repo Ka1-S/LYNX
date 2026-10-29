@@ -4169,7 +4169,7 @@ public:
         if (isRhythmEdit (item)) // round 144
             return { tr ("Rhythm taps: drag up / down = level, sideways = time; double-click = add or remove a tap; right-click = patterns"), {}, false, false };
         if (isRhythmPatterns (item))
-            return { tr ("Load a tap pattern (LYNX's own), or go back to even spacing"), {}, false, false };
+            return { tr ("Load a tap pattern (LYNX SHARE's own), or go back to even spacing"), {}, false, false };
         if (isWaveShaperGraph (item)) // round 165
             return { wsHint (item, p), {}, false, true };
         if (item.type == Item::display)
