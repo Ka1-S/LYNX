@@ -4577,6 +4577,8 @@ TEST (audio_clips_trigger_cut_and_resume)
     clip.length = 2 * lynx::ppq; // lasts 2 beats
     clip.offset = lynx::ppq;     // skips the first beat of the audio
     s.playlist.push_back (clip);
+    // an empty pattern clip over the whole bar: the song ends at beat 4 (FL loops at the last clip's exact end)
+    s.playlist.push_back (lynx::Clip { 0, 1, 0, 4 * lynx::ppq, 0 });
     s.mode = lynx::PlayMode::song;
 
     const auto tps = lynx::ticksPerSample (120.0, 48000.0);

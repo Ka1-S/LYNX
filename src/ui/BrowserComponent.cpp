@@ -1869,13 +1869,20 @@ public:
     {
         const auto playing = isPlaying();
         const auto show = isAudio (file) && (playing || isMouseOver (true));
-        browser.stopButton.setIcon (playing ? Icon::stop : Icon::play);
-        browser.stopButton.setPrimary (playing);
-        const auto text = playing ? tr ("Stop the sample preview") : tr ("Play the sample preview");
-        browser.stopButton.setTooltip (text);
-        ui::setHint (browser.stopButton, text, true);
-        browser.stopButton.setVisible (show);
-        browser.previewVolume.setVisible (show);
+        if (playing != shownPlaying) // (only on a change: this runs on every timer tick)
+        {
+            shownPlaying = playing;
+            browser.stopButton.setIcon (playing ? Icon::stop : Icon::play);
+            browser.stopButton.setPrimary (playing);
+            const auto text = playing ? tr ("Stop the sample preview") : tr ("Play the sample preview");
+            browser.stopButton.setTooltip (text);
+            ui::setHint (browser.stopButton, text, true);
+        }
+        if (browser.stopButton.isVisible() != show)
+        {
+            browser.stopButton.setVisible (show);
+            browser.previewVolume.setVisible (show);
+        }
         if (show && ! isTimerRunning())
             startTimerHz (30); // (hides them again when the mouse leaves)
     }
@@ -2081,6 +2088,7 @@ private:
     double seconds = 0.0, startedAt = 0.0;
     juce::String info;
     bool dragging = false;
+    std::optional<bool> shownPlaying; // the Play / Stop state the button shows
 };
 
 // --- the browser -------------------------------------------------------------------------------------
