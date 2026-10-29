@@ -670,8 +670,11 @@ private:
         juce::AttributedString text;
         text.append (message.getText(), message.getFont(), theme::colour::textPrimary);
         juce::TextLayout layout;
-        layout.createLayout (text, (float) getWidth() - 32.0f);
-        return (int) std::ceil (layout.getHeight()) + 6;
+        // the label draws inside its border (left + right), so measure at that width: otherwise a text just
+        // under one more line (German, after the v0.1.20 rename) was measured a line short and cut with "..."
+        const auto border = message.getBorderSize();
+        layout.createLayout (text, (float) (getWidth() - 32 - border.getLeftAndRight()));
+        return (int) std::ceil (layout.getHeight()) + border.getTopAndBottom() + 4;
     }
 
     void resizeToFit()
