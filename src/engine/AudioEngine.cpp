@@ -170,19 +170,24 @@ struct AudioEngine::DeviceStateSaver final : public juce::ChangeListener
     AudioEngine& engine;
 };
 
+// written by fileJobs: the write ends with FlushFileBuffers on Windows, which took 2 s on a busy disk and froze the UI
+// after every device change (issue #13). In order, so the newest setup is the one left on disk.
 void AudioEngine::saveAudioDeviceState()
 {
     if (auto xml = deviceManager.createStateXml())
-        xml->writeTo (audioDeviceFile());
+        fileJobs.post ([text = xml->toString(), file = audioDeviceFile()] { file.replaceWithText (text); });
 }
 
 void AudioEngine::restoreAudioDeviceState (const juce::XmlElement* state)
 {
     deviceStateSaver = nullptr;
-    if (state != nullptr)
-        state->writeTo (audioDeviceFile());
-    else
-        audioDeviceFile().deleteFile();
+    fileJobs.post ([text = state != nullptr ? state->toString() : juce::String(), restore = state != nullptr, file = audioDeviceFile()] {
+        if (restore)
+            file.replaceWithText (text);
+        else
+            file.deleteFile();
+    });
+    fileJobs.waitIdle(); // (after the saves still queued, and done when this returns)
 }
 
 namespace
@@ -3213,6 +3218,169 @@ void AudioEngine::chooseSafeBufferSize()
     }
 }
 
+bool AudioEngine::showDriverPanel (juce::AudioDeviceManager& devices)
+{
+    auto* device = devices.getCurrentAudioDevice();
+    if (device == nullptr || ! device->hasControlPanel())
+        return false;
+    // JUCE's ASIO device: true when the panel stayed open long enough to have changed something (its own selector
+    // then closes and restarts the device the same way)
+    if (! device->showControlPanel())
+        return false;
+    auto setup = devices.getAudioDeviceSetup();
+    devices.closeAudioDevice(); // deletes `device`
+    device = nullptr;
+    // 0 = the new device's default, i.e. the preferred size the driver now reports (ASIO4ALL / FL ASIO: its panel's
+    // buffer); a driver that keeps no preferred size gets LYNX's usual default
+    setup.bufferSize = 0;
+    devices.setAudioDeviceSetup (setup, true);
+    return true;
+}
+
+namespace
+{
+// A driver with its own panel, like ASIO4ALL / FL ASIO: the panel sets the preferred buffer size the next device
+// object reads. Every live device is tracked, so a call on a deleted one is caught instead of crashing.
+struct PanelTestState
+{
+    std::vector<const void*> alive;
+    int preferred = 256;
+    int panelResult = 64; // the size the panel picks; 0 = the panel changes nothing (returns false)
+    bool calledDeleted = false;
+};
+PanelTestState& panelTest()
+{
+    static PanelTestState state;
+    return state;
+}
+
+struct PanelTestDevice final : juce::AudioIODevice
+{
+    PanelTestDevice() : juce::AudioIODevice ("Panel test device", "Panel test"), preferred (panelTest().preferred) { panelTest().alive.push_back (this); }
+    ~PanelTestDevice() override
+    {
+        close();
+        auto& alive = panelTest().alive;
+        alive.erase (std::remove (alive.begin(), alive.end(), (const void*) this), alive.end());
+    }
+    bool isAlive() const { const auto& a = panelTest().alive; return std::find (a.begin(), a.end(), (const void*) this) != a.end(); }
+    juce::StringArray getOutputChannelNames() override { return { "Out 1", "Out 2" }; }
+    juce::StringArray getInputChannelNames() override { return {}; }
+    juce::Array<double> getAvailableSampleRates() override { return { 44100.0, 48000.0 }; }
+    juce::Array<int> getAvailableBufferSizes() override { return { 64, 128, 256, 272, 512 }; }
+    int getDefaultBufferSize() override { return preferred; }
+    juce::String open (const juce::BigInteger&, const juce::BigInteger& outs, double rate, int size) override
+    {
+        rateNow = rate;
+        sizeNow = size;
+        outsNow = outs;
+        opened = true;
+        return {};
+    }
+    void close() override { stop(); opened = false; }
+    bool isOpen() override { return opened; }
+    void start (juce::AudioIODeviceCallback* cb) override
+    {
+        if (cb != nullptr)
+            cb->audioDeviceAboutToStart (this);
+        callback = cb;
+    }
+    void stop() override
+    {
+        if (auto* cb = std::exchange (callback, nullptr))
+            cb->audioDeviceStopped();
+    }
+    bool isPlaying() override { return callback != nullptr; }
+    juce::String getLastError() override { return {}; }
+    int getCurrentBufferSizeSamples() override { return sizeNow; }
+    double getCurrentSampleRate() override { return rateNow; }
+    int getCurrentBitDepth() override { return 32; }
+    juce::BigInteger getActiveOutputChannels() const override { return outsNow; }
+    juce::BigInteger getActiveInputChannels() const override { return {}; }
+    int getOutputLatencyInSamples() override { return 0; }
+    int getInputLatencyInSamples() override { return 0; }
+    bool hasControlPanel() const override { return true; }
+    bool showControlPanel() override
+    {
+        if (! isAlive())
+        {
+            panelTest().calledDeleted = true;
+            return false;
+        }
+        if (panelTest().panelResult == 0)
+            return false;
+        panelTest().preferred = panelTest().panelResult; // what the driver now reports to a new device object
+        return true;
+    }
+
+    const int preferred;
+    double rateNow = 44100.0;
+    int sizeNow = 0;
+    juce::BigInteger outsNow;
+    bool opened = false;
+    juce::AudioIODeviceCallback* callback = nullptr;
+};
+
+struct PanelTestType final : juce::AudioIODeviceType
+{
+    PanelTestType() : juce::AudioIODeviceType ("Panel test") {}
+    void scanForDevices() override {}
+    juce::StringArray getDeviceNames (bool input) const override { return input ? juce::StringArray() : juce::StringArray ("Panel test device"); }
+    int getDefaultDeviceIndex (bool input) const override { return input ? -1 : 0; }
+    int getIndexOfDevice (juce::AudioIODevice* d, bool input) const override { return d != nullptr && ! input ? 0 : -1; }
+    bool hasSeparateInputsAndOutputs() const override { return false; }
+    juce::AudioIODevice* createDevice (const juce::String& out, const juce::String&) override
+    {
+        return out == "Panel test device" ? new PanelTestDevice() : nullptr;
+    }
+};
+} // namespace
+
+juce::String AudioEngine::driverPanelSelfTest()
+{
+    auto& state = panelTest();
+    state = {};
+    juce::AudioDeviceManager devices;
+    devices.addAudioDeviceType (std::make_unique<PanelTestType>());
+    devices.setCurrentAudioDeviceType ("Panel test", true);
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    setup.outputDeviceName = "Panel test device";
+    setup.sampleRate = 44100.0;
+    setup.bufferSize = 272; // chosen in LYNX's own buffer box
+    setup.useDefaultOutputChannels = true;
+    if (const auto error = devices.setAudioDeviceSetup (setup, true); error.isNotEmpty())
+        return "open: " + error;
+    auto* before = devices.getCurrentAudioDevice();
+    if (before == nullptr || before->getCurrentBufferSizeSamples() != 272)
+        return "open: buffer " + juce::String (before != nullptr ? before->getCurrentBufferSizeSamples() : -1);
+
+    // a panel that changes nothing: the same device keeps running with LYNX's buffer
+    state.panelResult = 0;
+    if (showDriverPanel (devices) || devices.getCurrentAudioDevice() != before || before->getCurrentBufferSizeSamples() != 272)
+        return "unchanged panel reopened the device";
+
+    // the panel picks 64 samples (issue #13's ASIO4ALL setting): reopened, the panel's buffer kept, never the old object
+    state.panelResult = 64;
+    if (! showDriverPanel (devices))
+        return "changed panel did not reopen";
+    auto* after = devices.getCurrentAudioDevice();
+    if (state.calledDeleted)
+        return "called the deleted device";
+    if (after == nullptr || ! after->isOpen())
+        return "no device after the panel";
+    if (after->getCurrentBufferSizeSamples() != 64)
+        return "buffer " + juce::String (after->getCurrentBufferSizeSamples()) + " after the panel chose 64";
+    if (state.alive.size() != 1)
+        return juce::String ((int) state.alive.size()) + " devices alive";
+    // and the reopened device can show its panel again (the button pressed twice)
+    state.panelResult = 128;
+    if (! showDriverPanel (devices) || devices.getCurrentAudioDevice() == nullptr || devices.getCurrentAudioDevice()->getCurrentBufferSizeSamples() != 128
+        || state.calledDeleted)
+        return "second panel";
+    devices.closeAudioDevice();
+    return "OK";
+}
+
 juce::File AudioEngine::glitchLogFile() { return PluginHost::settingsFolder().getChildFile ("audio-glitches.log"); }
 
 void AudioEngine::updateRealtimeStats()
@@ -3277,14 +3445,16 @@ void AudioEngine::updateRealtimeStats()
     const auto stats = rtStats.snapshot();
     if ((stats.overBudget > loggedOver || stats.lateCalls > loggedLate) && juce::Time::getMillisecondCounterHiRes() - lastLogMs > 2000.0)
     {
-        const auto file = glitchLogFile();
-        if (file.getSize() > 1024 * 1024)
-            file.moveFileTo (file.withFileExtension ("old.log"));
+        // (appended by fileJobs: this runs on the message thread, and at a small buffer glitches come every 2 s)
         const auto bar = transport.positionTicks.load() / (double) (ppq * juce::jmax (1, song.beatsPerBar)) + 1.0;
-        file.appendText (juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "  over deadline +" + juce::String ((juce::int64) (stats.overBudget - loggedOver))
-                             + ", late calls +" + juce::String ((juce::int64) (stats.lateCalls - loggedLate)) + ", at bar " + juce::String (bar, 2)
-                             + (transport.playing.load() ? "" : " (stopped)") + "\n" + describeRealtime() + "\n",
-                         false, false, "\r\n");
+        auto line = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H:%M:%S") + "  over deadline +" + juce::String ((juce::int64) (stats.overBudget - loggedOver))
+                    + ", late calls +" + juce::String ((juce::int64) (stats.lateCalls - loggedLate)) + ", at bar " + juce::String (bar, 2)
+                    + (transport.playing.load() ? "" : " (stopped)") + "\n" + describeRealtime() + "\n";
+        fileJobs.post ([line = std::move (line), file = glitchLogFile()] {
+            if (file.getSize() > 1024 * 1024)
+                file.moveFileTo (file.withFileExtension ("old.log"));
+            file.appendText (line, false, false, "\r\n");
+        });
         loggedOver = stats.overBudget;
         loggedLate = stats.lateCalls;
         lastLogMs = juce::Time::getMillisecondCounterHiRes();

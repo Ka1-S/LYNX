@@ -48,9 +48,9 @@ No app → **Iniciar envio**:
 ### Listagens em 16 idiomas (importar de uma vez)
 
 Textos prontos: inglês, português (Brasil), espanhol (Espanha, e o mesmo texto para o México), francês, alemão,
-italiano, holandês, polonês, russo, turco, indonésio, japonês, coreano, chinês simplificado e tradicional. Cada um diz
-logo no começo que a interface do LYNX, por enquanto, é só em inglês e português (Brasil). O pacote declara só inglês e
-português (é a verdade); a Store aceita listagens em outros idiomas mesmo assim.
+italiano, holandês, polonês, russo, turco, indonésio, japonês, coreano, chinês simplificado e tradicional. A interface
+do LYNX tem esses 15 idiomas (desde a 0.1.20), e o pacote MSIX declara todos eles; o espanhol do México usa o texto da
+Espanha.
 
 1. No app → **Listagens da Store** → **Exportar listagem** → salve o `.csv` (ex.: em Downloads).
 2. Me mande o caminho do arquivo — ou rode você mesmo, na pasta do repositório:

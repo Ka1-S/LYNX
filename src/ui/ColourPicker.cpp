@@ -256,7 +256,7 @@ void ColourPicker::paint (juce::Graphics& g)
     g.setColour (juce::Colour (themes::readableTextOn (original.getARGB())));
     g.drawText (tr ("Before"), half.toNearestInt(), juce::Justification::centred);
     g.setColour (juce::Colour (themes::readableTextOn (getColour().getARGB())));
-    g.drawText (tr ("New"), half.withX (half.getRight()).toNearestInt(), juce::Justification::centred);
+    g.drawText (trc ("@colour after change: New"), half.withX (half.getRight()).toNearestInt(), juce::Justification::centred);
     g.setColour (theme::colour::borderStrong);
     g.drawRoundedRectangle (r, 4.0f, 1.0f);
 }
