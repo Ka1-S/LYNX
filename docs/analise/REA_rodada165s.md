@@ -5,11 +5,21 @@ of audio files into the Playlist (and the Channel Rack) from the file manager do
 
 ## Where I stopped
 
-- 02:30 item 1 done in code (FL checked, `transport.playFromStart` = Shift+Space, test, 14 languages). Item 3: the
-  JUCE fix (cmake/LynxPatchJuce.cmake) is in; the bug is reproduced on the real GNOME 50 path (mutter 50 headless +
-  Xwayland + a GTK 4 Wayland drag source, tmp/issue11b/gnome-*.sh). A SECOND bug: even a plain XDND v3 drop is ignored
-  by the Playlist (the Channel Rack takes it); debugging with temporary `DBG11b` stderr lines in PlaylistComponent.cpp
-  (remove before landing). Item 2 waits for issue12c (its landing failed 01:32, zig cache error).
+- 03:10 item 1 done in code. Item 3: four JUCE fixes in cmake/LynxPatchJuce.cmake (CMake builds patch the fetched
+  JUCE; scripts/build-windows-zig.sh compiles a patched copy of juce_gui_basics). Item 2: feature/issue12c (not landed
+  yet) merged into this branch; core/ShownEffectSlot.h used by the native effect editors (Parametric EQ 2 and every
+  FL-style layout) and Facet EQ. Next: Linux build + tests, GUI checks (Linux, Windows), land.
+
+## 2. Effect editors following their automation
+
+Issue #12's follow-up (round 165p, issue12c) made knobs, faders and LYNX's pro editors show the automated value while
+the song plays (core/AutomationDisplay, UI-side evaluation). The native effect windows (Parametric EQ 2's band handles
+and curve, Fruity Filter, Fruity Delay, Reeverb and every other layout drawn by NativeEffectEditor) and Facet EQ read
+their slot straight from the Song, so they stayed still. Now `current()` returns the slot through
+core/ShownEffectSlot.h: a cached copy with the automated `effectParam`s overlaid (the same values the renderer uses),
+or the Song's slot when nothing is automated, the transport is stopped or a mouse button is down (the hand wins).
+Every edit still goes through setParams on the Song. The editor's timer repaints when the shown values change.
+Third-party plugins get automation through their own parameters, so their own editors already move.
 
 ## 3. Drag & drop from the file manager (Linux)
 
@@ -23,6 +33,20 @@ Evidence [CODE]:
   so Nautilus 50 offers the plain-text type first; JUCE picks the first offered type it knows and would deliver the
   paths as a *text* drag (no LYNX drop target takes text).
 - LYNX's own Browser drags never go through X11 (JUCE DragAndDropContainer), which is why those worked.
+- A stale `finishAfterDropDataReceived` after a refused drag made the next drag "finish" at XdndEnter (reproduced
+  with an XDND emulator, tmp/issue11b/xdndsrc.c: a v5 drag, then a v3 drop → nothing).
+- All platforms: `ComponentPeer::handleDragDrop` keeps `lastDragAndDropCompUnderMouse` when no component took the drop,
+  so the next drag starting over the same component skips the target search (reproduced: an unsupported file dropped
+  on the Playlist, then every following Playlist drop failed).
+- Real GNOME 50 path (mutter 50.1 headless + Xwayland + a GTK 4 Wayland drag source, private prefix): mutter 50.1
+  never sends any Xdnd message to an X11 window (gdb on XSendEvent; a minimal logging X target gets nothing), while
+  Wayland→Wayland drags work. mutter 51.1's NEWS: "Fix drag&drop between Wayland and Xwayland clients (!5362)". So on
+  GNOME 50 the compositor drops the drag before LYNX; with the fixes above LYNX takes it once the bridge delivers it
+  (mutter 51.1+, KWin). Workaround: add the folder to LYNX's Browser and drag from there.
+
+Fix: cmake/LynxPatchJuce.cmake, four idempotent source fixes (XDND 3..5, text/uri-list first, reset on enter, forget
+the component under the mouse after a drop). Verified with the emulator on Xvfb: GNOME-style v5 drag with GTK 4's type
+order and a percent-encoded path with a space lands as a clip on the Playlist and as a sample in the Channel Rack.
 
 ## 1. Shift+Space (FL 2026, checked in FL)
 

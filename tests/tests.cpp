@@ -26,6 +26,7 @@
 #endif
 
 #include "core/AutomationDisplay.h"
+#include "core/ShownEffectSlot.h"
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
