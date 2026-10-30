@@ -243,11 +243,18 @@ const char* effectId (EffectKind k)
         case EffectKind::emphasizer: return "emphasizer";
         case EffectKind::flFrequencyShifter: return "flFrequencyShifter";
         case EffectKind::flLowLifter: return "flLowLifter";
+        case EffectKind::flPhaseInverter: return "flPhaseInverter";
+        case EffectKind::flCenter: return "flCenter";
+        case EffectKind::flBassBoost: return "flBassBoost";
+        case EffectKind::fl7BandEq: return "fl7BandEq";
+        case EffectKind::flDelay1: return "flDelay1";
         case EffectKind::hardwareInsert: return "hardwareInsert";
         case EffectKind::fruityMute2: return "fruityMute2";
         case EffectKind::bigClock: return "bigClock";
         case EffectKind::tuner: return "tuner";
         case EffectKind::htmlNotebook: return "htmlNotebook";
+        case EffectKind::scratcher: return "fruityScratcher";
+        case EffectKind::transmitter: return "transmitter";
         case EffectKind::waveCandy: return "waveCandy";
         case EffectKind::visualizer: return "visualizer";
         case EffectKind::xyController: return "xyController";
@@ -728,8 +735,10 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
                     EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter, EffectKind::waveCandy, EffectKind::visualizer,
+                    EffectKind::flPhaseInverter, EffectKind::flCenter, EffectKind::flBassBoost, EffectKind::fl7BandEq, EffectKind::flDelay1,
                     EffectKind::xyController, EffectKind::xyzController, EffectKind::controlSurface, EffectKind::hardwareInsert,
-                    EffectKind::fruityMute2, EffectKind::bigClock, EffectKind::tuner, EffectKind::htmlNotebook })
+                    EffectKind::fruityMute2, EffectKind::bigClock, EffectKind::tuner, EffectKind::htmlNotebook,
+                    EffectKind::scratcher, EffectKind::transmitter })
         if (id == effectId (k))
             return k;
 
@@ -748,6 +757,7 @@ const char* targetKindName (AutomationTargetKind k)
         case AutomationTargetKind::effectParam: return "effectParam";
         case AutomationTargetKind::tempo: return "tempo";
         case AutomationTargetKind::effectMix: return "effectMix";
+        case AutomationTargetKind::mixerSend: return "mixerSend";
         case AutomationTargetKind::none: break;
     }
     return "none";
@@ -757,7 +767,7 @@ AutomationTargetKind targetKindFromName (const juce::String& name)
 {
     for (auto k : { AutomationTargetKind::channelVolume, AutomationTargetKind::channelPan, AutomationTargetKind::channelParam,
                     AutomationTargetKind::mixerVolume, AutomationTargetKind::mixerPan, AutomationTargetKind::effectParam,
-                    AutomationTargetKind::tempo, AutomationTargetKind::effectMix })
+                    AutomationTargetKind::tempo, AutomationTargetKind::effectMix, AutomationTargetKind::mixerSend })
         if (name == targetKindName (k))
             return k;
 
@@ -1798,7 +1808,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
     if ((int) root["version"] > currentVersion)
     {
-        error = utf8 ("project saved by a newer version of LYNX");
+        error = utf8 ("project saved by a newer version of LYNX SHARE");
         return std::nullopt;
     }
 
@@ -2155,7 +2165,7 @@ std::optional<MixerTrack> mixerTrackStateFromJson (const juce::String& json, juc
     const auto root = juce::JSON::parse (json);
     if (root["format"].toString() != "lynx-mixer-track" || ! root["track"].isObject())
     {
-        error = utf8 ("not a LYNX mixer track state");
+        error = utf8 ("not a LYNX SHARE mixer track state");
         return std::nullopt;
     }
     return mixerTrackFromVar (root["track"]);

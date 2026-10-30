@@ -44,7 +44,7 @@ The build scripts honour `ZIG`, `JUCE_DIR` and `OUT` if the paths differ.
 ## 3. The repository
 
 ```bash
-cd ~/projetos && git clone https://github.com/Ka1-S/LYNX.git lynx && cd lynx
+cd ~/projetos && git clone https://github.com/Ka1-S/LYNX-SHARE.git lynx && cd lynx
 git config user.name "<your name>" && git config user.email "<your GitHub email>"
 scripts/build-local.sh "/mnt/c/Program Files/Image-Line/FL Studio 2026/Data"   # must end "N checks, 0 failures"
 scripts/build-windows-zig.sh                                                   # build-win/LYNX.exe

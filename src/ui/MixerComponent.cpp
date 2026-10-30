@@ -17,6 +17,7 @@
 #include "ui/BrowserComponent.h"
 #include "ui/ExportDialog.h"
 
+#include <cmath>
 #include <complex>
 
 #include "core/Biquad.h"
@@ -389,7 +390,7 @@ juce::Rectangle<int> MixerStrips::tipArea (Part part, int t) const
         {
             const auto rail = faderRail (t);
             const auto& mixer = engine.getSong().mixer;
-            const auto v = t >= 0 && t < (int) mixer.size() ? mixer[(std::size_t) t].volume : 0.0f;
+            const auto v = t >= 0 && t < (int) mixer.size() ? shownVolume (t) : 0.0f;
             const auto capY = rail.getBottom() - (int) (v * (float) rail.getHeight());
             return { rail.getX(), capY - 6, rail.getWidth(), 12 };
         }
@@ -594,7 +595,8 @@ void MixerStrips::paint (juce::Graphics& g)
         }
 
         // pan and stereo separation
-        drawKnob (g, panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f), (track.pan + 1.0f) * 0.5f, true,
+        drawKnob (g, panArea (t).toFloat().withSizeKeepingCentre (26.0f, 26.0f),
+                  engine.getAutomationDisplay().shown (AutomationTarget { AutomationTargetKind::mixerPan, t }, (track.pan + 1.0f) * 0.5f), true,
                   dragging (Part::pan) ? colour::accent : colour::info, hovered (Part::pan) || dragging (Part::pan));
         drawKnob (g, stereoArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), (track.stereo + 1.0f) * 0.5f, true,
                   dragging (Part::stereo) ? colour::accent : colour::knobArc, hovered (Part::stereo) || dragging (Part::stereo));
@@ -684,7 +686,8 @@ void MixerStrips::paint (juce::Graphics& g)
 
             // fader track and 0 dB mark
             const auto railX = (float) fader.getCentreX();
-            const auto capY = (float) fader.getBottom() - track.volume * (float) fader.getHeight();
+            const auto volume = shownVolume (t); // (its automation's value while it plays: the fader moves, issue #12)
+            const auto capY = (float) fader.getBottom() - volume * (float) fader.getHeight();
             theme::fillRoundRect (g, { railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight() }, 2.0f, colour::bg0);
             theme::fillRoundRect (g, { railX - 2.0f, capY, 4.0f, juce::jmax (0.0f, (float) fader.getBottom() - capY) }, 2.0f, colour::bg6.brighter (0.15f).withAlpha (track.muted ? 0.4f : 1.0f));
             const auto unityY = (float) fader.getBottom() - unityFader * (float) fader.getHeight();
@@ -703,7 +706,7 @@ void MixerStrips::paint (juce::Graphics& g)
 
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption));
-            textcache::drawText (g, faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
+            textcache::drawText (g, faderToDb (volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
 
             // a hardware output target (REA round 156, optional): a small badge at the fader's top right
             if (mixeroutput::isCustom (engine, t))
@@ -741,7 +744,10 @@ void MixerStrips::paint (juce::Graphics& g)
 
                 // the route's level knob (FL's route knob), on the routes to inserts and to Master
                 if (on)
-                    drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f), faderPosition (song.routeLevel (selected, t)), false,
+                    drawKnob (g, sendArea (t).toFloat().withSizeKeepingCentre (22.0f, 22.0f),
+                              engine.getAutomationDisplay().shown (AutomationTarget { AutomationTargetKind::mixerSend, selected, t },
+                                                                   faderPosition (song.routeLevel (selected, t))),
+                              false,
                               dragging (Part::send) ? colour::accent : colour::accentHover, hovered (Part::send) || dragging (Part::send));
             }
             else if (feedsSelected) // this insert sends into the selected one
@@ -879,7 +885,7 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
             juce::PopupMenu menu;
             const auto spec = specFor (Part::send, t);
             menu.addSectionHeader (spec.name + ": " + spec.text (valueOf (Part::send, t)));
-            ui::addValueItems (menu, *this, nullptr, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
+            ui::addValueItems (menu, *this, &engine, spec, valueOf (Part::send, t), [this, t] (double v) { setValue (Part::send, t, v); });
             menu.addSeparator();
             menu.addItem (t == 0 ? tr ("Remove the route to Master") : tr ("Remove this send"),
                           [this, from, t] { engine.editSong ([from, t] (Song& s) { s.setRoute (from, t, false); }); });
@@ -1092,7 +1098,11 @@ ui::ValueSpec MixerStrips::specFor (Part part, int t) const
         return stereoSpec (name + " - " + tr ("Stereo separation"));
 
     if (part == Part::send)
-        return sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + (t == 0 ? tr ("Level to Master") : tr ("Send level")));
+    {
+        auto spec = sendSpec (nameOf (selected) + juce::String::fromUTF8 (" \xe2\x86\x92 ") + name + " - " + (t == 0 ? tr ("Level to Master") : tr ("Send level")));
+        spec.target = AutomationTarget { AutomationTargetKind::mixerSend, selected, t }; // automatable (issue #12)
+        return spec;
+    }
 
     auto spec = ui::faderSpec (name + " - " + tr ("Volume"), unityFader);
     spec.pixelsForRange = juce::jmax (60, faderRail (juce::jmax (0, t)).getHeight());
@@ -1989,10 +1999,48 @@ void MixerStrips::changeListenerCallback (juce::ChangeBroadcaster*)
     repaint();
 }
 
+float MixerStrips::shownVolume (int t) const
+{
+    const auto& mixer = engine.getSong().mixer;
+    const auto base = t >= 0 && t < (int) mixer.size() ? mixer[(std::size_t) t].volume : 0.0f;
+    return engine.getAutomationDisplay().shown (AutomationTarget { AutomationTargetKind::mixerVolume, t }, base);
+}
+
+void MixerStrips::repaintAutomatedStrips()
+{
+    // faders, pan and send knobs follow their automation while the song plays (issue #12): only the strips with an
+    // automated control repaint, and only when a shown value changed
+    const auto& shown = engine.getAutomationDisplay();
+    if (shown.getGeneration() == shownAutomation)
+        return;
+    shownAutomation = shown.getGeneration();
+
+    std::vector<int> strips;
+    for (const auto& t : shown.automatedTargets())
+    {
+        if (t.kind == AutomationTargetKind::mixerVolume || t.kind == AutomationTargetKind::mixerPan)
+            strips.push_back (t.index);
+        else if (t.kind == AutomationTargetKind::mixerSend && t.index == selected)
+            strips.push_back (t.slot); // (the route knob sits under the destination)
+    }
+    std::vector<int> all = strips;
+    all.insert (all.end(), automatedStrips.begin(), automatedStrips.end());
+    automatedStrips = std::move (strips);
+    if (! isShowing())
+        return;
+    std::sort (all.begin(), all.end());
+    all.erase (std::unique (all.begin(), all.end()), all.end());
+    const auto count = (int) engine.getSong().mixer.size();
+    for (const auto t : all)
+        if (t >= 0 && t < count)
+            repaint (stripX (t), 0, stripWidthOf (t), getHeight());
+}
+
 void MixerStrips::timerCallback()
 {
     auto& meters = engine.getMeters();
     const auto showing = isShowing();
+    repaintAutomatedStrips();
     const auto& mixer = engine.getSong().mixer;
     inputLevels.resize (mixer.size(), 0.0f);
 
@@ -2055,8 +2103,11 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter,
                                       EffectKind::hardcore,
                                       EffectKind::multibandDelay, EffectKind::emphasizer, EffectKind::flFrequencyShifter, EffectKind::flLowLifter,
+                                      EffectKind::flPhaseInverter, EffectKind::flCenter, EffectKind::flBassBoost, EffectKind::fl7BandEq, EffectKind::flDelay1, // round 165k
                                       EffectKind::waveCandy, EffectKind::visualizer, // visual plugins (round 164c)
                                       EffectKind::fruityMute2, EffectKind::bigClock, EffectKind::tuner, EffectKind::htmlNotebook, // round 165g
+                                      EffectKind::scratcher, // round 165g (flscratch165): FL's turntable
+                                      EffectKind::transmitter, // round 165g (fltrans165): FL's transient / sustain splitter
                                       // FL engines that need more than their parameters (round 142, issue #5): a new one starts from
                                       // the plugin's Default preset of the user's FL installation (core/NativeEngines.h)
                                       EffectKind::maximus, EffectKind::vocodex, EffectKind::equo, EffectKind::distructor, EffectKind::lovePhilter,
@@ -2082,7 +2133,7 @@ juce::String addableEffectName (EffectKind kind)
     // LYNX's own pitch / frequency effects sit next to FL's look-alikes (Pitch Shifter, Frequency Shifter, Pitcher)
     // in the lists: tell them apart (round 162, issue #7 review)
     if (kind == EffectKind::pitchShift || kind == EffectKind::freqShift || kind == EffectKind::pitchCorrect)
-        return tr ("{0} (LYNX)", { name });
+        return tr ("{0} (LYNX SHARE)", { name });
     if (const auto* e = natives::effectEngine (kind))
     {
         if (! natives::available (*e, flStudioAccess()))
@@ -2468,13 +2519,20 @@ void EffectsPanel::paintEq (juce::Graphics& g)
             }
         }
 
+        // the knob captions take the width their (translated) text needs, the title gives way (round 165o)
+        const juce::Font captionFont (font (type::caption));
+        const auto captionWidth = juce::jlimit (32, 70, (int) std::ceil (juce::jmax (juce::GlyphArrangement::getStringWidth (captionFont, tr ("Freq")),
+                                                                                     juce::GlyphArrangement::getStringWidth (captionFont, tr ("Width")))) + 2);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::title));
-        textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
-        g.setFont (font (type::caption));
+        textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 8 - captionWidth, 20,
+                             juce::Justification::centredLeft);
+        g.setFont (captionFont);
         g.setColour (colour::textDisabled);
-        textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
-        textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+        textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 2 - captionWidth, eqKnobBounds (0, 1).getY(), captionWidth, 22,
+                             juce::Justification::centredRight);
+        textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 2 - captionWidth, eqKnobBounds (0, 2).getY(), captionWidth, 22,
+                             juce::Justification::centredRight);
     }
 
     // the audio output target
@@ -2586,7 +2644,7 @@ void addItems (juce::PopupMenu& menu, AudioEngine& engine, bool newProjects)
         juce::PopupMenu chain;
         const std::pair<const char*, MasterChain> chains[] = { { TR_NOOP ("Empty (nothing on the Master)"), MasterChain::empty },
                                                                { TR_NOOP ("Soft clipper only"), MasterChain::clipper },
-                                                               { TR_NOOP ("LYNX default (limiter)"), MasterChain::lynxDefault } };
+                                                               { TR_NOOP ("LYNX SHARE default (limiter)"), MasterChain::lynxDefault } };
         for (const auto& [label, c] : chains)
             chain.addItem (tr (label), true, d.master == c, [c = c] {
                 newProjectDefaults().master = c;
@@ -3288,7 +3346,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.setColour (colour::info);
         g.setFont (font (type::caption));
         const auto original = juce::String::fromUTF8 (substituteOriginalName (slot).c_str());
-        textcache::drawText (g, engine.getSong().substitutesBypassed ? tr ("LYNX substitute for {0} (bypassed)", { original }) : tr ("LYNX substitute for {0}", { original }),
+        textcache::drawText (g, engine.getSong().substitutesBypassed ? tr ("LYNX SHARE substitute for {0} (bypassed)", { original }) : tr ("LYNX SHARE substitute for {0}", { original }),
                     10 + titleWidth + 10, titleY,
                     juce::jmax (0, titleRight - 20 - titleWidth), 20, juce::Justification::centredLeft, true);
     }
@@ -4103,7 +4161,7 @@ bool EffectsPanel::dropPreset (const juce::File& file, juce::Point<int> position
     if (! fx)
     {
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Preset"),
-                                                tr ("LYNX can't build an effect from this preset."));
+                                                tr ("LYNX SHARE can't build an effect from this preset."));
         return false;
     }
 
@@ -4279,7 +4337,7 @@ void EffectsPanel::showAddMenu (int)
                                      repaint();
                                  });
     if (equivalents.getNumItems() > 0)
-        menu.addSubMenu (tr ("LYNX equivalents"), equivalents);
+        menu.addSubMenu (tr ("LYNX SHARE equivalents"), equivalents);
 
     juce::PopupMenu plugins;
     addPluginItems (plugins, engine, false, [this] (PluginRef ref) {
@@ -4436,7 +4494,7 @@ void EffectsPanel::showSlotMenu (int slot)
         menu.addSubMenu (hasSpare ? tr ("A/B compare (B stored)") : tr ("A/B compare"), ab);
     }
     if ((*slots())[(std::size_t) slot].isSubstitute()) // A/B of every substitute of the project at once (round 113)
-        menu.addItem (tr ("Bypass all LYNX substitutes of this project"), true, engine.getSong().substitutesBypassed, [this] {
+        menu.addItem (tr ("Bypass all LYNX SHARE substitutes of this project"), true, engine.getSong().substitutesBypassed, [this] {
             engine.editSong ([] (Song& song) { song.substitutesBypassed = ! song.substitutesBypassed; });
             repaint();
         });
@@ -4718,29 +4776,22 @@ void showMenu (AudioEngine& engine, int track, juce::Component* target, std::fun
     menu.showMenuAsync (options);
 }
 
-void toggleArm (AudioEngine& engine, int track, juce::Component* target)
+void toggleArm (AudioEngine& engine, int track, juce::Component* /*target*/)
 {
-    if (engine.isInsertArmed (track))
+    if (track < 0 || track >= (int) engine.getSong().mixer.size())
+        return;
+
+    // FL 2026: arms at once, also without an input source (the recording start reports a missing input)
+    switch (armClick (track, engine.isInsertArmed (track)))
     {
-        engine.setInsertArmed (track, false);
-        return;
+        case ArmClick::none: return;
+        case ArmClick::disarm: engine.setInsertArmed (track, false); return;
+        case ArmClick::arm:
+            engine.setInsertArmed (track, true);
+            if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none)
+                explain (notice);
+            return;
     }
-
-    const auto& mixer = engine.getSong().mixer;
-    if (track <= 0 || track >= (int) mixer.size())
-        return;
-
-    if (mixer[(std::size_t) track].inputChannel >= 0)
-    {
-        engine.setInsertArmed (track, true);
-        if (const auto notice = engine.takeRecordingNotice(); notice.issue != AudioEngine::InputIssue::none)
-            explain (notice);
-        return;
-    }
-
-    // FL: "Audio input needed - Please select an audio input first." Here the input menu opens right away
-    ui::postHint ({ tr ("Audio input needed: choose this insert's input, then it is armed"), {}, false, false }, 4000);
-    showMenu (engine, track, target, [&engine, track] { engine.setInsertArmed (track, true); });
 }
 } // namespace mixerinput
 

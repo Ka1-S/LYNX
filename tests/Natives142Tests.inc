@@ -112,7 +112,7 @@ TEST (natives142_lists_and_no_fl_installation)
             CHECK (fx->kind == e.kind);
     }
     CHECK (natives::newEffect (EffectKind::eq, none).has_value()); // (a plain effect: always)
-    CHECK (natives::effectMenuName (EffectKind::newtone) == "Newtone (beta)" && natives::effectMenuName (EffectKind::maximus) == "Maximus");
+    CHECK (natives::effectMenuName (EffectKind::newtime) == "Newtime (beta)" && natives::effectMenuName (EffectKind::newtone) == "Newtone" && natives::effectMenuName (EffectKind::maximus) == "Maximus");
 }
 
 TEST (natives142_fl_keys_default_wavetable)

@@ -81,7 +81,7 @@ struct Pin
     int port = 0;
     juce::Point<float> at; // world position
     juce::String label;
-    bool adds = false;     // "To LYNX": the pin that makes a new extra output
+    bool adds = false;     // "To LYNX SHARE": the pin that makes a new extra output
 };
 
 juce::Colour wireColour (PatchWire::Kind kind)
@@ -1061,7 +1061,7 @@ private:
     void drawHost (juce::Graphics& g, const PatcherDoc& d, bool input) const
     {
         const auto n = input ? patchFromHost : patchToHost;
-        drawBox (g, nodeBounds (d, n), input ? tr ("From LYNX") : tr ("To LYNX"), selectedNode == n, true, false);
+        drawBox (g, nodeBounds (d, n), input ? tr ("From LYNX SHARE") : tr ("To LYNX SHARE"), selectedNode == n, true, false);
     }
 
     void drawNode (juce::Graphics& g, const PatcherDoc& d, int n) const
@@ -1510,7 +1510,7 @@ private:
             case EffectKind::delay: case EffectKind::reverb: case EffectKind::epochVerb: case EffectKind::atrium: case EffectKind::foilPlate:
             case EffectKind::nebula: case EffectKind::halo: case EffectKind::horizon: case EffectKind::echoform: case EffectKind::spiralEcho:
             case EffectKind::reeverb2: case EffectKind::reeverb1: case EffectKind::fruityDelay2: case EffectKind::fruityDelay3:
-            case EffectKind::fruityDelayBank: case EffectKind::luxeVerb: case EffectKind::multibandDelay: case EffectKind::convolver:
+            case EffectKind::fruityDelayBank: case EffectKind::luxeVerb: case EffectKind::multibandDelay: case EffectKind::flDelay1: case EffectKind::convolver:
                 return "Delay reverb";
             case EffectKind::distortion: case EffectKind::lofi: case EffectKind::fruityWaveShaper: case EffectKind::fruitySoftClipper:
             case EffectKind::fruityBloodOverdrive: case EffectKind::fruityFastDist: case EffectKind::hardcore: case EffectKind::distructor:
@@ -1524,6 +1524,7 @@ private:
             case EffectKind::eq: case EffectKind::parametricEq: case EffectKind::facetEq: case EffectKind::filter: case EffectKind::fruityFastLP:
             case EffectKind::fruityFreeFilter: case EffectKind::fruityFilter: case EffectKind::equo: case EffectKind::lovePhilter:
             case EffectKind::vocoder: case EffectKind::vocodex: case EffectKind::aether: case EffectKind::flLowLifter:
+            case EffectKind::flCenter: case EffectKind::flBassBoost: case EffectKind::fl7BandEq:
                 return "Filter";
             case EffectKind::chorus: case EffectKind::fruityChorus: case EffectKind::hyperChorus: case EffectKind::vintageChorus:
             case EffectKind::fruityFlangus: case EffectKind::fruityFlanger: case EffectKind::fruityPhaser: case EffectKind::vintagePhaser:
@@ -1536,6 +1537,10 @@ private:
                 return "Visual";
             case EffectKind::tuner: // round 165g (FL's Tuner: an analyser)
                 return "Misc";
+            case EffectKind::scratcher: // round 165g (FL's Scratcher: a turntable, a generator in effect form)
+                return "Misc";
+            case EffectKind::transmitter: // round 165g (FL's Transmitter: transient shaping)
+                return "Dynamics";
             default:
                 return "Misc";
         }
@@ -1605,7 +1610,7 @@ public:
         const auto host = input ? patchFromHost : patchToHost;
         auto touches = [host] (const PatchWire& w) { return w.from == host || w.to == host; };
         juce::PopupMenu menu;
-        menu.addSectionHeader (input ? tr ("From LYNX") : tr ("To LYNX"));
+        menu.addSectionHeader (input ? tr ("From LYNX SHARE") : tr ("To LYNX SHARE"));
         menu.addItem (tr ("Disconnect all"), std::any_of (d->wires.begin(), d->wires.end(), touches), false, [this, touches] {
             edit ([touches] (PatcherDoc& doc) { std::erase_if (doc.wires, touches); });
         });
@@ -1682,7 +1687,7 @@ public:
             *eventsOut = events;
         menu.addSubMenu (tr ("Events"), events);
 
-        // Audio: the I/O node's audio pins ("To LYNX": the main output and the extra outputs to other inserts)
+        // Audio: the I/O node's audio pins ("To LYNX SHARE": the main output and the extra outputs to other inserts)
         juce::PopupMenu audio;
         if (input)
         {

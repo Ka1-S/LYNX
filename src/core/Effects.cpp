@@ -15,6 +15,7 @@
 #include "core/ConvolverFx.h"
 #include "core/VintagePhaser.h"
 #include "core/EmphasizerFx.h"
+#include "core/FlLegacyFx.h"
 #include "core/FreqShifterFl.h"
 #include "core/LowLifterFl.h"
 #include "core/Vocodex.h"
@@ -50,6 +51,8 @@
 #include "core/VoiceShift.h"
 #include "core/VisualFx.h"
 #include "core/FlExtraFx.h"
+#include "core/Scratcher.h"
+#include "core/Transmitter.h"
 #include "core/XyController.h"
 #include "core/ControlSurface.h"
 
@@ -2894,6 +2897,35 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                   { "Left phase offset", 0.5f } } };
             return info;
         }
+        case EffectKind::flPhaseInverter:
+        {
+            static const EffectInfo info { "Fruity Phase Inverter", { { "Invert", 1.0f } } };
+            return info;
+        }
+        case EffectKind::flCenter:
+        {
+            static const EffectInfo info { "Fruity Center", { { "On", 1.0f } } };
+            return info;
+        }
+        case EffectKind::flBassBoost:
+        {
+            static const EffectInfo info { "Fruity Bass Boost", { { "Frequency", 0.5f }, { "Amount", 0.75f } } };
+            return info;
+        }
+        case EffectKind::fl7BandEq:
+        {
+            static const EffectInfo info { "Fruity 7 Band EQ", { { "63 Hz", 0.5f }, { "250 Hz", 0.5f }, { "500 Hz", 0.5f },
+                                                                 { "1.5 kHz", 0.5f }, { "3 kHz", 0.5f }, { "5 kHz", 0.5f },
+                                                                 { "8 kHz", 0.5f } } };
+            return info;
+        }
+        case EffectKind::flDelay1:
+        {
+            // FL's defaults: input 338, feedback 512, cutoff 1024, host tempo, 3 sixteenths, normal
+            static const EffectInfo info { "Fruity Delay", { { "Input", 338.0f / 1024.0f }, { "Feedback", 0.5f }, { "Cutoff", 1.0f },
+                                                             { "Tempo", 0.0f }, { "Time", 2.0f / 15.0f }, { "Mode", 0.0f } } };
+            return info;
+        }
         case EffectKind::flLowLifter:
         {
             // FL's controls; defaults = the plug-in's Default preset (as a new instance in FL)
@@ -2932,6 +2964,71 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::htmlNotebook:
         {
             static const EffectInfo info { "Fruity HTML NoteBook", {} };
+            return info;
+        }
+        case EffectKind::scratcher:
+        {
+            // FL's defaults (its editor's DFM): platter at 690 / 30000, 1x, stopped, Hold off, Volume 199 / 255
+            static const EffectInfo info = [] {
+                const auto d = scratcher::defaults();
+                return EffectInfo { "Fruity Scratcher",
+                                    { { "Wave position", d[0] }, { "Mute", d[1] }, { "Speed", d[2] }, { "Acceleration", d[3] },
+                                      { "Pan", d[4] }, { "Volume", d[5] }, { "Hold", d[6] }, { "Sensitivity", d[7] },
+                                      { "Transport", d[8] }, { "Smooth 1", d[9] }, { "Smooth 2", d[10] }, { "Smooth 3", d[11] },
+                                      { "Smooth 4", d[12] }, { "Rotations", d[13] } } };
+            }();
+            return info;
+        }
+        case EffectKind::transmitter:
+        {
+            // FL's Default preset (core/Transmitter.h: the 42 controls in FL's order, each over its range)
+            static const EffectInfo info = [] {
+                const auto d = transmitter::defaults();
+                return EffectInfo { "Transmitter",
+                                    {
+                                      { "Sensitivity", d[0] },
+                                      { "Hold", d[1] },
+                                      { "Release", d[2] },
+                                      { "Transient level", d[3] },
+                                      { "Sustain level", d[4] },
+                                      { "Transient tilt", d[5] },
+                                      { "Sustain tilt", d[6] },
+                                      { "Transient diffusion mix", d[7] },
+                                      { "Transient diffusion depth", d[8] },
+                                      { "Transient diffusion delay", d[9] },
+                                      { "Sustain diffusion mix", d[10] },
+                                      { "Sustain diffusion depth", d[11] },
+                                      { "Sustain diffusion delay", d[12] },
+                                      { "Transient saturation mix", d[13] },
+                                      { "Transient saturation drive", d[14] },
+                                      { "Transient saturation warmth", d[15] },
+                                      { "Sustain saturation mix", d[16] },
+                                      { "Sustain saturation drive", d[17] },
+                                      { "Sustain saturation warmth", d[18] },
+                                      { "Transient bounce mix", d[19] },
+                                      { "Transient bounce amplitude curve", d[20] },
+                                      { "Transient bounce delay curve", d[21] },
+                                      { "Sustain bounce mix", d[22] },
+                                      { "Sustain bounce amplitude curve", d[23] },
+                                      { "Sustain bounce delay curve", d[24] },
+                                      { "Transient delay mix", d[25] },
+                                      { "Transient delay time", d[26] },
+                                      { "Transient delay synced time", d[27] },
+                                      { "Transient delay feedback", d[28] },
+                                      { "Sustain delay mix", d[29] },
+                                      { "Sustain delay time", d[30] },
+                                      { "Sustain delay synced time", d[31] },
+                                      { "Sustain delay feedback", d[32] },
+                                      { "Lookahead", d[33] },
+                                      { "Stereo link", d[34] },
+                                      { "Mode", d[35] },
+                                      { "Transient on", d[36] },
+                                      { "Sustain on", d[37] },
+                                      { "Transient effect", d[38] },
+                                      { "Sustain effect", d[39] },
+                                      { "Transient delay tempo sync", d[40] },
+                                      { "Sustain delay tempo sync", d[41] } } };
+            }();
             return info;
         }
         case EffectKind::waveCandy:
@@ -3017,6 +3114,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, 
         return mixsuite::glow::classicParamText (param, v);
     if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))
         return mixsuite::hush::classicParamText (param, v);
+    if (kind == EffectKind::hushDeEsser && ! mixsuite::hush::extended (context)) // round 165x: the old ranges
+        return mixsuite::hush::oldLawText (param, v);
     if (kind == EffectKind::fruityPhaser && param == 0) // the sweep rate follows the frequency range switch
         return phaserfx::sweepText (v, context[3] > 0.5f);
     if (kind == EffectKind::parametricEq && peq::flLaw (context) && param >= 0 && param < peq::slopeParam + peq::bands)
@@ -3467,6 +3566,16 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return fsfl::paramText (param, v);
         case EffectKind::flLowLifter:
             return lowlifter::paramText (param, v);
+        case EffectKind::flPhaseInverter:
+            return fllegacy::phaseInverterParamText (param, v);
+        case EffectKind::flCenter:
+            return fllegacy::centerParamText (param, v);
+        case EffectKind::flBassBoost:
+            return fllegacy::bassBoostParamText (param, v);
+        case EffectKind::fl7BandEq:
+            return fllegacy::eq7ParamText (param, v);
+        case EffectKind::flDelay1:
+            return fllegacy::delay1ParamText (param, v);
         case EffectKind::hardwareInsert:
             return hwinsert::paramText (param, v);
         case EffectKind::fruityMute2:
@@ -3477,6 +3586,10 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return flextra::tuner::paramText (param, v);
         case EffectKind::htmlNotebook:
             return {};
+        case EffectKind::scratcher:
+            return scratcher::paramText (param, v);
+        case EffectKind::transmitter:
+            return transmitter::paramText (param, v);
         case EffectKind::waveCandy:
             return visualfx::wavecandy::paramText (param, v);
         case EffectKind::visualizer:
@@ -3577,6 +3690,9 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 165w: … and before the measured release keeps round 123's
     if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::releaseLaw)
         slot.params[(std::size_t) mixsuite::glow::releaseLaw] = 0.0f;
+    // round 165x: a Hush De-esser saved before the extended law keeps ±12 dB levels, the 2 … 16 kHz high-pass, its own link
+    if (slot.kind == EffectKind::hushDeEsser && savedCount <= (std::size_t) mixsuite::hush::rangeLaw)
+        slot.params[(std::size_t) mixsuite::hush::rangeLaw] = 0.0f;
     // round 152: a Compressor saved before the measured vintage curve keeps the round-150 curve
     if (slot.kind == EffectKind::compressor && savedCount <= 18 && slot.params.size() > 18)
         slot.params[18] = 0.0f;
@@ -3747,11 +3863,18 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::emphasizer: return emphasizer::make(); // round 154
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::flLowLifter: return lowlifter::make(); // round 154
+        case EffectKind::flPhaseInverter: return fllegacy::makePhaseInverter(); // round 165k
+        case EffectKind::flCenter: return fllegacy::makeCenter();
+        case EffectKind::flBassBoost: return fllegacy::makeBassBoost();
+        case EffectKind::fl7BandEq: return fllegacy::makeEq7();
+        case EffectKind::flDelay1: return fllegacy::makeDelay1();
         case EffectKind::hardwareInsert: return std::make_unique<hwinsert::HardwareInsertFx>(); // round 164d
         case EffectKind::fruityMute2: return flextra::mute2::make(); // round 165g
         case EffectKind::bigClock:
         case EffectKind::tuner:
         case EffectKind::htmlNotebook: return visualfx::make(); // round 165g: pass the sound, feed the editor's tap
+        case EffectKind::scratcher: return scratcher::make (nullptr); // (with its sample: RackRenderer's buildEffect)
+        case EffectKind::transmitter: return transmitter::make();
         case EffectKind::waveCandy:
         case EffectKind::visualizer: return visualfx::make(); // round 164c: passes the sound, feeds the editor's display
         case EffectKind::xyController:

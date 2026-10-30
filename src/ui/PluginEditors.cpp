@@ -6,6 +6,7 @@
 #include "ui/VisualEditors.h"
 #include "ui/FlExtraEditors.h"
 #include "ui/PluginEditors.h"
+#include "core/ShownEffectSlot.h"
 
 #include <cstring>
 #include <map>
@@ -127,9 +128,13 @@ public:
                     || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0 || std::strcmp (item.display, "hwping") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
-                startTimerHz (30);
+                liveDisplays = true;
                 break;
             }
+        if (! node.locate)
+            startTimerHz (30); // live displays, and the controls following their automation (cheap while nothing moves)
+        else if (liveDisplays)
+            startTimerHz (30);
         setSize ((int) std::ceil ((float) l.width * initialScale), (int) std::ceil ((float) l.height * initialScale + headerHeight + footerHeight()));
     }
 
@@ -143,7 +148,17 @@ public:
     // the design size (for the window's aspect ratio)
     juce::Point<int> designSize() const { return { activeLayout().width, activeLayout().height }; }
 
+    // The slot as shown: while the song plays, its automated parameters at their automation's value (issue #11 comment 4:
+    // Parametric EQ 2's handles, Fruity Filter's knobs... move with the automation, as in FL). Edits always go through
+    // setParams, so they change the Song's values.
     const EffectSlot* current() const
+    {
+        const auto* fx = stored();
+        return node.locate ? fx : shownSlot.get (engine.getAutomationDisplay(), fx, track, slot, juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown());
+    }
+
+    // the slot in the Song (or the Patcher node)
+    const EffectSlot* stored() const
     {
         if (node.locate)
         {
@@ -345,6 +360,12 @@ public:
             return;
         if (kind == EffectKind::echoform) // round 135w: Filter link moves the low and high cut together
             if (const auto edits = echosuite::echoform::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
+        if (kind == EffectKind::glowLeveler) // round 165x: AUTO MAKEUP's reference point and its make-up kept when off
+            if (const auto edits = mixsuite::glow::linkedEdit (current()->params, param, value); edits.size() > 1)
             {
                 setParams (edits);
                 return;
@@ -2506,25 +2527,11 @@ public:
             g.drawText (tapBpm > 0.0 ? caps (tr ("Tap")) + "  " + juce::String (tapBpm, 1) : caps (tr ("Tap")), r, juce::Justification::centred, false);
             return;
         }
-        else if (id == "vusel") // round 129: the VU display selector, INPUT | GR | OUTPUT (the reference's VU DISPLAY knob)
-        {
-            static constexpr int order[] = { 1, 0, 2 };
-            const char* names[] = { TR_NOOP ("Input"), TR_NOOP ("GR"), TR_NOOP ("Output") };
-            const auto w = r.getWidth() / 3.0f;
-            for (int k = 0; k < 3; ++k)
-            {
-                const auto cell = juce::Rectangle<float> (r.getX() + w * (float) k, r.getY(), w, r.getHeight()).reduced (1.5f * s, 0.0f);
-                skin::button (g, cell, vuMode == order[k], false, accent, radius::sm * s);
-                g.setColour (vuMode == order[k] ? colour::textPrimary : colour::textSecondary);
-                g.setFont (font (juce::jmax (7.0f, 9.5f * s), true));
-                g.drawText (caps (tr (names[k])), cell, juce::Justification::centred, false);
-            }
-            return;
-        }
         else if (id == "vumeter") // round 114: an analog-style VU needle showing the gain reduction (the optical leveler)
         {
             // gain reduction (needle down from 0 VU) or the output level (0 VU = −18 dBFS), like the reference's selector
-            // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (the "vusel" item)
+            // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (round 165x: the "VU display" parameter)
+            syncVuMode();
             const auto level = liveMeter (vuMode == 1 ? 2 : 3);
             const auto target = vuMode != 0 ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, level)) + 18.0f))
                                             : -juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
@@ -2591,7 +2598,7 @@ public:
         else if (id == "hushband") // the detector's filter (high-pass or band) at the frequency, 1 .. 20 kHz
         {
             grid (8, 4);
-            const auto f0 = mixsuite::hush::hz (param01 ("Frequency"));
+            const auto f0 = mixsuite::hush::hpHz (param01 ("Frequency"), param01 ("Range law") >= 0.5f && param01 ("Voicing") < 0.5f); // round 165x
             const auto band = param01 ("Band detector") >= 0.5f;
             strokeCurve ([f0, band] (float x) {
                 const auto u = 1000.0 * std::pow (20.0, (double) x) / f0;
@@ -3654,7 +3661,7 @@ public:
         }
         if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output / input
         {
-            vuMode = (vuMode + 1) % 3;
+            setVuMode ((vuMode + 1) % 3);
             repaint();
             return;
         }
@@ -3708,14 +3715,6 @@ public:
                 setParams (changes);
             }
             lastTap = now;
-            repaint();
-            return;
-        }
-        if (item.type == Item::display && juce::String (item.display) == "vusel") // round 129: INPUT | GR | OUTPUT
-        {
-            const auto r = rectOf (item);
-            static constexpr int order[] = { 1, 0, 2 };
-            vuMode = order[juce::jlimit (0, 2, (int) ((e.position.x - r.getX()) / r.getWidth() * 3.0f))];
             repaint();
             return;
         }
@@ -4163,8 +4162,6 @@ public:
             return { tr ("Output limiter: lit while it keeps the output under 0 dBFS"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "outmeter")
             return { tr ("Output level (peak, dBFS): the lamp lights when the output clips, the number holds the highest peak; click to reset"), {}, false, false };
-        if (item.type == Item::display && juce::String (item.display) == "vusel")
-            return { tr ("VU display: what the meter shows (input level, gain reduction, output level)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
             return { tr ("Drag the point: both values at once"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "tunekeys") // round 147
@@ -4172,7 +4169,7 @@ public:
         if (isRhythmEdit (item)) // round 144
             return { tr ("Rhythm taps: drag up / down = level, sideways = time; double-click = add or remove a tap; right-click = patterns"), {}, false, false };
         if (isRhythmPatterns (item))
-            return { tr ("Load a tap pattern (LYNX's own), or go back to even spacing"), {}, false, false };
+            return { tr ("Load a tap pattern (LYNX SHARE's own), or go back to even spacing"), {}, false, false };
         if (isWaveShaperGraph (item)) // round 165
             return { wsHint (item, p), {}, false, true };
         if (item.type == Item::display)
@@ -4339,6 +4336,9 @@ private:
     void timerCallback() override
     {
         if (! isShowing()) return; // a hidden editor costs nothing
+        if (! node.locate && shownSlot.changed (engine.getAutomationDisplay(), track, slot)) // the controls follow their automation
+            repaint();
+        if (! liveDisplays) return;
         learnScaleFromMidi();
         if (kind == EffectKind::hardwareInsert)
             hwPingTick();
@@ -4393,6 +4393,8 @@ private:
     skin::Animator anim;                            // hover fades (runs only while something moves)
     int quietFrames = 1000; // frames since the live meters last moved (the displays start at rest)
     float lastMeters = 0.0f;
+    bool liveDisplays = false;            // the layout has live meters / graphs (redrawn by the timer)
+    mutable ShownEffectSlot shownSlot;    // the slot with its automation's values (current())
     ui::ValueDrag drag;
     juce::String presetName;
     pluginheader::PresetBar bar { engine, track, slot }; // undo / redo, A / B, presets (round 129)
@@ -4435,6 +4437,19 @@ private:
     std::vector<double> tapIntervals;
     double tapBpm = 0.0; // the "iometer" display: input and output (round 129)
     int vuMode = 0;            // what the VU shows: 0 gain reduction, 1 input level, 2 output level (0 VU = −18 dBFS)
+    // round 165x: Glow keeps the VU display as a parameter (saved with the project, translated from the reference's state)
+    void syncVuMode()
+    {
+        if (kind == EffectKind::glowLeveler)
+            if (const auto* fx = current(); fx != nullptr && fx->params.size() > (std::size_t) mixsuite::glow::vuDisplay)
+                vuMode = mixsuite::glow::vuModeOf (fx->params[(std::size_t) mixsuite::glow::vuDisplay]);
+    }
+    void setVuMode (int mode)
+    {
+        vuMode = mode;
+        if (kind == EffectKind::glowLeveler && current() != nullptr)
+            setParams ({ { mixsuite::glow::vuDisplay, mode == 1 ? 0.5f : mode == 2 ? 1.0f : 0.0f } });
+    }
     juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
 

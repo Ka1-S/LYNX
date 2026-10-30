@@ -13,6 +13,11 @@ bool playsSampleFile (InstrumentKind kind) noexcept
     return kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip || kind == InstrumentKind::granulizer;
 }
 
+bool pluginWindowTakesSample (InstrumentKind kind) noexcept
+{
+    return kind == InstrumentKind::granulizer;
+}
+
 std::string insertName (const Song& song, int track)
 {
     if (track >= 0 && track < (int) song.mixer.size() && ! song.mixer[(std::size_t) track].name.empty())
@@ -164,7 +169,8 @@ std::vector<Item> automations (const Song& song)
             && t.index >= 0 && t.index < (int) song.channels.size())
             item.colour = song.channels[(std::size_t) t.index].colour;
         else if ((t.kind == AutomationTargetKind::mixerVolume || t.kind == AutomationTargetKind::mixerPan
-                  || t.kind == AutomationTargetKind::effectParam || t.kind == AutomationTargetKind::effectMix)
+                  || t.kind == AutomationTargetKind::effectParam || t.kind == AutomationTargetKind::effectMix
+                  || t.kind == AutomationTargetKind::mixerSend)
                  && t.index >= 0 && t.index < (int) song.mixer.size())
             item.colour = song.mixer[(std::size_t) t.index].colour;
         if (automation.isLive())

@@ -838,9 +838,13 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             }
 
             const auto touched = knobDrag != Area::none && knobRow == row;
-            theme::drawKnob (g, controlBounds (Area::pan, row).toFloat().reduced (1.0f, 2.0f), (channel.pan + 1.0f) / 2.0f, true,
+            // (while the song plays an automated knob shows its automation's value, issue #12)
+            const auto& automated = engine.getAutomationDisplay();
+            theme::drawKnob (g, controlBounds (Area::pan, row).toFloat().reduced (1.0f, 2.0f),
+                             automated.shown ({ AutomationTargetKind::channelPan, row }, (channel.pan + 1.0f) / 2.0f), true,
                              touched && knobDrag == Area::pan ? accent : info, hovered (Area::pan) || (touched && knobDrag == Area::pan));
-            theme::drawKnob (g, controlBounds (Area::volume, row).toFloat().reduced (1.0f, 2.0f), channel.volume, false,
+            theme::drawKnob (g, controlBounds (Area::volume, row).toFloat().reduced (1.0f, 2.0f),
+                             automated.shown ({ AutomationTargetKind::channelVolume, row }, channel.volume), false,
                              touched && knobDrag == Area::volume ? accent : knobArc, hovered (Area::volume) || (touched && knobDrag == Area::volume));
 
             // small box with the mixer insert ("-" = straight to Master)
@@ -2041,8 +2045,8 @@ void ChannelRackComponent::mouseDoubleClick (const juce::MouseEvent& e)
         setLoopPoint (row, ChannelLoop::nextBar);
     else if (area == Area::select && ! e.mods.isPopupMenu())
         selectAll();
-    else if (area == Area::name && ! e.mods.isAnyModifierKeyDown() && onOpenPianoRoll)
-        onOpenPianoRoll();
+    // a double-click on a channel's name is two clicks, as in FL: its window opens and closes again (FL 2026, checked
+    // round 165q F7). It no longer opens the Piano Roll — the hint promised that, but FL's channel button does not.
 }
 
 void ChannelRackComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
@@ -2108,7 +2112,7 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             h.text = name + " - " + tr ("Click: mute.  Ctrl+click or right-click: solo");
             break;
         case Area::name:
-            h.text = name + " - " + tr ("[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu");
+            h.text = name + " - " + tr ("[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [LMB] drag up/down reorders  [RMB] channel menu");
             // sample channels: where the pitch is (round 163, "getting to the sample pitching")
             if (row >= 0 && row < (int) song.channels.size()
                 && (song.channels[(std::size_t) row].instrument == InstrumentKind::sampler || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip))
@@ -2843,6 +2847,22 @@ void ChannelRackComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void ChannelRackComponent::timerCallback()
 {
+    // the channels' volume / pan knobs follow their automation (issue #12): only the automated knobs repaint
+    if (const auto& shown = engine.getAutomationDisplay(); shown.getGeneration() != shownAutomation)
+    {
+        shownAutomation = shown.getGeneration();
+        std::vector<int> rows;
+        for (const auto& t : shown.automatedTargets())
+            if (t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan)
+                rows.push_back (t.index);
+        if (isShowing())
+            for (const auto list : { &rows, &automatedRows })
+                for (const auto r : *list)
+                    if (r >= 0 && r < (int) engine.getSong().channels.size())
+                        repaint (controlBounds (Area::pan, r).getUnion (controlBounds (Area::volume, r)).expanded (2));
+        automatedRows = std::move (rows);
+    }
+
     auto& transport = engine.getTransport();
     auto step = -1;
 
@@ -2894,11 +2914,32 @@ bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& detail
 
 void ChannelRackComponent::itemDropped (const SourceDetails& details)
 {
-    // a generator dragged from the Browser's Plugin database (round 162): a new channel with it, its window open
+    // a generator dragged from the Browser's Plugin database (round 162): below the channels a new channel with it, onto a
+    // channel it replaces that channel's instrument (FL, audit round 165z-a: insert, notes and levels stay); window open
     if (BrowserComponent::isGeneratorDrag (details))
     {
         if (auto c = BrowserComponent::draggedGenerator (details))
-            addChannel (std::move (*c), true);
+        {
+            int row = 0;
+            const auto area = areaAt (details.localPosition.x, details.localPosition.y, row);
+            if (area != Area::none && area != Area::addRow && row >= 0 && row < (int) engine.getSong().channels.size())
+            {
+                closeEditor (row);
+                const auto kind = c->instrument;
+                engine.editSong ([row, &c] (Song& s) { replaceGenerator (s, row, std::move (*c)); });
+                selectionAnchor = row;
+                selectRows ({ row }, row);
+                if (kind == InstrumentKind::plugin)
+                {
+                    openPluginWindow (row);
+                    openEditorRow = row;
+                }
+                else if (natives::instrumentEngine (kind) != nullptr)
+                    openChannelSettings (engine, row);
+            }
+            else
+                addChannel (std::move (*c), true);
+        }
         return;
     }
 

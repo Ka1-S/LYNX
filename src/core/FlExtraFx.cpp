@@ -714,7 +714,7 @@ std::string inertPluginNote (const std::string& flPluginName)
     if (flPluginName == "FL Studio Mobile Rack FX")
         return "FL Studio Mobile Rack FX (its modules are not reproduced; the slot is left out)";
     if (flPluginName == "FL Studio Mobile" || flPluginName == "FL Studio Mobile Rack")
-        return flPluginName + " (its instruments are not reproduced; played with a LYNX synth preset)";
+        return flPluginName + " (its instruments are not reproduced; played with a LYNX SHARE synth preset)";
     return {};
 }
 } // namespace lynx::flextra

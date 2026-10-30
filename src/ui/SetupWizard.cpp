@@ -49,7 +49,7 @@ public:
     {
         auto& host = engine.getPluginHost();
 
-        title.setText (tr ("Welcome to LYNX"), juce::dontSendNotification);
+        title.setText (tr ("Welcome to LYNX SHARE"), juce::dontSendNotification);
         title.setFont (theme::font (theme::type::display, true));
         title.setColour (juce::Label::textColourId, theme::colour::textPrimary);
         intro.setText (tr ("A few things to get started. Everything here can be changed later (Options > Setup wizard)."),
@@ -77,7 +77,7 @@ public:
         for (const auto& l : i18n::languages())
         {
             languageBox.addItem (juce::String::fromUTF8 (l.nativeName), id);
-            if (i18n::saved() == l.id)
+            if (i18n::current() == l.id)
                 languageBox.setSelectedId (id, juce::dontSendNotification);
             ++id;
         }
@@ -377,7 +377,7 @@ private:
     double progress = 0.0;
     juce::ProgressBar progressBar { progress };
     juce::ToggleButton scanAtStart { tr ("Look for new plugins in the background at every start") };
-    juce::ToggleButton menuEntry { tr ("Show LYNX in the applications menu and open .lynx files with it") };
+    juce::ToggleButton menuEntry { tr ("Show LYNX SHARE in the applications menu and open .lynx files with it") };
     std::unique_ptr<juce::FileChooser> chooser;
     bool scanStarted = false;
 };

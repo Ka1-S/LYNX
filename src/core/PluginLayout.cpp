@@ -1010,6 +1010,77 @@ Layout fruityMute2Layout()
     return l;
 }
 
+LayoutItem menuOf (float x, float y, float w, float h, const char* param, const char* caption, const char* options); // (below)
+
+Layout transmitterLayout()
+{
+    // round 165g (fltrans165), FL Studio 2026's arrangement: DETECTION along the top (sensitivity, hold, release, the
+    // envelope mode, lookahead and stereo link), then the TRANSIENT and SUSTAIN columns side by side, each with its
+    // on switch, level fader, tilt and one section effect whose knobs swap in place with the effect menu
+    Layout l;
+    l.fl = "Transmitter";
+    l.width = 620;
+    l.height = 344;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 620, 112, TR_NOOP ("DETECTION")));
+    v.push_back (knob (52, 52, 40, "Sensitivity", TR_NOOP ("Sensitivity"), 92, showValue));
+    v.push_back (knob (126, 52, 40, "Hold", TR_NOOP ("Hold"), 92, showValue));
+    v.push_back (knob (200, 52, 40, "Release", TR_NOOP ("Release"), 92, showValue));
+    v.push_back (label (262, 26, 190, 16, TR_NOOP ("Mode")));
+    v.push_back (tabs (262, 46, 190, 24, "Mode", TR_NOOP ("Smooth|Balanced|Dense")));
+    v.push_back (toggle (474, 34, 132, 22, "Lookahead", TR_NOOP ("Lookahead")));
+    v.push_back (toggle (474, 64, 132, 22, "Stereo link", TR_NOOP ("Stereo link")));
+
+    struct Part
+    {
+        float x;
+        const char *title, *on, *level, *tilt, *effect;
+        const char *satMix, *drive, *warmth, *bounceMix, *ampCurve, *delayCurve, *diffMix, *depth, *diffDelay;
+        const char *delayMix, *time, *synced, *feedback, *sync;
+    };
+    const Part parts[] = {
+        { 0, TR_NOOP ("TRANSIENT"), "Transient on", "Transient level", "Transient tilt", "Transient effect",
+          "Transient saturation mix", "Transient saturation drive", "Transient saturation warmth", "Transient bounce mix",
+          "Transient bounce amplitude curve", "Transient bounce delay curve", "Transient diffusion mix", "Transient diffusion depth",
+          "Transient diffusion delay", "Transient delay mix", "Transient delay time", "Transient delay synced time",
+          "Transient delay feedback", "Transient delay tempo sync" },
+        { 310, TR_NOOP ("SUSTAIN"), "Sustain on", "Sustain level", "Sustain tilt", "Sustain effect",
+          "Sustain saturation mix", "Sustain saturation drive", "Sustain saturation warmth", "Sustain bounce mix",
+          "Sustain bounce amplitude curve", "Sustain bounce delay curve", "Sustain diffusion mix", "Sustain diffusion depth",
+          "Sustain diffusion delay", "Sustain delay mix", "Sustain delay time", "Sustain delay synced time",
+          "Sustain delay feedback", "Sustain delay tempo sync" },
+    };
+    for (const auto& p : parts)
+    {
+        const float x = p.x;
+        v.push_back (section (x, 116, 310, 228, p.title));
+        v.push_back (toggle (x + 12, 146, 76, 22, p.on, TR_NOOP ("On")));
+        v.push_back (slider (Item::vslider, x + 30, 178, 32, 124, p.level, TR_NOOP ("Level")));
+        v.push_back (value (x + 8, 316, 82, 18, p.level, 0));
+        v.push_back (knob (x + 112, 196, 40, p.tilt, TR_NOOP ("Tilt"), 236, bipolar | showValue));
+        v.push_back (menuOf (x + 146, 146, 152, 24, p.effect, TR_NOOP ("Effect"), TR_NOOP ("Saturation|Bounce|Diffusion|Blur|Delay|Off")));
+        const float k1 = x + 172, k2 = x + 222, k3 = x + 272, ky = 214, cy = 252;
+        // Saturation [0, 0.1), Bounce [0.1, 0.3), Diffusion [0.3, 0.5), Blur [0.5, 0.7), Delay [0.7, 0.9), Off [0.9, 1]
+        v.push_back (when (knob (k1, ky, 36, p.satMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.0f, 0.1f));
+        v.push_back (when (knob (k2, ky, 36, p.drive, TR_NOOP ("Drive"), cy, showValue), p.effect, 0.0f, 0.1f));
+        v.push_back (when (knob (k3, ky, 36, p.warmth, TR_NOOP ("Warmth"), cy, showValue), p.effect, 0.0f, 0.1f));
+        v.push_back (when (knob (k1, ky, 36, p.bounceMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.1f, 0.3f));
+        v.push_back (when (knob (k2, ky, 36, p.ampCurve, TR_NOOP ("Amp curve"), cy, bipolar | showValue), p.effect, 0.1f, 0.3f));
+        v.push_back (when (knob (k3, ky, 36, p.delayCurve, TR_NOOP ("Delay curve"), cy, bipolar | showValue), p.effect, 0.1f, 0.3f));
+        v.push_back (when (knob (k1, ky, 36, p.diffMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.3f, 0.5f));
+        v.push_back (when (knob (k2, ky, 36, p.depth, TR_NOOP ("Depth"), cy, showValue), p.effect, 0.3f, 0.5f));
+        v.push_back (when (knob (k3, ky, 36, p.diffDelay, TR_NOOP ("Delay"), cy, showValue), p.effect, 0.3f, 0.5f));
+        v.push_back (when (label (x + 146, 204, 152, 20, TR_NOOP ("No settings"), dim), p.effect, 0.5f, 0.7f));
+        v.push_back (when (knob (k1, ky, 36, p.delayMix, TR_NOOP ("Mix"), cy, showValue), p.effect, 0.7f, 0.9f));
+        v.push_back (when (when (knob (k2, ky, 36, p.time, TR_NOOP ("Time"), cy, showValue), p.effect, 0.7f, 0.9f), p.sync, 0.0f, 0.5f));
+        v.push_back (when (when (knob (k2, ky, 36, p.synced, TR_NOOP ("Time"), cy, showValue), p.effect, 0.7f, 0.9f), p.sync, 0.5f, 1.0f));
+        v.push_back (when (knob (k3, ky, 36, p.feedback, TR_NOOP ("Feedback"), cy, showValue), p.effect, 0.7f, 0.9f));
+        v.push_back (when (toggle (x + 150, 286, 148, 22, p.sync, TR_NOOP ("Tempo sync")), p.effect, 0.7f, 0.9f));
+        v.push_back (when (label (x + 146, 204, 152, 20, TR_NOOP ("No settings"), dim), p.effect, 0.9f, 1.0f));
+    }
+    return l;
+}
+
 Layout fruitySend()
 {
     // one row: DRY, the SEND TO box (the destination insert, a menu of the mixer's inserts), PAN and VOLUME
@@ -1769,7 +1840,8 @@ Layout glowLeveler()
     auto vu = display (170, 40, 200, 136, "vumeter");
     vu.steps = 0; // live output 0: gain reduction
     v.push_back (vu);
-    v.push_back (display (392, 22, 136, 18, "vusel"));
+    // round 165x: the VU DISPLAY selector is a parameter (saved with the project, translated from the reference's state)
+    v.push_back (tabs (392, 22, 136, 18, "VU display", TR_NOOP ("Input|GR|Output"), { 0.5f, 0.0f, 1.0f }));
     v.push_back (tabs (200, 184, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
     v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
     // round 123: the voicing — Glow's own engine, or the measured classic opto leveler (substitutes start there)
@@ -1781,11 +1853,13 @@ Layout glowLeveler()
     v.push_back (when (tabs (12, 26, 130, 18, "Opto law", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     // round 165w: the classic voicing's release (Measured = the trial's gain recovery; Old = round 123's slower tail, kept
     // by a project saved before), right, under the VU selector
-    v.push_back (when (label (392, 46, 136, 10, TR_NOOP ("Release")), "Voicing", 0.5f, 1.0f));
+    v.push_back (when (label (392, 46, 136, 10, TR_NOOP ("Attack / release")), "Voicing", 0.5f, 1.0f)); // round 165x: both measured
     v.push_back (when (tabs (392, 57, 136, 16, "Opto release", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
     v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));
+    // round 165x: where Auto makeup was switched on (the reference's make-up follows the dial from there)
+    v.push_back (when (dial (470, 254, 28, "Makeup ref", TR_NOOP ("Makeup ref")), "Voicing", 0.5f, 1.0f));
     return l;
 }
 
@@ -1793,9 +1867,9 @@ Layout hushDeEsser()
 {
     Layout l;
     l.width = 460;
-    l.height = 316;
+    l.height = 376; // round 165x: + the extended law's row
     auto& v = l.items;
-    v.push_back (section (4, 4, 452, 308, TR_NOOP ("De-esser")));
+    v.push_back (section (4, 4, 452, 368, TR_NOOP ("De-esser")));
     v.push_back (display (12, 26, 200, 78, "hushband"));
     v.push_back (meter (12, 110, 200, 12, 0, TR_NOOP ("Reduction")));
     v.push_back (tabs (12, 130, 98, 20, "Wideband", TR_NOOP ("Split|Wide")));
@@ -1826,6 +1900,11 @@ Layout hushDeEsser()
     v.push_back (tabs (104, 286, 176, 20, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
     // round 148: the measured single-vocal detector (the role: a vocal de-esser's Single Vocal mode)
     v.push_back (toggle (290, 286, 158, 20, "Vocal voicing", TR_NOOP ("Vocal detector")));
+    // round 165x: the reference's ranges and link (Old = a project saved before: ±12 dB, 2 … 16 kHz, Hush's link) and
+    // the link's 100 … 200 % half (the share processed on the mid or side signal only)
+    v.push_back (tabs (12, 318, 200, 20, "Range law", TR_NOOP ("Old ranges|Extended")));
+    v.push_back (tabs (222, 318, 110, 20, "Link only side", TR_NOOP ("Mid only|Side only")));
+    v.push_back (dial (380, 330, 24, "Link only", TR_NOOP ("Link only")));
     return l;
 }
 
@@ -3310,7 +3389,7 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  // round 154
                                                  EffectKind::emphasizer,
                                                  // round 165g
-                                                 EffectKind::fruityMute2 };
+                                                 EffectKind::fruityMute2, EffectKind::transmitter };
     return kinds;
 }
 
@@ -3398,6 +3477,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::latticeMod: l = captionsAbove (latticeLayout()); break;
         case EffectKind::fruitySend: l = fruitySend(); break;
         case EffectKind::fruityMute2: l = fruityMute2Layout(); break;
+        case EffectKind::transmitter: l = transmitterLayout(); break;
         case EffectKind::crestCompressor: l = crestCompressor(); break;
         case EffectKind::prismMultiband: l = prismMultiband(); break;
         case EffectKind::sentryGate: l = sentryGate(); break;

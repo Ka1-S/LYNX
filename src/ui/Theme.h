@@ -93,6 +93,17 @@ inline juce::FontOptions font (float size, bool bold = false)
     return juce::FontOptions (size, bold ? juce::Font::bold : juce::Font::plain);
 }
 
+// The width a column of labels needs: `minWidth` when every text fits in it (the English layout), else the widest
+// text (+ the label borders), up to `maxWidth` (round 165o: translated labels are often longer).
+int labelColumnWidth (std::initializer_list<const juce::Label*> labels, int minWidth, int maxWidth);
+// Japanese / Korean / Chinese: the installed UI font family LYNX uses for that language (empty: none installed, or a
+// language that needs no font of its own — see needsOwnFont).
+juce::String uiFontForLanguage (const juce::String& languageId);
+bool needsOwnFont (const juce::String& languageId);
+
+// Same for a text button (its padding included).
+int buttonWidth (const juce::TextButton& button, int minWidth, int maxWidth);
+
 // --- menus -------------------------------------------------------------------------------------------
 // Options › General › Menu density (round 163): compact rows close to native Windows / FL menus (the default),
 // or the roomier rows of LYNX 0.1.17 and older.
@@ -207,6 +218,11 @@ public:
 
     // re-reads the colour tokens into the stock widgets' colours (after a theme change)
     void refreshColours();
+
+    // Japanese, Korean and Chinese: the OS's UI font for that script becomes the default sans-serif (Segoe UI and the
+    // other Latin UI fonts have no CJK glyphs; the font fallback would otherwise pick a CJK face per run, which may be
+    // a Chinese face for Japanese text). Returns the chosen family, or empty when the default is kept.
+    juce::String applyLanguageFont (const juce::String& languageId);
 
     // property set on a Button / TabBarButton to draw one of lynx::Icon next to (or instead of) its text
     static constexpr const char* iconProperty = "lynxIcon";

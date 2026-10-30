@@ -243,6 +243,19 @@ struct SamplerSettings
     bool operator== (const SamplerSettings&) const = default;
 };
 
+// The Sampler's knobs as automation targets (issue #12): a sampler channel's AutomationTarget { channelParam, channel, 0, k }
+// with k one of these. Values 0..1 follow the knobs' own curves (the Sampler settings page), so a clip drawn at 50% is
+// the knob at mid travel.
+namespace samplerparam
+{
+enum : int { attack, decay, sustain, release, cutoff, resonance, start, end, count };
+const char* name (int param) noexcept;              // "Attack", "Cutoff"... (TR_NOOP-marked in Song.cpp)
+float toValue (int param, float natural) noexcept;  // seconds / Hz / fraction -> 0..1
+float toNatural (int param, float value) noexcept;  // 0..1 -> seconds / Hz / fraction
+float get (const SamplerSettings& s, int param) noexcept;          // 0..1
+void set (SamplerSettings& s, int param, float value) noexcept;     // 0..1
+} // namespace samplerparam
+
 // Channel arpeggiator (FL's Channel settings).
 struct ArpSettings
 {
@@ -665,6 +678,11 @@ enum class EffectKind : std::uint8_t
     emphasizer,      // FL's Emphasizer, exact (REA_rodada154, core/EmphasizerFx.h): FL's 6 controls / max
     flFrequencyShifter, // FL's Frequency Shifter, exact (REA_rodada154, core/FreqShifterFl.h): FL's 10 controls (raw − min) / range
     flLowLifter,     // FL's Low Lifter, exact (REA_rodada154, core/LowLifterFl.h): FL's 15 controls / max
+    flPhaseInverter, // FL's Fruity Phase Inverter, exact (REA_rodada165k, core/FlLegacyFx.h): its control / 1024
+    flCenter,        // FL's Fruity Center, exact (REA_rodada165k, core/FlLegacyFx.h): on / off
+    flBassBoost,     // FL's Fruity Bass Boost, exact (REA_rodada165k, core/FlLegacyFx.h): frequency, amount / 1024
+    fl7BandEq,       // FL's Fruity 7 Band EQ, exact (REA_rodada165k, core/FlLegacyFx.h): 7 gains (raw + 1800) / 3600
+    flDelay1,        // FL's Fruity Delay (v1), exact (REA_rodada165k, core/FlLegacyFx.h): 6 controls (raw − min) / range
     waveCandy,       // LYNX's analyser in FL's Wave Candy role (REA_rodada164c, core/VisualFx.h): no sound; scope, spectrum, meters
     visualizer,      // LYNX's Visualizer in FL's ZGameEditor Visualizer role (REA_rodada164c): no sound; scene in EffectSlot::state
     xyController,    // FL's X-Y Controller (REA_rodada164a, core/XyController.h): no sound; outputs X, Y follow a pad
@@ -674,12 +692,16 @@ enum class EffectKind : std::uint8_t
     fruityMute2,     // FL's Fruity Mute 2, exact (REA_rodada165g §1, core/FlExtraFx.h): mute, channel (L, L + R, R)
     bigClock,        // FL's Fruity Big Clock (REA_rodada165g §2, core/FlExtraFx.h): no sound; the song position in big digits
     tuner,           // FL's Tuner (REA_rodada165g §3, core/FlExtraFx.h): no sound; chromatic tuner fed by the slot's tap
-    htmlNotebook     // FL's Fruity HTML NoteBook (REA_rodada165g §4, core/FlExtraFx.h): no sound; its page's address in EffectSlot::state
+    htmlNotebook,    // FL's Fruity HTML NoteBook (REA_rodada165g §4, core/FlExtraFx.h): no sound; its page's address in EffectSlot::state
+    scratcher,       // FL's Fruity Scratcher (REA_rodada165g-flscratch165, core/Scratcher.h): turntable over EffectSlot::samplePath, added to the input
+    transmitter      // FL's Transmitter (REA_rodada165g-fltrans165, core/Transmitter.h): transient / sustain splitter, a section effect on each part
 };
 // the last EffectKind (loops over every kind; update when one is appended)
-constexpr EffectKind lastEffectKind = EffectKind::htmlNotebook;
+constexpr EffectKind lastEffectKind = EffectKind::transmitter;
 
-constexpr int maxEffectParams = 160; // round 150: Prism Multiband 155, Ember 133. LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
+// round 165x: 160 → 192 (Ember had reached 160; a slot's parameters are 768 bytes, project files store only an engine's
+// own count, so older projects load unchanged). Round 150: 128 → 160 (Prism Multiband 155, Ember 133).
+constexpr int maxEffectParams = 192; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
 constexpr int maxEffectSlots = 10; // as in FL
 using EffectParams = std::array<float, maxEffectParams>;
 
@@ -911,7 +933,8 @@ enum class AutomationTargetKind : std::uint8_t
     mixerPan,      // index = track
     effectParam,   // index = track, slot, param (built-in effect or plugin)
     tempo,         // song tempo: 0..1 = minTempo..maxTempo BPM
-    effectMix      // index = track, slot: slot dry/wet (0..1)
+    effectMix,     // index = track, slot: slot dry/wet (0..1)
+    mixerSend      // index = source insert, slot = destination (0 = Master): the route's level knob (fader curve; issue #12)
 };
 
 constexpr double minTempo = 10.0, maxTempo = 522.0; // FL's range
@@ -1265,7 +1288,7 @@ struct Song
     // channel takes the next of its 125 inserts (round 162); 0 (Master) only when the mixer is full.
     int claimFreeInsert();
 
-    // End of the last clip, rounded up to a bar (minimum 1 bar; with no clip, the current pattern's length).
+    // End of the last clip, exactly where FL loops Song mode (no clip: the current pattern's length, minimum 1 bar).
     std::int64_t songLength() const noexcept;
 
     // Removes a pattern and fixes the clips and the current index.

@@ -220,6 +220,8 @@ private:
     // hover feedback
     void setHover (Area area, int row, int step);
     juce::Rectangle<int> controlBounds (Area area, int row) const; // knob / route box under the mouse (value tip)
+    std::uint32_t shownAutomation = 0; // AutomationDisplay generation last drawn (issue #12)
+    std::vector<int> automatedRows;
     void showTip (Area area, int row, bool transient);
     Area hoverArea = Area::none;
     int hoverRow = -1, hoverStep = -1;

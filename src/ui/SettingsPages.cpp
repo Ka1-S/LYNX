@@ -9,6 +9,7 @@
 #include "platform/LinuxRealtime.h"
 #include "ui/AutomationUi.h"
 #include "ui/I18n.h"
+#include "ui/MixerComponent.h"
 #include "ui/PluginSkin.h"
 
 namespace lynx
@@ -54,9 +55,16 @@ struct Rows
     }
 
     // label + control (control width 0 = to the right edge)
+    // round 165o: a caption wider than the label column (a long translation) gets its own line above the control
     juce::Rectangle<int> row (juce::Label& label, int controlWidth = 260, int height = rowHeight)
     {
-        label.setBounds (area.getX(), y, labelWidth, height);
+        if (theme::labelColumnWidth ({ &label }, 0, 2000) > labelWidth + labelWidth / 10) // a slight squeeze is fine
+        {
+            label.setBounds (area.getX(), y, area.getWidth(), 18);
+            y += 18;
+        }
+        else
+            label.setBounds (area.getX(), y, labelWidth, height);
         auto r = juce::Rectangle<int> (area.getX() + labelWidth, y, controlWidth > 0 ? controlWidth : area.getWidth() - labelWidth, height);
         y += height + rowGap;
         return r;
@@ -90,7 +98,7 @@ public:
         if (hooks.getGeneral)
             options = hooks.getGeneral();
         else
-            options.language = "en";
+            options.language = i18n::current(); // --snapshot: the language of the run
 
         for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
                                                                  &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox, &menuLabel, &menuBox,
@@ -102,7 +110,7 @@ public:
             add (*c);
 
         styleLabel (languageLabel, tr ("Language"));
-        styleNote (languageNote, tr ("A new language is applied when LYNX restarts."));
+        styleNote (languageNote, tr ("A new language is applied when LYNX SHARE restarts."));
         int id = 1;
         for (const auto& l : i18n::languages())
         {
@@ -115,7 +123,14 @@ public:
             const auto index = languageBox.getSelectedId() - 1;
             if (juce::isPositiveAndBelow (index, (int) i18n::languages().size()))
                 change ([&] { options.language = i18n::languages()[(std::size_t) index].id; });
+            updateTranslationLink();
+            resized();
         };
+        // the translations added in 0.1.20: an invitation to improve them (GitHub issue form)
+        translationLink.setFont (juce::FontOptions (13.0f), false, juce::Justification::centredLeft);
+        translationLink.setColour (juce::HyperlinkButton::textColourId, theme::colour::accent);
+        add (translationLink);
+        updateTranslationLink();
 
         styleLabel (scaleLabel, tr ("Interface size"));
         for (auto percent : toolbarlayout::uiScales)
@@ -154,7 +169,7 @@ public:
         pluginStyleBox.onChange = [this] { change ([&] { options.pluginStyle = pluginStyleBox.getSelectedId() - 2; }); };
         toggle (reducedEffects, tr ("Reduced effects in plugin editors (no glows or animations, for slower graphics cards)"), options.reducedEffects,
                 [this] (bool on) { options.reducedEffects = on; });
-        toggle (gpuRendering, tr ("Draw with the GPU (Direct2D). Turn off if LYNX crashes in the graphics driver or the screen flickers"),
+        toggle (gpuRendering, tr ("Draw with the GPU (Direct2D). Turn off if LYNX SHARE crashes in the graphics driver or the screen flickers"),
                 options.gpuRendering, [this] (bool on) { options.gpuRendering = on; });
        #if ! JUCE_WINDOWS
         gpuRendering.setVisible (false);
@@ -165,7 +180,7 @@ public:
         toggle (scanAtStart, tr ("Look for new plugins in the background at every start"), options.scanAtStart,
                 [this] (bool on) { options.scanAtStart = on; });
         // the AppImage on Linux (round 161): its menu entry and the .lynx file type, in the user's ~/.local/share
-        toggle (menuEntry, tr ("Show LYNX in the applications menu and open .lynx files with it"), options.menuEntry,
+        toggle (menuEntry, tr ("Show LYNX SHARE in the applications menu and open .lynx files with it"), options.menuEntry,
                 [this] (bool on) { options.menuEntry = on; });
         menuEntry.setVisible (runningAsAppImage());
 
@@ -214,10 +229,10 @@ public:
         toggle (unusedTakes, tr ("When a project closes, offer to delete the recordings it no longer uses"), options.askUnusedRecordings,
                 [this] (bool on) { options.askUnusedRecordings = on; });
 
-        toggle (sandbox, tr ("Run plugins in a separate process (protects LYNX from crashes)"), options.pluginSandbox,
+        toggle (sandbox, tr ("Run plugins in a separate process (protects LYNX SHARE from crashes)"), options.pluginSandbox,
                 [this] (bool on) { options.pluginSandbox = on; });
         styleNote (sandboxNote, tr ("Applies to plugins opened from now on; reopen the project to move the others."));
-        toggle (substitutes, tr ("Substitute missing plugins with LYNX equivalents"), options.pluginSubstitutes,
+        toggle (substitutes, tr ("Substitute missing plugins with LYNX SHARE equivalents"), options.pluginSubstitutes,
                 [this] (bool on) { options.pluginSubstitutes = on; });
         styleNote (substitutesNote, tr ("A project keeps the original plugin and uses it again once it is installed."));
         managePlugins.onClick = [this] {
@@ -236,7 +251,7 @@ public:
         crashBox.addItem (tr ("Never send"), 3);
         crashBox.setSelectedId (juce::jlimit (0, 2, options.crashReports) + 1, juce::dontSendNotification);
         crashBox.onChange = [this] { change ([&] { options.crashReports = crashBox.getSelectedId() - 1; }); };
-        styleNote (crashNote, tr ("A report holds LYNX's version, your system and audio device, the crash or freeze file and the last steps, without "
+        styleNote (crashNote, tr ("A report holds LYNX SHARE's version, your system and audio device, the crash or freeze file and the last steps, without "
                                   "your name, file names or projects. It goes to lynx-share.com only with your consent (Help > Report a problem... "
                                   "sends one by hand)."));
 
@@ -251,7 +266,9 @@ private:
         Rows r (width);
         r.section (languageTitle, true);
         languageBox.setBounds (r.row (languageLabel, 220));
-        languageNote.setBounds (r.indented (16).translated (0, -3));
+        languageNote.setBounds (r.indented (languageNote.getText().length() > 60 ? 32 : 16).translated (0, -3));
+        if (translationLink.isVisible())
+            translationLink.setBounds (r.indented (18).translated (0, -4).withWidth (juce::jmin (420, width - 40)));
         scaleBox.setBounds (r.row (scaleLabel, 120));
         menuBox.setBounds (r.row (menuLabel, 160));
         wavesBox.setBounds (r.row (wavesLabel, 0));
@@ -330,6 +347,25 @@ private:
             hooks.setGeneral (options);
     }
 
+    void updateTranslationLink()
+    {
+        // shown in the language just picked when it is already running, else in the current one
+        const auto id = options.language;
+        translationLink.setVisible (i18n::isNewTranslation (id));
+        // Linux without Noto CJK & co.: the language would show empty boxes
+        const auto noFont = theme::needsOwnFont (id) && theme::uiFontForLanguage (id).isEmpty();
+        languageNote.setText (noFont ? tr ("This language needs a Chinese / Japanese / Korean font: install the Noto Sans CJK fonts "
+                                           "(fonts-noto-cjk or google-noto-sans-cjk-fonts), then restart LYNX SHARE.")
+                                     : tr ("A new language is applied when LYNX SHARE restarts."),
+                              juce::dontSendNotification);
+        languageNote.setColour (juce::Label::textColourId, noFont ? theme::colour::accent : theme::colour::textDisabled);
+        translationLink.setButtonText (tr ("New translation — suggestions welcome"));
+        translationLink.setTooltip (tr ("Opens a GitHub issue to suggest a better translation"));
+        translationLink.setURL (juce::URL ("https://github.com/Ka1-S/LYNX-SHARE/issues/new")
+                                    .withParameter ("title", "Translation (" + id + "): ")
+                                    .withParameter ("labels", "translation"));
+    }
+
     AudioEngine& engine;
     SettingsHooks hooks;
     bool persistent;
@@ -337,6 +373,7 @@ private:
     SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") };
     juce::Label languageLabel, languageNote, scaleLabel, menuLabel, wavesLabel, noteNamesLabel, blackNotesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
+    juce::HyperlinkButton translationLink;
     juce::ComboBox crashBox, languageBox, scaleBox, menuBox, wavesBox, noteNamesBox, blackNotesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
     juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, menuEntry, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
@@ -356,9 +393,11 @@ public:
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
                                                                  &bufferNote, &panelButton, &testButton, &status, &load, &outputChannels, &realtime, &recordInput, &recordNote, &inputChannels,
                                                                  &formatLabel, &formatBox, &takeNames, &latencyTitle, &latencyText, &pingOutLabel, &pingOutBox,
-                                                                 &pingInLabel, &pingInBox, &measureButton, &pingNote, &useMeasured, &offsetLabel, &offsetSlider, &offsetNote })
+                                                                 &pingInLabel, &pingInBox, &measureButton, &pingNote, &useMeasured, &offsetLabel, &offsetSlider, &offsetNote,
+                                                                 &mixerTitle, &metronomeTrackLabel, &metronomeTrackBox, &metronomeTrackNote })
             add (*c);
         setupRecordingControls();
+        setupMixerControls();
 
         styleLabel (driverLabel, tr ("Driver"));
         styleLabel (outputLabel, tr ("Output device"));
@@ -416,19 +455,10 @@ public:
             apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) { s.bufferSize = bufferBox.getSelectedId(); });
         };
         panelButton.onClick = [this] {
-            if (auto* device = devices.getCurrentAudioDevice(); device != nullptr && device->hasControlPanel())
-            {
-                // the driver's own window (ASIO): the device is reopened afterwards with what was set there. (It used
-                // to close the device first and then call the deleted device: a crash every time, reported by the
-                // crash reports of issue #12's user with LYNX ASIO on 0.1.18. JUCE's own order: the panel, then the
-                // reopen when the driver says its settings changed.)
-                if (device->showControlPanel())
-                {
-                    devices.closeAudioDevice();
-                    devices.restartLastAudioDevice();
-                }
-                refresh();
-            }
+            // the driver's own window (ASIO); AudioEngine::showDriverPanel reopens the device with what was set there
+            // (0.1.17 / 0.1.18 closed the device first and then called the deleted device: issues #12 and #13)
+            AudioEngine::showDriverPanel (devices);
+            refresh();
         };
         testButton.onClick = [this] { devices.playTestSound(); };
 
@@ -484,7 +514,33 @@ private:
         useMeasured.setBounds (r.full (24));
         offsetSlider.setBounds (r.row (offsetLabel, 200));
         offsetNote.setBounds (r.full (32).translated (0, -3));
+        r.section (mixerTitle);
+        metronomeTrackBox.setBounds (r.row (metronomeTrackLabel, 260));
+        metronomeTrackNote.setBounds (r.full (32).translated (0, -3));
         return r.bottom();
+    }
+
+    // FL's Settings › Audio › Mixer › "Metronome track" (round 165z-a2): "---" = the Master, else an insert. A global
+    // setting, like FL's; a song without that insert plays the click on the Master.
+    void setupMixerControls()
+    {
+        styleLabel (metronomeTrackLabel, tr ("Metronome track"));
+        styleCombo (metronomeTrackBox);
+        metronomeTrackBox.setTooltip (tr ("Metronome target mixer track"));
+        styleNote (metronomeTrackNote, tr ("The mixer track the metronome plays through (--- is the Master). The click is never in an export."));
+        const auto& mixer = engine.getSong().mixer;
+        metronomeTrackBox.addItem ("---", 1);
+        for (int t = 1; t < maxMixerTracks; ++t)
+        {
+            const auto name = t < (int) mixer.size() ? juce::String (mixer[(std::size_t) t].name) : juce::String();
+            metronomeTrackBox.addItem (name.isEmpty() ? juce::String (t) : juce::String (t) + "  " + name, t + 1);
+        }
+        metronomeTrackBox.setSelectedId (engine.getTransport().metronomeTrack.load() + 1, juce::dontSendNotification);
+        metronomeTrackBox.onChange = [this] {
+            engine.getTransport().metronomeTrack.store (juce::jmax (0, metronomeTrackBox.getSelectedId() - 1));
+            if (mixeroptions::changed)
+                mixeroptions::changed(); // (ui-options.txt)
+        };
     }
 
     void apply (const std::function<void (juce::AudioDeviceManager::AudioDeviceSetup&)>& change)
@@ -636,7 +692,7 @@ private:
         else if (denied)
             realtime.setText (tr ("Audio thread: normal priority, so the sound breaks up more easily under load. To allow real-time priority, "
                                   "install rtkit (most desktops have it) or add yourself to the \"audio\" group with an rtprio limit "
-                                  "(/etc/security/limits.d), then log in again. LYNX never needs root."),
+                                  "(/etc/security/limits.d), then log in again. LYNX SHARE never needs root."),
                               juce::dontSendNotification);
         else
             realtime.setText (tr ("Audio thread: real-time priority ({0})", { lynx::rt::describe() }), juce::dontSendNotification);
@@ -734,7 +790,7 @@ private:
             refreshRecording();
         };
         styleNote (pingNote, tr ("Connect the ping output to the ping input with a cable (or a loopback in your interface's mixer) and turn your speakers "
-                                 "down: LYNX plays 8 clicks and times their way back. The result is kept for this driver, device, sample rate and buffer size."));
+                                 "down: LYNX SHARE plays 8 clicks and times their way back. The result is kept for this driver, device, sample rate and buffer size."));
         styleToggle (useMeasured, tr ("Use the measured round trip instead of the driver's figures"));
         useMeasured.onClick = [this] {
             auto s = engine.getRecordingSettings();
@@ -835,26 +891,26 @@ private:
                                  { juce::String (prefs::bufferLatencyMs (period, rate), 1) })
                            : tr ("Shared like the normal mode, but asks Windows for a shorter mixing period. Only some drivers support it.");
             case prefs::DriverKind::wasapiExclusive:
-                return tr ("LYNX uses the device alone: the lowest latency without ASIO, but other programs go silent while LYNX plays.");
+                return tr ("LYNX SHARE uses the device alone: the lowest latency without ASIO, but other programs go silent while LYNX SHARE plays.");
             case prefs::DriverKind::directSound:
                 return tr ("Old Windows audio path with high latency. Use it only when the others fail.");
             case prefs::DriverKind::asio:
                 return tr ("Low-latency drivers. LYNX ASIO, FL Studio ASIO and ASIO4ALL work with any device; a manufacturer's ASIO driver works with its own device.");
             case prefs::DriverKind::lynxAsio:
                 if (platform::runningPackaged()) // the Store build: the package folder moves with every update
-                    return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
-                               "To use it in other programs, install LYNX from lynx-share.com (the installer registers it).");
-                return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
-                           "For other programs, run \"Register LYNX ASIO\" in LYNX's folder once.");
+                    return tr ("LYNX SHARE's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
+                               "To use it in other programs, install LYNX SHARE from lynx-share.com (the installer registers it).");
+                return tr ("LYNX SHARE's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
+                           "For other programs, run \"Register LYNX ASIO\" in LYNX SHARE's folder once.");
             case prefs::DriverKind::coreAudio:
                 return tr ("macOS's own audio system: low latency with any device, shared with other programs.");
             case prefs::DriverKind::alsa:
-                return tr ("Talks to the sound card directly. Choose \"default\" or \"pipewire\" to share the device with other programs; a \"hw:\" device gives the lowest latency but takes the card for LYNX alone.");
+                return tr ("Talks to the sound card directly. Choose \"default\" or \"pipewire\" to share the device with other programs; a \"hw:\" device gives the lowest latency but takes the card for LYNX SHARE alone.");
             case prefs::DriverKind::jack:
                 return tr ("Low latency, shared with other programs and routable. On current distributions PipeWire answers as JACK (package pipewire-jack); otherwise start a JACK server first.");
             case prefs::DriverKind::pipewire:
-                return tr ("LYNX talks to PipeWire directly: low latency, shared with other programs. \"System default\" follows the output chosen in "
-                           "the system's sound settings (also when a device is plugged in or removed); LYNX appears as \"LYNX\" in pw-link, qpwgraph or Helvum.");
+                return tr ("LYNX SHARE talks to PipeWire directly: low latency, shared with other programs. \"System default\" follows the output chosen in "
+                           "the system's sound settings (also when a device is plugged in or removed); LYNX SHARE appears as \"LYNX\" in pw-link, qpwgraph or Helvum.");
             case prefs::DriverKind::other:
                 break;
         }
@@ -880,6 +936,9 @@ private:
     juce::Slider offsetSlider;
     bool measuring = false;
     juce::String pingResult;
+    SectionTitle mixerTitle { tr ("Mixer") };
+    juce::Label metronomeTrackLabel, metronomeTrackNote;
+    juce::ComboBox metronomeTrackBox;
 };
 
 // ================================================================================================================
@@ -1067,11 +1126,11 @@ public:
                                                                  &outputsNote, &noOutputs, &syncTitle, &clockLabel, &clockBox, &clockOffsetLabel,
                                                                  &clockOffset, &clockStatusLabel, &clockStatus, &clockNote })
             add (*c);
-        styleNote (outputsNote, tr ("Send master sync drives drum machines, synths and other software from LYNX's transport: MIDI clock "
+        styleNote (outputsNote, tr ("Send master sync drives drum machines, synths and other software from LYNX SHARE's transport: MIDI clock "
                                     "with Song Position Pointer, or MIDI Time Code."));
         styleLabel (noOutputs, tr ("No MIDI output devices found."));
         styleLabel (clockLabel, tr ("External clock sync"));
-        clockBox.setTooltip (tr ("LYNX follows the MIDI clock of this input: its tempo, Start / Continue / Stop and Song Position Pointer"));
+        clockBox.setTooltip (tr ("LYNX SHARE follows the MIDI clock of this input: its tempo, Start / Continue / Stop and Song Position Pointer"));
         clockBox.onChange = [this] {
             if (loading)
                 return;
@@ -1096,7 +1155,7 @@ public:
         clockOffset.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 56, 24);
         clockOffset.setRange (-1000.0, 1000.0, 1.0);
         clockOffset.setDoubleClickReturnValue (true, 0.0);
-        clockOffset.setTooltip (tr ("Positive plays LYNX later than the clock, negative earlier"));
+        clockOffset.setTooltip (tr ("Positive plays LYNX SHARE later than the clock, negative earlier"));
         clockOffset.onValueChange = [this] {
             if (loading)
                 return;

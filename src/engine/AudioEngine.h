@@ -10,6 +10,7 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include "core/AutomationDisplay.h"
 #include "core/HeldNotes.h"
 #include "core/Preferences.h"
 #include "core/LiveEventQueue.h"
@@ -18,6 +19,7 @@
 #include "core/Recorder.h"
 #include "core/TakeRecording.h"
 #include "core/WorkerPool.h"
+#include "core/SerialJobs.h"
 #include "engine/MidiSyncIo.h"
 #include "core/RackRenderer.h"
 #include "core/RtStats.h"
@@ -392,6 +394,13 @@ public:
 
     // Document (UI thread)
     const Song& getSong() const noexcept { return song; }
+    // The values automation gives the controls at the playhead while the song plays (issue #12: knobs and faders move
+    // with their automation, as in FL). Refreshed at most once per UI frame, on the UI thread only; the audio thread
+    // does no extra work for it. An editor shows `shown (target, its Song value)` and repaints when the generation
+    // changes.
+    const AutomationDisplay& getAutomationDisplay();
+    // the time the last refresh took (ms), for --perf style measurements
+    double getAutomationDisplayMs() const noexcept { return automationDisplayCostMs; }
     void setSong (Song newSong); // new/opened project: clears the history
 
     // Edits the song and publishes it to audio. `undoable` edits go into the history;
@@ -503,6 +512,9 @@ public:
         warmup::Settings warmUp;
         // false: samples above 0 dBFS are clamped to ±1 before the dither / the file (integer formats, Ogg)
         bool keepOvers = false;
+        // FL never puts the metronome in an export (round 165z-a2, measured): off, the click is left out even with
+        // the metronome on. (The selftest turns it on to measure the click.)
+        bool includeMetronome = false;
     };
 
     float renderOffline (const RenderOptions& options);
@@ -561,6 +573,15 @@ public:
     // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
     juce::String describeRealtime (bool withUnits = true) const;
 
+    // Settings › Audio "Driver settings…": shows the device's own panel (ASIO) and, when the driver says its settings
+    // changed, reopens it with them. The device object is replaced (its driver re-read), so the old pointer is never
+    // used after the close (0.1.17 / 0.1.18 called the deleted device: issues #12 and #13), and the buffer size the
+    // panel chose is kept (the reopen asks for the driver's preferred size instead of the size LYNX had before, which
+    // silently undid an ASIO4ALL / FL ASIO buffer change). Returns true when the device was reopened. Message thread.
+    static bool showDriverPanel (juce::AudioDeviceManager& devices);
+    // --selftest "driver_panel": showDriverPanel with a fake device whose panel changes its buffer (and one whose panel
+    // changes nothing). "OK" or what went wrong.
+    static juce::String driverPanelSelfTest();
     // %APPDATA%\LYNX\audio-glitches.log: a line each time callbacks run over their deadline (at most every 2 s).
     static juce::File glitchLogFile();
 
@@ -588,6 +609,10 @@ private:
     void startAudioTake();
     void finishAudioTake();
     double estimatedPositionNow() const noexcept;
+    AutomationDisplay automationDisplay;
+    std::uint64_t songStamp = 1;            // + 1 at every publishSong (the display's tables follow the Song)
+    double automationDisplayAtMs = -1.0e9;  // when it was last refreshed
+    double automationDisplayCostMs = 0.0;
 
     void buildInitialGraph();
     void choosePreferredDriver(); // a first start on Linux: PipeWire, then JACK, then ALSA (round 161)
@@ -717,6 +742,9 @@ private:
     mutable juce::SpinLock scoreLogLock;             // MIDI thread and UI thread write, the UI reads
     scorelog::Log scoreLog;
     std::map<std::tuple<int, int, int, int, int, int>, prefs::PickupState> pickups; // (cc, channel, target) -> takeover
+    // settings / log files written off the message thread (issue #13's freezes); declared before the saver so it
+    // outlives it, and its destructor writes what is still queued
+    SerialJobs fileJobs;
     struct DeviceStateSaver;
     std::unique_ptr<DeviceStateSaver> deviceStateSaver;
 

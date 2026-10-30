@@ -11,7 +11,7 @@
 static const char* const features[] = { CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_UTILITY, NULL };
 
 static const clap_plugin_descriptor_t descriptor = {
-    CLAP_VERSION_INIT, "org.lynx.test-gain", "LYNX Test Gain", "LYNX", "https://github.com/Ka1-S/LYNX", "", "", "1.0.0",
+    CLAP_VERSION_INIT, "org.lynx.test-gain", "LYNX Test Gain", "LYNX", "https://github.com/Ka1-S/LYNX-SHARE", "", "", "1.0.0",
     "Half-gain pass-through for scan tests", features
 };
 

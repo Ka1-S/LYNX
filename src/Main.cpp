@@ -20,6 +20,7 @@
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
+#include "engine/Metronome.h"
 #include "engine/AudioLogger.h"
 #include "engine/DllAsioDevice.h"
 #include "engine/PipeWireDevice.h"
@@ -290,6 +291,7 @@ public:
 
         // interface language: saved in %APPDATA%\LYNX\language.txt; --lang pt-BR overrides it for this run
         lynx::i18n::initialise (args);
+        lookAndFeel.applyLanguageFont (lynx::i18n::current());
 
         if (args.contains ("--showcase"))
         {
@@ -786,7 +788,7 @@ public:
 
         if (args.contains ("--flextrashot"))
         {
-            // LYNX.exe --flextrashot <folder>: pictures of the editors of round 165g (Big Clock, Tuner, HTML NoteBook, Mute 2)
+            // LYNX.exe --flextrashot <folder>: pictures of the editors of round 165g (Big Clock, Tuner, HTML NoteBook, Mute 2, Scratcher, Transmitter)
             const auto i = args.indexOf ("--flextrashot");
             juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
             lynx::AudioEngine shotEngine (false);
@@ -818,8 +820,8 @@ public:
             const auto i = args.indexOf ("--menu-entry");
             const auto on = args[i + 1].unquoted() != "off";
             const auto ok = lynx::runningAsAppImage() && lynx::setAppImageMenuEntry (on);
-            std::fprintf (ok ? stdout : stderr, "%s\n", ok ? (on ? "LYNX added to the applications menu" : "LYNX removed from the applications menu")
-                                                         : "only the LYNX AppImage on Linux can do this");
+            std::fprintf (ok ? stdout : stderr, "%s\n", ok ? (on ? "LYNX SHARE added to the applications menu" : "LYNX SHARE removed from the applications menu")
+                                                         : "only the LYNX SHARE AppImage on Linux can do this");
             setApplicationReturnValue (ok ? 0 : 1);
             quit();
             return;
@@ -896,6 +898,16 @@ public:
             // LYNX.exe --controllershot prefix: the built-in controllers' editors (round 133) as PNGs
             const auto i = args.indexOf ("--controllershot");
             runControllerShot (args[i + 1].unquoted());
+            quit();
+            return;
+        }
+
+        if (args.contains ("--edisonshot"))
+        {
+            // LYNX.exe --edisonshot prefix [audio.wav]: the audio editor's Edison tool windows (round 165l) and the
+            // editor before / after some of them, as PNGs (a synthetic drum loop without a file)
+            const auto i = args.indexOf ("--edisonshot");
+            runEdisonShot (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].unquoted() : juce::String());
             quit();
             return;
         }
@@ -1122,7 +1134,13 @@ public:
         addDriverFileDeviceType();
 
         if (startupOptions.sound)
-            engine->previewSample (lynx::makeStartupSample());
+        {
+            // Options › Theme › Startup sound (issue #12): the user's file, else (or when it can't be read) LYNX's own
+            std::shared_ptr<const lynx::SampleData> sound;
+            if (const auto& own = lynx::themeui::current().startupSound; ! own.empty() && juce::File (juce::String::fromUTF8 (own.c_str())).existsAsFile())
+                sound = engine->getSampleLibrary().load (juce::String::fromUTF8 (own.c_str()));
+            engine->previewSample (sound != nullptr ? sound : lynx::makeStartupSample());
+        }
         startupTrace.mark ("startup sound");
 
         // a project given on the command line: its slow plugin modules (a Waves shell) start now, on their own
@@ -1141,7 +1159,7 @@ public:
 
     void createMainWindow()
     {
-        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
+        mainWindow = std::make_unique<MainWindow> ("LYNX SHARE", *engine); // the brand; getApplicationName() stays "LYNX" (an id: instance lock, X11 WM_CLASS, ALSA client)
         lynx::setMainWindowForOwnership (mainWindow.get());
         lynx::applyRenderingChoice (*mainWindow); // (GPU rendering off: GDI; round 157a)
         lynx::startRenderingWatch();
@@ -1164,7 +1182,7 @@ public:
             return;
         }
         auto message = lynx::tr ("The last session ended without closing normally. Last step: {0}. Backup copies of your project are in "
-                                 "LYNX's autosave folder; details in crash-history.log.",
+                                 "LYNX SHARE's autosave folder; details in crash-history.log.",
                                  { uncleanLastStep });
         uncleanLastStep.clear();
         const auto cause = uncleanCause();
@@ -1178,7 +1196,7 @@ public:
         {
             lynx::setGpuRenderingEnabled (false);
             message << "\n\n"
-                    << lynx::tr ("The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU "
+                    << lynx::tr ("The crash was in the graphics driver ({0}). LYNX SHARE now draws its windows without the GPU; you can turn GPU "
                                  "rendering back on in Options > General settings (after a driver update, for example).",
                                  { cause.driverModule });
         }
@@ -1225,10 +1243,10 @@ public:
         if (separatePlugin.isNotEmpty())
         {
             juce::AlertWindow::showOkCancelBox (
-                juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"),
+                juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX SHARE closed unexpectedly"),
                 message + "\n\n"
                     + lynx::tr ("It happened while the window of {0} was opening{1}. Run {0} in a separate process from now on? If it "
-                                "crashes again, only the plugin stops and LYNX keeps running (Plugin wrapper menu: \"Always run in a "
+                                "crashes again, only the plugin stops and LYNX SHARE keeps running (Plugin wrapper menu: \"Always run in a "
                                 "separate process\").",
                                 { separatePlugin, cause.gpuDriver ? lynx::tr (" (in the graphics driver, {0})", { cause.driverModule }) : juce::String() }),
                 lynx::tr ("Run separately"), lynx::tr ("No"), nullptr,
@@ -1238,7 +1256,7 @@ public:
                 }));
             return;
         }
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"), message);
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX SHARE closed unexpectedly"), message);
     }
 
     // --opentime: after the start-up file was handed to the window
@@ -1826,8 +1844,61 @@ private:
         }
         const auto nativesOk = nativesResult == "OK";
 
+        // The metronome as FL 2026 plays it (round 165z-a2): FL's five sounds from its install, the downbeat at
+        // 0.9404 × the Tick two semitones up, into the Master ("---") by default; insert 2 as its track plays it through
+        // insert 2 (muted: silent); never in an export
+        juce::String metronomeResult = "OK";
+        int metronomeFlSounds = 0;
+        float metronomeMaster = 0.0f;
+        {
+            const auto& flData = lynx::flStudioAccess().roots.data;
+            const auto sounds = lynx::Metronome::loadSounds (flData.empty() ? juce::File() : lynx::platform::localFile (flData));
+            for (const auto& s : sounds)
+                metronomeFlSounds += s.fromFl ? 1 : 0;
+            auto renderClick = [] (int track, bool muteInsert, bool include) {
+                auto song = lynx::Song::makeDefault();
+                song.channels.clear();
+                song.playlist.clear();
+                for (auto& p : song.patterns)
+                    p.notes.clear();
+                song.mixer[0].effects.clear(); // (the default Master limiter)
+                song.mixer[2].muted = muteInsert;
+                lynx::AudioEngine player (false);
+                player.setSong (std::move (song));
+                player.dispatchPendingMessages();
+                auto& t = player.getTransport();
+                t.metronome = true;
+                t.metronomeSound = 1; // Tick
+                t.metronomeTrack = track;
+                lynx::AudioEngine::RenderOptions o;
+                o.seconds = 0.25;
+                o.sampleRate = 44100.0;
+                o.pluginWarmUp = false;
+                o.includeMetronome = include;
+                return player.renderOffline (o);
+            };
+            metronomeMaster = renderClick (0, false, true);
+            const auto insert = renderClick (2, false, true);
+            const auto muted = renderClick (2, true, true);
+            const auto exported = renderClick (0, false, false);
+            // FL's Tick peaks at 1.0: its downbeat at most 0.9404 (the interpolation may land between peaks)
+            const auto expectHigh = metronomeFlSounds == lynx::metronome::soundCount ? lynx::metronome::downbeatGain + 1.0e-3f : 1.0f;
+            if (! (metronomeMaster > 0.5f && metronomeMaster < expectHigh))
+                metronomeResult = "ERROR master " + juce::String (metronomeMaster, 4);
+            else if (std::abs (insert - metronomeMaster) > 2.0e-3f)
+                metronomeResult = "ERROR insert " + juce::String (insert, 4);
+            else if (muted > 1.0e-4f)
+                metronomeResult = "ERROR muted insert " + juce::String (muted, 4);
+            else if (exported > 1.0e-4f)
+                metronomeResult = "ERROR in export " + juce::String (exported, 4);
+        }
+        const auto metronomeOk = metronomeResult == "OK";
+
+        // Settings › Audio "Driver settings…" with a fake driver panel (issue #13's crash, the panel's buffer kept)
+        const auto driverPanel = lynx::AudioEngine::driverPanelSelfTest();
+
         const auto ok = audioOk && projectOk && richOk && hwOutOk && latencyOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
-                        && wavpack != "ERROR" && effectsOk;
+                        && wavpack != "ERROR" && effectsOk && driverPanel == "OK" && metronomeOk;
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
@@ -1845,6 +1916,9 @@ private:
                << "package=" << (packageOk ? "OK" : "ERROR") << "\n"
                << "wavpack=" << wavpack << "\n"
                << "effects=" << (effectsOk ? "OK" : "NONFINITE") << "\n"
+               << "driver_panel=" << driverPanel << "\n"
+               << "metronome=" << metronomeResult << " (FL sounds " << metronomeFlSounds << "/" << lynx::metronome::soundCount
+               << ", downbeat peak " << juce::String (metronomeMaster, 4) << ")\n"
                << "result=" << (ok ? "OK" : "FAILED") << "\n";
 
         if (reportPath.isNotEmpty())
@@ -2173,7 +2247,7 @@ private:
                                      return std::optional<lynx::Song> (songWith (fx));
                                  } });
             std::vector<std::size_t> cuts { n / 2 };
-            for (const auto c : { (std::size_t) 90, (std::size_t) 114, (std::size_t) 128 }) // (Facet's 90 → 114 params; the 128 → 160 slot)
+            for (const auto c : { (std::size_t) 90, (std::size_t) 114, (std::size_t) 128, (std::size_t) 160 }) // (Facet's 90 → 114 params; the 128 → 160 → 192 slot)
                 if (c < n) cuts.push_back (c);
             for (const auto c : cuts)
                 variants.push_back ({ "old project (" + juce::String ((int) c) + " of " + juce::String ((int) n) + " params)", [=] { return oldState (base, c); } });
@@ -5506,6 +5580,90 @@ private:
         lynx::FormulaControllerWindows::closeAll();
     }
 
+    void runEdisonShot (const juce::String& prefix, const juce::String& file)
+    {
+        namespace ae = lynx::audioedit;
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        ae::Document d;
+        if (file.isNotEmpty())
+        {
+            juce::MemoryBlock bytes;
+            if (! juce::File (file).loadFileAsData (bytes) || ! ae::decodeWav (static_cast<const std::uint8_t*> (bytes.getData()), bytes.getSize(), d))
+            {
+                std::fprintf (stderr, "edisonshot: cannot read %s\n", file.toRawUTF8());
+                return;
+            }
+        }
+        else
+        {
+            // a drum loop with a hum and hiss under it (something for the denoiser and the EQ to show)
+            d.title = "Drum loop";
+            d.audio.sampleRate = 44100.0;
+            const auto frames = (std::size_t) (44100 * 2);
+            d.audio.channels.assign (2, std::vector<float> (frames, 0.0f));
+            std::uint32_t seed = 7;
+            for (std::size_t i = 0; i < frames; ++i)
+            {
+                seed = seed * 1664525u + 1013904223u;
+                const auto hiss = ((float) (seed >> 8) / 16777216.0f - 0.5f) * 0.02f;
+                const auto hum = 0.01f * (float) std::sin (2.0 * 3.141592653589793 * 50.0 * (double) i / 44100.0);
+                d.audio.channels[0][i] = hiss + hum;
+                d.audio.channels[1][i] = hiss * 0.9f + hum;
+            }
+            for (int hit = 0; hit < 8; ++hit)
+            {
+                const auto at = (std::size_t) hit * frames / 8;
+                const auto kick = hit % 2 == 0;
+                double phase = 0.0;
+                for (std::size_t i = 0; i < 12000 && at + i < frames; ++i)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    const auto noise = (float) (seed >> 8) / 16777216.0f - 0.5f;
+                    const auto t = (double) i / 44100.0;
+                    phase += 2.0 * 3.141592653589793 * (kick ? 45.0 + 160.0 * std::exp (-t * 30.0) : 190.0) / 44100.0;
+                    const auto body = (float) std::sin (phase) * (float) std::exp (-t * (kick ? 9.0 : 22.0));
+                    const auto v = kick ? 0.85f * body : 0.35f * body + 0.6f * noise * (float) std::exp (-t * 18.0);
+                    d.audio.channels[0][at + i] += v;
+                    d.audio.channels[1][at + i] += kick ? v : v * 0.8f;
+                }
+            }
+            for (int hit = 1; hit < 8; ++hit)
+                ae::addMarker (d, (std::int64_t) (hit * frames / 8));
+            ae::setLoop (d, { 0, (std::int64_t) frames });
+        }
+        // a volume envelope (a fade-in and a dip) to show the envelope mode and the envelope tools
+        d.volumeEnvelope.points = { { 0.0, 0.0, 0.0f }, { 0.12, 0.5, 0.4f }, { 0.55, 0.5, 0.0f }, { 0.62, 0.25, 0.0f }, { 0.7, 0.5, 0.0f }, { 1.0, 0.5, 0.0f } };
+        auto editor = lynx::makeAudioEditorForSnapshot (offline, d, false);
+        auto shot = [&prefix] (juce::Component& c, const juce::String& name) {
+            juce::Image image (juce::Image::ARGB, c.getWidth(), c.getHeight(), true);
+            {
+                juce::Graphics g (image);
+                g.fillAll (lynx::theme::panel);
+                c.paintEntireComponent (g, false);
+            }
+            savePng (image, prefix + name);
+        };
+        editor->setSize (1120, 600);
+        lynx::setAudioEditorEnvelopeModeForSnapshot (*editor, 1);
+        shot (*editor, "-editor-volume-envelope.png");
+        lynx::setAudioEditorEnvelopeModeForSnapshot (*editor, 0);
+        juce::File (prefix + "-menu.txt").replaceWithText (lynx::audioEditorMenuForSnapshot (*editor).joinIntoString ("\n") + "\n");
+        for (int t = 0; lynx::audioToolNameForSnapshot (t) != nullptr; ++t)
+        {
+            const auto envelopeTool = t >= 10 && t <= 14; // Scale levels .. Create sequence work on the volume envelope
+            if (auto panel = lynx::makeAudioToolPanelForSnapshot (*editor, t, envelopeTool ? 1 : 0))
+            {
+                offline.dispatchPendingMessages();
+                const auto name = juce::String (lynx::audioToolNameForSnapshot (t)).toLowerCase().retainCharacters ("abcdefghijklmnopqrstuvwxyz ").trim().replaceCharacter (' ', '-');
+                shot (*panel, "-tool-" + juce::String (t).paddedLeft ('0', 2) + "-" + name + ".png");
+                if (envelopeTool)
+                    shot (*editor, "-tool-" + juce::String (t).paddedLeft ('0', 2) + "-" + name + "-editor.png");
+                panel.reset(); // (puts the envelope back)
+            }
+        }
+    }
+
     static juce::TextButton* findButton (juce::Component& root, const juce::String& text)
     {
         if (auto* b = dynamic_cast<juce::TextButton*> (&root); b != nullptr && b->getButtonText() == text)
@@ -6156,6 +6314,7 @@ private:
                 frame.setOpaque (true);
                 frame.addAndMakeVisible (*c);
                 c->setTopLeftPosition (0, 0);
+                checkTextFit (*c, name.fromFirstOccurrenceOf ("-", false, false).upToLastOccurrenceOf (".", false, false));
                 juce::Image image (juce::Image::ARGB, frame.getWidth(), frame.getHeight(), true);
                 {
                     juce::Graphics g (image);
@@ -6296,8 +6455,8 @@ private:
             {
                 // the Settings pages, with credits like a project imported from FL would carry
                 offline.editSong ([] (lynx::Song& s) {
-                    s.info = { "Night Drive", "LYNX demo", "Synthwave", "https://lynx-share.com",
-                               "Made with LYNX.\nDrums and bass from the Channel Rack, pads from the Browser.", false };
+                    s.info = { "Night Drive", "LYNX SHARE demo", "Synthwave", "https://lynx-share.com",
+                               "Made with LYNX SHARE.\nDrums and bass from the Channel Rack, pads from the Browser.", false };
                 }, false);
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::project), "-settings-project.png");
                 saveWindow (lynx::makeSettingsPanel (offline, lynx::SettingsPage::info), "-settings-info.png");
@@ -6850,6 +7009,9 @@ private:
                 saveSnapshot (ui, prefix + "-browser-preview.png");
             }
         }
+        // round 165o: every Label / button / tick box whose text the drawing squeezes below its minimum scale or cuts
+        // (an ellipsis), per language: `LYNX --lang de --snapshot shots/de` -> shots/de-textfit.txt
+        juce::File (prefix + "-textfit.txt").replaceWithText (textFitLog().joinIntoString ("\n") + "\n");
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         quit();
     }
@@ -7174,8 +7336,79 @@ private:
         savePng (sheet, prefix + "-tips-sheet.png");
     }
 
+    static juce::StringArray& textFitLog()
+    {
+        static juce::StringArray log;
+        return log;
+    }
+
+    // drawFittedText would shrink `text` below `minScale` or cut it: fewer visible glyphs than the text has
+    static bool textIsCut (const juce::Font& font, const juce::String& text, juce::Rectangle<int> area, int maxLines, float minScale)
+    {
+        if (text.trim().isEmpty() || area.getWidth() <= 4 || area.getHeight() <= 4)
+            return false;
+        auto visible = [] (juce::GlyphArrangement& ga) {
+            int n = 0;
+            for (int i = 0; i < ga.getNumGlyphs(); ++i)
+                n += ga.getGlyph (i).isWhitespace() ? 0 : 1;
+            return n;
+        };
+        juce::GlyphArrangement fitted, full;
+        fitted.addFittedText (font, text, 0.0f, 0.0f, (float) area.getWidth(), (float) area.getHeight(), juce::Justification::centredLeft,
+                              juce::jmax (1, maxLines), minScale);
+        full.addLineOfText (font, text, 0.0f, 0.0f);
+        return visible (fitted) < visible (full);
+    }
+
+    // walks the visible components under `root` and logs the texts that don't fit (labels, text buttons, tick boxes)
+    static void checkTextFit (juce::Component& root, const juce::String& where)
+    {
+        std::function<void (juce::Component&)> visit = [&] (juce::Component& c) {
+            if (! c.isVisible() || c.getWidth() <= 0 || c.getHeight() <= 0)
+                return;
+            juce::String text;
+            bool cut = false;
+            if (auto* label = dynamic_cast<juce::Label*> (&c); label != nullptr && ! label->isBeingEdited())
+            {
+                const auto font = label->getLookAndFeel().getLabelFont (*label);
+                const auto area = label->getBorderSize().subtractedFrom (label->getLocalBounds());
+                text = label->getText();
+                cut = textIsCut (font, text, area, juce::jmax (1, (int) ((float) area.getHeight() / font.getHeight())),
+                                 label->getMinimumHorizontalScale());
+            }
+            else if (auto* toggle = dynamic_cast<juce::ToggleButton*> (&c))
+            {
+                const auto tick = juce::jmin (16.0f, (float) c.getHeight() - 4.0f);
+                text = toggle->getButtonText();
+                cut = textIsCut (juce::Font (lynx::theme::font (juce::jmin ((float) lynx::theme::type::body, (float) c.getHeight() * 0.75f))), text,
+                                 c.getLocalBounds().withTrimmedLeft (juce::roundToInt (tick) + 8).withTrimmedRight (2), 2, 0.85f);
+            }
+            else if (auto* button = dynamic_cast<juce::TextButton*> (&c);
+                     button != nullptr && (int) button->getProperties().getWithDefault (lynx::theme::LookAndFeel::iconProperty, 0) == 0)
+            {
+                text = button->getButtonText();
+                cut = textIsCut (button->getLookAndFeel().getTextButtonFont (*button, button->getHeight()), text,
+                                 button->getLocalBounds().reduced (juce::jmin (8, button->getWidth() / 6), 0), 2, 0.85f);
+            }
+            if (cut)
+            {
+                juce::String path;
+                for (auto* p = &c; p != nullptr && p != &root; p = p->getParentComponent())
+                    if (p->getName().isNotEmpty())
+                        path = p->getName() + (path.isEmpty() ? "" : "/") + path;
+                const auto line = where + " | " + juce::String (c.getWidth()) + "x" + juce::String (c.getHeight()) + " | " + text.replace ("\n", "\\n")
+                                  + (path.isEmpty() ? juce::String() : " | " + path);
+                textFitLog().addIfNotAlreadyThere (line);
+            }
+            for (auto* child : c.getChildren())
+                visit (*child);
+        };
+        visit (root);
+    }
+
     static void saveSnapshot (juce::Component& c, const juce::String& path)
     {
+        checkTextFit (c, juce::File (path).getFileNameWithoutExtension());
         const juce::File file (path);
         file.deleteFile();
         juce::PNGImageFormat png;

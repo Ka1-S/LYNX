@@ -172,6 +172,75 @@ TEST (issue12_recorded_pitch_bend_plays_on_a_lynx_instrument)
     CHECK (ok);
 }
 
+// Issue #12: the Sampler's ADSR, cutoff, resonance, start and end are automation targets; the 0..1 values follow the
+// knobs' curves, and an automation clip / pattern event lane on them binds to the channel's instrument.
+TEST (issue12_sampler_knobs_are_automation_targets)
+{
+    using namespace lynx;
+    for (int k = 0; k < samplerparam::count; ++k)
+        for (float v : { 0.0f, 0.25f, 0.5f, 0.9f, 1.0f })
+            CHECK (std::abs (samplerparam::toValue (k, samplerparam::toNatural (k, v)) - v) < 1.0e-4f);
+    // the knobs' mid points: attack 0.2 s, cutoff 1 kHz at half travel
+    CHECK (std::abs (samplerparam::toNatural (samplerparam::attack, 0.5f) - 0.2f) < 1.0e-4f);
+    CHECK (std::abs (samplerparam::toNatural (samplerparam::cutoff, 0.5f) - 1000.0f) < 0.05f);
+
+    auto song = Song::makeDefault();
+    song.channels[0].instrument = InstrumentKind::sampler;
+    song.channels[0].sampler.flChannel = { 1, 2, 3 };
+    const AutomationTarget cutoff { AutomationTargetKind::channelParam, 0, 0, samplerparam::cutoff };
+    CHECK (song.setTargetValue (cutoff, 0.5f));
+    CHECK (std::abs (song.channels[0].sampler.cutoff - 1000.0f) < 0.05f);
+    CHECK (song.channels[0].sampler.flChannel.empty()); // like the knob turned by hand
+    CHECK (std::abs (song.targetValue (cutoff) - 0.5f) < 1.0e-4f);
+    CHECK (lasttweak::valueText (song, cutoff, 0.5f) == "1.0 kHz");
+    CHECK (lasttweak::valueText (song, { AutomationTargetKind::channelParam, 0, 0, samplerparam::attack }, 0.5f) == "0.200 s");
+
+    // an event lane on the sampler's End binds to the instrument
+    auto& p = song.patterns[(std::size_t) song.currentPattern];
+    PatternEvents lane;
+    lane.target = { AutomationTargetKind::channelParam, 0, 0, samplerparam::end };
+    lane.events.push_back ({ 0, 0.5f });
+    p.events.push_back (lane);
+    auto state = RackState::build (song, nullptr, 48000.0);
+    auto bound = false;
+    for (const auto& b : state->pluginParams)
+        bound = bound || (b.channel == 0 && b.param == samplerparam::end);
+    CHECK (bound);
+}
+
+// Issue #12: a route's level knob (the send knobs under the faders) is an automation target, also when the send sits
+// at 0 (the automation brings it up); moving inserts keeps the target on the same route.
+TEST (issue12_send_level_is_an_automation_target)
+{
+    using namespace lynx;
+    auto song = Song::makeDefault();
+    while (song.mixer.size() < 4)
+        song.mixer.emplace_back().name = "Insert " + std::to_string (song.mixer.size());
+    song.setRoute (1, 2, true);
+    song.setRouteLevel (1, 2, 0.0f);
+    const AutomationTarget send { AutomationTargetKind::mixerSend, 1, 2 };
+    CHECK (song.targetValue (send) == 0.0f);
+    CHECK (song.setTargetValue (send, faderPosition (1.0f)));
+    CHECK (std::abs (song.routeLevel (1, 2) - 1.0f) < 1.0e-4f);
+    CHECK (lasttweak::valueText (song, send, faderPosition (1.0f)) == "0.0 dB");
+    CHECK (song.targetValue ({ AutomationTargetKind::mixerSend, 1, 3 }) < 0.0f); // no such route
+    song.setRouteLevel (1, 2, 0.0f);
+
+    auto& p = song.patterns[(std::size_t) song.currentPattern];
+    PatternEvents lane;
+    lane.target = send;
+    lane.events.push_back ({ 0, 0.8f });
+    p.events.push_back (lane);
+    auto state = RackState::build (song, nullptr, 48000.0);
+    auto automated = false;
+    for (const auto& in : state->mixerInputs[2])
+        automated = automated || (in.source == 1 && in.automation >= 0);
+    CHECK (automated);
+
+    mixerops::swapTracks (song, 2, 3);
+    CHECK (song.patterns[(std::size_t) song.currentPattern].events.back().target == (AutomationTarget { AutomationTargetKind::mixerSend, 1, 3 }));
+}
+
 // Crash (0.1.18, the user's crash report): cycling quickly through samples crashed in WaveformCache's disk-cache pruning
 // — std::sort's comparator read each file's access time on every comparison, the times changed during the sort, and
 // the sort ran past the array. The pruning now reads every key once (sortonce::byKey, used by engine/FileSort.h).
@@ -232,4 +301,44 @@ TEST (issue12_secondary_windows_run_the_global_shortcuts)
     CHECK (map.findFromSecondaryWindow ({ f12 }, true, false) == "view.closeWindows");
     // the typing piano owns its letters
     CHECK (map.findFromSecondaryWindow ({ 'C' }, false, true).empty());
+}
+
+// Issue #12: an automation clip on the Sampler's Cutoff reaches the sound (setParameter on the audio thread), keeps its
+// value when the song is re-applied unchanged, and lets go when the knob is turned by hand.
+TEST (issue12_sampler_cutoff_automation_changes_the_sound)
+{
+    auto data = std::make_shared<lynx::SampleData>();
+    data->sampleRate = 48000.0;
+    for (int i = 0; i < 6000; ++i)
+        data->left.push_back (std::sin (0.6f * (float) i) * 0.25f); // ~4.6 kHz
+
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::sampler;
+    auto energyOf = [] (lynx::Instrument& sampler) {
+        sampler.allNotesOff();
+        sampler.noteOn (60, 0.8f);
+        std::vector<float> l (4000), r (4000);
+        sampler.render (l.data(), r.data(), 4000, 0.7f, 0.7f);
+        double e = 0.0;
+        for (std::size_t i = 1000; i < l.size(); ++i)
+            e += (double) l[i] * l[i];
+        return e;
+    };
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, data);
+    sampler->prepare (48000.0);
+    sampler->configure (c, 120.0);
+    const auto open = energyOf (*sampler);
+
+    sampler->setParameter (lynx::samplerparam::cutoff, 0.0f); // the clip at its bottom: 20 Hz
+    const auto automated = energyOf (*sampler);
+    sampler->configure (c, 120.0); // the song re-applied unchanged (any edit elsewhere): the automation keeps its value
+    const auto kept = energyOf (*sampler);
+    c.sampler.cutoff = 19000.0f; // the knob turned by hand
+    sampler->configure (c, 120.0);
+    const auto byHand = energyOf (*sampler);
+
+    CHECK (open > 1.0);
+    CHECK (automated < open * 0.05);
+    CHECK (kept < open * 0.05);
+    CHECK (byHand > open * 0.5);
 }

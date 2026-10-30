@@ -5,6 +5,8 @@
 #include "ui/DanceView.h"
 #include "ui/Controllers164.h"
 #include "ui/VoltageEditor.h"
+#include "ui/AutomationUi.h"
+#include "ui/BrowserComponent.h"
 
 #include "core/MixerOps.h"
 
@@ -37,6 +39,7 @@
 #include "core/SytrusEngine.h"
 #include "core/SynthPresets.h"
 #include "core/PluginLayout.h"
+#include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "core/RackOps.h"
 #include "ui/ControllerEditors.h"
@@ -49,6 +52,10 @@
 #include "ui/SoundFontEditor.h"
 #include "ui/VfxEditors.h"
 #include "ui/VideoPlayerView.h"
+#include "ui/BrowserComponent.h"
+#include "engine/SampleLibrary.h"
+#include "core/SampleFiles.h"
+#include "core/ProjectContents.h"
 
 namespace lynx
 {
@@ -424,7 +431,9 @@ private:
 };
 
 // Physical-model channels (Sakura, Drumpad; REA_rodada28): knobs for the main raw FL parameters (0..1)
-class ModelPanel final : public juce::Component
+class ModelPanel final : public juce::Component,
+                         public juce::DragAndDropTarget,
+                         public juce::FileDragAndDropTarget
 {
 public:
     ModelPanel (AudioEngine& e, ChannelRef c)
@@ -1031,15 +1040,15 @@ public:
             const auto path = juce::String::fromUTF8 (def.samplePath.c_str());
             ui::setHint (sampleButton, path.isEmpty() ? tr ("Choose the sample the Granulizer plays") : path);
             sampleButton.onClick = [this] {
-                chooser = std::make_unique<juce::FileChooser> (tr ("Sample"), juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+                juce::StringArray patterns;
+                for (const auto e : sampleFileExtensions)
+                    patterns.add ("*." + juce::String (std::string (e)));
+                chooser = std::make_unique<juce::FileChooser> (tr ("Sample"), juce::File(), patterns.joinIntoString (";"));
                 chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                       [safe = juce::Component::SafePointer<ModelPanel> (this)] (const juce::FileChooser& fc) {
                                           if (safe == nullptr || fc.getResult() == juce::File())
                                               return;
-                                          const auto file = fc.getResult();
-                                          safe->ref.edit (safe->engine, [path = file.getFullPathName().toStdString()] (ChannelDef& d) { d.samplePath = path; });
-                                          ui::setHint (safe->sampleButton, file.getFullPathName());
-                                          safe->repaint();
+                                          safe->loadGranulizerSample (fc.getResult());
                                       });
             };
             addAndMakeVisible (sampleButton);
@@ -1467,7 +1476,71 @@ public:
         }
     }
 
+    // FL's Granulizer takes a sample dropped on its window (from the Browser or the system) and plays it; before, the
+    // drop fell through to the Playlist under the window and made an audio clip (audit 165)
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        return takesSample() && BrowserComponent::isBrowserDrag (details) && SampleLibrary::isSampleFile (BrowserComponent::draggedFile (details));
+    }
+    void itemDragEnter (const SourceDetails&) override { setDropHighlight (true); }
+    void itemDragExit (const SourceDetails&) override { setDropHighlight (false); }
+    void itemDropped (const SourceDetails& details) override
+    {
+        setDropHighlight (false);
+        loadGranulizerSample (BrowserComponent::draggedFile (details));
+    }
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        return takesSample() && files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
+    }
+    void fileDragEnter (const juce::StringArray&, int, int) override { setDropHighlight (true); }
+    void fileDragExit (const juce::StringArray&) override { setDropHighlight (false); }
+    void filesDropped (const juce::StringArray& files, int, int) override
+    {
+        setDropHighlight (false);
+        loadGranulizerSample (juce::File (files[0]));
+    }
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (dropHighlight)
+        {
+            g.setColour (theme::colour::accent);
+            g.drawRect (getLocalBounds(), 2);
+        }
+    }
+
 private:
+    bool takesSample() const
+    {
+        const auto* c = ref.get (engine);
+        return c != nullptr && projectcontents::pluginWindowTakesSample (c->instrument);
+    }
+    void setDropHighlight (bool on)
+    {
+        if (dropHighlight != on)
+        {
+            dropHighlight = on;
+            repaint();
+        }
+    }
+
+    // the Granulizer plays the new sample with the same settings (FL keeps the knobs and the channel's name)
+    void loadGranulizerSample (const juce::File& file)
+    {
+        if (! takesSample() || ! file.existsAsFile())
+            return;
+        if (engine.getSampleLibrary().load (file.getFullPathName()) == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Sample"), tr ("Could not read {0}", { file.getFileName() }));
+            return;
+        }
+        ref.edit (engine, [path = file.getFullPathName().toStdString()] (ChannelDef& d) { d.samplePath = path; });
+        if (sampleButton.isVisible())
+            ui::setHint (sampleButton, file.getFullPathName());
+        repaint();
+    }
+    bool dropHighlight = false;
+
     // Fruity Granulizer: what the keys move (Key to), where the slices come from (Transients), tempo lock and the beat
     // count it uses (REA_rodada165g-flgran165)
     void setupGranulizerModes (const ChannelDef& def)
@@ -1555,8 +1628,41 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
+// A Sampler knob: right-click opens its automation menu instead of moving it (issue #12)
+class MenuSlider final : public juce::Slider
+{
+public:
+    std::function<void()> onMenu;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        menuClick = e.mods.isPopupMenu() && onMenu != nullptr;
+        if (menuClick)
+            onMenu();
+        else
+            juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! menuClick)
+            juce::Slider::mouseDrag (e);
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! menuClick)
+            juce::Slider::mouseUp (e);
+        menuClick = false;
+    }
+
+private:
+    bool menuClick = false;
+};
+
 class SettingsPanel final : public juce::Component,
-                            private juce::ChangeListener
+                            public juce::DragAndDropTarget,
+                            public juce::FileDragAndDropTarget,
+                            private juce::ChangeListener,
+                            private juce::Timer
 {
 public:
     SettingsPanel (AudioEngine& e, ChannelRef c)
@@ -1621,6 +1727,24 @@ public:
             b->onClick = [this] { apply(); };
         }
 
+        // the knobs an automation clip can drive (samplerparam, issue #12): right-click = FL's parameter menu; a move
+        // is a tweak (Last tweaked, automation recording)
+        for (auto [slider, param] : { std::pair { &attack, (int) samplerparam::attack }, { &decay, (int) samplerparam::decay },
+                                      { &sustain, (int) samplerparam::sustain }, { &release, (int) samplerparam::release },
+                                      { &cutoff, (int) samplerparam::cutoff }, { &resonance, (int) samplerparam::resonance },
+                                      { &regionStart, (int) samplerparam::start }, { &regionEnd, (int) samplerparam::end } })
+        {
+            if (ref.index < 0) // (a Patcher node: no automation target)
+                break;
+            const auto target = [this, param] { return AutomationTarget { AutomationTargetKind::channelParam, ref.index, 0, param }; };
+            // one menu, FL's parameter menu (the slider contract's plain value menu used to open beside it)
+            ui::setOwnMenu (*slider);
+            slider->onMenu = [this, slider, target] { ui::showSliderMenu (*slider, &engine, target()); };
+            slider->onDragStart = [this, target] { engine.noteTweaked (target(), true); };
+            slider->onDragEnd = [this, target] { engine.tweakReleased (target()); };
+            tweakTargets.push_back ({ slider, param });
+        }
+
         wave.setEmptyText (tr ("No sample loaded"));
         wave.setTooltip (tr ("The sample: colours show where it is bass-heavy (warm) or bright (cool); outside Start/End is dimmed"));
         addAndMakeVisible (wave);
@@ -1628,6 +1752,8 @@ public:
         refresh();
         engine.addChangeListener (this);
         setSize (420, 676);
+        if (ref.index >= 0)
+            startTimerHz (30); // the knobs follow their automation while the song plays (issue #12)
     }
 
     ~SettingsPanel() override { engine.removeChangeListener (this); }
@@ -1650,8 +1776,8 @@ public:
 
         auto top = area.removeFromTop (110);
         {
-            // Gain, Pitch, Stretch and the keep-pitch switch in four columns
-            const auto w4 = top.getWidth() / 4;
+            // Gain, Pitch, Stretch and the keep-pitch switch (a third of the width: its text is long)
+            const auto w4 = top.getWidth() * 2 / 9;
             for (auto [slider, label] : { std::pair { &gain, &gainLabel }, { &pitch, &pitchLabel }, { &stretch, &stretchLabel } })
             {
                 auto column = top.removeFromLeft (w4);
@@ -1691,7 +1817,66 @@ public:
 
     int getChannel() const noexcept { return ref.index; }
 
+    // A sample dropped on the waveform (from the Browser or the system) replaces the channel's sample (issue #12)
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        return BrowserComponent::isBrowserDrag (details) && SampleLibrary::isSampleFile (BrowserComponent::draggedFile (details));
+    }
+    void itemDragEnter (const SourceDetails&) override { setDropHighlight (true); }
+    void itemDragExit (const SourceDetails&) override { setDropHighlight (false); }
+    void itemDropped (const SourceDetails& details) override
+    {
+        setDropHighlight (false);
+        replaceSample (BrowserComponent::draggedFile (details));
+    }
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        return files.size() == 1 && SampleLibrary::isSampleFile (juce::File (files[0]));
+    }
+    void fileDragEnter (const juce::StringArray&, int, int) override { setDropHighlight (true); }
+    void fileDragExit (const juce::StringArray&) override { setDropHighlight (false); }
+    void filesDropped (const juce::StringArray& files, int, int) override
+    {
+        setDropHighlight (false);
+        replaceSample (juce::File (files[0]));
+    }
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (dropHighlight)
+        {
+            g.setColour (theme::colour::accent);
+            g.drawRect (wave.getBounds().expanded (2), 2);
+        }
+    }
+
 private:
+    void setDropHighlight (bool on)
+    {
+        if (dropHighlight != on)
+        {
+            dropHighlight = on;
+            repaint (wave.getBounds().expanded (4));
+        }
+    }
+
+    // the new sample plays with the same settings; slices of the old one no longer apply, the channel takes its name
+    void replaceSample (const juce::File& file)
+    {
+        if (current() == nullptr || ! file.existsAsFile())
+            return;
+        if (engine.getSampleLibrary().load (file.getFullPathName()) == nullptr)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Sample"), tr ("Could not read {0}", { file.getFileName() }));
+            return;
+        }
+        ref.edit (engine, [path = file.getFullPathName().toStdString(), name = file.getFileNameWithoutExtension().toStdString()] (ChannelDef& d) {
+            d.samplePath = path;
+            d.zones.clear();
+            d.sampler.slices.clear();
+            d.name = name;
+        });
+    }
+
     void setup (juce::Slider& s, juce::Label& label, const char* name, double lo, double hi, double step, const char* suffix)
     {
         s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
@@ -1699,7 +1884,7 @@ private:
         s.setRange (lo, hi, step);
         s.setTextValueSuffix (suffix);
         s.setDoubleClickReturnValue (true, 0.0);
-        s.onValueChange = [this] { apply(); };
+        s.onValueChange = [this, &s] { apply (&s); };
         label.setText (tr (name), juce::dontSendNotification);
         label.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (s);
@@ -1735,6 +1920,7 @@ private:
             cut.setToggleState (c->sampler.cut, juce::dontSendNotification);
             porta.setToggleState (c->sampler.porta, juce::dontSendNotification);
             updating = false;
+            showAutomation (true);
 
             const auto path = juce::String::fromUTF8 ((c->samplePath.empty() && ! c->zones.empty() ? c->zones.front().path : c->samplePath).c_str());
             wave.setFile (path, [&e = engine, path] { return e.getSampleLibrary().load (path); });
@@ -1747,7 +1933,65 @@ private:
         }
     }
 
-    void apply()
+    // The knobs an automation drives show its value while the song plays, as in FL (issue #12); a knob held by the
+    // mouse shows the hand's value. `force`: after refresh() put the Song's values back.
+    void showAutomation (bool force)
+    {
+        const auto* c = current();
+        if (c == nullptr || ref.index < 0)
+            return;
+        const auto& shown = engine.getAutomationDisplay();
+        if (! force && shown.getGeneration() == shownGeneration)
+            return;
+        shownGeneration = shown.getGeneration();
+        if (! force && automatedShown.empty() && ! shown.any())
+            return;
+
+        std::vector<juce::Slider*> now;
+        updating = true;
+        for (const auto& [slider, param] : tweakTargets)
+        {
+            if (slider->isMouseButtonDown())
+                continue;
+            const auto v = shown.valueOf ({ AutomationTargetKind::channelParam, ref.index, 0, param });
+            const auto was = std::find (automatedShown.begin(), automatedShown.end(), slider) != automatedShown.end();
+            if (v)
+            {
+                slider->setValue (samplerparam::toNatural (param, *v), juce::dontSendNotification);
+                now.push_back (slider);
+            }
+            else if (was && ! force)
+                slider->setValue (samplerparam::toNatural (param, samplerparam::get (c->sampler, param)), juce::dontSendNotification);
+        }
+        updating = false;
+        automatedShown = std::move (now);
+        wave.setRegion ((float) regionStart.getValue(), (float) regionEnd.getValue());
+    }
+
+    void timerCallback() override
+    {
+        if (isShowing())
+            showAutomation (false);
+    }
+
+    // the Song's value of `param` (a knob that shows its automation must not write the automated value back)
+    static void keepSongValue (SamplerSettings& s, const SamplerSettings& song, int param) noexcept
+    {
+        switch (param)
+        {
+            case samplerparam::attack: s.attack = song.attack; break;
+            case samplerparam::decay: s.decay = song.decay; break;
+            case samplerparam::sustain: s.sustain = song.sustain; break;
+            case samplerparam::release: s.release = song.release; break;
+            case samplerparam::cutoff: s.cutoff = song.cutoff; break;
+            case samplerparam::resonance: s.resonance = song.resonance; break;
+            case samplerparam::start: s.regionStart = song.regionStart; break;
+            case samplerparam::end: s.regionEnd = song.regionEnd; break;
+            default: break;
+        }
+    }
+
+    void apply (juce::Slider* changed = nullptr)
     {
         if (updating || current() == nullptr)
             return;
@@ -1771,6 +2015,9 @@ private:
         s.cutoff = (float) cutoff.getValue();
         s.resonance = (float) resonance.getValue();
         s.filterType = juce::jlimit (0, 3, filterType.getSelectedId() - 1);
+        for (const auto& [slider, param] : tweakTargets)
+            if (slider != changed && std::find (automatedShown.begin(), automatedShown.end(), slider) != automatedShown.end())
+                keepSongValue (s, current()->sampler, param);
         {
             // an ADSR edited by hand replaces FL's imported volume envelope
             const auto& old = current()->sampler;
@@ -1785,7 +2032,11 @@ private:
         if (s == current()->sampler)
             return;
 
+        const auto before = current()->sampler;
         ref.edit (engine, [s] (ChannelDef& channelDef) { channelDef.sampler = s; });
+        for (const auto& [slider, param] : tweakTargets)
+            if (std::abs (samplerparam::get (before, param) - samplerparam::get (s, param)) > 1.0e-6f)
+                engine.noteTweaked ({ AutomationTargetKind::channelParam, ref.index, 0, param });
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
@@ -1806,7 +2057,12 @@ private:
     AudioEngine& engine;
     ChannelRef ref;
     bool updating = false;
-    juce::Slider pitch, gain, attack, release, decay, sustain, stretch, regionStart, regionEnd, cutoff, resonance;
+    juce::Slider pitch, gain, stretch;
+    MenuSlider attack, release, decay, sustain, regionStart, regionEnd, cutoff, resonance;
+    std::vector<std::pair<MenuSlider*, int>> tweakTargets; // knob -> samplerparam
+    std::vector<juce::Slider*> automatedShown;             // knobs showing their automation's value now
+    std::uint32_t shownGeneration = 0;
+    bool dropHighlight = false;
     juce::Label pitchLabel, gainLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
         cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch, porta;
@@ -2082,7 +2338,7 @@ private:
             ref.edit (engine, [s = *synth] (ChannelDef& channelDef) { channelDef.synth = s; });
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("FL presets"),
-                                                    tr ("This preset is not for a synth LYNX converts, or it could not be read."));
+                                                    tr ("This preset is not for a synth LYNX SHARE converts, or it could not be read."));
     }
     juce::Slider porta;
     juce::ComboBox filterTypeBox;
@@ -2223,7 +2479,8 @@ private:
 // A small rotary control with LYNX's control contract (drag, Ctrl = fine, wheel, Alt / middle-click / double-click
 // reset, right-click menu with automation items when the spec has a target); the hint bar shows its name and value.
 class FrameKnob final : public juce::Component,
-                        public ui::HintSource
+                        public ui::HintSource,
+                        private juce::Timer
 {
 public:
     FrameKnob (AudioEngine& e, std::function<ui::ValueSpec()> makeSpec, std::function<double()> get, std::function<void (double)> set,
@@ -2231,7 +2488,32 @@ public:
         : engine (e), specOf (std::move (makeSpec)), getter (std::move (get)), setter (std::move (set)), label (std::move (caption))
     {
         setRepaintsOnMouseActivity (true);
+        if (specOf().target)
+            startTimerHz (30); // follows its automation while the song plays (issue #12)
     }
+
+    // the value drawn: the automation's while the song plays (pan / volume: the targets these knobs have), else the Song's
+    double shownValue (const ui::ValueSpec& spec) const
+    {
+        if (spec.target && ! isMouseButtonDown())
+            if (const auto v = engine.getAutomationDisplay().valueOf (*spec.target))
+                return spec.target->kind == AutomationTargetKind::channelPan || spec.target->kind == AutomationTargetKind::mixerPan
+                           ? (double) *v * 2.0 - 1.0
+                           : (double) *v;
+        return getter();
+    }
+
+    void timerCallback() override
+    {
+        if (! isShowing())
+            return;
+        if (const auto generation = engine.getAutomationDisplay().getGeneration(); generation != shownGeneration)
+        {
+            shownGeneration = generation;
+            repaint();
+        }
+    }
+    std::uint32_t shownGeneration = 0;
 
     ui::Hint hintAt (juce::Point<int>) override { return ui::valueHint (specOf(), getter(), ui::valueGestures()); }
 
@@ -2242,14 +2524,16 @@ public:
         const auto caption = area.removeFromBottom (13.0f);
         const auto valueArea = area.removeFromBottom (13.0f);
         const auto size = juce::jmin (area.getWidth(), area.getHeight());
-        const auto v = (float) juce::jlimit (0.0, 1.0, (getter() - spec.minimum) / juce::jmax (1e-9, spec.maximum - spec.minimum));
+        const auto shown = shownValue (spec);
+        const auto v = (float) juce::jlimit (0.0, 1.0, (shown - spec.minimum) / juce::jmax (1e-9, spec.maximum - spec.minimum));
         theme::drawKnob (g, juce::Rectangle<float> (size, size).withCentre (area.getCentre()), v, spec.minimum < 0.0,
                          isMouseOverOrDragging() ? theme::colour::accent : theme::colour::knobArc, isMouseOver());
         g.setFont (theme::font (theme::type::caption));
         g.setColour (theme::colour::textPrimary);
-        g.drawText (spec.text (getter()), valueArea, juce::Justification::centred);
+        // squeezed (down to 65 %) before an ellipsis: translated captions are often longer (round 165o)
+        g.drawFittedText (spec.text (shown), valueArea.toNearestInt(), juce::Justification::centred, 1, 0.65f);
         g.setColour (theme::colour::textSecondary);
-        g.drawText (theme::caps (label), caption, juce::Justification::centred);
+        g.drawFittedText (theme::caps (label), caption.toNearestInt(), juce::Justification::centred, 1, 0.65f);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -2656,7 +2940,7 @@ public:
         fullPorta.onClick = [this] { edit ([on = fullPorta.getToggleState()] (ChannelDef& d) { d.misc.fullPorta = on; }); };
         // Vol / Key tracking
         trackVol.setButtonText (tr ("Vol"));
-        trackKey.setButtonText (tr ("Key"));
+        trackKey.setButtonText (trc ("@key tracking: Key"));
         for (auto* b : { &trackVol, &trackKey })
         {
             b->setClickingTogglesState (true);
@@ -2960,10 +3244,11 @@ public:
         {
             auto rootRow = section (area.removeFromTop (74), tr ("Root note"));
             rootSection = (int) sections.size() - 1;
-            auto toggles = rootRow.removeFromLeft (150);
+            const auto resetWidth = theme::buttonWidth (rootReset, 50, 96); // long "Reset" translations
+            auto toggles = rootRow.removeFromLeft (100 + resetWidth);
             mainPitch.setBounds (toggles.removeFromTop (22));
             auto line = toggles.removeFromTop (22);
-            rootReset.setBounds (line.removeFromRight (50).reduced (0, 1));
+            rootReset.setBounds (line.removeFromRight (resetWidth).reduced (0, 1));
             addToKey.setBounds (line);
             auto fine = rootRow.removeFromLeft (58);
             row (fine, { fineTune });

@@ -703,9 +703,9 @@ std::string githubOsOption (std::string_view os, std::string_view arch, bool app
 std::string githubKindOption (std::string_view kind)
 {
     if (kind == "crash" || kind == "unclean")
-        return "LYNX closed (crash)";
+        return "LYNX SHARE closed (crash)";
     if (kind == "hang")
-        return "LYNX froze (not responding)";
+        return "LYNX SHARE froze (not responding)";
     return "Other";
 }
 

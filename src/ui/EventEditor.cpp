@@ -125,6 +125,12 @@ public:
         };
         addAndMakeVisible (clearButton);
 
+        // FL's "Convert to automation" (round 165l): the lane becomes an automation clip in the Playlist
+        toAutoButton.setButtonText (tr ("To automation..."));
+        toAutoButton.setTooltip (tr ("Turn these events into an automation clip (the events are removed from the pattern)"));
+        toAutoButton.onClick = [this] { showConvertToAutomation(); };
+        addAndMakeVisible (toAutoButton);
+
         rebuildTargets();
         setSize (900, 400);
         setWantsKeyboardFocus (true);
@@ -275,34 +281,63 @@ public:
     {
         auto r = getLocalBounds().reduced (12, 8);
         auto top = r.removeFromTop (30);
-        title.setBounds (top.removeFromLeft (230));
-        targetBox.setBounds (top.removeFromLeft (240).reduced (0, 2));
-        top.removeFromLeft (12);
+        // round 165o: buttons and labels as wide as their (translated) text needs; the title and sliders give way
+        int modeWidth[3], i = 0;
         for (auto* b : { &drawButton, &lineButton, &selectButton })
-            b->setBounds (top.removeFromLeft (64).reduced (1, 2));
+            modeWidth[i++] = theme::buttonWidth (*b, 64, 120);
+        const auto clearWidth = theme::buttonWidth (clearButton, 70, 120);
+        const auto toAutoWidth = theme::buttonWidth (toAutoButton, 120, 180); // (round 165l)
+        const auto gridWidth = theme::labelColumnWidth ({ &gridLabel }, 40, 110);
+        const auto fixedTop = 240 + 12 + modeWidth[0] + modeWidth[1] + modeWidth[2] + 12 + gridWidth + 110 + clearWidth + 4 + toAutoWidth;
+        auto titleWidth = juce::jlimit (120, 230, top.getWidth() - fixedTop), boxWidth = 240;
+        // a title longer than its room ("Événements - Pattern 1") takes up to 80 px from the target box
+        const auto titleNeeds = juce::jmin (230, theme::labelColumnWidth ({ &title }, 0, 400));
+        if (titleNeeds > titleWidth)
+        {
+            const auto taken = juce::jmin (80, titleNeeds - titleWidth);
+            titleWidth += taken;
+            boxWidth -= taken;
+        }
+        title.setBounds (top.removeFromLeft (titleWidth));
+        targetBox.setBounds (top.removeFromLeft (boxWidth).reduced (0, 2));
         top.removeFromLeft (12);
-        gridLabel.setBounds (top.removeFromLeft (40));
+        i = 0;
+        for (auto* b : { &drawButton, &lineButton, &selectButton })
+            b->setBounds (top.removeFromLeft (modeWidth[i++]).reduced (1, 2));
+        top.removeFromLeft (12);
+        gridLabel.setBounds (top.removeFromLeft (gridWidth));
         gridBox.setBounds (top.removeFromLeft (110).reduced (0, 2));
-        clearButton.setBounds (top.removeFromRight (70).reduced (0, 2));
+        clearButton.setBounds (top.removeFromRight (clearWidth).reduced (0, 2));
+        top.removeFromRight (4);
+        toAutoButton.setBounds (top.removeFromRight (toAutoWidth).reduced (0, 2));
 
         auto tools = r.removeFromBottom (32);
         r.removeFromBottom (6);
         canvas = r.withTrimmedTop (4);
 
-        scaleLabel.setBounds (tools.removeFromLeft (42));
-        scaleSlider.setBounds (tools.removeFromLeft (140).reduced (0, 4));
+        const auto scaleW = theme::labelColumnWidth ({ &scaleLabel }, 42, 120), offsetW = theme::labelColumnWidth ({ &offsetLabel }, 44, 120),
+                   randomW = theme::labelColumnWidth ({ &randomLabel }, 66, 140), lfoW = theme::labelColumnWidth ({ &lfoLabel }, 28, 80);
+        const auto randomButtonW = theme::buttonWidth (randomButton, 52, 106) + 4, lfoButtonW = theme::buttonWidth (lfoButton, 52, 106) + 4;
+        const auto grown = (scaleW - 42) + (offsetW - 44) + (randomW - 66) + (lfoW - 28) + (randomButtonW - 56) + (lfoButtonW - 56);
+        const auto spare = tools.getWidth() - 874; // the widths below at their minimum (was 834: 40 px short)
+        // the three sliders give the room back first, then the LFO boxes (round 165o: German / Russian captions)
+        const auto overflow = juce::jmax (0, grown - spare);
+        const auto shrink = juce::jmin (70, overflow / 3);
+        const auto boxShrink = juce::jmin (16, juce::jmax (0, overflow - 3 * shrink) / 2);
+        scaleLabel.setBounds (tools.removeFromLeft (scaleW));
+        scaleSlider.setBounds (tools.removeFromLeft (140 - shrink).reduced (0, 4));
         tools.removeFromLeft (8);
-        offsetLabel.setBounds (tools.removeFromLeft (44));
-        offsetSlider.setBounds (tools.removeFromLeft (140).reduced (0, 4));
+        offsetLabel.setBounds (tools.removeFromLeft (offsetW));
+        offsetSlider.setBounds (tools.removeFromLeft (140 - shrink).reduced (0, 4));
         tools.removeFromLeft (12);
-        randomLabel.setBounds (tools.removeFromLeft (66));
-        amountSlider.setBounds (tools.removeFromLeft (110).reduced (0, 4));
-        randomButton.setBounds (tools.removeFromLeft (56).reduced (2, 3));
+        randomLabel.setBounds (tools.removeFromLeft (randomW));
+        amountSlider.setBounds (tools.removeFromLeft (juce::jmax (50, 110 - shrink)).reduced (0, 4));
+        randomButton.setBounds (tools.removeFromLeft (randomButtonW).reduced (2, 3));
         tools.removeFromLeft (10);
-        lfoLabel.setBounds (tools.removeFromLeft (28));
-        shapeBox.setBounds (tools.removeFromLeft (84).reduced (1, 3));
-        periodBox.setBounds (tools.removeFromLeft (78).reduced (1, 3));
-        lfoButton.setBounds (tools.removeFromLeft (56).reduced (2, 3));
+        lfoLabel.setBounds (tools.removeFromLeft (lfoW));
+        shapeBox.setBounds (tools.removeFromLeft (84 - boxShrink).reduced (1, 3));
+        periodBox.setBounds (tools.removeFromLeft (78 - boxShrink).reduced (1, 3));
+        lfoButton.setBounds (tools.removeFromLeft (lfoButtonW).reduced (2, 3));
 
         if (! fitted && plotArea().getWidth() > 50) // the whole pattern, with a little room after it
         {
@@ -509,7 +544,12 @@ private:
                 targetBox.setSelectedItemIndex ((int) i, juce::dontSendNotification);
         }
 
-        title.setText (tr ("Events - {0}", { juce::String::fromUTF8 (currentPattern().name.c_str()) }), juce::dontSendNotification);
+        const auto newTitle = tr ("Events - {0}", { juce::String::fromUTF8 (currentPattern().name.c_str()) });
+        if (newTitle != title.getText())
+        {
+            title.setText (newTitle, juce::dontSendNotification);
+            resized(); // the title's width follows its text
+        }
     }
 
     // --- editing --------------------------------------------------------------------------------
@@ -571,6 +611,115 @@ private:
         beginGesture();
         previewGesture ([&] (PatternEvents& lane) { fn (lane, from, to); });
         commitGesture();
+    }
+
+    void showConvertToAutomation()
+    {
+        const auto* lane = eventedit::findLane (currentPattern(), target);
+        if (lane == nullptr || lane->events.empty())
+            return;
+        struct Panel final : public juce::Component
+        {
+            Panel (EventEditor& o) : owner (&o)
+            {
+                label.setText (tr ("Sensitivity"), juce::dontSendNotification);
+                addAndMakeVisible (label);
+                slider.setRange (40.0, 100.0, 0.1);
+                slider.setValue (100.0, juce::dontSendNotification);
+                slider.setDoubleClickReturnValue (true, 100.0);
+                slider.setTextValueSuffix ("%");
+                slider.onValueChange = [this] { update(); };
+                addAndMakeVisible (slider);
+                info.setFont (theme::font (theme::type::small));
+                info.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+                addAndMakeVisible (info);
+                accept.setButtonText (tr ("Accept"));
+                accept.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
+                cancel.setButtonText (tr ("Cancel"));
+                accept.onClick = [this] {
+                    if (owner != nullptr)
+                        owner->convertToAutomation ((float) slider.getValue() / 100.0f);
+                    closeToolWindowOf (*this);
+                };
+                cancel.onClick = [this] { closeToolWindowOf (*this); };
+                addAndMakeVisible (accept);
+                addAndMakeVisible (cancel);
+                setSize (380, 130);
+                update();
+            }
+            void update()
+            {
+                if (owner == nullptr)
+                    return;
+                const auto* l = eventedit::findLane (owner->currentPattern(), owner->target);
+                const auto n = l != nullptr ? eventedit::toAutomationPoints (*l, (float) slider.getValue() / 100.0f).size() : 0u;
+                info.setText (tr ("{0} events become {1} automation points", { juce::String (l != nullptr ? (int) l->events.size() : 0), juce::String ((int) n) }), juce::dontSendNotification);
+            }
+            void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg2); }
+            void resized() override
+            {
+                auto r = getLocalBounds().reduced (12);
+                auto row = r.removeFromTop (28);
+                label.setBounds (row.removeFromLeft (90));
+                slider.setBounds (row);
+                info.setBounds (r.removeFromTop (28));
+                auto b = r.removeFromBottom (28);
+                cancel.setBounds (b.removeFromRight (84));
+                b.removeFromRight (6);
+                accept.setBounds (b.removeFromRight (84));
+            }
+            juce::Component::SafePointer<EventEditor> owner;
+            juce::Label label, info;
+            juce::Slider slider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+            juce::TextButton accept, cancel;
+        };
+        openToolWindow (std::make_unique<Panel> (*this), tr ("Convert to automation"), "eventeditor-toauto");
+    }
+
+    void convertToAutomation (float sensitivity)
+    {
+        const auto* lane = eventedit::findLane (currentPattern(), target);
+        if (lane == nullptr || lane->events.empty())
+            return;
+        auto points = eventedit::toAutomationPoints (*lane, sensitivity);
+        const auto t = target;
+        const auto name = describeAutomationTarget (engine, t).toStdString();
+        const auto length = juce::jmax (patternLength(), points.back().tick + 1);
+        if (points.back().tick < length)
+            points.push_back ({ length, points.back().value, 0.0f });
+        int index = -1;
+        engine.editSong ([&] (Song& s) {
+            Automation a;
+            a.name = name;
+            a.target = t;
+            a.points = points;
+            s.automations.push_back (std::move (a));
+            index = (int) s.automations.size() - 1;
+            // the clip sits where the pattern is first used in the Playlist (else at the start), on a new track
+            const auto pattern = juce::jlimit (0, (int) s.patterns.size() - 1, s.currentPattern);
+            std::int64_t at = -1;
+            int track = 0;
+            for (const auto& c : s.playlist)
+            {
+                track = std::max (track, c.track + 1);
+                if (c.kind == ClipKind::pattern && c.pattern == pattern && (at < 0 || c.start < at))
+                    at = c.start;
+            }
+            Clip clip;
+            clip.kind = ClipKind::automation;
+            clip.automation = index;
+            clip.track = track;
+            clip.start = std::max<std::int64_t> (0, at);
+            clip.length = length;
+            s.playlist.push_back (clip);
+            auto& p = currentPattern (s);
+            eventedit::erase (eventedit::laneFor (p, t), 0, std::numeric_limits<std::int64_t>::max());
+            eventedit::removeEmptyLanes (p);
+        });
+        rebuildTargets();
+        repaint();
+        if (index >= 0)
+            openAutomationEditor (engine, index);
     }
 
     std::int64_t lastEventTick() const
@@ -697,7 +846,7 @@ private:
 
     juce::Label title, gridLabel, scaleLabel, offsetLabel, randomLabel, lfoLabel;
     juce::ComboBox targetBox, gridBox, shapeBox, periodBox;
-    juce::TextButton drawButton, lineButton, selectButton, randomButton, lfoButton, clearButton;
+    juce::TextButton drawButton, lineButton, selectButton, randomButton, lfoButton, clearButton, toAutoButton;
     juce::Slider scaleSlider, offsetSlider, amountSlider;
 
     juce::Rectangle<int> canvas;

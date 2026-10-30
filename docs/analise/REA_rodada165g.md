@@ -7,8 +7,8 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
 - 2026-10-28 17:20: Kepler landed b06e2c59, Granulizer engine landed 471b4f23 (both out of beta). Video Player:
   build-local 1 781 828 checks, 0 failures; Windows --videoshot with the user's ffmpeg 8.1 [SHOT]: frames at song
   0 / 1.5 / 3.25 s (delay 0.5 s) = ffmpeg's own frames at video 0 (held before the delay) / 1.0 / 2.75 s; landing.
-  Harmor's presets run as sub-round flbeta165h. Left: Transmitter and Scratcher ports (§6), Kepler Exo, Newtime /
-  Newtone.
+  Harmor's presets run as sub-round flbeta165h. Left: Transmitter port (§6), Kepler Exo, Newtime /
+  Newtone (Newtone: out of beta in flnewt165; Newtime: beta, §6). (Scratcher: landed by sub-round flscratch165, §6.)
 - 2026-10-28 12:50 (resume after the 2nd BSOD): batch 2 for 0.1.20, one sub-round at a time. (1) Kepler
   (feature/flbeta165k, out of beta, verified in REA_rodada165g-flbeta165k.md) merged with main, build-local running;
   (2) Granulizer engine (feature/flgran165, out of beta, REA_rodada165g-flgran165.md) merged with main (pt-BR conflict:
@@ -27,7 +27,7 @@ installation's DLL (clean-room: behaviour only), [FL render] FL64.exe /R of a cr
 | Fruity Big Clock | effect (no sound) | §2 | [MANUAL] |
 | Tuner | effect (no sound) | §3 | [MANUAL] |
 | Fruity HTML NoteBook | effect (no sound) | §4 | [MANUAL] |
-| Fruity Scratcher | effect (turntable) | (todo) | [MANUAL] |
+| Fruity Scratcher | effect (turntable) | FL's engine, state, sample, pattern events, editor (REA_rodada165g-flscratch165.md); DVS timecode not reproduced | [DECOMP], [FL render] |
 | Transmitter | effect (transient / sustain split) | (todo) | [MANUAL], presets |
 | Fruity Video Player | generator | §7 (video via the user's ffmpeg, sound track, FL's state) | [DECOMP] |
 | FL Studio Mobile / Mobile Rack FX | generator / effect | import note (§5) | |
@@ -72,23 +72,28 @@ FL Studio Mobile channels keep LYNX's synth substitute with a note saying why; R
 of their own) are imported muted, with the note (Fruity Video Player: §7 since batch 2).
 
 ## 6. Left for a next round (groundwork)
-- Transmitter, round 165g batch 2 [DECOMP Transmitter_x64.dll]: CreatePlugInstance 0x7145c0 builds the class at VMT
-  0x714360 (slot 3 SaveRestoreState 0x7157e0, slot 7 Eff_Render 0x717600). The render hands the block to a separate
-  engine object (+0x154): its vtable +0x30 processes (n, in, out, the transient / sustain envelope buffers +0x134 /
-  +0x13c), +0x48 returns the two chains' buffers; the sidechain input (+0x230) and the two envelope sends (+0x234 /
-  +0x238) are mixer tracks read / written through the host (+0x120 / +0x128). The editor's 64 controls (DFM hints):
-  Sensitivity, Lookahead, Stereo link, Hold / Release times, Detection mode and sidechain track, Transient / Sustain
-  level, amplitude, tilt, and per section Saturation (drive, warmth, mix), Diffuser (delay, depth, mix), Bounce (delay
-  curve, amp curve, mix) and Delay (time ×2 with tempo-based time, feedback, mix). A faithful port of this engine is a
-  round of its own; not started.
-- Transmitter [DATA 34 presets, tmp scratch tr.py]: state = i32 version 3 + 47 ints. Ints 1–33 are controls 0…10000
-  (Default: 7475, 1968, 1968, 8743, 8743, 5000, 5000, 10000, 9112, 0, 5000, 5051, …), 34–42 flags/selectors (34–38
-  0/1 enables: "Transient only" clears 38, "Sustain only" clears 37; 39–40 selectors 0…5; 41–42 0/1), 46 = 49…90,
-  47 = 257 / 65793 (bytes). The DSP (transient / sustain split, Saturation / Bounce / Diffusion / Delay per section) needs
-  a decompile of Transmitter.dll before LYNX can reproduce it; until then an imported Transmitter is reported as unsupported.
-- Fruity Scratcher [DATA presets]: state = version 1001000 + 14 floats + the sample path. engine_x64.dll is only the
-  DVS timecode decoder; the scratch DSP is in the 4 MB Delphi DLL. An FL render exists (D:\lynx-work\flplugins165\r\m_ref.wav).
+- Transmitter: **done** in sub-round fltrans165 (REA_rodada165g-fltrans165.md): the front end's 42 controls and state,
+  the engine in Shared\ildsp_x64.dll (TransmitterImpl) rebuilt — the 8-band onset detector and its hold / release, the
+  lookahead, the transient / sustain split, tilt, levels, and every section effect (Saturation, Bounce, Diffusion, Blur,
+  Delay) — checked against FL's engine run as a black box (EXEC harness): detector, split, levels, Delay and Diffusion
+  bit-exact; Saturation −140 dB, Bounce −137…−141 dB (float order); the sidechain input drives the detection; FL-arranged
+  editor. Left: the transient / sustain sends to other mixer tracks (reported as not routed on import), FL's steps:ticks
+  text of the synced delay, its envelope display, bit-exact tanh / logf (Dense mode with a high sensitivity: −81 dB).
+- Fruity Scratcher: **done** in sub-round flscratch165 (REA_rodada165g-flscratch165.md): FL's engine (motor / hold,
+  smoothing, rotations, DC blocker, gain / pan glides), FL's 16-bit copy of the sample, state + sample path + pattern
+  events imported, editor (scratch with the mouse, Browser / desktop drops). LYNX's renders vs FL's: motor within 1 LSB
+  (96.5…99 % of the samples equal), hold 99.5…99.95 % equal. Left: the DVS timecode input (engine_x64.dll) and RIAA,
+  FL's stop / reset of the platter at the song's end and its render pre-roll, FL's chunk grid for pattern events
+  (2…4 ms), the resampling of non-44.1 kHz samples [HYP].
 - Fruity Video Player: done in batch 2 (§7).
+- Newtone / Newtime: sub-round flnewt165 (REA_rodada165g-flnewt165.md). **Newtone out of beta**: its engine against
+  FL's own Newtone engine (EXEC harness, 135 states): per-note level within 0.4 dB (was 62 of 135 within 0.5 dB, worst
+  8.8 dB: FL's grain size and no gain correction), median pitch within 9 c, FL's tremolo and pitch ramps added, unedited
+  notes bit-identical; editor with FL's tools (Cut / glue, Center / Variation / Transition, Snap to scale, per-note
+  ramps / vibrato / tremolo, multi-select, undo, Score to piano roll / MIDI). Left: legato glides with long smooth times
+  (up to 40 c), FL's sample re-alignment after edits, Sync / Snap to grid / clipboard / Send to Playlist in the editor.
+  **Newtime stays beta**: FL's warp markers are not imported and zplane's élastique stretch is not reproduced (next
+  version: parse the markers, then fit LYNX's stretch to FL's renders as for Newtone).
 
 ## 7. Fruity Video Player [DECOMP Fruity Video Player_x64.dll][DATA Default.fst]
 What FL's plugin is (DFM forms + handlers): a generator that shows a video and plays its sound track, slaved to the
@@ -121,3 +126,20 @@ display (H:M:S:Ms and 14 SMPTE rates, menu tags = the saved index), Send audio t
 - Verified [TEST] video165_* (FL's Default.fst bytes round-trip, SMPTE drop frame, clock, the instrument's track at
   the delay / volume / mute); [SHOT] `LYNX.exe --videoshot prefix clip.mp4` on Windows with ffmpeg 8.1 (fresh
   profile): the editor's frames equal ffmpeg's frames at the same video times.
+
+## 8. Drops on the plugin windows (audit 165)
+- Bug: a sample dropped on the Fruity Granulizer's window fell through to the Playlist under it and made an audio clip
+  (switching to Song mode). FL's Granulizer takes the drop and plays the sample. Fix: the plugin page (ui/ChannelSettings
+  ModelPanel) is a Browser and OS drop target when projectcontents::pluginWindowTakesSample (the Granulizer), for the
+  files SampleLibrary::isSampleFile accepts (core/SampleFiles.h, .wv included); the drop sets the channel's sample,
+  keeps the knobs and the channel name (one undo step), with an accent frame while hovering. The Patcher node's Sample...
+  button takes the same file types now.
+- [TEST] grandrop165_granulizer_window_takes_a_dropped_sample: the drop's edit rebuilds the channel's instrument, which
+  then renders the new sample exactly (and not the old one).
+- [SHOT] Windows, fresh profile, real input (FL's "Render tests/Fruity Granulizer.flp"): Browser › Packs › Loops ›
+  DL Breaker dragged onto the Granulizer window → no new channel, no clip, Pattern mode kept, Current project › Audio
+  files = DL Breaker (808 Kick gone), History "Channel: 808 Kick". Explorer drag of DropLoop.wav onto the same window →
+  Audio files = DropLoop. (Before the fix, the same Browser drag made a "DL Breaker" audio clip channel and switched
+  to Song.)
+- Video Player: takes video files dropped from the system (the Browser lists no videos). Fruity Scratcher: its sub-round
+  (flscratch165) was asked to give its window the same drop target.

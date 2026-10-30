@@ -1,51 +1,47 @@
 #pragma once
 
-#include <juce_audio_processors/juce_audio_processors.h>
+#include <array>
+#include <vector>
 
+#include <juce_core/juce_core.h>
+
+#include "core/MetronomeVoice.h"
 #include "engine/Transport.h"
 
 namespace lynx
 {
-// Metronome: one click per beat, higher-pitched on the first beat
-// of the bar. Toggled by Transport::metronome.
-class Metronome final : public juce::AudioProcessor
+// The metronome (core/MetronomeVoice.h has FL's measured behaviour): one click per beat, the downbeat two semitones
+// up and louder. It no longer plays straight to the output: the Channel Rack node renders it each block and the
+// mixer adds it to the "Metronome track" (Transport::metronomeTrack; the Master by default), as FL does.
+// Toggled by Transport::metronome; it also counts the count-in.
+class Metronome final
 {
 public:
-    explicit Metronome (const Transport& transport);
+    // Loads the five sounds: FL's own files from `flDataFolder` (FL's "Data" folder), LYNX's stand-ins for any that
+    // is missing. Off the audio thread.
+    Metronome (const Transport& transport, const juce::File& flDataFolder);
 
-    const juce::String getName() const override { return "Metronome"; }
+    void prepare (double sampleRate, int maximumBlockSize);
 
-    void prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock) override;
-    void releaseResources() override {}
-    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override;
+    // Audio thread: the block's click into left/right (cleared first). False = silent block (nothing was written
+    // beyond the clearing).
+    bool render (float* left, float* right, int numSamples) noexcept;
 
-    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
-    bool hasEditor() const override { return false; }
+    const metronome::Sample& sound (int index) const noexcept { return sounds[(std::size_t) metronome::clampSound (index)]; }
+    // The block buffers the Channel Rack hands to the mixer (sized by prepare()).
+    float* bufferLeft() noexcept { return left.data(); }
+    float* bufferRight() noexcept { return right.data(); }
+    int capacity() const noexcept { return (int) left.size(); }
 
-    bool acceptsMidi() const override { return false; }
-    bool producesMidi() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
-
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
-    void changeProgramName (int, const juce::String&) override {}
-
-    void getStateInformation (juce::MemoryBlock&) override {}
-    void setStateInformation (const void*, int) override {}
+    // The five sounds, FL's files where `flDataFolder`\System has them.
+    static std::array<metronome::Sample, metronome::soundCount> loadSounds (const juce::File& flDataFolder);
 
 private:
     const Transport& transport;
-    double currentSampleRate = 44100.0;
+    std::array<metronome::Sample, metronome::soundCount> sounds;
+    metronome::Voice voice;
+    std::vector<float> left, right;
     std::int64_t lastBeat = -1;
-    double clickPhase = 0.0, clickPhase2 = 0.0;
-    double clickPhaseDelta = 0.0, clickPhaseDelta2 = 0.0;
-    int clickSamplesLeft = 0, clickLength = 1, clickSound = 0;
-    float clickAccent = 1.0f;
-    std::uint32_t noiseState = 0x9e3779b9u;
-    float hp1 = 0.0f, hp2 = 0.0f, lastNoise = 0.0f, lastHp = 0.0f;
-    float voiceSample() noexcept;
 
     // local copy of the Transport's time-signature table (start, bar length in ticks)
     std::array<std::pair<std::int64_t, std::int64_t>, Transport::maxSignatures> signatures {};

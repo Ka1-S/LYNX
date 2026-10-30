@@ -1,6 +1,6 @@
 # Platforms
 
-LYNX runs on Windows, macOS and Linux from one code base. The core (`src/core`, `src/flp`) is plain C++20 without
+LYNX SHARE runs on Windows, macOS and Linux from one code base. The core (`src/core`, `src/flp`) is plain C++20 without
 JUCE and builds anywhere; the app uses JUCE 8.0.4. Everything that differs per OS sits behind a few small helpers in
 `src/platform/`, so the rest of the code never spells out `%APPDATA%` or an `HWND`.
 
@@ -9,7 +9,7 @@ JUCE and builds anywhere; the app uses JUCE 8.0.4. Everything that differs per O
 | Builds | Zig cross build from Linux/WSL (`scripts/build-windows-zig.sh`, used for releases) or CMake + MSVC | CMake + Apple clang, universal arm64 + x86_64 | CMake + GCC or Clang |
 | Package | per-user installer (NSIS) + portable .zip | .dmg (ad-hoc signed, **not notarized**) | AppImage + .tar.gz (`install.sh`) |
 | Minimum | Windows 10 x64 | macOS 11 Big Sur | x86_64, glibc 2.35 (Ubuntu 22.04, Debian 12, Fedora 36), X11 or XWayland |
-| Audio drivers | Windows Audio (WASAPI shared / low-latency / exclusive), DirectSound, ASIO, built-in LYNX ASIO | Core Audio | PipeWire (LYNX's own client, loaded at run time), JACK, ALSA ([LINUX.md](LINUX.md)) |
+| Audio drivers | Windows Audio (WASAPI shared / low-latency / exclusive), DirectSound, ASIO, built-in LYNX ASIO | Core Audio | PipeWire (LYNX SHARE's own client, loaded at run time), JACK, ALSA ([LINUX.md](LINUX.md)) |
 | Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
 | Plugin sandbox (separate process) | yes (opt-in) | no | yes (opt-in) |
 | Settings | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `$XDG_CONFIG_HOME/LYNX` (`~/.config/LYNX`) |
@@ -17,7 +17,7 @@ JUCE and builds anywhere; the app uses JUCE 8.0.4. Everything that differs per O
 | Crash report + emergency save | `%APPDATA%\LYNX\autosave` | `.../Application Support/LYNX/autosave` | `~/.config/LYNX/autosave` |
 | FL Studio installation (factory samples, plugin database) | registry, else `Program Files\Image-Line\FL Studio*` | `/Applications/FL Studio*.app/Contents/Resources/FL` (layout not confirmed) | a Windows FL Studio under Wine: `$WINEPREFIX` or `~/.wine`, `drive_c/Program Files/Image-Line/FL Studio*` |
 
-`LYNX_FL_INSTALL=<folder>` points LYNX at an FL Studio installation anywhere (the folder that contains `Data`).
+`LYNX_FL_INSTALL=<folder>` points LYNX SHARE at an FL Studio installation anywhere (the folder that contains `Data`).
 Importing `.flp` projects works everywhere; the installation only adds FL's factory samples and plugin database.
 
 ## Platform helpers (`src/platform/`)
@@ -75,8 +75,8 @@ round 117 notes (`docs/analise/REA_rodada117.md`) list the measured differences.
 ## Windows plugins on Linux (yabridge)
 
 [yabridge](https://github.com/robbert-vdh/yabridge) turns Windows VST2/VST3 plugins into Linux ones running in Wine.
-LYNX treats them like any other Linux plugin: add the folder yabridge syncs to (`~/.vst3/yabridge` for VST3, the folder
+LYNX SHARE treats them like any other Linux plugin: add the folder yabridge syncs to (`~/.vst3/yabridge` for VST3, the folder
 of the `.so` files for VST2) in *Options › Plugins* or let the standard folders be scanned. Checked in round 161 with
 yabridge 5.1.1 and Wine 10.0: scanning, the plugin window, playback, export, and the plugin sandbox (the Wine host then
-runs under the sandbox child, so a crash there leaves LYNX running). Wine has to be installed by the user; LYNX
+runs under the sandbox child, so a crash there leaves LYNX SHARE running). Wine has to be installed by the user; LYNX SHARE
 itself needs nothing extra.

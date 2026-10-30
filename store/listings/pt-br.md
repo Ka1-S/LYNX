@@ -12,7 +12,7 @@ DAW gratuita e de código aberto com fluxo baseado em padrões: Channel Rack, Pi
 
 ## Description
 
-O LYNX (publicado aqui como LYNX SHARE) é uma estação de trabalho de áudio digital (DAW) gratuita e de código aberto
+O LYNX SHARE é uma estação de trabalho de áudio digital (DAW) gratuita e de código aberto
 para fazer beats e músicas. Ele segue o fluxo baseado em padrões que os beatmakers adoram — Channel Rack com
 sequenciador de passos, padrões, Piano Roll, Playlist com arranjos e um Mixer com inserts, sends e sidechain — e foi
 feito para continuar leve e rápido em qualquer PC.
@@ -24,22 +24,22 @@ compressores, limitadores, reverbs, delays, afinação de voz, visualizadores e 
 • Seus plugins: carrega instrumentos e efeitos VST3, CLAP e VST2, cada um opcionalmente em um processo separado
 (sandbox), para que um plugin que trave não derrube sua sessão.
 • Abre projetos do FL Studio (.flp) com padrões, notas, mixer, automação e samples, e importa arquivos MIDI.
-• Baixa latência: ASIO (inclusive o driver ASIO do próprio LYNX, para qualquer dispositivo), WASAPI compartilhado e
+• Baixa latência: ASIO (inclusive o driver ASIO do próprio LYNX SHARE, para qualquer dispositivo), WASAPI compartilhado e
 exclusivo.
 • Grave áudio e MIDI, edite áudio, automatize qualquer parâmetro, exporte em WAV, FLAC, MP3, OGG ou stems.
-• Interface em português do Brasil e inglês.
+• Interface em 15 idiomas: português do Brasil, inglês, espanhol, francês, alemão, italiano, holandês, polonês, russo, turco, indonésio, japonês, coreano e chinês (simplificado e tradicional).
 
-Sem conta, sem assinatura, sem anúncios e sem telemetria. O LYNX é software livre (GNU AGPL-3.0); o código-fonte
+Sem conta, sem assinatura, sem anúncios e sem telemetria. O LYNX SHARE é software livre (GNU AGPL-3.0); o código-fonte
 está no GitHub.
 
-O LYNX é um projeto independente, sem vínculo com a Image-Line nem endossado por ela. FL Studio é marca registrada da
+O LYNX SHARE é um projeto independente, sem vínculo com a Image-Line nem endossado por ela. FL Studio é marca registrada da
 Image-Line Software. Outros nomes de produtos são marcas de seus respectivos donos.
 
-O LYNX está em fase alfa: pode ter arestas; por favor, relate problemas no GitHub.
+O LYNX SHARE está em fase alfa: pode ter arestas; por favor, relate problemas no GitHub.
 
 ## What's new
 
-LYNX 0.1.20: primeira versão na Microsoft Store. Edição de pontos no estilo do FL no Fruity WaveShaper e nos clipes
+LYNX SHARE 0.1.20: primeira versão na Microsoft Store. Edição de pontos no estilo do FL no Fruity WaveShaper e nos clipes
 de automação, mais cinco efeitos do FL idênticos ao FL, controles do Dashboard que enviam MIDI e muitas correções.
 
 ## Features
@@ -52,7 +52,7 @@ de automação, mais cinco efeitos do FL idênticos ao FL, controles do Dashboar
 6. Motor multinúcleo que continua leve em PCs mais antigos
 7. Gravação de áudio e MIDI, editor de áudio, clipes de automação
 8. Exporta WAV, FLAC, MP3, OGG e stems
-9. Interface em português do Brasil e inglês
+9. Interface em 15 idiomas, incluindo português do Brasil
 10. Gratuito e de código aberto (AGPL-3.0): sem conta, sem anúncios, sem telemetria
 
 ## Search terms
@@ -67,7 +67,7 @@ de automação, mais cinco efeitos do FL idênticos ao FL, controles do Dashboar
 
 ## Screenshot captions
 
-- 01-workspace.png — A área de trabalho do LYNX: navegador, Playlist, Piano Roll, Channel Rack e Mixer
+- 01-workspace.png — A área de trabalho do LYNX SHARE: navegador, Playlist, Piano Roll, Channel Rack e Mixer
 - 02-playlist.png — Organize padrões, áudio e automação na Playlist
 - 03-piano-roll.png — Escreva melodias e acordes no Piano Roll
 - 04-mixer.png — Mixe com inserts, sends, sidechain e efeitos embutidos

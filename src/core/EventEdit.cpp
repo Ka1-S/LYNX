@@ -128,4 +128,63 @@ void applyLfo (PatternEvents& lane, std::int64_t from, std::int64_t to, const pr
 
     sortLane (lane);
 }
+std::vector<AutomationPoint> toAutomationPoints (const PatternEvents& lane, float sensitivity)
+{
+    std::vector<AutomationPoint> pts;
+    const auto& ev = lane.events;
+    if (ev.empty())
+        return pts;
+    // full sensitivity: a step per event (the value jumps at the event: two points at the same tick, then holds);
+    // lower: a point per event joined by lines, which the simplification below thins out
+    const auto exact = sensitivity >= 0.999f;
+    for (std::size_t i = 0; i < ev.size(); ++i)
+    {
+        if (i == 0)
+            pts.push_back ({ ev[i].tick, ev[i].value, 0.0f });
+        else if (std::abs (ev[i].value - ev[i - 1].value) > 1.0e-6f)
+        {
+            if (exact)
+                pts.push_back ({ ev[i].tick, ev[i - 1].value, 0.0f });
+            pts.push_back ({ ev[i].tick, ev[i].value, 0.0f });
+        }
+    }
+    if (pts.back().tick != ev.back().tick)
+        pts.push_back ({ ev.back().tick, ev.back().value, 0.0f });
+    // simplification: points within `eps` of the line through their neighbours go (Ramer-Douglas-Peucker on value)
+    const auto eps = (1.0 - std::clamp ((double) sensitivity, 0.4, 1.0)) / 0.6 * 0.08; // 1 -> exact, 0.4 -> 8 %
+    if (eps <= 0.0 || pts.size() < 3)
+        return pts;
+    std::vector<bool> keep (pts.size(), false);
+    keep.front() = keep.back() = true;
+    std::vector<std::pair<std::size_t, std::size_t>> stack { { 0, pts.size() - 1 } };
+    while (! stack.empty())
+    {
+        const auto [a, b] = stack.back();
+        stack.pop_back();
+        double worst = -1.0;
+        std::size_t at = a;
+        for (auto k = a + 1; k < b; ++k)
+        {
+            const auto span = (double) (pts[b].tick - pts[a].tick);
+            const auto t = span > 0.0 ? (double) (pts[k].tick - pts[a].tick) / span : 0.5;
+            const auto d = std::abs ((double) pts[k].value - ((double) pts[a].value + ((double) pts[b].value - pts[a].value) * t));
+            if (d > worst)
+            {
+                worst = d;
+                at = k;
+            }
+        }
+        if (worst > eps)
+        {
+            keep[at] = true;
+            stack.push_back ({ a, at });
+            stack.push_back ({ at, b });
+        }
+    }
+    std::vector<AutomationPoint> out;
+    for (std::size_t k = 0; k < pts.size(); ++k)
+        if (keep[k])
+            out.push_back (pts[k]);
+    return out;
+}
 } // namespace lynx::eventedit
