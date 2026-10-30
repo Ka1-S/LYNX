@@ -22,6 +22,8 @@ verdict MATCH / DIFFERENT / MISSING / UNVERIFIED. DIFFERENT / MISSING items that
   registry values restored afterwards), fix F done, Windows run mt0–mt12 + selftest OK (desktop clean, lock
   released). lynx_tests: 1887165 checks; the two fader checks of the new test expected a linear fader (fixed to FL's
   fader curve, `audit165za2_*` 36 checks, 0 failures). Next: land.
+- 2026-10-29 21:00: a2 DONE. Landed as 60c0a58e (merge: 1887178 checks, 0 failures; Windows selftest
+  `metronome=OK (FL sounds 5/5, downbeat peak 0.9391)`, result=OK). #4 reply draft and 0.1.20 notes updated.
 
 ## Evidence
 
