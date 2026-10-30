@@ -1,10 +1,8 @@
 # Round 165r crash13: GitHub issue #13 (caiorobertcr7, 0.1.17, Windows 11, ASIO4ALL 64 samples)
 
 ## Where I stopped
-- 2026-10-28 22:50: build-local with FL Data 0 failures (1787612 checks); Windows build OK, `--selftest` driver_panel=OK.
-  Windows GUI check of the fix done (below). Added the FL plugin database warm-up (3rd freeze source); Windows rebuild
-  running, then a short Settings-open check, land (merge lock + land.sh crash13), notes, reply (draft kept on
-  /mnt/e/lynx-work/crash13/reply13.md until it goes into tmp/coord/replies-0.1.20.md).
+- 2026-10-29: LANDED on main 23a36375 (land.sh: 1886023 checks 0 failures, Windows selftest driver_panel=OK). Notes
+  bullets and the #13 reply draft are in tmp/coord (notes-0.1.20.md, replies-0.1.20.md "## #13"). Round done.
 
 ## Crash (LYNX.exe 0.1.17 + LYNX.pdb from /mnt/d/lynx-work/crash-reports/symbols/0.1.17, `LYNX.exe --symbolize`)
 ```
