@@ -111,7 +111,8 @@ def candidates(field):
         return [f"desktopscreenshot{m.group(2)}", f"screenshot{m.group(2)}"]
     aliases = {"ReleaseNotes": ["releasenotes", "whatsnew"], "PrivacyPolicy": ["privacypolicy", "privacypolicyurl"],
                "WebsiteURL": ["websiteurl", "website"], "SupportContactInfo": ["supportcontactinfo", "supportcontact"],
-               "DevStudio": ["devstudio", "developedby"]}
+               "DevStudio": ["devstudio", "developedby"],
+               "CopyrightTrademarkInfo": ["copyrighttrademarkinfo", "copyrighttrademarkinformation"]}
     return aliases.get(field, [norm(field)])
 
 
@@ -129,7 +130,8 @@ def main(argv):
     exported, out = argv
     with open(exported, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.reader(f))
-    if not rows or [c.strip().lower() for c in rows[0][:4]] != ["field", "id", "type", "default"]:
+    # Partner Center has exported the third header both as "Type" and as "Type (Type)"
+    if not rows or [c.strip().lower().split(" (")[0] for c in rows[0][:4]] != ["field", "id", "type", "default"]:
         raise SystemExit("not a Partner Center listing export (first columns must be Field, ID, Type, default)")
     header = rows[0]
     index = {}
@@ -168,7 +170,8 @@ def main(argv):
 
     # one column per language file
     langs = sorted(f[:-3] for f in os.listdir(LISTINGS) if f.endswith(".md") and f != "common.md")
-    langs += sorted(extra for extra, source in REUSE.items() if source in langs and extra not in langs)
+    # an extra language goes in only when the export has its column: importing a column the submission lacks fails
+    langs += sorted(extra for extra, source in REUSE.items() if source in langs and extra not in langs and extra in [h.strip().lower() for h in header])
     for lang in langs:
         if lang in [h.strip().lower() for h in header]:
             column = [h.strip().lower() for h in header].index(lang)
