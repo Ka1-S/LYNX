@@ -142,7 +142,7 @@ public:
         find.onTextChange = [this] { refreshRows(); };
         addAndMakeVisible (find);
         pluginsOnly.setButtonText (tr ("Plugins only"));
-        pluginsOnly.setTooltip (tr ("Only third-party plugins (VST3 / CLAP), not LYNX's own instruments and effects"));
+        pluginsOnly.setTooltip (tr ("Only third-party plugins (VST3 / CLAP), not LYNX SHARE's own instruments and effects"));
         pluginsOnly.onClick = [this] { refreshRows(); };
         addAndMakeVisible (pluginsOnly);
         freeze.setButtonText (tr ("Freeze"));

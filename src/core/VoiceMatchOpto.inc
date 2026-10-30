@@ -49,6 +49,7 @@ double table (const double* xs, const double* ys, int n, double x) noexcept
 
 double autoMakeupDb (double peakReduction) noexcept { return table (amKnob, amGain, (int) std::size (amKnob), std::clamp (peakReduction, 0.0, 100.0)); }
 double makeupDb (double gainKnob_) noexcept { return table (gainKnob, gainLevel, (int) std::size (gainKnob), std::clamp (gainKnob_, 0.0, 100.0)); }
+double gainForMakeupDb (double db) noexcept { return std::clamp (table (gainLevel, gainKnob, (int) std::size (gainKnob), db), 0.0, 100.0); }
 double sensitivityDb (double peakReduction, double hiFreq) noexcept
 {
     const double pr = table (prKnob, prLevel, (int) std::size (prKnob), std::clamp (peakReduction, 0.0, 100.0)) - herLevel;

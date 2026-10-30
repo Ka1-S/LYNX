@@ -89,9 +89,9 @@ public:
     std::function<void (const juce::File&)> onSendToPlaylist; // a sample's "Send to the Playlist as an audio clip"
     std::function<void()> onPreviewVolumeChanged;             // the preview volume knob moved (the main window saves it)
 
-    // The sample preview volume knob beside the search box (0..125%, engine.setPreviewVolume): follows the engine.
+    // The sample preview volume slider on the preview strip (0..125%, engine.setPreviewVolume): follows the engine.
     void refreshPreviewVolume();
-    void stopPreview(); // the Stop button beside it
+    void stopPreview(); // the strip's Play / Stop toggle beside it
     // F2 on a Plugin database entry: rename it (FL's renamed plugins, issue #11); false when no plugin is selected
     bool renameSelectedPlugin();
 
@@ -187,6 +187,7 @@ private:
     void searchAnswered (const search::SearchResult& result, const juce::String& query, const juce::Array<juce::File>& scope);
     void indexStatusChanged();
     juce::String statusLine; // under the search box: indexing progress / what the search found
+    void showNote (const juce::String& text); // a short note there (files copied in), gone after a few seconds
     juce::Rectangle<int> statusArea;
     void rebuildRoots();
     void rebuildTree();
@@ -237,7 +238,7 @@ private:
     juce::TextEditor searchBox;
     class FocusWatcher; // a click outside the search box takes the keyboard back from it
     std::unique_ptr<FocusWatcher> focusWatcher;
-    IconButton stopButton { "stop preview", Icon::stop };
+    IconButton stopButton { "play or stop preview", Icon::play }; // on the preview strip (FL 2026)
     IconButton viewButton { "browser options", Icon::panelMenu };
     void refreshViewButton();
     juce::Slider previewVolume { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };

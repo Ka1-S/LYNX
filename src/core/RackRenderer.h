@@ -48,6 +48,11 @@ struct RackState
     std::vector<int> mixerVolumeAuto, mixerPanAuto;
     std::vector<std::vector<std::array<int, maxEffectParams>>> effectParamAuto; // [track][slot][param] (built-in)
     std::vector<std::vector<int>> effectMixAuto;                                 // [track][slot]: dry/wet
+    struct RouteAuto
+    {
+        int from = 0, to = 0, slot = -1;
+    };
+    std::vector<RouteAuto> routeAutos; // route level knobs (mixerSend), bound to mixerInputs by buildMixerGraph
     std::vector<int> liveAutomations;                                            // automations with a live source (controllers)
 
     // pattern events (event editor): each lane uses an automation slot after the song's automations
@@ -118,6 +123,7 @@ struct RackState
         int delay = 0; // index into sendDelays[source]
         float level = 1.0f;
         int tap = -1;  // ≥ 0: a Fruity Send slot's signal (sendTaps[tap]) instead of the source's output
+        int automation = -1; // the route's level automation (mixerSend, issue #12): its slot; -1 = none
     };
     std::vector<std::vector<MixerInput>> mixerInputs; // [track]; [0] = Master
 
@@ -278,6 +284,15 @@ public:
     void setHardwareOutput (HardwareOutput* out) noexcept { hwOut = out; }
     // Performance mode (round 165m): the launch commands / what plays, shared with the UI. Set before playback.
     void setPerformance (perf::Live* live) noexcept { perfLive = live; }
+    // The metronome's click for the next process() block (round 165z-a2, FL's Settings › Audio › "Metronome track"):
+    // added to the input of mixer track `track` (0 = the Master, FL's "---"; an insert this song lacks = the Master),
+    // so it plays through that track's effects and fader. nullptr = silent. Same thread as process().
+    void setMetronomeInput (const float* left, const float* right, int track) noexcept
+    {
+        clickLeft = left;
+        clickRight = right != nullptr ? right : left;
+        clickTrack = track;
+    }
 
     // Allocates the mixer buffers: call off the audio thread.
     // Blocks larger than maxBlockSize are processed in pieces.
@@ -409,6 +424,11 @@ private:
     std::vector<float> hwScratch; // 2 × blockCapacity
     void mixHardwareOutputs (const RackState& state, int n) noexcept;
     int liveInputOffset = 0; // of the chunk within the process() block
+    const float* clickLeft = nullptr;
+    const float* clickRight = nullptr;
+    int clickTrack = 0;
+    int metronomeTarget (const RackState& state) const noexcept;
+    void mixMetronome (const RackState& state, int track, int n) noexcept;
     void mixLiveInput (const RackState& state, bool playing, int n) noexcept;
     void mixLiveInputTrack (const RackState& state, int track, bool recording, bool playing, int n) noexcept;
     // the task graph run (RackState::graphOk): per chunk, each task's unfinished predecessors and the ready queue

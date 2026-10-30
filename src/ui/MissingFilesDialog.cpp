@@ -11,6 +11,25 @@ namespace
 {
 juce::String u8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 
+// "Used by" names come from core/MissingFiles in English ("Audio clip: Hook", "Insert 3: effect", "Master: effect")
+juce::String userName (const std::string& user)
+{
+    auto u = u8 (user);
+    juce::String suffix;
+    if (u.endsWith (": effect"))
+    {
+        u = u.dropLastCharacters (8);
+        suffix = ": " + tr ("effect");
+    }
+    if (u.startsWith ("Audio clip: "))
+        u = tr ("Audio clip") + ": " + u.substring (12);
+    else if (u == "Master")
+        u = tr ("Master");
+    else if (u.startsWith ("Insert ") && u.substring (7).containsOnly ("0123456789"))
+        u = tr ("Insert {0}", { u.substring (7) });
+    return u + suffix;
+}
+
 juce::File searchFoldersFile() { return PluginHost::settingsFolder().getChildFile ("search-folders.txt"); }
 
 // Recursive search of folders for the missing files' names, off the UI thread.
@@ -232,7 +251,7 @@ private:
             lines.add (tr ("{0} sample(s) used by {1} could not be found on this PC.",
                            { juce::String ((int) info.files.size()), info.projectName.isNotEmpty() ? info.projectName : tr ("this project") }));
         if (! info.plugins.empty())
-            lines.add (tr ("{0} plugin(s) will not sound as in FL Studio (not installed, not loaded, or without their settings): see what LYNX did with each.",
+            lines.add (tr ("{0} plugin(s) will not sound as in FL Studio (not installed, not loaded, or without their settings): see what LYNX SHARE did with each.",
                            { juce::String ((int) info.plugins.size()) }));
         if (! info.autoRelocated.empty())
             lines.add (tr ("{0} file(s) were found automatically in another folder.", { juce::String ((int) info.autoRelocated.size()) }));
@@ -312,7 +331,7 @@ private:
             name = u8 (pathFileName (m.path));
             juce::StringArray users;
             for (const auto& u : m.usedBy)
-                users.add (u8 (u));
+                users.add (userName (u));
             right = users.joinIntoString (", ");
             if (m.skipped)
             {
@@ -338,7 +357,7 @@ private:
             name = u8 (p.name);
             juce::StringArray users;
             for (const auto& u : p.usedBy)
-                users.add (u8 (u));
+                users.add (userName (u));
             right = users.joinIntoString (", ");
             detail = tr ("Replaced by: {0}", { p.replacementArg.empty() ? tr (u8 (p.replacement)) : tr (p.replacement.c_str(), { u8 (p.replacementArg) }) });
             if (! p.replacementArg.empty())

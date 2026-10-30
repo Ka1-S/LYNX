@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -20,12 +21,27 @@ void apply (const themes::Spec& spec, bool save = true);
 // Reads the saved theme and sets the tokens (call once at start, before the first window).
 void loadSaved();
 
-// .lynxtheme files (JSON: name, accent, background, workspace, image, fit, imageOpacity, dim).
+// .lynxtheme files (JSON: name, accent, background, workspace, image, fit, imageOpacity, dim, startupSound).
 juce::String toJson (const themes::Spec& spec);
 std::optional<themes::Spec> fromJson (const juce::String& json);
 bool saveFile (const themes::Spec& spec, const juce::File& file);
 std::optional<themes::Spec> loadFile (const juce::File& file);
 juce::File userThemesFolder(); // <settings>/Themes
+
+// Issue #12: workspace images live in a "Backgrounds" folder next to LYNX.exe (a portable LYNX keeps them when moved;
+// the settings folder's "Backgrounds" when LYNX's own folder can't be written; the test profile's under
+// LYNX_PROFILE_DIR). A theme names an image there by its relative path.
+juce::File backgroundsFolder();
+juce::File imageFile (const std::string& image); // the theme's image path as a file (relative: in backgroundsFolder)
+std::string imagePathFor (const juce::File& file); // how a theme stores this image (relative when in the folder)
+// Asks for a workspace image (PNG, JPEG, GIF), copies it into backgroundsFolder() unless it is there, and calls `done`
+// with the file (not called when cancelled or unreadable). Options › Theme and FL's View › Background use it.
+void chooseWorkspaceImage (std::function<void (const juce::File&)> done);
+// FL's View › Background (audit round 165z-a): "Set image wallpaper..." applies and saves the chosen image at once.
+void setImageWallpaper();
+void removeImageWallpaper();
+// Options › Theme › Startup sound: plays a startup sound now (path empty = LYNX's own). The main window sets it.
+extern std::function<void (const juce::String& path)> previewStartupSound;
 
 // Something that caches drawings in theme colours can listen (sent on the message thread after a change).
 juce::ChangeBroadcaster& changes();

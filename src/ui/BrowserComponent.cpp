@@ -286,7 +286,8 @@ private:
 // --- the tree (and, flat, the search results) ---------------------------------------------------------
 
 class BrowserComponent::FileTree final : public juce::Component,
-                                         public ui::HintSource
+                                         public ui::HintSource,
+                                         public juce::FileDragAndDropTarget
 {
 public:
     static constexpr int rowHeight = 22;
@@ -422,7 +423,7 @@ public:
         // Generators
         {
             auto gens = folder (root.get(), tr ("Generators"), Icon::keyboard);
-            auto lynxGens = folder (gens.get(), "LYNX", Icon::folder);
+            auto lynxGens = folder (gens.get(), "LYNX SHARE", Icon::folder);
             auto flGens = folder (gens.get(), tr ("FL engines"), Icon::folder);
             // FL's VFX note processors (round 164b): channels with no sound, they play other channels / Patcher nodes
             auto vfxGens = folder (gens.get(), tr ("VFX (note effects)"), Icon::folder);
@@ -445,7 +446,7 @@ public:
         // Effects
         {
             auto fxs = folder (root.get(), tr ("Effects"), Icon::mixer);
-            auto lynxFx = folder (fxs.get(), "LYNX", Icon::folder);
+            auto lynxFx = folder (fxs.get(), "LYNX SHARE", Icon::folder);
             auto flFx = folder (fxs.get(), tr ("FL engines"), Icon::folder);
             auto installed = folder (fxs.get(), tr ("Installed"), Icon::folder);
             Node* folders[] = { lynxFx.get(), flFx.get(), installed.get(), installed.get() };
@@ -842,6 +843,12 @@ public:
             }
         }
 
+        if (juce::isPositiveAndBelow (dropRow, (int) rows.size())) // files from the system would go here
+        {
+            g.setColour (accent);
+            g.drawRect (juce::Rectangle<int> (0, dropRow * rowHeight, getWidth(), rowHeight), 2);
+        }
+
         if (rows.empty() && status.isNotEmpty())
         {
             g.setColour (textDisabled);
@@ -854,6 +861,97 @@ public:
     {
         const auto row = y / rowHeight;
         return y >= 0 && row < (int) rows.size() ? row : -1;
+    }
+
+    // --- files dragged in from the system (issue #12): copied into the folder under the mouse ----------------------
+    // The folder row a drop at y lands in: a folder on disk, or a file's own folder; -1 = nowhere to copy to.
+    int dropFolderRow (int y) const
+    {
+        auto row = rowAt (y);
+        if (row < 0)
+            return -1;
+        const Node* n = rows[(std::size_t) row];
+        if (n->kind == Kind::file)
+            n = n->parent;
+        if (n == nullptr || n->kind != Kind::fsFolder || ! n->file.isDirectory())
+            return -1;
+        const auto it = std::find (rows.begin(), rows.end(), n);
+        return it != rows.end() ? (int) (it - rows.begin()) : -1;
+    }
+
+    bool isInterestedInFileDrag (const juce::StringArray& files) override
+    {
+        // the files the Browser lists (samples, MIDI, projects, presets): an other file would not show in the folder
+        return ! flat && std::any_of (files.begin(), files.end(), [] (const juce::String& f) {
+            const juce::File file (f);
+            return file.existsAsFile() && isListed (file);
+        });
+    }
+
+    void fileDragMove (const juce::StringArray&, int, int y) override
+    {
+        if (const auto row = dropFolderRow (y); row != dropRow)
+        {
+            dropRow = row;
+            repaint();
+        }
+    }
+
+    void fileDragExit (const juce::StringArray&) override
+    {
+        dropRow = -1;
+        repaint();
+    }
+
+    void filesDropped (const juce::StringArray& files, int, int y) override
+    {
+        dropRow = -1;
+        repaint();
+        const auto row = dropFolderRow (y);
+        if (row < 0)
+        {
+            browser.showNote (tr ("Drop the files on a folder to copy them there"));
+            return;
+        }
+        auto* folderNode = rows[(std::size_t) row];
+        const auto folder = folderNode->file;
+        int copied = 0;
+        juce::File first;
+        for (const auto& path : files)
+        {
+            const juce::File source (path);
+            if (! source.existsAsFile() || ! isListed (source) || source.getParentDirectory() == folder)
+                continue;
+            // never over a file that is there: "Kick (2).wav"
+            auto target = folder.getChildFile (source.getFileName());
+            if (target.exists())
+                target = folder.getNonexistentChildFile (source.getFileNameWithoutExtension(), source.getFileExtension(), true);
+            if (source.copyFileTo (target))
+            {
+                ++copied;
+                if (first == juce::File())
+                    first = target;
+            }
+        }
+        if (copied == 0)
+        {
+            browser.showNote (tr ("Nothing was copied to {0}", { folder.getFileName() }));
+            return;
+        }
+        // the folder lists again, open, with the first copy selected
+        folderNode->children.clear();
+        folderNode->loaded = false;
+        folderNode->expanded = true;
+        load (*folderNode);
+        rebuild();
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(std::size_t) i]->file == first)
+            {
+                select (i, false);
+                break;
+            }
+        browser.showNote (copied == 1 ? tr ("Copied 1 file to {0}", { folder.getFileName() })
+                                      : tr ("Copied {0} files to {1}", { juce::String (copied), folder.getFileName() }));
     }
 
     void mouseMove (const juce::MouseEvent& e) override { setHovered (rowAt (e.y)); }
@@ -1016,7 +1114,7 @@ public:
             case Kind::item:
                 return itemHint (n);
             case Kind::plugins:
-                h.text = tr ("Plugin database: LYNX's built-in generators and effects, FL's engines and the installed plugins") + "  "
+                h.text = tr ("Plugin database: LYNX SHARE's built-in generators and effects, FL's engines and the installed plugins") + "  "
                          + (n.expanded ? tr ("[LMB] close") : tr ("[LMB] open"));
                 h.value = n.detail;
                 return h;
@@ -1675,6 +1773,7 @@ private:
     juce::Array<juce::File> bases;
     juce::String status, pendingKey;
     int selected = -1, hovered = -1, pressedRow = -1;
+    int dropRow = -1; // the folder files dragged in from the system would be copied to
     bool dragStarted = false;
 };
 
@@ -1757,6 +1856,56 @@ public:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); } // the spectral waveform is ready
 
+    // FL 2026's preview strip (audit round 165z-a): over the waveform, bottom left, a Play / Stop toggle and the preview
+    // volume slider; they show while the mouse is over the strip or a sample plays
+    void adoptControls()
+    {
+        addChildComponent (browser.stopButton);
+        addChildComponent (browser.previewVolume);
+        updateControls();
+    }
+
+    void updateControls()
+    {
+        const auto playing = isPlaying();
+        const auto show = isAudio (file) && (playing || isMouseOver (true));
+        if (playing != shownPlaying) // (only on a change: this runs on every timer tick)
+        {
+            shownPlaying = playing;
+            browser.stopButton.setIcon (playing ? Icon::stop : Icon::play);
+            browser.stopButton.setPrimary (playing);
+            const auto text = playing ? tr ("Stop the sample preview") : tr ("Play the sample preview");
+            browser.stopButton.setTooltip (text);
+            ui::setHint (browser.stopButton, text, true);
+        }
+        if (browser.stopButton.isVisible() != show)
+        {
+            browser.stopButton.setVisible (show);
+            browser.previewVolume.setVisible (show);
+        }
+        if (show && ! isTimerRunning())
+            startTimerHz (30); // (hides them again when the mouse leaves)
+    }
+
+    void resized() override
+    {
+        auto row = getLocalBounds().reduced (8, 6).removeFromBottom (14);
+        browser.stopButton.setBounds (row.removeFromLeft (20));
+        row.removeFromLeft (6);
+        browser.previewVolume.setBounds (row.removeFromLeft (juce::jmin (90, juce::jmax (40, row.getWidth() / 2))));
+    }
+
+    void mouseEnter (const juce::MouseEvent&) override { updateControls(); }
+    void mouseExit (const juce::MouseEvent&) override { updateControls(); }
+
+    void togglePlay()
+    {
+        if (isPlaying())
+            browser.stopPreview();
+        else if (isAudio (file))
+            browser.fileSelected (file, true);
+    }
+
     void show (const juce::File& f, bool playing)
     {
         if (f != file)
@@ -1802,6 +1951,7 @@ public:
             startedAt = juce::Time::getMillisecondCounterHiRes();
             startTimerHz (30);
         }
+        updateControls();
         repaint();
     }
 
@@ -1903,8 +2053,10 @@ public:
 
     void stop()
     {
-        stopTimer();
         startedAt = 0.0;
+        if (! isMouseOver (true))
+            stopTimer();
+        updateControls();
         repaint();
     }
 
@@ -1918,12 +2070,15 @@ private:
 
     void timerCallback() override
     {
-        if (position() >= 1.0)
+        if (startedAt > 0.0 && position() >= 1.0)
         {
             stop();
             browser.tree->repaint(); // the "playing" colour goes
             browser.results->repaint();
         }
+        updateControls();
+        if (startedAt <= 0.0 && ! browser.stopButton.isVisible())
+            stopTimer();
         repaint();
     }
 
@@ -1933,6 +2088,7 @@ private:
     double seconds = 0.0, startedAt = 0.0;
     juce::String info;
     bool dragging = false;
+    std::optional<bool> shownPlaying; // the Play / Stop state the button shows
 };
 
 // --- the browser -------------------------------------------------------------------------------------
@@ -2038,14 +2194,15 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
                                 "OR, -word (not), \"exact phrase\", * and ? wildcards  [Enter] to the results  [Esc] clear"));
     addAndMakeVisible (searchBox);
 
-    // FL's Browser has a way to silence the preview too: a Stop button beside the preview volume (issue #9)
+    // FL's Browser has a way to silence the preview too (issue #9): a Play / Stop toggle on the preview strip, beside
+    // the preview volume, as in FL 2026 (audit round 165z-a); the strip adopts both below
     stopButton.setFlat (true);
     stopButton.setWantsKeyboardFocus (false);
     stopButton.setMouseClickGrabsKeyboardFocus (false);
-    stopButton.setTooltip (tr ("Stop the sample preview"));
-    ui::setHint (stopButton, tr ("Stop the sample preview"), true);
-    stopButton.onClick = [this] { stopPreview(); };
-    addAndMakeVisible (stopButton);
+    stopButton.onClick = [this] {
+        if (strip != nullptr)
+            strip->togglePlay();
+    };
 
     // what this Browser shows (round 163): content filter, folders shown, the Sample browser window
     viewButton.setFlat (true);
@@ -2055,7 +2212,8 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
     viewButton.onClick = [this] { showViewMenu(); };
     addAndMakeVisible (viewButton);
 
-    // the sample preview volume (FL's Browser has one too): a small knob at the end of the search row
+    // the sample preview volume (FL's Browser has one too): a slider on the preview strip, as in FL 2026
+    previewVolume.setSliderStyle (juce::Slider::LinearHorizontal);
     previewVolume.setRange (0.0, controls::maxUtilityVolume, 0.01);
     previewVolume.setDoubleClickReturnValue (true, 1.0);
     previewVolume.textFromValueFunction = [] (double v) { return ui::utilityVolumeText (v); };
@@ -2069,7 +2227,6 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
         if (onPreviewVolumeChanged != nullptr)
             onPreviewVolumeChanged();
     };
-    addAndMakeVisible (previewVolume);
     refreshPreviewVolume();
 
     tree = std::make_unique<FileTree> (*this, false);
@@ -2089,6 +2246,7 @@ BrowserComponent::BrowserComponent (AudioEngine& e, Role r)
 
     strip = std::make_unique<PreviewStrip> (*this);
     addAndMakeVisible (*strip);
+    strip->adoptControls();
     details = std::make_unique<DetailsBox>();
     addChildComponent (*details);
 
@@ -2491,7 +2649,7 @@ std::vector<BrowserComponent::FolderEntry> BrowserComponent::folderEntries() con
     std::vector<FolderEntry> out;
     out.push_back ({ browserview::projectRootId, tr ("Current project"), tr ("the project's patterns, channels, samples and history"),
                      view.shows (browserview::projectRootId), false, false });
-    out.push_back ({ browserview::pluginsRootId, tr ("Plugin database"), tr ("LYNX's, FL's and your installed plugins"),
+    out.push_back ({ browserview::pluginsRootId, tr ("Plugin database"), tr ("LYNX SHARE's, FL's and your installed plugins"),
                      view.shows (browserview::pluginsRootId), false, false });
     for (int i = 0; i < allRoots.size(); ++i)
     {
@@ -2808,8 +2966,6 @@ void BrowserComponent::resized()
     area.removeFromTop (4);
     {
         auto row = area.removeFromTop (24);
-        previewVolume.setBounds (row.removeFromRight (24));
-        stopButton.setBounds (row.removeFromRight (22));
         viewButton.setBounds (row.removeFromRight (22));
         row.removeFromRight (4);
         searchBox.setBounds (row);
@@ -2905,6 +3061,20 @@ void BrowserComponent::addSystemItems (juce::PopupMenu& menu, const juce::File& 
     system.addSeparator();
     system.addItem (tr ("Delete file..."), file.existsAsFile(), false, [this, file] { confirmDeleteFile (file); });
     menu.addSubMenu (tr ("File"), system);
+}
+
+void BrowserComponent::showNote (const juce::String& text)
+{
+    const auto relayout = text.isEmpty() != statusLine.isEmpty();
+    statusLine = text;
+    if (relayout)
+        resized();
+    repaint();
+    // it goes away by itself (unless something else wrote there meanwhile)
+    juce::Timer::callAfterDelay (5000, [safe = juce::Component::SafePointer<BrowserComponent> (this), text] {
+        if (safe != nullptr && safe->statusLine == text)
+            safe->showNote ({});
+    });
 }
 
 void BrowserComponent::confirmDeleteFile (const juce::File& file)
@@ -3390,7 +3560,7 @@ void BrowserComponent::loadSelected()
     {
         // Enter: into the selected LYNX Soundfont channel, else a new one
         if (! openSoundFontFile (engine, file, engine.getSelectedChannel()))
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX can read."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX SHARE can read."));
         return;
     }
     if (! onLoadIntoChannel || ! onLoadIntoChannel (file))
@@ -3459,7 +3629,7 @@ void BrowserComponent::openFile (const juce::File& file)
     if (file.hasFileExtension ("sf2;sf3"))
     {
         if (! openSoundFontFile (engine, file))
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX can read."));
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX SHARE can read."));
         return;
     }
     if (isAudio (file))
@@ -3503,7 +3673,7 @@ void BrowserComponent::openFile (const juce::File& file)
         }
         else
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Preset"),
-                                                    tr ("LYNX reads presets from 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun and Sakura."));
+                                                    tr ("LYNX SHARE reads presets from 3x Osc, Sytrus, Harmor, GMS, Harmless, MiniSynth, DX10, Fruit Kick, Ogun and Sakura."));
         return;
     }
 

@@ -5,6 +5,7 @@
 #include "core/LiveEventQueue.h"
 #include "core/RackRenderer.h"
 #include "core/SnapshotExchange.h"
+#include "engine/Metronome.h"
 #include "engine/Transport.h"
 
 namespace lynx
@@ -47,6 +48,12 @@ public:
     // Hardware output buses of the inserts (REA round 156).
     void setHardwareOutput (HardwareOutput* out) noexcept { renderer.setHardwareOutput (out); }
     void setPerformance (perf::Live* live) noexcept { renderer.setPerformance (live); }
+    // The metronome (round 165z-a2): rendered here each block and added to the "Metronome track" by the mixer, as
+    // FL plays it. Set before the device starts.
+    void setMetronome (std::unique_ptr<Metronome> m) noexcept { metronome = std::move (m); }
+    Metronome* getMetronome() noexcept { return metronome.get(); }
+    // Off during an offline render: FL never exports the click.
+    void setMetronomeAllowed (bool allowed) noexcept { metronomeAllowed.store (allowed); }
     // The renderer (its per-unit CPU profile, REA round 87).
     RackRenderer& getRenderer() noexcept { return renderer; }
     // Per instrument / effect processing time (Plugin performance monitor).
@@ -61,6 +68,8 @@ private:
     MeterBank& meters;
     RackRenderer renderer;
     juce::AudioBuffer<float> scratch; // for mono output
+    std::unique_ptr<Metronome> metronome;
+    std::atomic<bool> metronomeAllowed { true };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRackProcessor)
 };

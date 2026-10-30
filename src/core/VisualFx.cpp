@@ -984,7 +984,7 @@ const std::vector<Scene>& presets()
             parts.additive = true;
             s.layers.push_back (parts);
             auto text = make (LayerType::text, 0xffffffff, 0xffff3048, 0.5f, 0.5f, 0.35f, Band::beat, 0.4f);
-            text.text = "LYNX";
+            text.text = "LYNX SHARE";
             text.amount = 0.6f;
             s.layers.push_back (text);
             out.push_back (s);
@@ -1041,7 +1041,7 @@ const std::vector<Scene>& presets()
             s.layers.push_back (black());
             s.layers.push_back (fx (LayerType::terrain, "road"));
             auto title = make (LayerType::text, 0xffffffff, 0xffff2d95, 0.5f, 0.87f, 0.11f, Band::beat, 0.3f);
-            title.text = "LYNX";
+            title.text = "LYNX SHARE";
             title.amount = 0.7f;
             s.layers.push_back (title);
             s.layers.push_back (fx (LayerType::postprocess, "bloom"));
@@ -1344,7 +1344,7 @@ std::optional<Scene> fromZge (const std::vector<std::uint8_t>& state, std::vecto
         else if (has (app, "Text\\") || has (app, "HUD Text"))
         {
             l = make (LayerType::text, 0xffffffff, 0xffff3048, 0.5f, 0.5f, 0.2f, Band::beat, 0.3f);
-            l.text = text.empty() ? std::string ("LYNX") : text;
+            l.text = text.empty() ? std::string ("LYNX SHARE") : text;
             if (has (app, "TextTrueType") && p.size() >= 7)
             {
                 const auto c = zgeColour();

@@ -17,9 +17,14 @@ struct Transport
 {
     std::atomic<bool> playing { false };
     std::atomic<bool> metronome { false };
-    // the metronome's sound (FL's Metronome sound menu, REA round 165f): 0 click, 1 hi-hat, 2 tick, 3 beep, 4 cowbell, 5 pulse
-    std::atomic<int> metronomeSound { 0 };
-    std::atomic<float> metronomeVolume { 1.0f }; // the metronome's volume (0..1.25, 1 = the default click level)
+    // the metronome's sound in FL's Metronome sound menu order (core/MetronomeVoice.h, REA round 165z-a2): 0 Hi-hat,
+    // 1 Tick (FL's default), 2 Beep, 3 Cowbell, 4 Pulse
+    std::atomic<int> metronomeSound { 1 };
+    // LYNX's metronome volume trim (0..1.25; 1 = FL's level). FL has none: its click is set by the mixer track it
+    // plays through. Kept so a volume set before 0.1.20 still applies.
+    std::atomic<float> metronomeVolume { 1.0f };
+    // FL's Settings › Audio › Mixer › "Metronome track": 0 = "---" (the Master), n = insert n
+    std::atomic<int> metronomeTrack { 0 };
     std::atomic<bool> recording { false };
     std::atomic<double> bpm { 130.0 };
     // External clock sync (round 165f): > 0 = the tempo LYNX follows from an incoming MIDI clock, over the song's

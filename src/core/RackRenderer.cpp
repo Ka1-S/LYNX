@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/MetronomeVoice.h"
 
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
@@ -20,6 +21,7 @@
 #include "core/DirectWave.h"
 #include "core/SoundFont.h"
 #include "core/NewtoneFx.h"
+#include "core/Scratcher.h"
 
 #include <algorithm>
 #include <atomic>
@@ -233,6 +235,12 @@ std::shared_ptr<Effect> buildEffect (const EffectSlot& slot, double sampleRate, 
         // (Newtone: its note edits rendered by LYNX's engine, REA_rodada95)
         effect = newtonefx::make (factories.samples && ! slot.samplePath.empty() ? factories.samples (slot.samplePath) : nullptr,
                                   slot.state);
+        effect->prepare (sampleRate);
+    }
+    else if (kind == EffectKind::scratcher)
+    {
+        // Fruity Scratcher: its turntable's sample, loaded off the audio thread (REA_rodada165g-flscratch165)
+        effect = scratcher::make (factories.samples && ! slot.samplePath.empty() ? factories.samples (slot.samplePath) : nullptr);
         effect->prepare (sampleRate);
     }
     else
@@ -505,16 +513,26 @@ void RackState::buildMixerGraph()
         for (const auto listener : sidechainListeners[(std::size_t) t])
             depth[(std::size_t) listener] = std::max (depth[(std::size_t) listener], depth[(std::size_t) t] + 1);
 
+        // a route whose level knob is automated (issue #12)
+        auto routeAuto = [this, t] (int to) {
+            for (const auto& r : routeAutos)
+                if (r.from == t && r.to == to)
+                    return r.slot;
+            return -1;
+        };
+
         if (track.toMaster)
-            mixerInputs[0].push_back ({ t, 0, track.masterLevel });
+            mixerInputs[0].push_back ({ t, 0, track.masterLevel, -1, routeAuto (0) });
 
         for (std::size_t k = 0; k < track.sends.size(); ++k)
         {
             const auto& send = track.sends[k];
+            const auto automation = send.target > 0 ? routeAuto (send.target) : -1;
 
-            if (send.target > 0 && send.target < tracks && send.target != t && send.level > 0.0f)
+            // (a send at 0 is left out, unless an automation brings it up)
+            if (send.target > 0 && send.target < tracks && send.target != t && (send.level > 0.0f || automation >= 0))
             {
-                mixerInputs[(std::size_t) send.target].push_back ({ t, (int) k + 1, send.level });
+                mixerInputs[(std::size_t) send.target].push_back ({ t, (int) k + 1, send.level, -1, automation });
                 depth[(std::size_t) send.target] = std::max (depth[(std::size_t) send.target], depth[(std::size_t) t] + 1);
             }
         }
@@ -936,6 +954,7 @@ void RackState::buildAutomationTables()
     }
 
     pluginParams.clear();
+    routeAutos.clear();
     hasAutomation = false;
     tempoAutomation = -1;
 
@@ -968,7 +987,10 @@ void RackState::buildAutomationTables()
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::dashboard && t.param >= 0
                                       && t.param < surface::maxOutputs)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::voltage && t.param >= 0
-                                      && t.param < voltage::paramCount)))
+                                      && t.param < voltage::paramCount)
+                                  // the Sampler's knobs (issue #12)
+                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::sampler && t.param >= 0
+                                      && t.param < samplerparam::count)))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
                 else
                     used = false;
@@ -1000,6 +1022,19 @@ void RackState::buildAutomationTables()
                 break;
 
             case AutomationTargetKind::tempo: tempoAutomation = a; break;
+            case AutomationTargetKind::mixerSend:
+                if (trackOk && song.routes (t.index, t.slot))
+                {
+                    // the last one of the same route wins (as the loop's order makes it for the other targets)
+                    auto it = std::find_if (routeAutos.begin(), routeAutos.end(), [&t] (const RouteAuto& r) { return r.from == t.index && r.to == t.slot; });
+                    if (it == routeAutos.end())
+                        routeAutos.push_back ({ t.index, t.slot, a });
+                    else
+                        it->slot = a;
+                }
+                else
+                    used = false;
+                break;
             case AutomationTargetKind::none: used = false; break;
         }
 
@@ -1886,6 +1921,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         if (key < smartDisable.size() && slots[i].smartDisable && ! (isPlugin && ! slots[i].plugin.allowSmartDisable)
             && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
             && slots[i].kind != EffectKind::newtime
+            && slots[i].kind != EffectKind::scratcher // (nor the Scratcher: its turntable plays whatever the input)
             && slots[i].kind != EffectKind::hardwareInsert // (nor the hardware insert: outboard gear has its own tails and noise)
             && ! (slots[i].kind == EffectKind::patcher && patcher::usesHardwareIo (slots[i].patcher)) // (nor a Patcher holding one, round 165c)
             // (nor a controller: its outputs move whatever the sound — a silent insert is their usual place; round 164)
@@ -2834,6 +2870,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
         if (liveInput != nullptr && liveInput->numChannels > 0)
             mixLiveInput (state, playing, numSamples);
+        mixMetronome (state, metronomeTarget (state), numSamples);
 
         // 2) inserts by layers: within a layer nothing depends on anything else; each track pulls the
         //    outputs of the tracks that send to it (without writing into others' buffers)
@@ -3118,6 +3155,7 @@ bool RackRenderer::runTaskGraph (const RackState& state, bool playing, int chann
             sumChannelsInto (state, t, channels, n);
             if (live)
                 mixLiveInputTrack (state, t, recording, playing, n);
+            mixMetronome (state, t, n);
             processTrack (state, t, n, meters);
         }
         for (auto k = state.graphNextStart[(std::size_t) id]; k < state.graphNextStart[(std::size_t) id + 1]; ++k)
@@ -3133,7 +3171,30 @@ bool RackRenderer::runTaskGraph (const RackState& state, bool playing, int chann
     sumChannelsInto (state, 0, channels, n);
     if (live)
         mixLiveInputTrack (state, 0, recording, playing, n);
+    mixMetronome (state, 0, n);
     return true;
+}
+
+int RackRenderer::metronomeTarget (const RackState& state) const noexcept
+{
+    return metronome::targetTrack (clickTrack, std::min ((int) state.song.mixer.size(), maxMixerTracks));
+}
+
+// the metronome's click into its track's input (round 165z-a2); `track` is the one being filled, the click goes in
+// only when it is the metronome's
+void RackRenderer::mixMetronome (const RackState& state, int track, int n) noexcept
+{
+    if (clickLeft == nullptr || state.song.mixer.empty() || track != metronomeTarget (state))
+        return;
+    auto* dl = trackBuffer (track, 0);
+    auto* dr = trackBuffer (track, 1);
+    const auto* a = clickLeft + liveInputOffset;
+    const auto* b = clickRight + liveInputOffset;
+    for (int i = 0; i < n; ++i)
+    {
+        dl[i] += a[i];
+        dr[i] += b[i];
+    }
 }
 
 void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
@@ -3147,6 +3208,9 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
     for (const auto& in : state.mixerInputs[(std::size_t) t])
     {
         const auto tap = in.tap >= 0 && in.tap < RackState::maxSendTaps ? in.tap : -1;
+        // an automated route level (fader curve, like the knob)
+        const auto automatedLevel = in.automation >= 0 ? automationValues[(std::size_t) in.automation] : std::numeric_limits<float>::quiet_NaN();
+        const auto level = std::isnan (automatedLevel) ? in.level : faderGain (automatedLevel);
         const auto active = tap >= 0 ? tapActive[(std::size_t) tap] : trackActive[(std::size_t) in.source];
         const auto& delays = state.sendDelays[(std::size_t) in.source];
         auto* delay = (std::size_t) in.delay < delays.size() ? delays[(std::size_t) in.delay].get() : nullptr;
@@ -3159,7 +3223,7 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
         {
             // PDC: this edge is shorter than the slowest one arriving here. A silent source
             // still drains the tail that was in the line.
-            delay->mixInto (active ? sl : nullptr, active ? sr : nullptr, in.level, dl, dr, n);
+            delay->mixInto (active ? sl : nullptr, active ? sr : nullptr, level, dl, dr, n);
             continue;
         }
 
@@ -3168,8 +3232,8 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
 
         for (int i = 0; i < n; ++i)
         {
-            dl[i] += sl[i] * in.level;
-            dr[i] += sr[i] * in.level;
+            dl[i] += sl[i] * level;
+            dr[i] += sr[i] * level;
         }
     }
 }

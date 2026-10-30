@@ -1,11 +1,11 @@
 name: Feature request
-description: Suggest something new, or an FL Studio feature that LYNX is missing.
+description: Suggest something new, or an FL Studio feature that LYNX SHARE is missing.
 labels: ["enhancement"]
 body:
   - type: textarea
     id: idea
     attributes:
-      label: What would you like LYNX to do?
+      label: What would you like LYNX SHARE to do?
     validations:
       required: true
 

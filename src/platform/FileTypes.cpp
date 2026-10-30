@@ -67,7 +67,7 @@ bool writeEntry (const juce::File& appImage)
 {
     auto text = appDir().getChildFile (entryName).loadFileAsString();
     if (text.isEmpty())
-        text = "[Desktop Entry]\nType=Application\nName=LYNX\nIcon=lynx\nTerminal=false\nCategories=AudioVideo;Audio;Midi;Music;Sequencer;\n"
+        text = "[Desktop Entry]\nType=Application\nName=LYNX SHARE\nIcon=lynx\nTerminal=false\nCategories=AudioVideo;Audio;Midi;Music;Sequencer;\n"
                "MimeType=application/x-lynx-project;\n";
     juce::StringArray lines;
     lines.addLines (text);
@@ -156,7 +156,7 @@ void registerFileTypes()
 
     WindowsRegistry::setValue (classes + ".lynx\\", progId);
     WindowsRegistry::setValue (classes + ".lynx\\Content Type", juce::String ("application/x-lynx-project"));
-    WindowsRegistry::setValue (classes + progId + "\\", juce::String ("LYNX Project"));
+    WindowsRegistry::setValue (classes + progId + "\\", juce::String ("LYNX SHARE Project"));
     WindowsRegistry::setValue (classes + progId + "\\DefaultIcon\\", icon);
     WindowsRegistry::setValue (classes + progId + "\\shell\\open\\command\\", command);
     // Explorer caches icons per type: tell it the association changed

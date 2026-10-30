@@ -1,6 +1,6 @@
 # Code of Conduct
 
-LYNX is made by and for people who love making music. We want the issues, pull requests and every other LYNX space to be friendly and welcoming for everyone, whatever their experience, background or the DAW they come from.
+LYNX SHARE is made by and for people who love making music. We want the issues, pull requests and every other LYNX SHARE space to be friendly and welcoming for everyone, whatever their experience, background or the DAW they come from.
 
 ## Expected
 - Be kind and patient, especially with people who are new to music software or to open source.

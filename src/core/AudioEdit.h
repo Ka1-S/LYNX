@@ -32,12 +32,42 @@ struct Marker
     bool isRegion() const noexcept { return end > start; }
 };
 
+// --- point envelopes (round 165l: the curves drawn in the tool forms and the amp envelopes over the audio) ---------
+// x 0..1 (time or frequency, depending on the tool), y 0..1; `tension` bends the segment that ends at the point
+// (-1..1, 0 = straight; positive = slow start). Points are kept sorted by x.
+struct EnvPoint
+{
+    double x = 0.0, y = 0.0;
+    float tension = 0.0f;
+};
+
+struct Envelope
+{
+    std::vector<EnvPoint> points;
+
+    bool empty() const noexcept { return points.empty(); }
+    // The value at x (the first / last point's value outside them; 0 when there are no points).
+    double at (double x) const noexcept;
+    void sort();
+    // Index of the point inserted at (x, y).
+    int insert (double x, double y, float tension = 0.0f);
+
+    static Envelope flat (double y); // two points (0, y) and (1, y)
+};
+
 struct Document
 {
     Audio audio;
     std::vector<Marker> markers; // sorted by start
     std::int64_t loopStart = -1, loopEnd = -1; // frames [loopStart, loopEnd), -1 = no loop
     std::string title;
+    // Edison's amp envelopes drawn over the audio (round 165l; x 0..1 over the whole audio; empty = none), applied
+    // by "Mixdown amp envelopes" (core/AudioEditTools.h).
+    Envelope volumeEnvelope, panEnvelope, separationEnvelope;
+    // the mix envelope of "Paste mix (envelope)" (not heard: it says how much of the clipboard is mixed in)
+    Envelope mixEnvelope;
+    // the position envelope of "Scratch (envelope)" (not heard until applied)
+    Envelope scratchEnvelope;
 
     bool hasLoop() const noexcept { return loopStart >= 0 && loopEnd > loopStart; }
 };

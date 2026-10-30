@@ -85,7 +85,7 @@ void migrateFromUnpackaged (const juce::File& target)
                 copied.add (name);
         }
     }
-    marker.replaceWithText ("Copied from " + old.getFullPathName() + " on first start of the packaged LYNX:\n"
+    marker.replaceWithText ("Copied from " + old.getFullPathName() + " on first start of the packaged LYNX SHARE:\n"
                             + copied.joinIntoString ("\n") + "\n");
 }
 } // namespace

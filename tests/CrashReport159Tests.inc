@@ -210,7 +210,7 @@ TEST (report159_github_url)
     CHECK (githubOsOption ("Windows 11") == "Windows 11" && githubOsOption ("Windows 10") == "Windows 10");
     CHECK (githubOsOption ("Mac OSX 15.1", "arm64") == "macOS (Apple silicon)" && githubOsOption ("Mac OSX 15.1", "x86_64") == "macOS (Intel)");
     CHECK (githubOsOption ("Linux", {}, true) == "Linux (AppImage)" && githubOsOption ("Linux") == "Linux (tar.gz)" && githubOsOption ("BeOS").empty());
-    CHECK (githubKindOption ("crash") == "LYNX closed (crash)" && githubKindOption ("hang") == "LYNX froze (not responding)"
+    CHECK (githubKindOption ("crash") == "LYNX SHARE closed (crash)" && githubKindOption ("hang") == "LYNX SHARE froze (not responding)"
            && githubKindOption ("manual") == "Other");
 
     IssueFields f;
@@ -220,8 +220,8 @@ TEST (report159_github_url)
     f.kind = githubKindOption ("crash");
     f.steps = "1. Open the editor\n2. LYNX closes";
     const auto url = githubIssueUrl (f);
-    CHECK (url.rfind ("https://github.com/Ka1-S/LYNX/issues/new?template=bug_report.yml&", 0) == 0);
-    CHECK (has (url, "&os=Windows%2011") && has (url, "&kind=LYNX%20closed%20%28crash%29") && has (url, "&version=0.1.16"));
+    CHECK (url.rfind ("https://github.com/Ka1-S/LYNX-SHARE/issues/new?template=bug_report.yml&", 0) == 0);
+    CHECK (has (url, "&os=Windows%2011") && has (url, "&kind=LYNX%20SHARE%20closed%20%28crash%29") && has (url, "&version=0.1.16"));
     CHECK (has (url, "&steps=1.%20Open%20the%20editor%0A2.%20LYNX%20closes"));
     CHECK (! has (url, "&logs=")); // empty fields are left out
 

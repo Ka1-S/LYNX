@@ -35,15 +35,15 @@ SignPath requires MFA for everyone with commit or approval rights.
 
 1. Open <https://signpath.org/apply> (linked from <https://signpath.org>) and fill in the form. Suggested answers:
    - **Project name:** LYNX
-   - **Repository:** https://github.com/Ka1-S/LYNX
-   - **Homepage / download page:** https://lynx-share.com and https://github.com/Ka1-S/LYNX/releases
+   - **Repository:** https://github.com/Ka1-S/LYNX-SHARE
+   - **Homepage / download page:** https://lynx-share.com and https://github.com/Ka1-S/LYNX-SHARE/releases
    - **Licence:** GNU AGPL-3.0 (OSI approved); components listed in `THIRD_PARTY.md`
    - **Description:** a free, open-source digital audio workstation for Windows (C++/JUCE) with a pattern-based
      workflow; it opens `.flp` project files.
    - **Build system:** GitHub Actions, workflow `.github/workflows/release.yml`, GitHub-hosted runners
    - **Artifacts to sign:** `LYNX.exe` (64-bit PE); later also the installer, if one is added
-   - **Code signing policy URL:** https://github.com/Ka1-S/LYNX#code-signing-policy
-   - **Privacy policy URL:** https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md
+   - **Code signing policy URL:** https://github.com/Ka1-S/LYNX-SHARE#code-signing-policy
+   - **Privacy policy URL:** https://github.com/Ka1-S/LYNX-SHARE/blob/main/PRIVACY.md
    - **Team / roles:** Ka1-S is author, reviewer and approver
    - **Maturity:** public releases since 0.1.0 alpha (October 2026)
 2. Wait for their e-mail. They may ask questions or request changes; the README and website already say
@@ -55,8 +55,8 @@ SignPath creates an organization for LYNX and invites you to <https://app.signpa
 
 1. Log in, enable MFA on the SignPath account too.
 2. **Trusted build system:** link GitHub.com (*Trusted Build Systems* → GitHub.com) and install the SignPath GitHub
-   app on `Ka1-S/LYNX` when asked. This lets SignPath verify that the artifact came from this repository's workflow.
-3. **Project:** create (or check) the project with slug `LYNX`, repository `https://github.com/Ka1-S/LYNX`.
+   app on `Ka1-S/LYNX-SHARE` when asked. This lets SignPath verify that the artifact came from this repository's workflow.
+3. **Project:** create (or check) the project with slug `LYNX`, repository `https://github.com/Ka1-S/LYNX-SHARE`.
 4. **Artifact configuration** (the GitHub artifact `LYNX-unsigned` is a zip containing `LYNX.exe`):
 
    ```xml

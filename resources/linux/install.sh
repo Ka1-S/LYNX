@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs LYNX for the current user (no root): the program in ~/.local/opt/LYNX, a launcher in ~/.local/bin,
+# Installs LYNX SHARE for the current user (no root): the program in ~/.local/opt/LYNX, a launcher in ~/.local/bin,
 # the menu entry, the icon and the .lynx file type. Run it again to update; ./install.sh --uninstall removes it.
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -11,7 +11,7 @@ if [ "$1" = "--uninstall" ]; then
     rm -rf "$opt" "$bin/LYNX" "$data/applications/lynx.desktop" "$data/icons/hicolor/256x256/apps/lynx.png" "$data/mime/packages/lynx-mime.xml"
     command -v update-mime-database > /dev/null && update-mime-database "$data/mime" || true
     command -v update-desktop-database > /dev/null && update-desktop-database "$data/applications" || true
-    echo "LYNX removed (your settings stay in ${XDG_CONFIG_HOME:-$HOME/.config}/LYNX)."
+    echo "LYNX SHARE removed (your settings stay in ${XDG_CONFIG_HOME:-$HOME/.config}/LYNX)."
     exit 0
 fi
 
@@ -24,4 +24,4 @@ cp "$here/lynx-mime.xml" "$data/mime/packages/lynx-mime.xml"
 command -v update-mime-database > /dev/null && update-mime-database "$data/mime" || true
 command -v update-desktop-database > /dev/null && update-desktop-database "$data/applications" || true
 command -v gtk-update-icon-cache > /dev/null && gtk-update-icon-cache -q "$data/icons/hicolor" 2> /dev/null || true
-echo "LYNX installed: start it from the applications menu or run $bin/LYNX"
+echo "LYNX SHARE installed: start it from the applications menu or run $bin/LYNX"

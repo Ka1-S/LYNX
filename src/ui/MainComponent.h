@@ -43,6 +43,7 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override; // right-click on the toolbar: the toolbar menu
     bool keyPressed (const juce::KeyPress& key) override;
+    void dragOperationStarted (const juce::DragAndDropTarget::SourceDetails&) override; // (issue #12: drops on windows)
     bool keyFromSecondaryWindow (const juce::KeyPress& key); // a key a tool / plugin window left unused
     bool keyStateChanged (bool isKeyDown) override;
     ui::Hint hintAt (juce::Point<int> position) override; // the toolbar's background: how to edit it
@@ -133,6 +134,7 @@ private:
     // transport
     void playStop();     // Space: play, or stop and go back to where playback started
     void playPause();    // Ctrl+Space: pause / resume where it is
+    void playFromStart(); // Shift+Space (FL): play; while playing, stop at the start of the time selection / song / pattern
     void stopAndRewind (bool toStart = false); // toStart: the very start, ignoring "Remember seek time"
     void showStopMenu(); // right-click on Stop: "remember seek time", panic // the Stop button
     double playStartTicks = 0.0;

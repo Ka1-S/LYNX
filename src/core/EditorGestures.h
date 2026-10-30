@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace lynx
 {
@@ -391,5 +392,31 @@ inline OverviewWindow overviewCentredOn (double at, OverviewWindow w, double tot
     w.start = std::clamp (at - w.length / 2.0, 0.0, std::max (0.0, total - w.length));
     return w;
 }
+
+// FL 2026 [SHOT, round 165z-b]: a double right-click held down is the Mute tool. The first right-click already deleted
+// the clip under it and FL does not bring it back; while sweeping, the first clip crossed decides one state (unmuted
+// -> mute every clip crossed, muted -> unmute every clip crossed) and each clip is touched once.
+inline bool isDoubleClick (std::uint32_t lastMs, std::uint32_t nowMs, double distancePixels,
+                           std::uint32_t windowMs = 500, double maxPixels = 6.0)
+{
+    return lastMs != 0 && nowMs - lastMs < windowMs && distancePixels < maxPixels;
+}
+
+struct MuteSweep
+{
+    bool decided = false;
+    bool target = true;
+
+    // the state a clip crossed by the sweep gets; the first one decides
+    bool touch (bool clipMuted)
+    {
+        if (! decided)
+        {
+            target = ! clipMuted;
+            decided = true;
+        }
+        return target;
+    }
+};
 } // namespace gesture
 } // namespace lynx

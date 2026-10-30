@@ -4,15 +4,15 @@ PackageVersion: <VERSION>
 PackageLocale: en-US
 Publisher: Ka1-S
 PublisherUrl: https://github.com/Ka1-S
-PublisherSupportUrl: https://github.com/Ka1-S/LYNX/issues
-PrivacyUrl: https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md
-PackageName: LYNX
+PublisherSupportUrl: https://github.com/Ka1-S/LYNX-SHARE/issues
+PrivacyUrl: https://github.com/Ka1-S/LYNX-SHARE/blob/main/PRIVACY.md
+PackageName: LYNX SHARE
 PackageUrl: https://lynx-share.com
 License: AGPL-3.0-or-later
-LicenseUrl: https://github.com/Ka1-S/LYNX/blob/main/LICENSE
+LicenseUrl: https://github.com/Ka1-S/LYNX-SHARE/blob/main/LICENSE
 ShortDescription: Free, open-source digital audio workstation with a pattern-based workflow.
 Description: |-
-  LYNX is a free, open-source DAW with a Channel Rack step sequencer, Piano Roll, Playlist and Mixer. It hosts VST3,
+  LYNX SHARE is a free, open-source DAW with a Channel Rack step sequencer, Piano Roll, Playlist and Mixer. It hosts VST3,
   CLAP and VST2 plugins, has 100+ built-in instruments and effects and opens FL Studio projects (.flp) and MIDI files.
 Moniker: lynx
 Tags:
@@ -22,6 +22,6 @@ Tags:
   - midi
   - vst
   - beatmaker
-ReleaseNotesUrl: https://github.com/Ka1-S/LYNX/releases/tag/v<VERSION>
+ReleaseNotesUrl: https://github.com/Ka1-S/LYNX-SHARE/releases/tag/v<VERSION>
 ManifestType: defaultLocale
 ManifestVersion: 1.6.0

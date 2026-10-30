@@ -21,14 +21,14 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName",      "Ka1-S"
-            VALUE "FileDescription",  "LYNX digital audio workstation"
+            VALUE "FileDescription",  "LYNX SHARE digital audio workstation"
             VALUE "FileVersion",      LYNX_VERSION_STR
             VALUE "InternalName",     "LYNX"
             VALUE "LegalCopyright",   "Copyright (C) 2026 Ka1-S. Licensed under the GNU AGPL-3.0."
             VALUE "OriginalFilename", "LYNX.exe"
-            VALUE "ProductName",      "LYNX"
+            VALUE "ProductName",      "LYNX SHARE"
             VALUE "ProductVersion",   LYNX_VERSION_STR
-            VALUE "Comments",         "https://github.com/Ka1-S/LYNX"
+            VALUE "Comments",         "https://github.com/Ka1-S/LYNX-SHARE"
         END
     END
     BLOCK "VarFileInfo"

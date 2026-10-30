@@ -47,6 +47,9 @@ std::vector<Action> makeActions()
         // transport and modes
         { "transport.playStop", TR_NOOP ("Play / stop (back to where playback started)"), Context::global, { chord (space) } },
         { "transport.pause", TR_NOOP ("Play / pause"), Context::global, { chord (space, ctrl) } },
+        // FL 2026 (checked in FL, round 165s): Shift+Space stops and goes back to the start of the song / pattern, or
+        // plays from there when stopped; the position clicked on a ruler is ignored (issue #11)
+        { "transport.playFromStart", TR_NOOP ("Play, or stop at the start of the song or pattern"), Context::global, { chord (space, shift) } },
         { "transport.toggleMode", TR_NOOP ("Pattern / song mode"), Context::global, { chord ('L') }, true },
         { "transport.nextMarker", TR_NOOP ("Jump to the next song marker (Quantize song jumps while playing)"), Context::global, { chord (numpadMultiply, alt) } },
         { "transport.previousMarker", TR_NOOP ("Jump to the previous song marker"), Context::global, { chord (numpadDivide, alt) } },

@@ -236,46 +236,60 @@ void SplashScreen::paint (juce::Graphics& g)
         g.setOpacity (1.0f);
     }
 
-    // "LYNX": the letters slide in one after another
+    // "LYNX SHARE" (v0.1.20 rename): "LYNX" big, "SHARE" under it in the accent colour, spaced out to the same
+    // width; the letters slide in one after another
     {
-        const juce::String word ("LYNX");
+        const juce::String word ("LYNX"), word2 ("SHARE");
         const juce::Font big (juce::FontOptions (78.0f, juce::Font::bold));
-        g.setFont (big);
-        auto x = 300.0f;
-        const auto baseline = 172.0f;
+        const juce::Font small (juce::FontOptions (30.0f, juce::Font::bold));
+        const auto left = 300.0f;
+        const auto baseline = 150.0f, baseline2 = 188.0f;
 
+        auto lynxWidth = 0.0f;
         for (int i = 0; i < word.length(); ++i)
+            lynxWidth += juce::GlyphArrangement::getStringWidth (big, word.substring (i, i + 1)) + 3.0f;
+        lynxWidth -= 3.0f;
+        auto shareWidth = 0.0f;
+        for (int i = 0; i < word2.length(); ++i)
+            shareWidth += juce::GlyphArrangement::getStringWidth (small, word2.substring (i, i + 1));
+        const auto tracking = juce::jmax (2.0f, (lynxWidth - shareWidth) / (float) juce::jmax (1, word2.length() - 1));
+
+        const auto drawWord = [&] (const juce::String& w, const juce::Font& f, float y, float gap, double start, juce::Colour c)
         {
-            const auto letter = word.substring (i, i + 1);
-            const auto p = (float) easeOutCubic ((t - 0.50 - 0.075 * i) / 0.30);
-            const auto advance = juce::GlyphArrangement::getStringWidth (big, letter) + 3.0f;
-
-            if (p > 0.0f)
+            g.setFont (f);
+            auto x = left;
+            for (int i = 0; i < w.length(); ++i)
             {
-                g.setColour (colour::textPrimary.withAlpha (p));
-                g.drawSingleLineText (letter, juce::roundToInt (x + (1.0f - p) * 26.0f), juce::roundToInt (baseline));
+                const auto letter = w.substring (i, i + 1);
+                const auto p = (float) easeOutCubic ((t - start - 0.075 * i) / 0.30);
+                if (p > 0.0f)
+                {
+                    g.setColour (c.withMultipliedAlpha (p));
+                    g.drawSingleLineText (letter, juce::roundToInt (x + (1.0f - p) * 26.0f), juce::roundToInt (y));
+                }
+                x += juce::GlyphArrangement::getStringWidth (f, letter) + gap;
             }
+        };
+        drawWord (word, big, baseline, 3.0f, 0.50, colour::textPrimary);
+        drawWord (word2, small, baseline2, tracking, 0.68, colour::accent);
 
-            x += advance;
-        }
-
-        // an accent underline that grows after the word
-        const auto line = (float) easeOutCubic ((t - 0.85) / 0.35);
+        // an accent underline that grows after the words
+        const auto line = (float) easeOutCubic ((t - 0.95) / 0.35);
         if (line > 0.0f)
         {
             g.setColour (colour::accent);
-            g.fillRoundedRectangle (302.0f, baseline + 16.0f, 54.0f * line, 4.0f, 2.0f);
+            g.fillRoundedRectangle (302.0f, baseline2 + 12.0f, 54.0f * line, 4.0f, 2.0f);
         }
 
-        const auto info = (float) easeOutCubic ((t - 0.95) / 0.35);
+        const auto info = (float) easeOutCubic ((t - 1.05) / 0.35);
         if (info > 0.0f)
         {
             g.setColour (colour::textSecondary.withAlpha (info));
             g.setFont (font (type::title));
-            g.drawText (tr ("Digital audio workstation"), 302, (int) baseline + 30, 240, 22, juce::Justification::centredLeft);
+            g.drawText (tr ("Digital audio workstation"), 302, (int) baseline2 + 24, 240, 22, juce::Justification::centredLeft);
             g.setColour (colour::textDisabled.withAlpha (info));
             g.setFont (font (type::small));
-            g.drawText (tr ("Version {0}", { JUCE_APPLICATION_VERSION_STRING }), 302, (int) baseline + 54, 240, 18, juce::Justification::centredLeft);
+            g.drawText (tr ("Version {0}", { JUCE_APPLICATION_VERSION_STRING }), 302, (int) baseline2 + 48, 240, 18, juce::Justification::centredLeft);
         }
     }
 

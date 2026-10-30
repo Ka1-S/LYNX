@@ -424,7 +424,10 @@ public:
         auto left = area.removeFromLeft ((area.getWidth() - 24) / 2);
         area.removeFromLeft (24);
         auto right = area;
-        constexpr int labelWidth = 92, rowHeight = 26, gap = 7;
+        const int labelWidth = theme::labelColumnWidth ({ &rangeLabel, &loopsLabel, &tailLabel, &tailLengthLabel, &stemsLabel, &depthLabel,
+                                                          &bitrateLabel, &compressionLabel, &rateLabel, &channelsLabel, &ditherLabel },
+                                                        92, 150);
+        constexpr int rowHeight = 26, gap = 7;
 
         auto row = [&] (juce::Rectangle<int>& column, juce::Label& label, juce::Component& control) {
             auto r = column.removeFromTop (rowHeight);
@@ -452,8 +455,17 @@ public:
         formatButtons.setBounds (right.removeFromTop (28));
         right.removeFromTop (4);
         {
+            // the four format ticks keep the room their names need; a caption too long to sit beside them
+            // ("Также сохранить", "Auch speichern") gets its own line above them instead of being cut
+            const auto ticks = 4 * 54;
+            const auto labelNeeds = theme::labelColumnWidth ({ &alsoLabel }, 0, 400);
+            const auto ownLine = labelNeeds > (right.getWidth() - ticks) * 11 / 10; // a slight squeeze is fine
+            if (ownLine)
+                alsoLabel.setBounds (right.removeFromTop (18));
             auto also = right.removeFromTop (22);
-            alsoLabel.setBounds (also.removeFromLeft (labelWidth - 22));
+            if (! ownLine) // as before round 165o
+                alsoLabel.setBounds (also.removeFromLeft (juce::jmax (juce::jmin (70, also.getWidth() - ticks),
+                                                                      juce::jmin (theme::labelColumnWidth ({ &alsoLabel }, 70, 130), also.getWidth() - ticks))));
             const auto w = also.getWidth() / 4;
             for (auto& t : alsoToggles)
                 t.setBounds (also.removeFromLeft (w));
@@ -821,21 +833,21 @@ void consolidatePlaylistTrack (AudioEngine& engine, int track, bool fromSongStar
 
 std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int format)
 {
-    auto panel = std::make_unique<ExportPanel> (engine, juce::File(), "LYNX", false);
+    auto panel = std::make_unique<ExportPanel> (engine, juce::File(), "LYNX SHARE", false);
     panel->setFormatForSnapshot (format);
     return panel;
 }
 
 std::unique_ptr<juce::Component> makeExportPanelForTracks (AudioEngine& engine, const std::vector<int>& tracks)
 {
-    return std::make_unique<ExportPanel> (engine, juce::File(), "LYNX", false, 0, tracks);
+    return std::make_unique<ExportPanel> (engine, juce::File(), "LYNX SHARE", false, 0, tracks);
 }
 
 void showExportDialogForTracks (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName,
                                 const std::vector<int>& tracks)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX",
+    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX SHARE",
                                                                                  true, -1, tracks)).release());
     options.dialogTitle = tr ("Render mixer tracks to audio files");
     options.dialogBackgroundColour = theme::colour::bg2;
@@ -849,7 +861,7 @@ void showExportDialogForTracks (AudioEngine& engine, const juce::File& suggested
 void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName, int format)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX", true, format)).release());
+    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX SHARE", true, format)).release());
     options.dialogTitle = tr ("Export audio");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;

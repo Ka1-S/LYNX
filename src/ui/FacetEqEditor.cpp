@@ -1,5 +1,6 @@
 #include "ui/SlotWatch.h"
 #include "ui/FacetEqEditor.h"
+#include "core/ShownEffectSlot.h"
 
 #include <juce_dsp/juce_dsp.h>
 
@@ -121,7 +122,10 @@ public:
         ui::hideValueTip();
     }
 
-    const EffectSlot* current() const
+    // the slot as shown: automated band handles and knobs at their automation's value while the song plays (issue #11)
+    const EffectSlot* current() const { return shownSlot.get (engine.getAutomationDisplay(), stored(), track, slot, juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown()); }
+
+    const EffectSlot* stored() const
     {
         const auto& mixer = engine.getSong().mixer;
         if (track < 0 || track >= (int) mixer.size() || slot < 0 || slot >= (int) mixer[(std::size_t) track].effects.size())
@@ -1597,6 +1601,8 @@ private:
     void timerCallback() override
     {
         if (! isShowing()) return; // a hidden editor costs nothing
+        if (shownSlot.changed (engine.getAutomationDisplay(), track, slot)) // the bands and knobs follow their automation
+            repaint();
         updateSpectrum();
         // redraw the graph only when the analyser or a dynamic band moved (an idle editor stops drawing)
         double signature = 0.0;
@@ -1695,6 +1701,7 @@ private:
 
     AudioEngine& engine;
     int track, slot;
+    mutable ShownEffectSlot shownSlot;
     bool demo = false;
     int selected = -1, hover = -1, tipBand = -1, dragBand = -1, dragParam = -1;
     bool piano = false;

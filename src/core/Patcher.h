@@ -9,7 +9,7 @@
 //  - nodes run in the order of the audio cables (a cable that closes a loop reads the source's previous block);
 //  - delay compensation: a cable whose source has less latency than the destination's latest input goes through a
 //    delay line of the difference, so parallel branches stay aligned; the graph reports its longest path;
-//  - notes: the "From LYNX" MIDI output reaches the instruments cabled to it (a generator Patcher's channel notes);
+//  - notes: the "From LYNX SHARE" MIDI output reaches the instruments cabled to it (a generator Patcher's channel notes);
 //  - control cables: a node's control output (Peak Controller, Formula Controller, an Envelope Controller…) sets a
 //    parameter of another node each block, through the cable's value map.
 
@@ -55,13 +55,13 @@ int shownMidiOutputs (const PatcherDoc& doc, int node);
 NodePorts nodePorts (const PatchNode& node);
 
 // MIDI through the I/O nodes (round 162, FL's "MIDI port N" pins).
-// The MIDI ports the "From LYNX" / "To LYNX" nodes show: the activated ones and those with a cable, sorted.
+// The MIDI ports the "From LYNX SHARE" / "To LYNX SHARE" nodes show: the activated ones and those with a cable, sorted.
 std::vector<int> shownFromMidiPorts (const PatcherDoc& doc);
 std::vector<int> shownToMidiPorts (const PatcherDoc& doc);
 bool fromNotesShown (const PatcherDoc& doc, bool generator);
-// The MIDI ports whose "From LYNX" pin has an active cable: the Patcher takes what LYNX sends on those ports.
+// The MIDI ports whose "From LYNX SHARE" pin has an active cable: the Patcher takes what LYNX sends on those ports.
 std::vector<int> midiInputPorts (const PatcherDoc& doc);
-// Where what enters on "From LYNX" pin `fromPin` (0 Notes, patchMidiPortPin (N)) leaves on "To LYNX" MIDI ports,
+// Where what enters on "From LYNX SHARE" pin `fromPin` (0 Notes, patchMidiPortPin (N)) leaves on "To LYNX SHARE" MIDI ports,
 // directly or through MIDI Out nodes (which set the MIDI channel; −1 = unchanged).
 struct MidiPortRoute
 {
@@ -69,7 +69,7 @@ struct MidiPortRoute
     bool operator== (const MidiPortRoute&) const = default;
 };
 std::vector<MidiPortRoute> midiOutputsOf (const PatcherDoc& doc, int fromPin);
-// The "To LYNX" MIDI ports a VFX node's outputs are cabled to (round 165c): what the VFX plays goes out on them
+// The "To LYNX SHARE" MIDI ports a VFX node's outputs are cabled to (round 165c): what the VFX plays goes out on them
 std::vector<int> vfxHostPorts (const PatcherDoc& doc);
 // Pin menu helpers (FL's Events submenu): "Deactivate unused" keeps only the pins with a cable.
 void deactivateUnusedMidiPins (PatcherDoc& doc, bool fromNode);
@@ -97,7 +97,7 @@ public:
     // the extra outputs land in auxOutput(). Any n (split into pieces).
     void process (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int n, double bpm) noexcept;
 
-    // the instruments cabled to "From LYNX" notes
+    // the instruments cabled to "From LYNX SHARE" notes
     void noteOn (int key, float velocity) noexcept;
     void noteOff (int key) noexcept;
     void noteOnMidi (int key, float velocity, int midiChannel) noexcept;
@@ -114,10 +114,10 @@ public:
     // a voice property of a note that came in on MIDI port `port` (a Channel Rack VFX's output, round 165c): the
     // instruments on that pin take it (VFX nodes as a property event of that voice)
     void voicePropertyPort (int port, int key, int prop, float value, int midiChannel) noexcept;
-    // what the VFX nodes sent to "To LYNX" MIDI ports since the last call (round 165c); the rest wait
+    // what the VFX nodes sent to "To LYNX SHARE" MIDI ports since the last call (round 165c); the rest wait
     int takeHostEvents (Instrument::PortEvent* out, int max) noexcept;
     // a controller's mod wheel, other CCs, channel pressure and pitch wheel played into the Patcher's channel (round
-    // 164e): like FL's Patcher (it takes MIDI input and passes it on), the instruments cabled to "From LYNX" notes get
+    // 164e): like FL's Patcher (it takes MIDI input and passes it on), the instruments cabled to "From LYNX SHARE" notes get
     // them as if they were the channel (hosted plugins the MIDI message, LYNX's samplers the bend)
     void midiMessage (const std::uint8_t* bytes, int size) noexcept;
     void pitchBend (float semitones) noexcept;
@@ -147,7 +147,7 @@ public:
     void setPublished (int k, float v) noexcept;
     float controlOutput (int output) const noexcept;
 
-    // "To LYNX" extra outputs (bus 1…): how many and their last block (valid until the next process)
+    // "To LYNX SHARE" extra outputs (bus 1…): how many and their last block (valid until the next process)
     int auxOutputs() const noexcept { return (int) aux.size(); }
     const float* auxOutput (int index, int side) const noexcept;
 
@@ -190,9 +190,9 @@ private:
     // `type`: 1 note on, 0 note off, 2 anything else (every child).
     template <typename F>
     void forLayeredTargets (const std::vector<MidiTarget>& targets, int type, int key, F&& f) noexcept;
-    // what a node's MIDI output pin `pin` (or a "From LYNX" pin) reaches, through MIDI Out nodes
+    // what a node's MIDI output pin `pin` (or a "From LYNX SHARE" pin) reaches, through MIDI Out nodes
     std::vector<MidiTarget> midiTargetsOf (const PatcherDoc& doc, int from, int pin) const;
-    std::vector<std::vector<MidiTarget>> pinTargets; // ["From LYNX" pin: 0 Notes, 1 + port] the instruments it reaches
+    std::vector<std::vector<MidiTarget>> pinTargets; // ["From LYNX SHARE" pin: 0 Notes, 1 + port] the instruments it reaches
     void deliver (int pin, bool on, int key, float velocity, int midiChannel) noexcept;
 
     // VFX nodes (round 164b): their processors run at the start of each piece on the voices that reached them, and
@@ -234,7 +234,7 @@ private:
     void renderNodes (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int start, int n, double bpm) noexcept;
     std::vector<PatchParam> published;
     std::vector<float> publishedValues; // built-in targets: the latest automation value (NaN = none), applied each block
-    std::vector<std::vector<int>> outputs; // [bus of "To LYNX"] its cables
+    std::vector<std::vector<int>> outputs; // [bus of "To LYNX SHARE"] its cables
     std::vector<std::array<std::vector<float>, 2>> aux;
     std::array<std::vector<float>, 6> scratch; // gathered input, gathered side-chain, wire delay
     std::vector<float> zeros;

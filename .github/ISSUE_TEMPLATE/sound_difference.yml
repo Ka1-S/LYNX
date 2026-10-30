@@ -1,17 +1,17 @@
 name: Sound / plugin difference
-description: A project sounds different in LYNX than in FL Studio, or a LYNX stand-in doesn't sound like the original plugin.
+description: A project sounds different in LYNX SHARE than in FL Studio, or a LYNX SHARE stand-in doesn't sound like the original plugin.
 labels: ["sound"]
 body:
   - type: markdown
     attributes:
       value: |
-        LYNX opens FL Studio projects and replaces missing plugins with its own effects. If something sounds different,
+        LYNX SHARE opens FL Studio projects and replaces missing plugins with its own effects. If something sounds different,
         a short audio comparison helps more than anything else.
 
   - type: input
     id: version
     attributes:
-      label: LYNX version
+      label: LYNX SHARE version
       placeholder: "0.1.16-alpha"
     validations:
       required: true
@@ -28,7 +28,7 @@ body:
     id: plugin
     attributes:
       label: Plugin or FL Studio feature
-      description: The original plugin (name, version, format) and, if you know it, the LYNX effect that replaced it.
+      description: The original plugin (name, version, format) and, if you know it, the LYNX SHARE effect that replaced it.
       placeholder: "Auto-Tune Pro 11 (VST3) → LYNX Tune"
     validations:
       required: true
@@ -38,8 +38,8 @@ body:
     attributes:
       label: Is the original plugin installed on this computer?
       options:
-        - "Yes, LYNX loads the original plugin"
-        - "No, LYNX uses its own stand-in"
+        - "Yes, LYNX SHARE loads the original plugin"
+        - "No, LYNX SHARE uses its own stand-in"
         - "I don't know"
     validations:
       required: true
@@ -57,7 +57,7 @@ body:
     attributes:
       label: Audio comparison (very helpful)
       description: |
-        Export the same part from FL Studio and from LYNX (File › Export › Wave) and attach both (zip them).
+        Export the same part from FL Studio and from LYNX SHARE (File › Export › Wave) and attach both (zip them).
         If you can, also attach the project (.flp or .lynx) or a small project that shows the difference.
 
   - type: textarea

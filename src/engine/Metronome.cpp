@@ -1,95 +1,64 @@
+#include <juce_audio_formats/juce_audio_formats.h>
+
 #include "engine/Metronome.h"
 
 #include "core/ValueMath.h"
 
 namespace lynx
 {
-namespace
+std::array<metronome::Sample, metronome::soundCount> Metronome::loadSounds (const juce::File& flDataFolder)
 {
-constexpr double clickLengthSeconds = 0.03;
-constexpr double downbeatHz = 1760.0;
-constexpr double beatHz = 880.0;
-constexpr float clickGain = 0.4f;
+    std::array<metronome::Sample, metronome::soundCount> result;
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
 
-// The sounds of FL's Metronome sound menu, as LYNX's own synthesis [DFM main form: Hi-hat, Tick, Beep, Cowbell,
-// Pulse]: {length in seconds, beat / downbeat frequencies}
-struct SoundShape
-{
-    double seconds, beatHz, downbeatHz;
-};
-constexpr SoundShape shapes[] = {
-    { clickLengthSeconds, beatHz, downbeatHz }, // LYNX's click: a sine with a falling ramp
-    { 0.045, 0.0, 0.0 },                        // hi-hat: high-passed noise, a fast decay
-    { 0.012, 2500.0, 3600.0 },                  // tick: a very short, bright sine
-    { 0.08, 1000.0, 1500.0 },                   // beep: a flat sine with soft edges
-    { 0.14, 587.0, 734.0 },                     // cowbell: two square partials (×1.44), ringing decay
-    { 0.06, 330.0, 495.0 },                     // pulse: a low raised-cosine bump
-};
-constexpr int soundCount = (int) (sizeof (shapes) / sizeof (shapes[0]));
-} // namespace
-
-float Metronome::voiceSample() noexcept
-{
-    const auto t = 1.0f - (float) clickSamplesLeft / (float) clickLength; // 0 → 1 over the sound
-    const auto twoPi = juce::MathConstants<double>::twoPi;
-    float out = 0.0f;
-    switch (clickSound)
+    for (int i = 0; i < metronome::soundCount; ++i)
     {
-        case 1: // hi-hat
-        {
-            noiseState ^= noiseState << 13;
-            noiseState ^= noiseState >> 17;
-            noiseState ^= noiseState << 5;
-            const auto noise = (float) (int) noiseState * (1.0f / 2147483648.0f);
-            // two first-order high-passes (about 7 kHz at 44.1 kHz)
-            hp1 = 0.35f * (hp1 + noise - lastNoise);
-            lastNoise = noise;
-            hp2 = 0.35f * (hp2 + hp1 - lastHp);
-            lastHp = hp1;
-            out = 2.4f * hp2 * std::exp (-6.0f * t);
-            break;
-        }
-        case 2: // tick
-            out = (float) std::sin (clickPhase) * std::exp (-5.0f * t);
-            break;
-        case 3: // beep: 5 % fade in and out
-            out = (float) std::sin (clickPhase) * 0.6f * juce::jmin (1.0f, t / 0.05f, (1.0f - t) / 0.05f);
-            break;
-        case 4: // cowbell
-        {
-            const auto a = std::sin (clickPhase) >= 0.0 ? 1.0f : -1.0f;
-            const auto b = std::sin (clickPhase2) >= 0.0 ? 1.0f : -1.0f;
-            out = 0.28f * (a + b) * std::exp (-4.0f * t);
-            clickPhase2 += clickPhaseDelta2;
-            break;
-        }
-        case 5: // pulse
-            out = (float) std::sin (clickPhase) * 0.5f * (1.0f - (float) std::cos (twoPi * t));
-            break;
-        default: // LYNX's click
-            out = (float) std::sin (clickPhase) * (1.0f - t);
-            break;
+        auto& s = result[(std::size_t) i];
+        const auto file = flDataFolder == juce::File() ? juce::File()
+                                                       : flDataFolder.getChildFile ("System").getChildFile (metronome::soundFileName (i));
+        if (file.existsAsFile())
+            if (std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file)); reader != nullptr)
+            {
+                const auto frames = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) reader->sampleRate * 4);
+                if (frames > 0 && reader->sampleRate > 0.0)
+                {
+                    juce::AudioBuffer<float> buffer ((int) juce::jmin (2u, juce::jmax (1u, reader->numChannels)), frames);
+                    if (reader->read (&buffer, 0, frames, 0, true, buffer.getNumChannels() > 1))
+                    {
+                        s.rate = reader->sampleRate;
+                        s.left.assign (buffer.getReadPointer (0), buffer.getReadPointer (0) + frames);
+                        const auto* r = buffer.getReadPointer (buffer.getNumChannels() > 1 ? 1 : 0); // mono: the same on both sides
+                        s.right.assign (r, r + frames);
+                        s.fromFl = true;
+                        continue;
+                    }
+                }
+            }
+        s = metronome::fallbackSound (i);
     }
-    clickPhase += clickPhaseDelta;
-    return out;
+    return result;
 }
 
-Metronome::Metronome (const Transport& t)
-    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      transport (t)
+Metronome::Metronome (const Transport& t, const juce::File& flDataFolder)
+    : transport (t), sounds (loadSounds (flDataFolder))
 {
 }
 
-void Metronome::prepareToPlay (double sampleRate, int)
+void Metronome::prepare (double sampleRate, int maximumBlockSize)
 {
-    currentSampleRate = sampleRate;
+    voice.setOutputRate (sampleRate);
+    voice.stop();
     lastBeat = -1;
-    clickSamplesLeft = 0;
+    const auto size = (std::size_t) juce::jmax (maximumBlockSize, 8192);
+    left.assign (size, 0.0f);
+    right.assign (size, 0.0f);
 }
 
-void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+bool Metronome::render (float* outLeft, float* outRight, int numSamples) noexcept
 {
-    buffer.clear();
+    std::fill (outLeft, outLeft + numSamples, 0.0f);
+    std::fill (outRight, outRight + numSamples, 0.0f);
 
     const auto countIn = transport.countIn.load (std::memory_order_relaxed);
     const auto counting = countIn > 0.0 && ! transport.playing.load (std::memory_order_relaxed);
@@ -97,8 +66,8 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     if (! counting && (! transport.playing.load (std::memory_order_relaxed) || ! transport.metronome.load (std::memory_order_relaxed)))
     {
         lastBeat = -1;
-        clickSamplesLeft = 0;
-        return;
+        voice.stop();
+        return false;
     }
 
     const auto beatsPerBar = juce::jmax (1, transport.beatsPerBar.load (std::memory_order_relaxed));
@@ -144,35 +113,22 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     // during the count-in the clicks run on a position before the start (whole bars, so the beats line up)
     const auto startTick = transport.positionTicks.load (std::memory_order_relaxed) - (counting ? countIn : 0.0);
     const auto tps = transport.ticksPerSample();
-    const auto level = clickGain * controls::metronomeGain (transport.metronomeVolume.load (std::memory_order_relaxed));
+    const auto level = controls::metronomeGain (transport.metronomeVolume.load (std::memory_order_relaxed));
+    auto any = false;
 
-    for (int i = 0; i < buffer.getNumSamples(); ++i)
+    for (int i = 0; i < numSamples; ++i)
     {
         const auto beat = (std::int64_t) std::floor ((startTick + i * tps) / ppq);
 
         if (beat != lastBeat)
         {
             lastBeat = beat;
-            const auto down = isDownbeat (beat);
-            clickSound = juce::jlimit (0, soundCount - 1, transport.metronomeSound.load (std::memory_order_relaxed));
-            const auto& shape = shapes[(std::size_t) clickSound];
-            const auto hz = down ? shape.downbeatHz : shape.beatHz;
-            clickPhase = clickPhase2 = 0.0;
-            clickPhaseDelta = juce::MathConstants<double>::twoPi * hz / currentSampleRate;
-            clickPhaseDelta2 = clickPhaseDelta * 1.44;
-            clickLength = juce::jmax (1, (int) (shape.seconds * currentSampleRate));
-            clickSamplesLeft = clickLength;
-            clickAccent = down || clickSound == 0 ? 1.0f : 0.7f; // (the click marks the downbeat by its pitch)
+            voice.trigger (&sound (transport.metronomeSound.load (std::memory_order_relaxed)), isDownbeat (beat));
         }
 
-        if (clickSamplesLeft > 0)
-        {
-            const auto sample = level * clickAccent * voiceSample();
-            --clickSamplesLeft;
-
-            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-                buffer.setSample (channel, i, sample);
-        }
+        if (voice.next (level, outLeft[i], outRight[i]))
+            any = true;
     }
+    return any;
 }
 } // namespace lynx

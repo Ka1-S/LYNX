@@ -525,6 +525,14 @@ std::string describe (const Song& song, int track)
     return {};
 }
 
+int armableInsert (const Song& song, int track)
+{
+    if (track < 0 || track >= (int) song.playlistTracks.size())
+        return -1;
+    const auto& t = song.playlistTracks[(std::size_t) track];
+    return t.mode == PlaylistTrackMode::audio && t.mixerTrack > 0 && t.mixerTrack < (int) song.mixer.size() ? t.mixerTrack : -1;
+}
+
 int followAudioTracks (Song& song)
 {
     int changed = 0;

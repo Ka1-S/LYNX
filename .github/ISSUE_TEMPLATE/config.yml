@@ -1,11 +1,11 @@
 blank_issues_enabled: true
 contact_links:
-  - name: LYNX website and downloads
+  - name: LYNX SHARE website and downloads
     url: https://lynx-share.com
     about: The latest release, screenshots and the feature list.
   - name: Latest release notes
-    url: https://github.com/Ka1-S/LYNX/releases
+    url: https://github.com/Ka1-S/LYNX-SHARE/releases
     about: Check whether your problem was already fixed.
   - name: Questions, ideas and feedback
-    url: https://github.com/Ka1-S/LYNX/discussions
-    about: Ask how to do something, share ideas or show what you made with LYNX.
+    url: https://github.com/Ka1-S/LYNX-SHARE/discussions
+    about: Ask how to do something, share ideas or show what you made with LYNX SHARE.

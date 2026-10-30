@@ -91,8 +91,11 @@ add_library(lynx_core STATIC
     src/core/EmphasizerFx.cpp
     src/core/FreqShifterFl.cpp
     src/core/LowLifterFl.cpp
+    src/core/FlLegacyFx.cpp
     src/core/VisualFx.cpp
     src/core/FlExtraFx.cpp
+    src/core/Scratcher.cpp
+    src/core/Transmitter.cpp
     src/core/VideoPlayer.cpp
     src/core/FruityDance.cpp
     src/core/Reeverb2.cpp
@@ -182,6 +185,7 @@ target_sources(lynx_core PRIVATE
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
     src/core/AudioEdit.cpp
+    src/core/AudioEditTools.cpp
     src/core/FlAutoSlicer.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
@@ -275,20 +279,27 @@ if(LYNX_BUILD_APP)
         GIT_SHALLOW ON)
     FetchContent_MakeAvailable(JUCE)
 
+    # JUCE fixes LYNX needs (Linux drag & drop from Wayland file managers, issue #11); see the file for details
+    option(LYNX_PATCH_JUCE "Apply cmake/LynxPatchJuce.cmake to the JUCE sources" ON)
+    if(LYNX_PATCH_JUCE)
+        include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/LynxPatchJuce.cmake)
+        lynx_patch_juce("${juce_SOURCE_DIR}")
+    endif()
+
     juce_add_gui_app(LYNX
         PRODUCT_NAME "LYNX"
         COMPANY_NAME "Ka1-S"
         COMPANY_COPYRIGHT "Copyright (C) 2026 Ka1-S. Licensed under the GNU AGPL-3.0."
-        DESCRIPTION "LYNX digital audio workstation"
+        DESCRIPTION "LYNX SHARE digital audio workstation"
         # macOS bundle (Info.plist, .icns made from the 1024 px badge); ignored elsewhere
         BUNDLE_ID "com.ka1-s.lynx"
         ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/lynx_badge.png"
         ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/resources/lynx_icon_256.png"
         MICROPHONE_PERMISSION_ENABLED TRUE
-        MICROPHONE_PERMISSION_TEXT "LYNX records audio from your microphone or audio interface when you arm a track and press Record."
+        MICROPHONE_PERMISSION_TEXT "LYNX SHARE records audio from your microphone or audio interface when you arm a track and press Record."
         DOCUMENT_EXTENSIONS lynx flp mid
         HARDENED_RUNTIME_ENABLED FALSE
-        PLIST_TO_MERGE "<plist><dict><key>LSMinimumSystemVersion</key><string>11.0</string><key>NSHighResolutionCapable</key><true/></dict></plist>")
+        PLIST_TO_MERGE "<plist><dict><key>CFBundleName</key><string>LYNX SHARE</string><key>CFBundleDisplayName</key><string>LYNX SHARE</string><key>LSMinimumSystemVersion</key><string>11.0</string><key>NSHighResolutionCapable</key><true/></dict></plist>")
 
     target_sources(LYNX PRIVATE
         src/Main.cpp
@@ -382,6 +393,7 @@ if(LYNX_BUILD_APP)
         src/ui/NoteToolDialogs.cpp
         src/ui/EventEditor.cpp
         src/ui/AudioEditor.cpp
+        src/ui/AudioEditorTools.cpp
         src/ui/ToolWindow.cpp
         src/ui/TempoTapper.cpp
         src/ui/HistoryPanel.cpp

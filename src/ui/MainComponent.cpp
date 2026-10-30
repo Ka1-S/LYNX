@@ -1,3 +1,4 @@
+#include "ui/ThemeSettings.h"
 #include "ui/ColourPicker.h"
 #include "core/NoteNames.h"
 #include "ui/ProjectLoading.h"
@@ -37,6 +38,7 @@
 
 #include "engine/Text.h"
 
+#include "core/MetronomeVoice.h"
 #include "core/RackOps.h"
 #include "core/Templates.h"
 #include "ui/NewProjectDialog.h"
@@ -482,6 +484,13 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::installSliderContract();
     // FL's Last tweaked and automation recording (REA round 143): every automatable control reports its moves
     ui::onTweak = [this] (const AutomationTarget& t) { engine.noteTweaked (t); };
+    // Options › Theme › Startup sound: its Play button (issue #12)
+    themeui::previewStartupSound = [this] (const juce::String& path) {
+        std::shared_ptr<const SampleData> sound;
+        if (path.isNotEmpty() && juce::File (path).existsAsFile())
+            sound = engine.getSampleLibrary().load (path);
+        engine.previewSample (sound != nullptr ? sound : makeStartupSample());
+    };
     // the toolbar's last-tweaked read-out opens the parameter's own menu (FL's Tools › Last tweaked; round 162d)
     tweakReadout.onClick = [this] {
         makeLastTweakedMenu (0).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tweakReadout));
@@ -564,6 +573,7 @@ MainComponent::~MainComponent()
     workspace.saveState();
     ui::uninstallSliderContract();
     ui::onTweak = nullptr;
+    themeui::previewStartupSound = nullptr;
     onEditEventsInPianoRoll = nullptr;
     PluginWindows::onGesture = nullptr;
     removeDialogTextFocus();
@@ -643,9 +653,19 @@ void MainComponent::resized()
 
     // panel widths
     auto& lf = getLookAndFeel();
-    int menuWidth = 0;
-    for (const auto& name : getMenuBarNames())
-        menuWidth += lf.getMenuBarItemWidth (menuBar, 0, name);
+    auto measureMenu = [&] {
+        int w = 0;
+        for (const auto& name : getMenuBarNames())
+            w += lf.getMenuBarItemWidth (menuBar, 0, name);
+        return w;
+    };
+    menuBar.getProperties().set ("lynxTightMenuBar", false);
+    int menuWidth = measureMenu();
+    if (menuWidth > 390) // translated menu titles (German, Russian...): English stays as it was
+    {
+        menuBar.getProperties().set ("lynxTightMenuBar", true);
+        menuWidth = measureMenu();
+    }
 
     const auto modeWidth = juce::jmax (patternModeButton.getIdealWidth (h - 2), songModeButton.getIdealWidth (h - 2));
     const int tempoWidth = 90 + grow, timeWidth = 110 + grow, captionWidth = 50, gridWidth = 148;
@@ -1084,6 +1104,12 @@ keys::Context MainComponent::focusContext() const
     return keys::Context::global;
 }
 
+void MainComponent::dragOperationStarted (const juce::DragAndDropTarget::SourceDetails&)
+{
+    // a drop on a window above this one (the Sampler's waveform, a plugin...) lands there, not on the panel under it
+    matchWindowOrderToScreen();
+}
+
 bool MainComponent::keyPressed (const juce::KeyPress& key)
 {
     const auto chord = chordFromKeyPress (key);
@@ -1143,6 +1169,7 @@ bool MainComponent::runAction (const std::string& id)
 
     if (is ("transport.playStop")) playStop();
     else if (is ("transport.pause")) playPause();
+    else if (is ("transport.playFromStart")) playFromStart();
     else if (is ("transport.toggleMode")) toggleMode();
     else if (is ("transport.nextMarker")) engine.jumpToNextMarker (true);
     else if (is ("transport.previousMarker")) engine.jumpToNextMarker (false);
@@ -1426,6 +1453,8 @@ void MainComponent::loadUiSettings()
 {
     juce::StringArray lines;
     lines.addLines (uiSettingsFile().loadFileAsString());
+    // the sound in FL's order (0.1.20) wins over the old key, wherever each line is
+    const auto flMetronomeSound = std::any_of (lines.begin(), lines.end(), [] (const juce::String& l) { return l.trim().startsWith ("metronomeSoundFl"); });
 
     for (const auto& line : lines)
     {
@@ -1483,8 +1512,12 @@ void MainComponent::loadUiSettings()
             askUnusedRecordings = on;
         else if (key == "autosaveKeep")
             autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
-        else if (key == "metronomeSound")
-            engine.getTransport().metronomeSound.store (juce::jlimit (0, 5, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "metronomeSound" && ! flMetronomeSound) // (before 0.1.20: 0 LYNX click, 1..5 hi-hat..pulse)
+            engine.getTransport().metronomeSound.store (metronome::soundFromLegacy (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "metronomeSoundFl") // FL's order: 0 Hi-hat, 1 Tick, 2 Beep, 3 Cowbell, 4 Pulse
+            engine.getTransport().metronomeSound.store (metronome::clampSound (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
+        else if (key == "metronomeTrack")
+            engine.getTransport().metronomeTrack.store (juce::jlimit (0, maxMixerTracks - 1, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue()));
         else if (key == "metronomeVolume")
             engine.getTransport().metronomeVolume.store ((float) controls::clampUtilityVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue()));
         else if (key == "previewVolume")
@@ -1576,7 +1609,8 @@ void MainComponent::saveUiSettings()
                                       + "\naskUnusedRecordings=" + juce::String (askUnusedRecordings ? 1 : 0)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\nmetronomeVolume=" + juce::String (engine.getTransport().metronomeVolume.load(), 2)
-                                      + "\nmetronomeSound=" + juce::String (engine.getTransport().metronomeSound.load())
+                                      + "\nmetronomeSoundFl=" + juce::String (metronome::clampSound (engine.getTransport().metronomeSound.load()))
+                                      + "\nmetronomeTrack=" + juce::String (engine.getTransport().metronomeTrack.load())
                                       + "\npreviewVolume=" + juce::String (engine.getPreviewVolume(), 2)
                                       + "\neditorVolume=" + juce::String (engine.getEditorVolume(), 2)
                                       + "\nrackPianoRollView=" + juce::String (rack.isPianoRollView() ? 1 : 0)
@@ -1632,6 +1666,28 @@ void MainComponent::playPause()
         playStartTicks = engine.getTransport().positionTicks.load();
         engine.startPlayback();
     }
+}
+
+void MainComponent::playFromStart()
+{
+    // FL 2026's Shift+Space (measured in FL, issue #11): playing, recording, waiting or counting in -> stop at the start
+    // of the time selection (Song mode) or else of the song / pattern; stopped -> play from the current position, as
+    // Space does (a later Space goes back there).
+    const auto wasPlaying = engine.getTransport().playing.load() || engine.isWaitingForInput() || engine.isCountingIn();
+    if (! wasPlaying)
+    {
+        playStop();
+        return;
+    }
+
+    engine.stop();
+    const auto& song = engine.getSong();
+    const auto target = transportedit::shiftSpaceStopTarget (song.mode == PlayMode::song, song.hasLoop(), song.loopStart);
+    if (target > 0)
+        engine.seek ((double) target);
+    else
+        engine.rewind();
+    playStartTicks = (double) target;
 }
 
 void MainComponent::stopAndRewind (bool toStart)
@@ -2153,41 +2209,28 @@ void MainComponent::armSelectedInsertForAudio()
 
     showPanel (Panel::mixer);
     this->mixer.selectTrack (target);
-    if (! engine.isInsertArmed (target))
+    if (engine.isInsertArmed (target))
+        return;
+    // this menu item says "(choose its input)": without one, the input menu comes first and arms after the choice
+    if (mixer[(std::size_t) target].inputChannel < 0)
+        mixerinput::showMenu (engine, target, &this->mixer, [this, target] { engine.setInsertArmed (target, true); });
+    else
         mixerinput::toggleArm (engine, target, &this->mixer);
 }
 
 void MainComponent::showMetronomeMenu()
 {
+    // FL 2026's right-click on the metronome button, as it is (REA round 165z-a2): the "Metronome sound" choice only,
+    // in FL's order. The volume trim is in Options, the count-in has its own button and the track the click plays
+    // through is in Settings › Audio › Mixer.
     auto& transport = engine.getTransport();
     juce::PopupMenu menu;
-    menu.addSectionHeader (tr ("Metronome"));
-    menu.addItem (tr ("Metronome") + shortcutText ("transport.metronome"), true, transport.metronome.load(), [this] {
-        metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
-    });
-    menu.addItem (tr ("Volume: {0}...", { ui::utilityVolumeText (transport.metronomeVolume.load()) }), [this] { showMetronomeVolume(); });
-    {
-        juce::PopupMenu levels;
-        for (const auto v : { 0.25, 0.5, 0.71, 1.0, 1.25 })
-            levels.addItem (ui::utilityVolumeText (v), true, std::abs (transport.metronomeVolume.load() - v) < 0.005, [this, v] {
-                engine.getTransport().metronomeVolume.store ((float) v);
-                saveUiSettings();
-            });
-        menu.addSubMenu (tr ("Volume"), levels);
-    }
-    // FL's Metronome sound section (REA round 165f), LYNX's own synthesized sounds
     menu.addSectionHeader (tr ("Metronome sound"));
-    {
-        const char* names[] = { TR_NOOP ("Click"), TR_NOOP ("Hi-hat"), TR_NOOP ("Tick"), TR_NOOP ("Beep"), TR_NOOP ("Cowbell"), TR_NOOP ("Pulse") };
-        for (int i = 0; i < 6; ++i)
-            menu.addItem (tr (names[i]), true, transport.metronomeSound.load() == i, [this, i] {
-                engine.getTransport().metronomeSound.store (i);
-                saveUiSettings();
-            });
-    }
-    menu.addSeparator();
-    menu.addItem (tr ("Count-in before recording") + shortcutText ("record.countIn"), true, engine.getRecordOptions().countInBars > 0,
-                  [this] { runAction ("record.countIn"); });
+    for (int i = 0; i < metronome::soundCount; ++i)
+        menu.addItem (tr (metronome::soundName (i)), true, metronome::clampSound (transport.metronomeSound.load()) == i, [this, i] {
+            engine.getTransport().metronomeSound.store (i);
+            saveUiSettings();
+        });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&metronomeButton));
 }
 
@@ -3095,7 +3138,7 @@ void MainComponent::timerCallback()
         PluginHost::settingsFolder().getChildFile ("plugin-crashes.log").appendText (lines[lines.size() - 1] + "\n");
         juce::AlertWindow::showMessageBoxAsync (
             juce::MessageBoxIconType::WarningIcon, tr ("Plugin crashed"),
-            tr ("The plugin \"{0}\" crashed and was switched off, so LYNX and your project kept running (the effect is bypassed, an "
+            tr ("The plugin \"{0}\" crashed and was switched off, so LYNX SHARE and your project kept running (the effect is bypassed, an "
                 "instrument stays silent). Save your project; the plugin loads again the next time you open it.",
                 { names[names.size() - 1] }));
     }
@@ -3192,10 +3235,10 @@ void MainComponent::timerCallback()
             if (lynx::rt::shouldShowHint (PluginHost::settingsFolder().getChildFile ("realtime-hint-shown")))
                 juce::AlertWindow::showMessageBoxAsync (
                     juce::MessageBoxIconType::InfoIcon, tr ("Real-time priority"),
-                    tr ("The sound broke up, and Linux runs LYNX's audio thread at normal priority. Real-time priority makes dropouts much rarer:\n\n"
+                    tr ("The sound broke up, and Linux runs LYNX SHARE's audio thread at normal priority. Real-time priority makes dropouts much rarer:\n\n"
                         "- install rtkit (package \"rtkit\"; most desktops already have it), or\n"
                         "- add yourself to the \"audio\" group with an rtprio limit in /etc/security/limits.d (as for JACK),\n\n"
-                        "then log out and in again. LYNX never needs root. Options > Audio settings shows the current state."));
+                        "then log out and in again. LYNX SHARE never needs root. Options > Audio settings shows the current state."));
         }
     }
 
@@ -3226,7 +3269,7 @@ void MainComponent::updateTitle()
 
     if (auto* window = getTopLevelComponent())
         window->setName ((engine.isModified() ? "* " : "")
-                         + (projectName.isNotEmpty() ? "LYNX - " + projectName : juce::String ("LYNX")) + importedSuffix);
+                         + (projectName.isNotEmpty() ? "LYNX SHARE - " + projectName : juce::String ("LYNX SHARE")) + importedSuffix);
 }
 
 std::unique_ptr<juce::AlertWindow> MainComponent::makeConfirmDiscardWindow()
@@ -3687,7 +3730,7 @@ void MainComponent::checkInterruptedTakes()
         names.add (juce::File (juce::String::fromUTF8 (j.wav.c_str())).getFileName());
     const auto folder = juce::File (juce::String::fromUTF8 (takes.front().wav.c_str())).getParentDirectory();
     auto* w = new juce::AlertWindow (tr ("Recordings recovered"),
-                                     tr ("LYNX was recording when it stopped. These takes were saved and repaired:\n{0}\n\nPut them on the Playlist "
+                                     tr ("LYNX SHARE was recording when it stopped. These takes were saved and repaired:\n{0}\n\nPut them on the Playlist "
                                          "where they were recorded?", { names.joinIntoString ("\n") }),
                                      juce::MessageBoxIconType::InfoIcon);
     w->addButton (tr ("Put them on the Playlist"), 1, juce::KeyPress (juce::KeyPress::returnKey));
@@ -3727,7 +3770,7 @@ void MainComponent::checkPreviousSession (juce::Time sessionStart)
         return; // nothing was saved in that session
     const auto backup = folder.getChildFile (juce::String::fromUTF8 (name.c_str()) + ProjectFile::extension);
 
-    auto* w = new juce::AlertWindow (tr ("LYNX did not close properly"),
+    auto* w = new juce::AlertWindow (tr ("LYNX SHARE did not close properly"),
                                      tr ("The last session ended unexpectedly. Open the newest backup it saved?\n{0}  ({1})",
                                          { backup.getFileName(), backup.getLastModificationTime().formatted ("%Y-%m-%d %H:%M") }),
                                      juce::MessageBoxIconType::WarningIcon);
@@ -4136,7 +4179,7 @@ void MainComponent::showMissingFiles (bool afterOpening)
                     auto it = std::find_if (info.plugins.begin(), info.plugins.end(), [&] (const MissingPlugin& p) { return p.name == name; });
                     if (it == info.plugins.end())
                         it = info.plugins.insert (info.plugins.end(),
-                                                  MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed). FL Studio plays a missing plugin's slot unprocessed: a substitute slot's menu › Bypass all LYNX substitutes of this project does the same"),
+                                                  MissingPlugin { name, {}, TR_NOOP ("LYNX SHARE substitute: {0} (the original plugin is used again once it is installed). FL Studio plays a missing plugin's slot unprocessed: a substitute slot's menu › Bypass all LYNX SHARE substitutes of this project does the same"),
                                                                   effectInfo (fx.kind).name });
                     const auto user = song.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : song.mixer[t].name;
                     if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())
@@ -4260,7 +4303,7 @@ void MainComponent::exportMidiFile()
 {
     // FL's File › Export › "MIDI file...": the arrangement's notes (or the current pattern's) as a Standard MIDI File
     const auto folder = currentFile.existsAsFile() ? currentFile.getParentDirectory() : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
-    const auto name = projectName.isNotEmpty() ? projectName : juce::String ("LYNX");
+    const auto name = projectName.isNotEmpty() ? projectName : juce::String ("LYNX SHARE");
     fileChooser = std::make_unique<juce::FileChooser> (tr ("Export MIDI file"), folder.getChildFile (name + ".mid"), "*.mid");
     juce::Component::SafePointer<MainComponent> safe (this);
     fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
@@ -4324,7 +4367,7 @@ void MainComponent::save (bool askForFile)
                                   }
                                   // FL warns the same way: the backup folder is cleaned up as new backups arrive
                                   auto* w = new juce::AlertWindow (tr ("Save in the backup folder?"),
-                                                                   tr ("This folder keeps LYNX's automatic backups and old ones are deleted as new "
+                                                                   tr ("This folder keeps LYNX SHARE's automatic backups and old ones are deleted as new "
                                                                        "ones arrive, so a project saved here can be lost. If you opened a backup, save it "
                                                                        "somewhere else."),
                                                                    juce::MessageBoxIconType::WarningIcon);
@@ -4618,6 +4661,14 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addSeparator();
         menu.addItem (tr ("Typing keyboard as a piano") + shortcutText ("view.typingPiano"), true, typingPiano, [this] { setTypingPiano (! typingPiano); });
         menu.addItem (tr ("Touch keyboard"), true, isTouchKeyboardOpen(), [this] { toggleTouchKeyboard (engine); });
+        {
+            // FL's View › Background (audit round 165z-a): the workspace image and colour of Options › Theme
+            juce::PopupMenu background;
+            background.addItem (tr ("Set image wallpaper..."), [] { themeui::setImageWallpaper(); });
+            background.addItem (tr ("Remove image wallpaper"), ! themeui::current().image.empty(), false, [] { themeui::removeImageWallpaper(); });
+            background.addItem (tr ("Set background color..."), [this] { openSettings ((int) SettingsPage::theme); });
+            menu.addSubMenu (tr ("Background"), background);
+        }
         menu.addSeparator();
         // FL's "Auto scrolling" (round 162, issue #9)
         menu.addItem (tr ("Playlist follows the playhead (auto scrolling)") + shortcutText ("playlist.follow"), true,
@@ -4664,6 +4715,18 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         });
         menu.addItem (tr ("Metronome volume ({0})...", { ui::utilityVolumeText (engine.getTransport().metronomeVolume.load()) }),
                       [this] { showMetronomeVolume(); });
+        {
+            // FL's Options › "Auto scrolling" (audit round 165z-a): one switch for every editor's Follow (Playlist,
+            // Piano roll, Channel rack, Audio editor); each window's own Follow button still sets just that window
+            auto& globals = EditorGlobals::get();
+            const auto on = globals.isFollowing (false) && globals.isFollowing (true);
+            menu.addItem (tr ("Auto scrolling"), true, on, [on] {
+                auto& g = EditorGlobals::get();
+                for (auto v : { EditorGlobals::FollowView::playlist, EditorGlobals::FollowView::pianoRoll,
+                                EditorGlobals::FollowView::channelRack, EditorGlobals::FollowView::audioEditor })
+                    g.setFollowingView (v, ! on);
+            });
+        }
         {
             juce::PopupMenu recording;
             addRecordOptions (recording);
@@ -4731,10 +4794,10 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
                 showImportReport();
         });
         menu.addItem (tr ("Built-in plugins (online list)..."), [] {
-            juce::URL ("https://github.com/Ka1-S/LYNX/blob/main/docs/PLUGINS.md").launchInDefaultBrowser();
+            juce::URL ("https://github.com/Ka1-S/LYNX-SHARE/blob/main/docs/PLUGINS.md").launchInDefaultBrowser();
         });
         menu.addItem (tr ("Report a problem..."), [this] { crashreporter::showManualReport (&engine.getDeviceManager()); });
-        menu.addItem (tr ("About LYNX"), [] {
+        menu.addItem (tr ("About LYNX SHARE"), [] {
             auto* window = makeAboutWindow().release();
             window->enterModalState (true, nullptr, true);
             keepAboveMainWindow (*window);
@@ -4757,7 +4820,7 @@ std::unique_ptr<juce::AlertWindow> MainComponent::makeAboutWindow()
     struct About final : juce::AlertWindow
     {
         About()
-            : juce::AlertWindow ("LYNX " JUCE_APPLICATION_VERSION_STRING,
+            : juce::AlertWindow ("LYNX SHARE " JUCE_APPLICATION_VERSION_STRING,
                                  tr ("Lightweight C++/JUCE DAW with the FL Studio workflow.\n"
                                      "Independent implementation: no Image-Line code was copied."),
                                  juce::MessageBoxIconType::NoIcon)
@@ -4789,7 +4852,7 @@ void MainComponent::showLanguageChoice (const juce::String& id)
     const juce::LocalisedStrings strings (table, false);
     auto say = [&] (const char* text) { return table.isEmpty() ? juce::String::fromUTF8 (text) : strings.translate (juce::String::fromUTF8 (text)); };
 
-    auto* window = new juce::AlertWindow (say (TR_NOOP ("Language")), say (TR_NOOP ("The new language is applied when LYNX restarts.")),
+    auto* window = new juce::AlertWindow (say (TR_NOOP ("Language")), say (TR_NOOP ("The new language is applied when LYNX SHARE restarts.")),
                                           juce::MessageBoxIconType::InfoIcon);
     window->addButton (say (TR_NOOP ("Restart now")), 1, juce::KeyPress (juce::KeyPress::returnKey));
     window->addButton (say (TR_NOOP ("Later")), 0, juce::KeyPress (juce::KeyPress::escapeKey));
@@ -4927,7 +4990,7 @@ void MainComponent::showHelp()
 {
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned (makeHelpContent().release());
-    options.dialogTitle = tr ("LYNX shortcuts");
+    options.dialogTitle = tr ("LYNX SHARE shortcuts");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;
     options.resizable = true;
@@ -4984,7 +5047,7 @@ void MainComponent::showImportReport()
     if (const auto& matched = engine.getMatchedPlugins(); ! matched.isEmpty())
         text << tr ("Plugins found on this PC:") << "\n  " << matched.joinIntoString ("\n  ") << "\n\n";
     if (! missing.isEmpty())
-        text << tr ("Plugins not installed on this PC (or in a folder LYNX doesn't scan; Options > Setup wizard):") << "\n  "
+        text << tr ("Plugins not installed on this PC (or in a folder LYNX SHARE doesn't scan; Options > Setup wizard):") << "\n  "
              << missing.joinIntoString ("\n  ") << "\n\n";
     if (const auto& lost = engine.getPluginsWithoutState(); ! lost.isEmpty())
         text << tr ("Plugins found but playing their default settings (the project saved them for the other format, VST2/VST3):") << "\n  "

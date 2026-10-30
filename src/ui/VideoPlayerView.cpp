@@ -886,7 +886,7 @@ private:
         const auto noFfmpeg = ! findFfmpeg().existsAsFile();
         locateButton.setVisible (noFfmpeg);
         if (noFfmpeg)
-            surface.message = tr ("ffmpeg was not found. LYNX plays videos with ffmpeg: install it or locate it.");
+            surface.message = tr ("ffmpeg was not found. LYNX SHARE plays videos with ffmpeg: install it or locate it.");
         else if (settings.path.empty())
             surface.message = tr ("No video") + "\n" + tr ("Load a video file (or drop one here)");
         else if (! resolveVideo (settings.path).existsAsFile())

@@ -626,7 +626,7 @@ public:
         g.drawText (tr ("LYNX Dance"), header, juce::Justification::centredLeft);
         g.setFont (theme::font (theme::type::small));
         g.setColour (theme::colour::textSecondary);
-        g.drawFittedText (tr ("Fruity Dance's role with LYNX's own dancer: it makes no sound. Its notes pick the move; drag the dancer to "
+        g.drawFittedText (tr ("Fruity Dance's role with LYNX SHARE's own dancer: it makes no sound. Its notes pick the move; drag the dancer to "
                               "place it, right-click it for its moves."),
                           header.translated (0, 22).withHeight (30), juce::Justification::topLeft, 2);
         for (const auto& [area, text] : { std::pair { moveLabel, tr ("Move") }, std::pair { sizeLabel, tr ("Size") }, std::pair { speedLabel, tr ("Speed") } })

@@ -1,11 +1,13 @@
 # Release steps
 
 Official release files come from GitHub Actions (`.github/workflows/release.yml`, see `docs/CODE_SIGNING.md`):
-a tag push builds `LYNX.exe` from the tagged source, runs the self-test on Windows and attaches to a draft release:
+a tag push builds `LYNX.exe` from the tagged source, runs the self-test on Windows and attaches to a draft release
+(titled "LYNX SHARE x.y.z"; the product is named LYNX SHARE since v0.1.20, while the file names below, `LYNX.exe` and the
+settings folders keep "LYNX" so existing installs, links and AppImage updates keep working):
 
 - `LYNX-x.y.z-setup-x64.exe` — per-user installer (NSIS, `resources/installer/LYNX.nsi`, no admin rights): installs to
   `%LOCALAPPDATA%\Programs\LYNX`, Start-menu shortcut, optional desktop shortcut, `.lynx` association, optional
-  "Open with LYNX" for `.flp` (FL Studio stays the default program), uninstaller in *Apps & features*. The workflow
+  "Open with LYNX SHARE" for `.flp` (FL Studio stays the default program), uninstaller in *Apps & features*. The workflow
   also installs and uninstalls it silently as a check.
 - `LYNX-x.y.z-windows-x64.zip` — portable build (extract and run), with `Demo.lynx`.
 - `LYNX-x.y.z-x86_64.AppImage` — Linux, one file (no "linux" in the name: AppImage naming rule; embeds AppImageUpdate information, with its `.zsync` next to it; the AppImage
@@ -16,7 +18,7 @@ a tag push builds `LYNX.exe` from the tagged source, runs the self-test on Windo
 - `LYNX-x.y.z-linux-x86_64.tar.gz` — Linux folder with `install.sh` (per-user install).
 - `LYNX-x.y.z-macos-universal.dmg` — macOS, ad-hoc signed.
 - `LYNX-x.y.z-store.msix` — the Microsoft Store package (unsigned; the Store signs it), uploaded by hand in Partner
-  Center. The workflow installs a test-identity copy of it and runs LYNX inside the package (`docs/STORE.md`).
+  Center. The workflow installs a test-identity copy of it and runs LYNX SHARE inside the package (`docs/STORE.md`).
 - `LYNX.exe` and `SHA256SUMS.txt` (SHA-256 of every file above).
 
 `workflow_dispatch` (Actions → Release → Run workflow, or `gh workflow run release.yml --ref <branch>`) builds and
