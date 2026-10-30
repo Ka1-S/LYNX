@@ -1,4 +1,6 @@
 #include "engine/AudioEngine.h"
+
+#include "core/MarkerPlan.h"
 #include "engine/AudioLogger.h"
 
 #include "core/HardwareInsert.h"
@@ -639,6 +641,10 @@ void AudioEngine::play() noexcept
         // Performance mode: the song plays from its Start marker (the zone before it is launched, not played)
         if (const auto zone = song.mode == PlayMode::song ? song.performanceZoneEnd() : 0; zone > 0 && transport.positionTicks.load() < (double) zone)
             seek ((double) zone);
+        // FL's "Start" marker: Play from the song's beginning starts at the marker (Song mode)
+        if (song.mode == PlayMode::song && transport.seekRequest.load() < 0.0 && transport.positionTicks.load() <= 0.0)
+            if (const auto start = transport.markerStart.load(); start > 0)
+                transport.seekRequest.store ((double) start);
     }
     transport.playing.store (true);
 }
@@ -782,8 +788,60 @@ bool AudioEngine::isInsertArmed (int track) const noexcept
     return std::find (armedInserts.begin(), armedInserts.end(), track) != armedInserts.end();
 }
 void AudioEngine::rewind() noexcept { transport.rewindRequested.store (true); }
+void AudioEngine::jumpTo (double tick) noexcept
+{
+    tick = juce::jmax (0.0, tick);
+    const auto quantize = quantizeSongJumps.load();
+    if (! transport.playing.load() || quantize <= 0 || song.mode != PlayMode::song)
+    {
+        seek (tick);
+        return;
+    }
+    // the jump waits for the next beat / bar(s) (FL's "Quantize song jumps"); the audio thread makes it there
+    const auto at = (double) markers::quantizedJumpTick (song, transport.positionTicks.load(), quantize);
+    transport.pendingJumpTo.store (tick);
+    transport.pendingJumpAt.store (at);
+}
+
+void AudioEngine::jumpToMarker (int index) noexcept
+{
+    const auto& list = song.markers();
+    if (index < 0 || index >= (int) list.size())
+        return;
+    if (song.mode != PlayMode::song)
+        editSong ([] (Song& s) { s.mode = PlayMode::song; }, false);
+    jumpTo ((double) list[(std::size_t) index].tick);
+}
+
+void AudioEngine::jumpToNextMarker (bool forward) noexcept
+{
+    // from where the song is (or where a quantized jump is going)
+    const auto pending = transport.pendingJumpAt.load() >= 0.0 ? transport.pendingJumpTo.load() : -1.0;
+    const auto here = pending >= 0.0 ? pending : transport.positionTicks.load();
+    const auto& list = song.markers();
+    int best = -1;
+    for (int i = 0; i < (int) list.size(); ++i)
+    {
+        const auto t = (double) list[(std::size_t) i].tick;
+        if (forward ? t > here + 0.5 : t < here - 0.5)
+        {
+            if (forward)
+            {
+                best = i;
+                break;
+            }
+            best = i;
+        }
+    }
+    if (best >= 0)
+        jumpToMarker (best);
+    else if (! forward)
+        jumpTo (0.0);
+}
+
 void AudioEngine::seek (double ticks) noexcept
 {
+    transport.pendingJumpAt.store (-1.0); // a direct seek replaces a quantized jump still waiting
     if (transport.playing.load())
         resetToInitialValues(); // a jump while the song plays (FL sets the position the same way)
     transport.seekRequest.store (juce::jmax (0.0, ticks));
@@ -1670,6 +1728,7 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
     prefs::MidiInputPrefs device;
     auto velocityCurve = prefs::VelocityCurve::linear;
     auto locked = -1; // a channel that "receives notes from" this device (FL's channel lock)
+    auto jumpChannel = 0;
     {
         const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
         const auto name = source != nullptr ? source->getName().toStdString() : std::string();
@@ -1683,6 +1742,7 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
                 if (l.midiChannel != 0)
                     break; // a lock on this very MIDI channel wins over one on any channel
             }
+        jumpChannel = midiPrefsShared.songMarkerJumpChannel;
     }
     if (locked >= 0)
         device.target = locked;
@@ -1695,6 +1755,14 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
         return;
 
     midiActivity.fetch_add (1, std::memory_order_relaxed); // the toolbar's MIDI input light
+
+    // FL's "Song marker jump (MIDI channel)": notes on that channel move the song to a marker instead of playing
+    if (jumpChannel > 0 && m.getChannel() == jumpChannel && m.isNoteOnOrOff())
+    {
+        if (m.isNoteOn())
+            pendingMarkerNote.store (m.getNoteNumber());
+        return;
+    }
 
     // FL's playlist live mode channel (round 165m): its notes launch the performance clips instead of playing
     if (const auto pc = performanceMidiChannel.load (std::memory_order_relaxed);
@@ -2673,6 +2741,7 @@ void AudioEngine::publishSong()
     transport.loopStart.store ((double) song.loopStart);
     transport.loopEnd.store ((double) song.loopEnd);
     transport.songEnd.store ((double) song.songLength());
+    transport.publishMarkers (makeMarkerPlan (song)); // FL's marker actions (loop, skip, pause, start...)
     transport.songStart.store ((double) song.performanceZoneEnd());
 
     const loadtrace::Scope buildTiming ("rack_build");
@@ -3145,6 +3214,8 @@ void AudioEngine::timerCallback()
     }
     rt::promotePending(); // Linux: real-time priority for the audio threads seen since the last tick (round 161)
     applyControllers();
+    if (const auto note = pendingMarkerNote.exchange (-1); note >= 0)
+        jumpToMarker (note); // FL's "Song marker jump": note 0 = the first marker
     updateRecording();
     updatePerformanceRecording();
     rackExchange.collectGarbage();
@@ -3676,6 +3747,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
     if (const auto target = transport.seekRequest.exchange (-1.0); target >= 0.0)
         transport.positionTicks.store (target);
 
+    transport.readMarkers (rtMarkers, rtMarkerVersion); // FL's marker actions (a new table when the song changed)
     // an external MIDI clock moves the transport (round 165f)
     midiSync.beginBlock (transport, callbackStart, numSamples);
 
@@ -3719,6 +3791,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         const auto loopStart = loop.start, loopEnd = loop.end;
         const auto looping = playing && loop.active() && tps > 0.0;
 
+        // without the loop region, the song's end goes back to FL's "Loop" marker (else the start)
+        const auto regionOn = ! throughRegion && transport.loopEnd.load (std::memory_order_relaxed) > transport.loopStart.load (std::memory_order_relaxed);
+        const auto songWrap = regionOn ? loopStart : juce::jlimit (loopStart, juce::jmax (loopStart, loopEnd - 1.0), (double) rtMarkers.wrapTo);
+
         if (looping)
         {
             // before the loop, play normally until reaching it; past the end, jump back to the start
@@ -3726,11 +3802,24 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
             if (position >= loopEnd)
             {
-                position = loopStart;
+                position = songWrap;
                 transport.positionTicks.store (position, std::memory_order_relaxed);
             }
 
             n = juce::jlimit (1, n, (int) std::ceil ((loopEnd - position) / tps));
+        }
+
+        // FL's marker actions (Song mode): the block ends where the position reaches a marker jump / pause, or a
+        // quantized jump the user asked for; it is made after the block (below), like the loop's wrap
+        const MarkerJump* markerJump = nullptr;
+        const auto pendingAt = transport.pendingJumpAt.load (std::memory_order_relaxed);
+        auto pendingDue = false;
+        if (playing && tps > 0.0 && transport.songMode.load (std::memory_order_relaxed))
+        {
+            const auto step = markerStep (rtMarkers, transport.positionTicks.load (std::memory_order_relaxed), n, tps, pendingAt);
+            n = step.samples;
+            markerJump = step.jump;
+            pendingDue = step.userJump;
         }
 
         for (int ch = 0; ch < numInputChannels; ++ch)
@@ -3803,9 +3892,27 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         {
             auto position = transport.positionTicks.load (std::memory_order_relaxed) + n * tps;
 
-            if (looping && position >= loopEnd - 1e-6)
+            if (pendingDue && position >= pendingAt - 1e-6)
             {
-                position = loopStart;
+                position = transport.pendingJumpTo.load (std::memory_order_relaxed);
+                transport.pendingJumpAt.store (-1.0, std::memory_order_relaxed);
+                markerEvents.fetch_add (1, std::memory_order_relaxed);
+            }
+            else if (markerJump != nullptr && position >= (double) markerJump->at - 1e-6)
+            {
+                markerEvents.fetch_add (1, std::memory_order_relaxed);
+                if (markerJump->kind == MarkerJump::Kind::pause)
+                {
+                    // FL's "Marker pause": playback stops at the marker; Play goes on from there
+                    position = (double) markerJump->at;
+                    transport.positionTicks.store (position, std::memory_order_relaxed);
+                    transport.playing.store (false, std::memory_order_relaxed); // the rest of the block plays stopped
+                }
+                position = (double) markerJump->to;
+            }
+            else if (looping && position >= loopEnd - 1e-6)
+            {
+                position = songWrap;
                 // loop recording: where this pass ends in the takes (round 163)
                 if (const auto frames = takeFrames.load (std::memory_order_relaxed); frames > 0 && takeStartTick.load (std::memory_order_relaxed) >= 0.0)
                     if (const auto k = takeWrapCount.load (std::memory_order_relaxed); k < (int) takeWraps.size())

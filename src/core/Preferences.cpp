@@ -1,6 +1,7 @@
 #include "core/Preferences.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -403,6 +404,8 @@ std::vector<std::string> split (const std::string& s, char sep, std::size_t maxP
 std::string MidiPrefs::toText() const
 {
     std::string out = "velocity=" + std::string (curveName (velocity)) + "\npickup=" + (pickup ? "1" : "0") + "\n";
+    if (songMarkerJumpChannel > 0)
+        out += "songMarkerJump=" + std::to_string (songMarkerJumpChannel) + "\n";
     if (performanceChannel != 0)
         out += "performanceChannel=" + std::to_string (performanceChannel) + "\n";
     // input=<enabled>|<midi channel>|<target>|<device name>
@@ -445,6 +448,8 @@ MidiPrefs MidiPrefs::fromText (const std::string& text)
         }
         else if (key == "pickup")
             p.pickup = trim (value) == "1";
+        else if (key == "songMarkerJump")
+            p.songMarkerJumpChannel = std::clamp (std::atoi (trim (value).c_str()), 0, 16);
         else if (key == "performanceChannel")
             p.performanceChannel = std::clamp (std::atoi (trim (value).c_str()), 0, 16);
         else if (key == "input")

@@ -5312,6 +5312,27 @@ countries: br
 "Send MIDI" = "Enviar MIDI"
 "The Dashboard sends its notes, the program and the controls set to \"Send MIDI\" to the plugins whose MIDI input port is this port (plugin window > Settings > MIDI > Input port)." = "O Dashboard envia suas notas, o programa e os controles com \"Enviar MIDI\" para os plugins cuja porta de entrada MIDI é esta porta (janela do plugin > Configurações > MIDI > Porta de entrada)."
 
+# --- Song markers: FL's marker actions, Time markers, Quantize song jumps, Song marker jump (round 165f)
+"Marker loop" = "Loop do marcador"
+"Marker skip" = "Pular trecho do marcador"
+"Marker pause" = "Pausa no marcador"
+"Pattern length" = "Duração do pattern"
+"Bar override" = "Substituir compasso"
+"Key/Scale" = "Tom/escala"
+"Loop length" = "Duração do loop"
+"Add one every" = "Adicionar um a cada"
+"8 bars" = "8 compassos"
+"Bars" = "Compassos"
+"Add jump to next bar" = "Adicionar salto para o próximo compasso"
+"Change to marker loop" = "Transformar em loop de marcador"
+"Time markers" = "Marcadores de tempo"
+"Quantize song jumps" = "Quantizar saltos da música"
+"Place loop (from this marker to the next)" = "Criar loop (deste marcador até o próximo)"
+"Song marker jump" = "Salto para marcador da música"
+"Notes on this channel move the song to a marker instead of playing: note 0 goes to the first marker, the next one to the second... (Playlist › Quantize song jumps applies while playing)." = "Notas neste canal levam a música a um marcador em vez de tocar: a nota 0 vai ao primeiro marcador, a seguinte ao segundo... (Playlist › Quantizar saltos da música vale durante a reprodução)."
+"Jump to the next song marker (Quantize song jumps while playing)" = "Saltar para o próximo marcador da música (Quantizar saltos da música durante a reprodução)"
+"Jump to the previous song marker" = "Saltar para o marcador anterior da música"
+"Marker: [LMB] jump to it (while playing: at the next Quantize song jumps step)  [RMB] action, rename, delete" = "Marcador: [LMB] saltar até ele (tocando: no próximo passo de Quantizar saltos da música)  [RMB] ação, renomear, excluir"
 # Round 165g: Fruity Mute 2, Fruity Big Clock, Tuner, Fruity HTML NoteBook
 "MUTE" = "MUDO"
 "CHANNEL" = "CANAL"
@@ -5799,7 +5820,6 @@ countries: br
 "Inserts empty columns before the song for the clips to launch, a marker on each, and a Start marker where the song begins; Performance mode is turned on." = "Insere colunas vazias antes da música para os clipes a disparar, um marcador em cada uma e um marcador Start onde a música começa; o modo performance é ligado."
 "Marker count" = "Número de marcadores"
 "2 steps" = "2 passos"
-"8 bars" = "8 compassos"
 "Track: [LMB] select  [Ctrl][LMB] add / remove  [Shift][LMB] range  [RMB] menu  [2xLMB] open the clip source  [Shift][Wheel] move up / down" = "Faixa: [LMB] seleciona  [Ctrl][LMB] inclui / tira  [Shift][LMB] intervalo  [RMB] menu  [2xLMB] abre a fonte do clipe  [Shift][Wheel] move para cima / baixo"
 
 # --- Mixer: track latency, routing selected ⇄ this track, submix, render tracks (REA round 165f-mixer)
@@ -5925,7 +5945,6 @@ countries: br
 "Pattern length in bars: [LMB] drag or [Wheel] change it  [2xLMB] automatic (from the notes)  [RMB] menu" = "Tamanho do pattern em compassos: [LMB] arraste ou [Wheel] para mudar  [2xLMB] automático (pelas notas)  [RMB] menu"
 "Pattern length: {0} (automatic, from the notes)" = "Tamanho do pattern: {0} (automático, pelas notas)"
 "Pattern length (bars, 0 = automatic)" = "Tamanho do pattern (compassos, 0 = automático)"
-"Pattern length" = "Tamanho do pattern"
 "Follow: a pattern longer than the Channel Rack pages along with the playing step; off, it stays where you scrolled" = "Seguir: um pattern maior que o Channel Rack passa de página junto com o step tocando; desligado, fica onde você rolou"
 "Follow the playhead (page along with the playing step) on/off" = "Seguir o cursor de reprodução (passar de página com o step tocando) liga/desliga"
 "Follow: the view pages along with the playback position; off, it stays where you scrolled" = "Seguir: a visão passa de página junto com a posição de reprodução; desligado, fica onde você rolou"

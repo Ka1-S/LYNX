@@ -27,7 +27,7 @@ enum Key : int
     f1 = 0x10001, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
     up = 0x10020, down, left, right, pageUp, pageDown, home, end,
     enter = 0x10030, escape, tab, backspace, del, insert,
-    numpadPlus = 0x10040, numpadMinus,
+    numpadPlus = 0x10040, numpadMinus, numpadMultiply, numpadDivide,
     numpad0 = 0x10050, numpad1, numpad2, numpad3, numpad4, numpad5, numpad6, numpad7, numpad8, numpad9
 };
 
