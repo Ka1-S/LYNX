@@ -101,5 +101,7 @@ analysed FLEngine project ([DECOMP], /mnt/d/lynx-work/rea165-rack), FL's demo pr
   rewrite); a typical looping 4-bar pattern with 16 channels is well under 0.1 ms. Non-looping patterns cost nothing.
 
 ## Where I stopped
-- 2026-10-28 03:40: everything implemented and verified (tests, Windows GUI); landing one batch (build-local with FL
-  Data + Windows build, then land.sh). Left: see §3.
+- 2026-10-29 21:10: everything implemented and verified (tests, Windows GUI, §4). After the BSOD / disk-full freeze:
+  merged origin/main 60c0a58e (Channel Rack title: the Follow button of issue #12 and our Loop button side by side;
+  I18nData.h regenerated, 56 keys in pending.keys for the other languages), build-local with FL Data → land.sh.
+  Left: see §3.
