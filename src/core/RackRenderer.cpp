@@ -1,6 +1,8 @@
 #include "core/RackRenderer.h"
 #include "core/MetronomeVoice.h"
 
+#include "core/ChannelLoops.h"
+
 #include "core/ControlSurface.h"
 #include "core/VoltageController.h"
 #include "core/FlSynths.h"
@@ -433,6 +435,9 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         }
     }
 
+    // FL's Channel Rack looping (round 165f-rack): the looping channels' repeats are written out as notes here, so
+    // playback, the Playlist's pattern clips and export all play them without any cost on the audio thread
+    channelloops::expandSong (song);
     state->song = std::move (song);
     const auto tailStarted = std::chrono::steady_clock::now();
 

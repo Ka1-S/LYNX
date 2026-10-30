@@ -220,6 +220,13 @@ void Song::removeChannel (int index)
         for (auto& n : p.notes)
             if (n.channel > index)
                 --n.channel;
+
+        // the Channel Rack's loop points (round 165f-rack)
+        auto& loops = p.channelLoops;
+        loops.erase (std::remove_if (loops.begin(), loops.end(), [index] (const ChannelLoop& l) { return l.channel == index; }), loops.end());
+        for (auto& l : loops)
+            if (l.channel > index)
+                --l.channel;
     }
 
     forEachClipList ([index] (std::vector<Clip>& clips) {

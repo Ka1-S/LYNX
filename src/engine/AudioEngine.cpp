@@ -1727,13 +1727,25 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
     // MIDI thread: queues and atomics only (and a short copy of the device settings)
     prefs::MidiInputPrefs device;
     auto velocityCurve = prefs::VelocityCurve::linear;
+    auto locked = -1; // a channel that "receives notes from" this device (FL's channel lock)
     auto jumpChannel = 0;
     {
         const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
-        device = midiPrefsShared.input (source != nullptr ? source->getName().toStdString() : std::string());
+        const auto name = source != nullptr ? source->getName().toStdString() : std::string();
+        device = midiPrefsShared.input (name);
         velocityCurve = midiPrefsShared.velocity;
+        const auto midiChannel = m.getChannel();
+        for (const auto& l : noteLocks)
+            if (l.device == name && (l.midiChannel == 0 || l.midiChannel == midiChannel))
+            {
+                locked = l.channel;
+                if (l.midiChannel != 0)
+                    break; // a lock on this very MIDI channel wins over one on any channel
+            }
         jumpChannel = midiPrefsShared.songMarkerJumpChannel;
     }
+    if (locked >= 0)
+        device.target = locked;
 
     if (! device.enabled)
         return;
@@ -2693,6 +2705,15 @@ void AudioEngine::publishSong()
             selectedChannels.insert (std::lower_bound (selectedChannels.begin(), selectedChannels.end(), selectedChannel), selectedChannel);
     }
     publishSelection();
+    {
+        // the channels locked to a MIDI input ("Receive notes from"): built here, swapped in under the lock
+        std::vector<NoteLock> locks;
+        for (std::size_t c = 0; c < song.channels.size(); ++c)
+            if (! song.channels[c].receiveFrom.empty())
+                locks.push_back ({ song.channels[c].receiveFrom, song.channels[c].receiveMidiChannel, (int) c });
+        const juce::SpinLock::ScopedLockType lock (midiPrefsLock);
+        noteLocks.swap (locks);
+    }
     transport.bpm.store (song.bpm);
     transport.beatsPerBar.store (song.beatsPerBar);
 

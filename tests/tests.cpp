@@ -145,6 +145,9 @@
 #include "core/KeyMap.h"
 #include "core/SortOnce.h"
 #include "core/RackOps.h"
+#include "core/ChannelLoops.h"
+#include "core/ChannelBurn.h"
+#include "core/AutoSampler.h"
 #include "core/ValueMath.h"
 #include "core/Workspace.h"
 #include "core/StartupSound.h"
@@ -16498,6 +16501,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "VfxScript165Tests.inc"
 #include "Misc164Tests.inc"
 #include "Store165Tests.inc" // (round 165n; kept off the end of the list, where every round appends)
+#include "Rack165Tests.inc"  // (round 165f-rack; likewise)
 #include "Visual164Tests.inc"
 #include "Visual165Tests.inc"
 #include "Patcher164fTests.inc"

@@ -570,6 +570,10 @@ struct ChannelDef
     // from keyLow to keyHigh (MIDI keys); 0…127 = every note. Layer's "Split children" sets one key per child.
     int keyLow = 0, keyHigh = 127;
     LayerSettings layer; // instrument == layer: its children and options
+    // FL's "Receive notes from" (the channel menu, round 165f-rack): the notes of this MIDI input device (and MIDI channel,
+    // 0 = any) play only this channel, whatever is selected in the Channel Rack. Empty = not locked.
+    std::string receiveFrom;
+    int receiveMidiChannel = 0;
 
     bool hasKeyRegion() const noexcept { return keyLow > 0 || keyHigh < 127; }
     bool inKeyRegion (int key) const noexcept { return key >= keyLow && key <= keyHigh; }
@@ -967,6 +971,24 @@ struct PatternEvents
     float valueAt (double tick) const noexcept;
 };
 
+// FL's Channel Rack loop types (the Loop button's menu, REA_rodada165f-rack §1): per pattern.
+enum class RackLoopMode : std::uint8_t
+{
+    steps = 1,   // "Loop step channels": the channels with only steps loop (at the next bar unless set)
+    all = 2,     // "Loop all channels": every channel loops (at the next bar unless set)
+    advanced = 3 // "Advanced looping": each channel's own loop point (none unless set)
+};
+
+// A channel's loop point in a pattern (FL .flp 0xA0 channel / 0xA1 setting). setting: 0 = don't loop, −1 = at the next
+// step after its last note, −2 = next beat, −3 = next bar, N > 0 = every N steps.
+struct ChannelLoop
+{
+    static constexpr int dontLoop = 0, nextStep = -1, nextBeat = -2, nextBar = -3;
+    int channel = 0;
+    int setting = dontLoop;
+    bool operator== (const ChannelLoop&) const = default;
+};
+
 struct Pattern
 {
     std::string name;
@@ -974,6 +996,11 @@ struct Pattern
     std::int64_t lengthTicks = 0; // 0 = automatic (rounds up to bars)
     std::uint32_t colour = 0;     // 0xFFRRGGBB; 0 = automatic (by index)
     std::vector<PatternEvents> events; // event editor lanes (one per target)
+    // FL's Channel Rack looping (FL 20.5+, .flp 0x1A on / 0xA2 type): channels shorter than the pattern repeat to its
+    // end (polyrhythms). The loop points stay stored while it is off.
+    bool loopOn = false;
+    RackLoopMode loopMode = RackLoopMode::steps;
+    std::vector<ChannelLoop> channelLoops; // at most one per channel
 
     void sortNotes();
     std::int64_t effectiveLength (int beatsPerBar) const noexcept;

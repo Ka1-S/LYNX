@@ -26,10 +26,11 @@ enum class Icon
     tuningFork, // master pitch
     drumBrush,  // Piano Roll: the drum paint tool
     graph,      // Channel Rack: the step graph editor (velocity, pan... bars)
-    follow      // Playlist / Piano Roll: the view follows the playhead (auto scrolling)
+    follow,     // Playlist / Piano Roll: the view follows the playhead (auto scrolling)
+    loop        // Channel Rack: channel looping (round 165f-rack)
 };
 
-constexpr int iconCount = (int) Icon::follow + 1;
+constexpr int iconCount = (int) Icon::loop + 1;
 
 namespace icons
 {

@@ -218,10 +218,11 @@ Si. Used by the Piano Roll keys and notes, its scale list and chord readout, the
 the channel's root-note keyboard. Octaves stay FL's (key 60 = C5 / Do5).
 
 ## Where I stopped
-- PAUSED by the coordinator (machine load 33). Audit done: §1 inventory ([DFM] of all 105 FLEngine forms, tmp/rea165/menus.txt),
-  §2 ranking. Sub-rounds launched and paused: rea165-markers (gap 1), rea165-midisync (gap 2) in their own worktrees.
-- Lead, gap 3 (score logger) in progress: [DECOMP] FUN_0124c060 (dump: ms→ticks at the project tempo, held notes dropped,
-  window back from the last note end, first note at tick 0, silences > 2 bars shortened to 2 bars, min length = step/6,
-  Merge / Replace / Cancel when the pattern has notes, menu Last 2/5/10/20/30 minutes + Clear log). Written:
-  src/core/ScoreLog.{h,cpp} (in build-local + CMake), not built yet. Next: engine hook (AudioEngine MIDI push lambda +
-  sendLiveNote record=true, SpinLock-guarded Log), Tools menu, tests; then gaps 4–6.
+- 2026-10-28 (after the 2nd BSOD, 09:14): landed on main — the lead batch (score log, metronome sounds, SMPTE, note
+  names), rea165-midisync; rea165-markers, rea165-mixer and rea165-rack landed one by one after the reboot (each
+  merged with origin/main, build-local with FL Data + Windows build + selftest through land.sh). Sub-round docs:
+  REA_rodada165f-{markers,midisync,mixer,rack}.md (each with its own "Not done" list).
+- Not started (left for the next version, ranked): rea165-browser (#10 Browser / plugin tags, Playlist track leftovers:
+  Lock to content, Send pattern instances here, Merge pattern clips; MIDI clipboard; score-sheet export),
+  rea165-scripts (Piano Roll / MIDI controller Python scripts on r165d's pocketpy), the mixer's record source point
+  (§4 of the mixer doc).

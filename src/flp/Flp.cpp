@@ -35,6 +35,10 @@ enum : std::uint32_t
     evChannelMixerTrackOld = 0x16, // u8, old files
     evNewChannel = 0x40,
     evNewPattern = 0x41,
+    evPatternLoopOn = 0x1A,        // u8: the Channel Rack's Loop button (REA_rodada165f-rack §1)
+    evPatternLoopMode = 0xA2,      // u32: loop type 1..3
+    evPatternLoopChannel = 0xA0,   // u32: FL channel of the next 0xA1
+    evPatternLoopSetting = 0xA1,   // i32: its loop point
     evTempoCoarse = 0x42,       // legacy: integer BPM
     evArrangement = 0x63,
     evPerformanceMode = 0x1F,   // u8: Playlist › Options › Performance mode on (round 165m, all 6 demos in "Performance mode" = 1)
@@ -676,6 +680,26 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
             case evPatternName:
                 if (currentPattern >= 0)
                     pattern().name = text (e);
+                break;
+
+            case evPatternLoopOn:
+                if (currentPattern >= 0)
+                    pattern().loopOn = e.value != 0;
+                break;
+
+            case evPatternLoopMode:
+                if (currentPattern >= 0 && e.value >= 1 && e.value <= 3)
+                    pattern().loopMode = (int) e.value;
+                break;
+
+            case evPatternLoopChannel:
+                if (currentPattern >= 0)
+                    pattern().channelLoops.emplace_back ((int) e.value, 0);
+                break;
+
+            case evPatternLoopSetting:
+                if (currentPattern >= 0 && ! pattern().channelLoops.empty())
+                    pattern().channelLoops.back().second = (int) (std::int32_t) e.value;
                 break;
 
             case evPatternColour:

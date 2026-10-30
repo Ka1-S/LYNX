@@ -316,6 +316,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         rackFilterBox.repaint();
         rackGraphButton.setToggleState (rack.areGraphLanesShown(), juce::dontSendNotification);
         rackPianoRollButton.setToggleState (rack.isPianoRollView(), juce::dontSendNotification);
+        rackLoopButton.setToggleState (rack.isLoopingOn(), juce::dontSendNotification);
     };
     rackGraphButton.setClickingTogglesState (false);
     rackGraphButton.onClick = [this] { rack.toggleGraphLanes(); };
@@ -338,6 +339,15 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::setQuickTip (rackFollowButton, tr ("Follow the playhead"));
     rackFollowButton.onClick = [this] { runAction ("rack.follow"); };
     rackTitleTools.addAndMakeVisible (rackFollowButton);
+    // FL's Loop button (round 165f-rack): click switches the pattern's channel looping, right-click its loop type and burns
+    rackLoopButton.setClickingTogglesState (false);
+    rackLoopButton.setOnColour (theme::colour::bg6);
+    rackLoopButton.setIconColourWhenOn (theme::colour::accent);
+    rackLoopButton.onClick = [this] { rack.toggleLooping(); };
+    rackLoopButton.onRightClick = [this] { rack.showLoopMenu (&rackLoopButton); };
+    ui::setHint (rackLoopButton, tr ("Channel looping: channels shorter than the pattern repeat to its end (polyrhythms)  [LMB] on / off  "
+                                     "[RMB] loop type (step channels, all channels, advanced) and Burn to pattern"));
+    rackTitleTools.addAndMakeVisible (rackLoopButton);
     // the pattern selector (issue #9): change the pattern the rack edits right from its title bar
     rackPatternSelector.onStep = [this] (int delta) { selectPattern (stepPattern (engine.getSong(), delta)); };
     rackPatternSelector.onMenu = [this] { showRackPatternList(); };
@@ -372,6 +382,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         rackPianoRollButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
         r.removeFromLeft (4);
         rackFollowButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
+        r.removeFromLeft (4);
+        rackLoopButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
     };
     workspace.setTitleAccessory (Panel::channelRack, &rackTitleTools, rackTitleToolsWidth);
     workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) { addPanelMenuItems (panel, menu); };
@@ -2768,6 +2780,8 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
         rackFilterBox.text = rack.filterName();
         rackFilterBox.repaint();
     }
+    if (rackLoopButton.getToggleState() != rack.isLoopingOn()) // (another pattern, undo)
+        rackLoopButton.setToggleState (rack.isLoopingOn(), juce::dontSendNotification);
 
     if ((int) song.channels.size() != fittedChannelCount && fittedChannelCount >= 0) // a row was added or removed
         fitChannelRack (false);
@@ -3073,6 +3087,7 @@ void MainComponent::setQuickTips()
     tip (rackFilterBox, tr ("Channel filter group"));
     tip (rackGraphButton, tr ("Graph editor"));
     tip (rackPianoRollButton, tr ("Piano-roll view"), "rack.pianoRollView");
+    tip (rackLoopButton, tr ("Channel looping"));
 
     for (int i = 0; i < workspace::panelCount; ++i)
         tip (panelButtons[(std::size_t) i], tr (panelName ((Panel) i)), panelAction ((Panel) i));

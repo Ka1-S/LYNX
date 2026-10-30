@@ -95,6 +95,14 @@ public:
     void sortChannels (ChannelSort by);
     void selectUnused();
 
+    // FL's Channel Rack looping (round 165f-rack): the title bar's Loop button switches the current pattern's looping
+    // on or off; its menu picks the loop type and burns the loops. Burn MIDI writes what a channel plays as notes.
+    void toggleLooping();
+    bool isLoopingOn() const;
+    void showLoopMenu (juce::Component* target);
+    void burnLoops (bool selectedOnly);
+    void burnMidi (int channel, bool toNewPattern);
+
     // Adds a channel at the end (routed to a free insert), selects it and, for plugins, opens its window.
     int addChannel (ChannelDef channel, bool openEditor);
 
@@ -137,7 +145,7 @@ public:
     static constexpr int stepWidth = 22;
 
 private:
-    enum class Area { none, mute, pan, volume, route, name, select, grid, addRow, laneLevels, lane };
+    enum class Area { none, mute, pan, volume, route, name, select, grid, addRow, laneLevels, lane, loop };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
@@ -149,6 +157,17 @@ private:
     int numSteps() const;   // the pattern's steps
     int shownSteps() const; // plus FL's ghost steps: the free width after the pattern's end (issue #11)
     int ghostSteps = 0;
+    // channel looping: the row's loop point in steps (0: the row doesn't loop), the advanced controls' column (FL's
+    // LoopWP: at the right edge of the visible rack) and its loop point menu
+    int loopStepsOf (int row) const;
+    bool advancedLoopShown() const;
+    static constexpr int loopColumnWidth = 44;
+    juce::Rectangle<int> loopBoxBounds (int row) const;
+    void paintLoopColumn (juce::Graphics& g);
+    void showLoopPointMenu (int row);
+    void setLoopPoint (int row, int setting);
+    int loopDragRow = -1, loopDragStart = 0;
+    float loopDragY = 0.0f;
     void parentSizeChanged() override { updateSize(); }
     int nameLeft() const noexcept { return muteWidth + 2 * knobWidth + routeWidth + 2; }
     int selectLeft() const noexcept { return nameLeft() + nameWidth + 4; }

@@ -540,6 +540,24 @@ Shape make (Icon icon)
             line (st, 16.5f, 15.0f, 19.5f, 12.0f);
             break;
         }
+        case Icon::loop: // two arcs chasing each other around (a loop), arrow heads at their ends
+        {
+            constexpr float r = 7.0f;
+            auto arcWithHead = [&] (float from, float to) {
+                juce::Path a;
+                a.addCentredArc (12.0f, 12.0f, r, r, 0.0f, from, to, true);
+                st.addPath (a);
+                // the head at the arc's end, pointing along it (clockwise); angles from 12 o'clock as JUCE's arcs
+                const juce::Point<float> end (12.0f + r * std::sin (to), 12.0f - r * std::cos (to));
+                const juce::Point<float> along (std::cos (to), std::sin (to)), out (std::sin (to), -std::cos (to));
+                juce::Path h;
+                h.addTriangle (end + along * 3.6f, end + out * 3.2f - along * 0.6f, end - out * 3.2f - along * 0.6f);
+                fi.addPath (h);
+            };
+            arcWithHead (0.45f, 2.55f);
+            arcWithHead (3.6f, 5.7f);
+            break;
+        }
         case Icon::tuningFork: // two prongs on a stem, with a weighted foot
         {
             juce::Path f;

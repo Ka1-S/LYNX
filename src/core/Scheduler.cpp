@@ -68,16 +68,20 @@ void emitOccurrences (double t, std::int64_t loopLength, double start, double en
         out.add (event);
     }
 }
+using NoteTiming = PlayedTiming;
+NoteTiming noteTiming (const Note& note, float swing, const ChannelDef* c) noexcept { return playedTiming (note, swing, c); }
+
+const ChannelDef* channelOf (const std::vector<ChannelDef>* channels, int channel) noexcept
+{
+    return channels != nullptr && channel >= 0 && channel < (int) channels->size() ? &(*channels)[(std::size_t) channel] : nullptr;
+}
+} // namespace
+
 // FL's Misc › Time (REA round 146b [EXEC]): Shift delays a channel's notes (on and off), Gate cuts the long ones to its
 // length — not the porta notes when Full porta is on.
-struct NoteTiming
+PlayedTiming playedTiming (const Note& note, float swing, const ChannelDef* c) noexcept
 {
-    std::int64_t start = 0, length = 1;
-};
-
-NoteTiming noteTiming (const Note& note, float swing, const ChannelDef* c) noexcept
-{
-    NoteTiming t;
+    PlayedTiming t;
     t.start = note.start + swingDelay (note.start, swing, c != nullptr ? c->swingMix : 1.0f);
     t.length = std::max<std::int64_t> (note.length, 1);
     if (c == nullptr)
@@ -92,12 +96,6 @@ NoteTiming noteTiming (const Note& note, float swing, const ChannelDef* c) noexc
     }
     return t;
 }
-
-const ChannelDef* channelOf (const std::vector<ChannelDef>* channels, int channel) noexcept
-{
-    return channels != nullptr && channel >= 0 && channel < (int) channels->size() ? &(*channels)[(std::size_t) channel] : nullptr;
-}
-} // namespace
 
 std::int64_t maxChannelShift (const std::vector<ChannelDef>& channels) noexcept
 {
