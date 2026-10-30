@@ -376,7 +376,7 @@ jobs:
   macos:
     name: macOS (universal dmg)
     needs: version
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       LABEL: ${{ needs.version.outputs.label }}
       VERSION: ${{ needs.version.outputs.version }}
