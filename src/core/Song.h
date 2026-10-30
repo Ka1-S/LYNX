@@ -1113,11 +1113,15 @@ struct Marker
     std::int64_t tick = 0;
     std::string name;
     int numerator = 0, denominator = 4;
-    // FL's marker action (the .flp's marker type, REA_rodada6 §5 / round 139): 0 = plain marker, 9 "Start recording"
-    // (punch in), 10 "Stop recording" (punch out); other FL actions are kept as their number (no effect in LYNX)
+    // FL's marker action = the .flp's marker type (REA_rodada6 §5, REA_rodada165f-markers §1): 0 plain marker,
+    // 1 marker loop, 2 marker skip, 3 marker pause, 4 (song) loop, 5 start, 6 pattern length, 7 bar override,
+    // 8 time signature (also numerator > 0), 9 start recording (punch in), 10 stop recording (punch out),
+    // 11 loop length (pattern markers), 12 key/scale. Playback follows them: core/MarkerPlan.h.
     int action = 0;
-    static constexpr int punchIn = 9, punchOut = 10;
-    static constexpr int songStart = 5; // FL's "Start": the song starts here; Performance mode's zone ends here
+    static constexpr int none = 0, markerLoop = 1, markerSkip = 2, markerPause = 3, songLoop = 4, start = 5,
+                         patternLength = 6, barOverride = 7, timeSignature = 8, punchIn = 9, punchOut = 10,
+                         loopLength = 11, keyScale = 12;
+    static constexpr int songStart = start; // (round 165m's name) Performance mode's zone ends here
 
     bool isSignature() const noexcept { return numerator > 0; }
     bool operator== (const Marker&) const = default;

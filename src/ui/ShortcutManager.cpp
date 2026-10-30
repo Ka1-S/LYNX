@@ -31,6 +31,7 @@ keys::Chord chordFromKeyPress (const juce::KeyPress& key)
         { juce::KeyPress::leftKey, keys::left },         { juce::KeyPress::rightKey, keys::right },       { juce::KeyPress::pageUpKey, keys::pageUp },
         { juce::KeyPress::pageDownKey, keys::pageDown }, { juce::KeyPress::homeKey, keys::home },         { juce::KeyPress::endKey, keys::end },
         { juce::KeyPress::numberPadAdd, keys::numpadPlus }, { juce::KeyPress::numberPadSubtract, keys::numpadMinus },
+        { juce::KeyPress::numberPadMultiply, keys::numpadMultiply }, { juce::KeyPress::numberPadDivide, keys::numpadDivide },
         { juce::KeyPress::F1Key, keys::f1 },   { juce::KeyPress::F2Key, keys::f2 },   { juce::KeyPress::F3Key, keys::f3 },
         { juce::KeyPress::F4Key, keys::f4 },   { juce::KeyPress::F5Key, keys::f5 },   { juce::KeyPress::F6Key, keys::f6 },
         { juce::KeyPress::F7Key, keys::f7 },   { juce::KeyPress::F8Key, keys::f8 },   { juce::KeyPress::F9Key, keys::f9 },

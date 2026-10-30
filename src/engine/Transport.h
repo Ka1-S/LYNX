@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
 
+#include "core/MarkerPlan.h"
 #include "core/Song.h"
 
 namespace lynx
@@ -50,6 +52,57 @@ struct Transport
     std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 };
     std::atomic<double> songEnd { 0.0 }; // Song::songLength(): without a loop region Song mode loops there
     std::atomic<double> songStart { 0.0 }; // Performance mode: the song loops back to its Start marker (round 165m)
+
+    // The Playlist markers' actions (core/MarkerPlan.h) for the audio thread, published by the UI under a seqlock
+    // like the signatures above (odd version while writing; the audio thread keeps its last good copy).
+    std::array<std::atomic<std::int64_t>, MarkerPlan::maxJumps> markerAt {}, markerTo {};
+    std::array<std::atomic<int>, MarkerPlan::maxJumps> markerKind {};
+    std::atomic<int> markerCount { 0 };
+    std::atomic<std::int64_t> markerWrapTo { 0 }, markerStart { -1 }, markerSongEnd { 0 };
+    std::atomic<std::uint32_t> markerVersion { 0 };
+
+    void publishMarkers (const MarkerPlan& plan) noexcept
+    {
+        markerVersion.fetch_add (1, std::memory_order_acq_rel); // odd: writing
+        const auto count = std::min (plan.count, MarkerPlan::maxJumps);
+        for (int i = 0; i < count; ++i)
+        {
+            markerAt[(std::size_t) i].store (plan.jumps[(std::size_t) i].at, std::memory_order_relaxed);
+            markerTo[(std::size_t) i].store (plan.jumps[(std::size_t) i].to, std::memory_order_relaxed);
+            markerKind[(std::size_t) i].store ((int) plan.jumps[(std::size_t) i].kind, std::memory_order_relaxed);
+        }
+        markerCount.store (count, std::memory_order_relaxed);
+        markerWrapTo.store (plan.wrapTo, std::memory_order_relaxed);
+        markerStart.store (plan.start, std::memory_order_relaxed);
+        markerSongEnd.store (plan.songEnd, std::memory_order_relaxed);
+        markerVersion.fetch_add (1, std::memory_order_acq_rel); // even: ready
+    }
+
+    // audio thread: refreshes `plan` when a new table is complete (false = kept as it was)
+    bool readMarkers (MarkerPlan& plan, std::uint32_t& version) const noexcept
+    {
+        const auto before = markerVersion.load (std::memory_order_acquire);
+        if ((before & 1u) != 0 || before == version)
+            return false;
+        MarkerPlan copy;
+        copy.count = std::clamp (markerCount.load (std::memory_order_relaxed), 0, MarkerPlan::maxJumps);
+        for (int i = 0; i < copy.count; ++i)
+            copy.jumps[(std::size_t) i] = { markerAt[(std::size_t) i].load (std::memory_order_relaxed),
+                                            (MarkerJump::Kind) markerKind[(std::size_t) i].load (std::memory_order_relaxed),
+                                            markerTo[(std::size_t) i].load (std::memory_order_relaxed) };
+        copy.wrapTo = markerWrapTo.load (std::memory_order_relaxed);
+        copy.start = markerStart.load (std::memory_order_relaxed);
+        copy.songEnd = markerSongEnd.load (std::memory_order_relaxed);
+        if (markerVersion.load (std::memory_order_acquire) != before)
+            return false;
+        plan = copy;
+        version = before;
+        return true;
+    }
+
+    // A jump asked by the user while playing (marker click, keyboard, MIDI "Song marker jump"): the audio thread
+    // makes it when the position reaches `pendingJumpAt` (FL's "Quantize song jumps"; < 0 = none).
+    std::atomic<double> pendingJumpAt { -1.0 }, pendingJumpTo { -1.0 };
 
     double ticksPerSample() const noexcept
     {

@@ -372,6 +372,14 @@ Song makeRenderSong (const Song& song, const Options& o, std::int64_t tailTicks,
         for (auto& c : base.channels)
             c.maxPolyphony = 0;
 
+    // FL's export plays the song straight through: marker loops / skips / pauses and the Start / Loop markers act only
+    // while playing live (REA_rodada165f-markers §1.3: FL's renders of every marker action match the plain song)
+    for (auto& a : base.arrangements)
+        for (auto& m : a.markers)
+            if (m.action == Marker::markerLoop || m.action == Marker::markerSkip || m.action == Marker::markerPause
+                || m.action == Marker::songLoop || m.action == Marker::start)
+                m.action = Marker::none;
+
     base.mode = PlayMode::song;
     base.loopStart = base.loopEnd = 0;
     return base;

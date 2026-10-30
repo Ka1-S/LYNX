@@ -3407,7 +3407,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         Arrangement a;
         a.name = arrangement.name.empty() ? "Arrangement " + std::to_string (song.arrangements.size() + 1) : arrangement.name;
 
-        // markers; type 8 changes the time signature (loop/pause actions become plain markers)
+        // markers; type 8 changes the time signature; the other types are FL's marker actions (core/MarkerPlan.h)
         for (const auto& m : arrangement.markers)
         {
             Marker marker;
@@ -3424,12 +3424,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 marker.denominator = m.denominator;
             }
 
-            // unnamed: the FL marker type (REA_rodada6 §5)
-            static const char* typeNames[] = { "", "Loop (marker)", "Skip", "Pause", "Loop", "Start", "Pattern length", "",
-                                               "", "Start recording", "Stop recording", "Loop length", "Key/scale" };
-            if (marker.name.empty() && m.type > 0 && m.type < 13 && m.type != 8)
-                marker.name = typeNames[m.type];
-
+            // (unnamed action markers show their action's name on the ruler, as in FL)
             a.markers.push_back (std::move (marker));
         }
 

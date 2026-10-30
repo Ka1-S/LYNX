@@ -2,3 +2,21 @@
 # A new UI string needs its pt-BR translation right away; if you can't translate it into the other languages,
 # list it here so the tests pass — the table maintainers translate the pending keys and empty this file.
 # python3 tools/i18n_tool.py pending   rewrites this file with every key some table still lacks.
+"Marker loop"
+"Marker skip"
+"Marker pause"
+"Bar override"
+"Key/Scale"
+"Loop length"
+"Add one every"
+"Bars"
+"Add jump to next bar"
+"Change to marker loop"
+"Time markers"
+"Quantize song jumps"
+"Place loop (from this marker to the next)"
+"Song marker jump"
+"Notes on this channel move the song to a marker instead of playing: note 0 goes to the first marker, the next one to the second... (Playlist › Quantize song jumps applies while playing)."
+"Jump to the next song marker (Quantize song jumps while playing)"
+"Jump to the previous song marker"
+"Marker: [LMB] jump to it (while playing: at the next Quantize song jumps step)  [RMB] action, rename, delete"

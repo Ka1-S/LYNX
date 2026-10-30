@@ -1124,7 +1124,8 @@ public:
                                                                  &velocityLabel, &velocityBox, &velocityNote, &perfLabel, &perfBox, &perfNote, &typeLabel, &typeValue, &pickup,
                                                                  &pickupNote, &linksLabel, &links, &removeLink, &removeAll, &outputsTitle,
                                                                  &outputsNote, &noOutputs, &syncTitle, &clockLabel, &clockBox, &clockOffsetLabel,
-                                                                 &clockOffset, &clockStatusLabel, &clockStatus, &clockNote })
+                                                                 &clockOffset, &clockStatusLabel, &clockStatus, &clockNote, &jumpLabel, &jumpBox,
+                                                                 &jumpNote })
             add (*c);
         styleNote (outputsNote, tr ("Send master sync drives drum machines, synths and other software from LYNX SHARE's transport: MIDI clock "
                                     "with Song Position Pointer, or MIDI Time Code."));
@@ -1202,6 +1203,19 @@ public:
         styleCombo (perfBox);
         styleNote (perfNote, tr ("With Performance mode on, its notes launch the Playlist's clips: an octave per track, a note per clip; "
                                  "notes 120/121 move the tracks, 122/123 the clips, 124 switches big steps."));
+        // FL's Options › MIDI "Song marker jump (MIDI channel)"
+        styleLabel (jumpLabel, tr ("Song marker jump"));
+        jumpBox.addItem (tr ("Off"), 1);
+        for (int c = 1; c <= 16; ++c)
+            jumpBox.addItem (tr ("MIDI channel {0}", { juce::String (c) }), c + 1);
+        jumpBox.onChange = [this] {
+            auto p = engine.getMidiPrefs();
+            p.songMarkerJumpChannel = juce::jlimit (0, 16, jumpBox.getSelectedId() - 1);
+            set (p);
+        };
+        styleCombo (jumpBox);
+        styleNote (jumpNote, tr ("Notes on this channel move the song to a marker instead of playing: note 0 goes to the first "
+                                 "marker, the next one to the second... (Playlist › Quantize song jumps applies while playing)."));
 
         styleLabel (typeLabel, tr ("Controller type"));
         typeLabel.setJustificationType (juce::Justification::topLeft);
@@ -1299,6 +1313,8 @@ private:
         velocityNote.setBounds (r.indented (16).translated (0, -3));
         perfBox.setBounds (r.row (perfLabel, 300));
         perfNote.setBounds (r.indented (32).translated (0, -3));
+        jumpBox.setBounds (r.row (jumpLabel, 300));
+        jumpNote.setBounds (r.indented (32).translated (0, -3));
 
         r.section (controllersTitle);
         {
@@ -1336,6 +1352,7 @@ private:
         const auto& p = engine.getMidiPrefs();
         velocityBox.setSelectedId ((int) p.velocity + 1, juce::dontSendNotification);
         pickup.setToggleState (p.pickup, juce::dontSendNotification);
+        jumpBox.setSelectedId (p.songMarkerJumpChannel + 1, juce::dontSendNotification);
         perfBox.setSelectedId (p.performanceChannel + 1, juce::dontSendNotification);
         {
             auto id = 1;
@@ -1495,9 +1512,9 @@ private:
     juce::ComboBox clockBox;
     juce::Slider clockOffset;
     SectionTitle inputsTitle { tr ("Input devices") }, notesTitle { tr ("Notes") }, controllersTitle { tr ("Controllers") };
-    juce::Label inputsNote, noDevices, velocityLabel, velocityNote, perfLabel, perfNote, typeLabel, typeValue, pickupNote, linksLabel;
+    juce::Label inputsNote, noDevices, velocityLabel, velocityNote, perfLabel, perfNote, typeLabel, typeValue, pickupNote, linksLabel, jumpLabel, jumpNote;
     juce::TextButton refresh { tr ("Refresh device list") }, removeLink { tr ("Remove link") }, removeAll { tr ("Remove all") };
-    juce::ComboBox velocityBox, perfBox;
+    juce::ComboBox velocityBox, perfBox, jumpBox;
     juce::ToggleButton pickup;
     juce::ListBox links;
 };
