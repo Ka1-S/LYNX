@@ -4,10 +4,25 @@ Issue #14 (kubapl2004gmail, Linux), "Feature Requests". The three bugs of the sa
 
 ## Where I stopped
 
-- All three items implemented and merged with round 166a (snap to scale moves every note, lit keys): when the view is
-  folded, dragging / Up-Down move by shown rows; otherwise 166a's snap-to-scale rules apply. build-local with FL Data
-  after the merge: 1 887 689 checks, 0 failures. Piano Roll, Mixer, Main and ProjectFile also syntax-checked against
-  the Linux JUCE build. Next: landing (land.sh), then the Windows GUI check (shots) on the landed build.
+- Landed in 6739ddbd (merged with rounds 166a, 166c, 166e, 166b; land.sh: 1 887 976 checks, 0 failures + Windows build).
+  Done. Left: FL was not checked for what it does *after* its max-tracks error (whether it adds nothing or adds the
+  rest); LYNX adds nothing. Older LYNX versions read the new Fruity Send "Send to" span wrongly (forward compat only);
+  automation clips and presets of Fruity Send's "Send to" are not rescaled.
+
+## LYNX 0.1.21 check on Windows [SHOT, 2026-10-31 06:31–06:33, landed LYNX.exe, fresh profile, LYNX_TEST_MODE=1]
+
+Shots in C:\Users\kauan\lynx-test\feat166d\ (s-*.png from `--feat166shot`, g*.png real input on the FL demo):
+
+| shot | step | result |
+|---|---|---|
+| s-pr-scale / s-pr-folded | demo in C# major, then Fold to the scale | the keyboard becomes the named list of the scale keys (C#, D#, F, F#, G#, A#, C), the A / G / D notes are hidden, the rest keep their place |
+| g3 | real right-click on the ghost notes button | "GHOST CHANNELS", All, None, a line, every channel ticked, ASHER POSTMAN (edited) bold, two columns: as FL's a6 |
+| g4 | click "Basic Sidechain", right-click again | the menu closed at the click; reopened, Basic Sidechain unticked and greyed, the project marked modified: as FL's a7/a8 |
+| s-mixer500-start / end | mixer filled to 500 inserts | Insert 500 is the last strip; filling took 7 ms, a full mixer repaint 328 ms (offscreen, all 500 strips) |
+| g7 / g13 / g14 | right-click the mixer "+", Add multiple..., 2999 with 127 inserts | "Add one / Add multiple..." then "You can add a maximum of 373 inserts." (FL: 125 used → "maximum of 375 tracks") |
+
+Note: the `--feat166shot` menu image (s-ghostmenu.png) is drawn by the snapshot helper, which skips custom menu items, so
+it has no ticks / bold; g3 is the real menu.
 
 ## FL evidence (FL Studio 2026.1, this PC)
 
