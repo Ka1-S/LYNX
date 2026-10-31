@@ -9,7 +9,7 @@
 // - no relaunch through the 8.3 short path (WindowsApps paths are plain ASCII);
 // - a restart goes through the package (shell:AppsFolder) so it keeps the package identity;
 // - LYNX ASIO is not offered for registration with other programs (the package folder changes with every update).
-// Updates come from the Store; LYNX has no self-updater on Windows.
+// Updates come from the Store: a packaged LYNX never checks for updates (ui/Updater.h; the other builds do).
 
 #include <juce_core/juce_core.h>
 

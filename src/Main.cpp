@@ -100,6 +100,7 @@
 #include "ui/ToolWindow.h"
 #include "platform/CrashGuard.h"
 #include "ui/CrashReporter.h"
+#include "ui/Updater.h"
 
 #include <atomic>
 #include <chrono>
@@ -269,6 +270,14 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        // round 166b: the copy of LYNX.exe that installs an update (ui/Updater.h) waits, installs, starts LYNX again
+        if (commandLine.contains ("--apply-update") && lynx::updater::runApplyHelper (juce::StringArray::fromTokens (commandLine, true)))
+        {
+            updateHelper = true;
+            quit();
+            return;
+        }
+
         // Windows, LYNX.exe in a folder with accents: run again from its ASCII short path (Waves editors crash otherwise)
         if (int code = 0; lynx::platform::relaunchFromAsciiPath (code))
         {
@@ -1083,6 +1092,7 @@ public:
             openStartupFile();
             startupTrace.mark ("startup file opened");
             startOpenTimeProbe();
+            startUpdateCheck();
             juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
             return;
         }
@@ -1125,6 +1135,7 @@ public:
                     openStartupFile();
                     startupTrace.mark ("startup file opened");
                     startOpenTimeProbe();
+                    startUpdateCheck();
                     juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
                     // first run: language, audio, plugin folders (FL Studio's included) and a background scan
                     if (! lynx::setupWizardDone() && lynx::platform::testMode())
@@ -1371,6 +1382,16 @@ public:
         perf = std::make_unique<Probe> (*this, openTimeReport, fileToOpen, openTimeIdleSeconds);
     }
 
+    // round 166b: the update check of a normal start (never in --opentime and the other command-line modes), a few
+    // seconds after the window is up so it never competes with the start-up; and the result of an update just installed
+    void startUpdateCheck()
+    {
+        if (openTimeReport != juce::File())
+            return;
+        lynx::updater::afterStart();
+        juce::Timer::callAfterDelay (3000, [] { lynx::updater::startAutomaticCheck(); });
+    }
+
     void openStartupFile()
     {
         if (fileToOpen != juce::File() && mainWindow != nullptr)
@@ -1379,13 +1400,14 @@ public:
 
     void shutdown() override
     {
-        if (relaunched)
+        if (relaunched || updateHelper)
             return; // the copy that ran owns the session (its crash notes stay for the next start)
 
         lynx::crashguard::note ("closing");
         lynx::shutdownPluginSandboxWorker();
         splash = nullptr;
         mainWindow = nullptr; // the UI goes before the engine
+        lynx::updater::shutdown(); // (a check or download in flight stops)
         crashEngine = nullptr;
         engine = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
@@ -1431,6 +1453,7 @@ private:
 
     bool sandboxChild = false;
     bool relaunched = false; // relaunchFromAsciiPath ran LYNX from its short path: this process only waited
+    bool updateHelper = false; // --apply-update (round 166b)
     juce::String uncleanLastStep; // last step of a previous run that ended without closing
 
     // LYNX.exe --selftest report.txt: renders 2 s without a sound card and writes the result.
@@ -6549,6 +6572,26 @@ private:
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
             saveWindow (lynx::crashreporter::makeDialogForSnapshot (false), "-crash-report.png"); // round 159
             saveWindow (lynx::crashreporter::makeDialogForSnapshot (true), "-report-problem.png");
+            // round 166b: the update bar in its states (available, downloading, failed, ready) and the release notes window
+            {
+                struct Bars final : juce::Component
+                {
+                    Bars()
+                    {
+                        constexpr int h = lynx::updater::UpdateBar::height;
+                        setSize (1100, 4 * (h + 6));
+                        for (int state = 0; state < 4; ++state)
+                        {
+                            bars[state].setBounds (0, state * (h + 6), getWidth(), h);
+                            bars[state].showForSnapshot (state);
+                            addAndMakeVisible (bars[state]);
+                        }
+                    }
+                    lynx::updater::UpdateBar bars[4];
+                };
+                saveWindow (std::make_unique<Bars>(), "-update-bar.png");
+                saveWindow (lynx::updater::makeReleaseNotesForSnapshot(), "-update-notes.png");
+            }
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 2), "-missing-found.png");

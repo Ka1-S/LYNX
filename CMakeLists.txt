@@ -216,6 +216,10 @@ target_sources(lynx_core PRIVATE
 target_sources(lynx_core PRIVATE
     src/core/CrashReport.cpp)
 
+# in-app update check: versions, release list, build flavours, checksums, release notes (round 166b)
+target_sources(lynx_core PRIVATE
+    src/core/UpdateCheck.cpp)
+
 # the embedded Python (pocketpy) and FL's VFX Script (round 165d)
 target_sources(lynx_core PRIVATE
     src/core/Python.cpp
@@ -412,7 +416,8 @@ if(LYNX_BUILD_APP)
         src/ui/TouchKeyboard.cpp
         src/ui/QuickAddPalette.cpp
         src/ui/PluginPicker.cpp
-        src/ui/CrashReporter.cpp)
+        src/ui/CrashReporter.cpp
+        src/ui/Updater.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/clap/include)
     # the commit the build comes from (crash reports name it, round 159)
