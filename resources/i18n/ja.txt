@@ -5917,3 +5917,9 @@ countries: jp
 "Yes" = "はい"
 "Make clip unique?" = "クリップをユニークにしますか？"
 "The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "クリップ \"{0}\" は別のオーディオトラックでも使用されています。\n\nこのインスタンスをユニークにしてから、このオーディオトラックにルーティングしますか？"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "喉の長さ"
+"Scale steps" = "スケール度数"
+"In scale" = "スケール内"
+"AMPLITUDE" = "振幅"
+"VARIATION" = "揺らぎ"

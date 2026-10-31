@@ -5917,3 +5917,9 @@ countries: nl be
 "Yes" = "Ja"
 "Make clip unique?" = "Clip uniek maken?"
 "The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "De clip \"{0}\" wordt ook op een andere audiotrack gebruikt.\n\nWil je deze instantie uniek maken en daarna naar deze audiotrack routen?"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "KEEL"
+"Scale steps" = "Toonladdertrappen"
+"In scale" = "In toonladder"
+"AMPLITUDE" = "AMPLITUDE"
+"VARIATION" = "VARIATIE"
