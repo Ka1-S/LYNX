@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "core/Effects.h"
+#include "core/FruityBasicFx.h"
 #include "core/PluginSubstitutes.h"
 #include "core/ProjectSafety.h"
 #include "engine/Text.h"
@@ -576,6 +577,8 @@ juce::var effectToVar (const EffectSlot& slot)
     for (std::size_t i = 0; i < used && i < slot.params.size(); ++i)
         params.add (exact ? (double) slot.params[i] : juce::roundToInt (slot.params[i] * 10000.0f) / 10000.0);
     e->setProperty ("params", params);
+    if (slot.kind == EffectKind::fruitySend) // the span "Send to" is normalised over (round 166d: 500 inserts)
+        e->setProperty ("sendSpan", maxMixerTracks - 1);
 
     if (slot.mix < 1.0f)
         e->setProperty ("mix", juce::roundToInt (slot.mix * 10000.0f) / 10000.0);
@@ -665,6 +668,9 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
             slot.params[(std::size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*params)[i]);
         upgradeLoadedEffectParams (slot, (std::size_t) params->size()); // engines that changed since the file was saved
     }
+    const auto sendSpan = *kind == EffectKind::fruitySend ? (int) e.getProperty ("sendSpan", flbasic::legacySendSpan) : 0;
+    if (sendSpan > 0) // saved over 0..127 before round 166d: the same insert over today's span
+        slot.params[3] = flbasic::rescaleSendTrackValue (slot.params[3], sendSpan);
 
     slot.plugin = pluginFromVar (e["plugin"]);
     if (*kind != EffectKind::plugin && e.hasProperty ("substituteFor"))
@@ -677,6 +683,8 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
     {
         for (int i = 0; i < other->size() && i < maxEffectParams; ++i)
             slot.abOther.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) (*other)[i]));
+        if (sendSpan > 0 && slot.abOther.size() > 3)
+            slot.abOther[3] = flbasic::rescaleSendTrackValue (slot.abOther[3], sendSpan);
         slot.abShowingB = (bool) e.getProperty ("abB", false);
     }
     if (e.hasProperty ("state"))
@@ -872,6 +880,8 @@ juce::var channelToVar (const ChannelDef& c)
     o->setProperty ("volume", c.volume);
     o->setProperty ("pan", c.pan);
     o->setProperty ("muted", c.muted);
+    if (c.ghostHidden)
+        o->setProperty ("ghostHidden", true);
 
     if (! c.samplePath.empty())
         o->setProperty ("sample", str (c.samplePath));
@@ -1105,6 +1115,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
     def.volume = juce::jlimit (0.0f, 1.0f, (float) c.getProperty ("volume", 0.8));
     def.pan = juce::jlimit (-1.0f, 1.0f, (float) c.getProperty ("pan", 0.0));
     def.muted = (bool) c.getProperty ("muted", false);
+    def.ghostHidden = (bool) c.getProperty ("ghostHidden", false);
     def.samplePath = c["sample"].toString().toStdString();
 
     {

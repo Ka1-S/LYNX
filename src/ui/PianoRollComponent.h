@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/NoteTools.h"
 #include "engine/AudioEngine.h"
 #include "ui/EditorTools.h"
 #include "ui/NoteToolDialogs.h"
@@ -72,6 +73,12 @@ public:
     bool isScaleSnapOn() const noexcept { return scaleSnap; }
     void setScaleSnap (bool on);
     bool hasScale() const { return scaleIndex() > 0; } // a scale is chosen in the toolbar
+    // "Fold to the scale" (round 166d, issue #14; LYNX's own — FL only highlights the scale): only the in-scale keys
+    // are shown, and the notes on the other keys are hidden and left alone by the edits.
+    bool isFoldedToScale() const noexcept { return foldToScale; }
+    void setFoldToScale (bool on);
+    // FL's ghost channels (round 166d): which channels' notes show as ghosts (ChannelDef::ghostHidden)
+    juce::PopupMenu ghostChannelsMenu();
 
     // Centers the view on the channel's notes and, with `fitPattern`, zooms to show the whole pattern
     // (called on open).
@@ -88,6 +95,7 @@ public:
 
     // For snapshots: the tool in use and the Note inspector of the selection.
     void setToolForSnapshot (EditTool tool) { tools.setTool (tool); }
+    void setScaleForSnapshot (int root, int scale) { scaleBox.setSelectedId (scale <= 0 ? 1 : scale * 100 + root + 1, juce::sendNotificationSync); }
     std::unique_ptr<juce::Component> makeNoteInspectorForSnapshot (bool singleNote = false);
     std::vector<int> noteIndicesForSnapshot() const { return selectionOrAll(); }
     std::int64_t gridForSnapshot() const { return gridTicks(); }
@@ -131,6 +139,13 @@ private:
     double xToTick (int x) const;
     int keyToY (int key) const;
     int yToKey (int y) const;
+    int rowFor (int key) const noexcept;  // the key's row from the top (a folded-away key: the row above it)
+    void updateKeyRows();                 // after the scale or the fold changed
+    notetools::KeyRows rows = notetools::keyRows (0, 0, false);
+    bool foldToScale = false;
+    bool folded() const noexcept { return rows.count < 128; }
+    bool ghostShown (int channel) const noexcept;
+    void setGhostChannels (const std::function<bool (int channel, bool shown)>& show);
     std::int64_t gridTicks() const;        // the grid step in use (resolving Screen / Nearest note)
     std::int64_t snap (double tick, bool enabled) const;
     std::int64_t viewLengthTicks() const;

@@ -5941,6 +5941,10 @@ countries: jp
 "Metronome track" = "メトロノームのトラック"
 "Metronome target mixer track" = "メトロノームの出力先ミキサートラック"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "メトロノームが鳴るミキサートラック（--- はマスター）。クリック音はエクスポートには含まれません。"
+"Fold to the scale (hide the other keys and their notes)" = "スケールに折りたたむ（ほかのキーとそのノートを隠す）"
+"Ghost channels" = "ゴーストチャンネル"
+"Add multiple..." = "複数追加..."
+"You can add a maximum of {0} inserts." = "追加できるインサートは最大 {0} 個です。"
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "クリップゲイン: [LMB] 上下にドラッグ (選択したクリップをまとめて)  [RMB] メニュー"

@@ -5941,6 +5941,10 @@ countries: id
 "Metronome track" = "Trek metronom"
 "Metronome target mixer track" = "Trek mixer tujuan metronom"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Trek mixer tempat metronom berbunyi (--- adalah Master). Klik tidak pernah masuk ke ekspor."
+"Fold to the scale (hide the other keys and their notes)" = "Lipat ke tangga nada (sembunyikan tuts lain dan notnya)"
+"Ghost channels" = "Channel ghost"
+"Add multiple..." = "Tambah beberapa..."
+"You can add a maximum of {0} inserts." = "Anda dapat menambahkan paling banyak {0} insert."
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "Gain klip: [LMB] seret ke atas / bawah (klip terpilih bersama)  [RMB] menu"

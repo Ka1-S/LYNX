@@ -18,7 +18,8 @@ namespace lynx
 constexpr int ppq = 960;              // ticks per quarter note
 constexpr int stepsPerBeat = 4;       // step sequencer in sixteenth notes
 constexpr int ticksPerStep = ppq / stepsPerBeat;
-constexpr int maxMixerTracks = 128;   // 0 = Master, 1..127 = inserts (FL has 125 + master)
+constexpr int maxMixerTracks = 501;   // 0 = Master, 1..500 inserts: FL 2026's dynamic mixer ("You can add a maximum of N tracks" up to 500;
+                                      // round 166d, issue #14). Was 128 (FL's old 125 + Master)
 constexpr float unityFader = 0.8f;    // fader position that gives 0 dB, as in FL
 
 // FL mixer fader curve: g = (11^v - 1) / 10 with v = position * 1.25 (0 dB at 0.8;
@@ -566,6 +567,9 @@ struct ChannelDef
     ChannelMisc misc;         // FL's Misc tab: time shift / gate, echo delay, velocity / key tracking (REA round 146b)
     // Piano Roll key labels (FL 2026's custom key labels, REA round 153): MIDI key -> the name shown on that key
     std::map<int, std::string> keyLabels;
+    // FL's ghost channels (the Piano Roll's ghost notes button menu, round 166d): this channel's notes are not shown as
+    // ghosts in the other channels' Piano Roll
+    bool ghostHidden = false;
     // FL's key region (the Channel settings keyboard's ruler, REA_rodada164a §2): the channel plays only the notes
     // from keyLow to keyHigh (MIDI keys); 0…127 = every note. Layer's "Split children" sets one key per child.
     int keyLow = 0, keyHigh = 127;

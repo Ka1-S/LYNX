@@ -5941,6 +5941,10 @@ countries: it ch sm
 "Metronome track" = "Traccia del metronomo"
 "Metronome target mixer track" = "Traccia del mixer di destinazione del metronomo"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "La traccia del mixer da cui suona il metronomo (--- è il Master). Il clic non è mai in un'esportazione."
+"Fold to the scale (hide the other keys and their notes)" = "Comprimi sulla scala (nascondi gli altri tasti e le loro note)"
+"Ghost channels" = "Canali fantasma"
+"Add multiple..." = "Aggiungi più..."
+"You can add a maximum of {0} inserts." = "Puoi aggiungere al massimo {0} insert."
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "Guadagno della clip: [LMB] trascina su / giù (le clip selezionate insieme)  [RMB] menu"

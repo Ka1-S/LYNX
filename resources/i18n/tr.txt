@@ -5941,6 +5941,10 @@ countries: tr
 "Metronome track" = "Metronom kanalı"
 "Metronome target mixer track" = "Metronomun hedef mikser kanalı"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Metronomun çaldığı mikser kanalı (--- Master'dır). Tık sesi hiçbir zaman dışa aktarıma girmez."
+"Fold to the scale (hide the other keys and their notes)" = "Gama katla (diğer tuşları ve notalarını gizle)"
+"Ghost channels" = "Hayalet kanallar"
+"Add multiple..." = "Birden fazla ekle..."
+"You can add a maximum of {0} inserts." = "En fazla {0} insert ekleyebilirsiniz."
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "Klip kazancı: [LMB] yukarı / aşağı sürükle (seçili klipler birlikte)  [RMB] menü"

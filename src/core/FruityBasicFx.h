@@ -58,6 +58,10 @@ void sendToParams (const SendState& s, float* params) noexcept;
 SendState sendFromParams (const float* params) noexcept;
 float sendTrackValue (int track) noexcept; // the "Send to" parameter of an insert (0 = none)
 int sendTrack (float value) noexcept;      // and back
+// "Send to" is normalised over 0..maxMixerTracks - 1. Files saved before round 166d (issue #14: 500 inserts) used
+// 0..127 and carry no "sendSpan": their value is rescaled to the current span (the same insert).
+constexpr int legacySendSpan = 127;
+float rescaleSendTrackValue (float value, int savedSpan) noexcept;
 
 std::string panOMaticParamText (int param, float value01);
 std::string balanceParamText (int param, float value01);

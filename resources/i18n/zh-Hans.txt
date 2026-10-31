@@ -5941,6 +5941,10 @@ countries: cn sg
 "Metronome track" = "节拍器轨道"
 "Metronome target mixer track" = "节拍器的目标混音器轨道"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "节拍器经由的混音器轨道（--- 为主控）。节拍声永远不会进入导出。"
+"Fold to the scale (hide the other keys and their notes)" = "折叠到音阶（隐藏其他琴键及其音符）"
+"Ghost channels" = "幽灵通道"
+"Add multiple..." = "添加多个..."
+"You can add a maximum of {0} inserts." = "最多可以添加 {0} 个插入轨。"
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "片段增益：[LMB] 上下拖动（选中的片段一起）  [RMB] 菜单"

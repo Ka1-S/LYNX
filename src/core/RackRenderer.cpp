@@ -3278,6 +3278,17 @@ void RackRenderer::pullInputs (const RackState& state, int t, int n) noexcept
     }
 }
 
+namespace
+{
+bool isSilentBlock (const float* l, const float* r, int n) noexcept
+{
+    for (int i = 0; i < n; ++i)
+        if (l[i] != 0.0f || r[i] != 0.0f)
+            return false;
+    return true;
+}
+} // namespace
+
 void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank* meters) noexcept
 {
     const auto& track = state.song.mixer[(std::size_t) t];
@@ -3308,10 +3319,24 @@ void RackRenderer::processTrack (const RackState& state, int t, int n, MeterBank
         return; // stays inactive: nobody pulls anything from it
     }
 
-    runEffects (state, t, n);
-
     auto* l = trackBuffer (t, 0);
     auto* r = trackBuffer (t, 1);
+
+    // an idle insert (round 166d, up to 500 of them): no effects, no built-in EQ and nothing came in this block. Its
+    // output is silence whatever the fader does, so it stays inactive and the tracks it feeds skip it (the same
+    // samples: adding zeros changes nothing)
+    if (track.effects.empty() && (state.song.cleanMixer || ! track.eq.active()) && isSilentBlock (l, r, n))
+    {
+        if (t < (int) trackEqs.size() && trackEqs[(std::size_t) t].running)
+            trackEqs[(std::size_t) t] = {};
+        lastL = gl;
+        lastR = gr;
+        if (meters != nullptr)
+            meters->capture.pushSilence (t, n);
+        return;
+    }
+
+    runEffects (state, t, n);
     applyTrackEq (track, t, state.song.cleanMixer, l, r, n);
     applyStereo (track, l, r, n);
     lastL = glideGain (l, l, n, fromL, gl);

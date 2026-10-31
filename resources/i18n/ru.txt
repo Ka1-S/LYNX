@@ -5941,6 +5941,10 @@ countries: ru by kz
 "Metronome track" = "Дорожка метронома"
 "Metronome target mixer track" = "Целевая дорожка микшера для метронома"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Дорожка микшера, через которую звучит метроном (--- — это Мастер). Щелчок никогда не попадает в экспорт."
+"Fold to the scale (hide the other keys and their notes)" = "Свернуть до гаммы (скрыть остальные клавиши и их ноты)"
+"Ghost channels" = "Ghost-каналы"
+"Add multiple..." = "Добавить несколько..."
+"You can add a maximum of {0} inserts." = "Можно добавить не более {0} инсертов."
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "Усиление клипа: [LMB] тянуть вверх / вниз (выделенные клипы вместе)  [RMB] меню"
