@@ -440,6 +440,10 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # The in-app updater (src/core/UpdateCheck.cpp, round 166b) picks the release files by these names: keep them stable.
+      # LYNX-<label>-setup-x64.exe, LYNX-<label>-windows-x64.zip, LYNX-<label>-macos-universal.dmg (any *.dmg),
+      # LYNX-<label>-x86_64.AppImage (+ .zsync, named by the AppImage's update information), LYNX-<label>-linux-x86_64.tar.gz,
+      # and SHA256SUMS.txt, which every download is checked against (no SHA256SUMS.txt line = no update from that file).
       - name: SHA256SUMS
         run: |
           cd dist

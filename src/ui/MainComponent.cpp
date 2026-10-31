@@ -111,6 +111,16 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 {
     heldKeys.setSender ([this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on, true); });
     connectBrowser (browser);
+    addChildComponent (updateBar);
+    updateBar.onVisibilityChanged = [this] { resized(); };
+    if (restoreUserSettings) // (the real window: Update saves the project as on quit and reopens it)
+        updater::setHost ({ [safe = juce::Component::SafePointer<MainComponent> (this)] (std::function<void()> then) {
+                               if (safe != nullptr)
+                                   safe->confirmDiscard (std::move (then));
+                           },
+                            [safe = juce::Component::SafePointer<MainComponent> (this)] {
+                                return safe != nullptr ? safe->currentFile : juce::File();
+                            } });
     mixeroptions::changed = [safe = juce::Component::SafePointer<MainComponent> (this)] {
         if (safe != nullptr)
         {
@@ -862,7 +872,10 @@ void MainComponent::resized()
         toolbarEditor->setToolbarHeight (toolbarHeight);
         toolbarEditor->toFront (false);
     }
-    workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight + tray));
+    auto below = getLocalBounds().withTrimmedTop (toolbarHeight + tray);
+    if (updateBar.isVisible())
+        updateBar.setBounds (below.removeFromTop (updater::UpdateBar::height));
+    workspace.setBounds (below);
     if (danceStage != nullptr)
     {
         danceStage->setBounds (getLocalBounds());
@@ -4051,6 +4064,7 @@ void MainComponent::openSettings (int page)
         o.menuEntry = appImageMenuEntryInstalled();
         o.pluginSubstitutes = pluginSubstitutesEnabled();
         o.crashReports = (int) crashreporter::consent();
+        o.checkUpdates = updater::automatic();
         return o;
     };
     hooks.setGeneral = [safe] (const GeneralOptions& o) {
@@ -4098,6 +4112,7 @@ void MainComponent::openSettings (int page)
             setPluginSubstitutesEnabled (o.pluginSubstitutes);
         if (o.crashReports != (int) crashreporter::consent())
             crashreporter::setConsent ((crashreport::Consent) juce::jlimit (0, 2, o.crashReports));
+        updater::setAutomatic (o.checkUpdates);
         ChannelRackComponent::keepEditorsOpen = o.keepEditorsOpen;
         EditorGlobals::get().rememberSeek = o.rememberSeek;
         PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, o.editPatternsIn);
@@ -4812,6 +4827,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
             juce::URL ("https://github.com/Ka1-S/LYNX-SHARE/blob/main/docs/PLUGINS.md").launchInDefaultBrowser();
         });
         menu.addItem (tr ("Report a problem..."), [this] { crashreporter::showManualReport (&engine.getDeviceManager()); });
+        if (updater::offered()) // (not in the Store build: the Store updates it)
+            menu.addItem (tr ("Check for updates..."), [] { updater::checkNow(); });
         menu.addItem (tr ("About LYNX SHARE"), [] {
             auto* window = makeAboutWindow().release();
             window->enterModalState (true, nullptr, true);

@@ -13,6 +13,7 @@ ManifestDPIAware true
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "Sections.nsh"
 
 !define APP "LYNX SHARE" ; the product name shown (v0.1.20 rename); folders, keys and LYNX.exe keep "LYNX"
 !define PROGID "LYNX.Project"
@@ -68,6 +69,7 @@ Function .onInit
     ${If} $0 == 1046
         StrCpy $LANGUAGE ${LANG_PORTUGUESEBR}
     ${EndIf}
+    Call SilentKeepsChoices
 FunctionEnd
 
 !macro CheckNotRunning
@@ -197,3 +199,19 @@ Section "Uninstall"
     DeleteRegKey HKCU "${UNINST_KEY}"
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
+
+; A silent install (/S) is LYNX SHARE's in-app update (ui/Updater.h, round 166b): it keeps the choices of the install it
+; updates instead of the defaults, so an update never adds a desktop shortcut or the .flp "Open with" entry the user
+; left out. (Defined after the sections: it names their indices.)
+Function SilentKeepsChoices
+    ${If} ${Silent}
+        SetShellVarContext current
+        ${IfNot} ${FileExists} "$DESKTOP\LYNX SHARE.lnk"
+            !insertmacro UnselectSection ${SecDesktop}
+        ${EndIf}
+        ReadRegStr $0 HKCU "Software\Classes\${FLP_PROGID}" ""
+        ${If} $0 == ""
+            !insertmacro UnselectSection ${SecFlp}
+        ${EndIf}
+    ${EndIf}
+FunctionEnd

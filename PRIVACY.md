@@ -5,13 +5,17 @@ user or the person installing or operating it.
 
 ## What LYNX SHARE does and does not do
 
-- **No network connections, except an opt-in crash report.** LYNX SHARE contains no update checker, telemetry, analytics,
-  advertising, online account or licence check, and it never downloads anything. The only connection it can make is
-  sending a crash / freeze report to `https://lynx-share.com/api/crash.php`, and only with your consent (below). The
-  source code is public, so this can be verified: the report upload in `src/ui/CrashReporter.cpp` is the only use of a
-  network API (JUCE's `URL`; on Linux the `curl` program), and JUCE's web browser component and its curl support are
-  disabled at build time (`JUCE_WEB_BROWSER=0`, `JUCE_USE_CURL=0`).
-- **No personal data is collected.** Nothing leaves your computer unless you choose to send a report.
+- **Two network connections, both disclosed and switchable.** LYNX SHARE contains no telemetry, analytics,
+  advertising, online account or licence check. It connects to the network for exactly two things:
+  1. **The update check** (below): a version query to GitHub, on by default, off in *Settings › General › Updates*.
+  2. **Crash reports**: sending a crash / freeze report to `https://lynx-share.com/api/crash.php`, only with your
+     consent (below).
+  The source code is public, so this can be verified: the update check in `src/ui/Updater.cpp` and the report upload
+  in `src/ui/CrashReporter.cpp` are the only uses of a network API (JUCE's `URL` / `WebInputStream`; on Linux the
+  `curl` program), and JUCE's web browser component and its curl support are disabled at build time
+  (`JUCE_WEB_BROWSER=0`, `JUCE_USE_CURL=0`).
+- **No personal data is collected.** The update check sends nothing about you or your computer; a crash report
+  leaves your computer only when you choose to send it.
 - **Local files only.** LYNX SHARE writes only to files you choose (projects, exports) and to its own settings folder
   `%APPDATA%\LYNX` (language, plugin list, autosaves and similar preferences). Delete that folder to remove them.
   It also registers the `.lynx` file type for the current user (`HKEY_CURRENT_USER\Software\Classes`) so project
@@ -22,6 +26,28 @@ user or the person installing or operating it.
 - **Plugin sandbox.** When a plugin is run in its own process, LYNX SHARE talks to that process through a local
   inter-process channel on the same computer; nothing is sent over a network.
 - **Crash logs** are written to local files (`autosave\crash *.txt`, `hang *.txt`, `crash-history.log`).
+
+## Update check (on by default, switchable)
+
+A few seconds after it starts, LYNX SHARE asks GitHub's public API for the list of LYNX SHARE releases
+(`https://api.github.com/repos/Ka1-S/LYNX-SHARE/releases`) and compares the newest version number with its own. If a
+newer version exists, a bar under the toolbar says so (*What's new*, *Update*, and ✕ to skip that version). The list
+is kept for three hours (`update-cache.json` in the settings folder), so LYNX SHARE asks at most once every few hours;
+*Help › Check for updates…* asks at any time.
+
+- **What is sent:** an ordinary HTTPS request for that public list, with the user agent `LYNX-SHARE/<version>`. No
+  identifier, no settings, no project, plugin or system information. GitHub sees your IP address, as for any visit to
+  a web page; GitHub's privacy statement applies to it. LYNX SHARE's own server is not involved.
+- **Turning it off:** *Settings › General › Updates › Check for updates automatically*. Off, LYNX SHARE never connects
+  for updates unless you choose *Help › Check for updates…*. The choice is kept in `updates.txt` in the settings folder
+  (with the version you skipped, if any).
+- **Updating** happens only when you click *Update*: the new release file comes from GitHub and is checked against the
+  release's `SHA256SUMS.txt` before it is used. The Windows installer version then installs it over itself (after
+  asking to save your project) and starts again; the portable and macOS versions save the file to your Downloads
+  folder; the Linux AppImage updates itself through AppImageUpdate when it is installed; the Linux .tar.gz opens the
+  release page.
+- **The Microsoft Store version never checks:** the Store updates it, so it has no update check and no *Update*
+  button.
 
 ## Crash reports (opt-in)
 

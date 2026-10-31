@@ -21,6 +21,7 @@
 #include "ui/HintBar.h"
 #include "ui/Splash.h"
 #include "ui/Toolbar.h"
+#include "ui/Updater.h"
 #include "ui/ValueControl.h"
 #include "ui/Workspace.h"
 
@@ -439,6 +440,7 @@ private:
     MixerComponent mixer;
     BrowserComponent browser;
     Workspace workspace; // after the panels' contents: it is destroyed first
+    updater::UpdateBar updateBar; // "LYNX SHARE x.y.z is available" under the toolbar (round 166b)
     std::unique_ptr<juce::Component> danceStage; // the dance channels' dancers over the workspace (ui/DanceView.h, round 165e)
 
     std::unique_ptr<juce::FileChooser> fileChooser;

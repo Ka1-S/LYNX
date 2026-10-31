@@ -33,6 +33,7 @@ struct GeneralOptions
     bool pluginSandbox = false;
     bool pluginSubstitutes = true; // missing plugins play a LYNX equivalent (core/PluginSubstitutes.h)
     int crashReports = 0;          // crashreport::Consent: 0 ask, 1 always send, 2 never (round 159)
+    bool checkUpdates = true;      // "Check for updates automatically" (ui/Updater.h, round 166b)
     bool reducedEffects = false;
     bool gpuRendering = true;      // Windows: Direct2D (JUCE 8's default) or GDI for every LYNX window (round 157a)
     int pluginStyle = -1;          // −1 automatic (each plugin its own style), else a skin::Style forced everywhere   // plugin editors without glows, blooms or the open animation (ui/PluginSkin.h)

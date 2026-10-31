@@ -81,7 +81,7 @@ run](https://learn.microsoft.com/windows/msix/desktop/desktop-to-uwp-behind-the-
 | Relaunch through the 8.3 short path (folders with accents) | skipped | `WindowsApps` paths are ASCII; a packaged exe started by its path would lose the package identity. |
 | Restart after a language change | `shell:AppsFolder\<family>!LYNX` | Starts the app through the package. |
 | LYNX ASIO for other programs | not offered (the hint says to use the installer build) | The package folder changes with every update, so a registered driver path would break. LYNX SHARE itself uses LYNX ASIO as usual. |
-| Updates | the Store | LYNX SHARE has no self-updater on Windows; nothing to disable. |
+| Updates | the Store | The Store build never checks for updates and has no *Update* button (ui/Updater.h, round 166b: the update check is off for a packaged LYNX); the other Windows builds have one. Nothing to disable. |
 
 Unchanged: plugin scanning (VST3 / CLAP / VST2 in Common Files, user folders; the `--scan-one` child process and the
 plugin sandbox run inside the package too), WASAPI / ASIO / DirectSound, FL Studio detection (reads only), drag & drop,
@@ -129,8 +129,10 @@ over Partner Center's limits.
 - **Open source (AGPL-3.0)** is allowed; the listing links the source and licence (*Additional license terms*).
 - **Third-party plugin hosting** is allowed: LYNX SHARE loads VST3 / CLAP / VST2 the user installed themself; it downloads
   no code (Store policy 10.2.2: no dynamic code from the network).
-- **No surprises:** no telemetry, ads, accounts or purchases; the only network use is the crash report, **opt-in**
-  (asked after a crash; *Settings › General › Crash reports*). Say so in the privacy questions.
+- **No surprises:** no telemetry, ads, accounts or purchases; the Store build's only network use is the crash report,
+  **opt-in** (asked after a crash; *Settings › General › Crash reports*). Say so in the privacy questions. (The other
+  builds also have an update check, a version query to GitHub; a packaged LYNX never runs it, so the Store privacy
+  answers stay as they are.)
 - **`runFullTrust`** is a restricted capability; the submission asks why. Answer: *"LYNX SHARE is a desktop digital audio
   workstation (Win32/JUCE). It needs full trust to host the user's VST3/CLAP audio plugins, open ASIO/WASAPI audio
   drivers with low latency and read and write the user's project and sample files anywhere on disk."*

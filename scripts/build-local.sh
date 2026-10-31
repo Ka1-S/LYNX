@@ -71,6 +71,8 @@ CORE="$CORE src/core/NativeEngines.cpp"
 CORE="$CORE src/core/Layer.cpp src/core/XyController.cpp src/core/FlCurve.cpp src/core/ControlSurface.cpp src/core/VoltageController.cpp"
 # crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
 CORE="$CORE src/core/CrashReport.cpp"
+# in-app update check: versions, release list, flavours, checksums, release notes (round 166b)
+CORE="$CORE src/core/UpdateCheck.cpp"
 # the embedded Python (pocketpy) and FL's VFX Script (round 165d)
 CORE="$CORE src/core/Python.cpp src/core/VfxScript.cpp"
 # WavPack decoder (C)
