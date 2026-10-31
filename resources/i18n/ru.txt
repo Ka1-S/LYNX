@@ -5901,3 +5901,6 @@ countries: ru by kz
 "Metronome track" = "Дорожка метронома"
 "Metronome target mixer track" = "Целевая дорожка микшера для метронома"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Дорожка микшера, через которую звучит метроном (--- — это Мастер). Щелчок никогда не попадает в экспорт."
+"Yes" = "Да"
+"Make clip unique?" = "Сделать клип уникальным?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Клип \"{0}\" также используется на другой аудиодорожке.\n\nСделать этот экземпляр уникальным и затем направить его на эту аудиодорожку?"

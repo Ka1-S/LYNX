@@ -324,6 +324,14 @@ public:
         std::array<std::atomic<std::uint64_t>, (std::size_t) maxMixerTracks * maxEffectSlots> effectMaxNs {};
         std::atomic<std::uint64_t> processNs { 0 }, processedSamples { 0 };
     };
+    // The keys sounding on a channel (played by the song / pattern, the keyboard, MIDI inputs), for the Piano roll's
+    // keyboard (issue #14: FL lights them); published after each block, safe to read from any thread.
+    NoteMask soundingKeys (int channel) const noexcept
+    {
+        if (channel < 0 || channel >= maxChannels)
+            return {};
+        return { sounding[(std::size_t) channel][0].load (std::memory_order_relaxed), sounding[(std::size_t) channel][1].load (std::memory_order_relaxed) };
+    }
     void setProfiling (bool on) noexcept { profiling.store (on, std::memory_order_relaxed); }
     bool isProfiling() const noexcept { return profiling.load (std::memory_order_relaxed); }
     const UnitTimes& unitTimes() const noexcept { return *units; }
@@ -393,6 +401,11 @@ private:
     float* tapBuffer (int tap, int side) noexcept;
     std::array<char, maxChannels> channelSilent {};          // channel skipped in this chunk (idle, no notes)
     std::array<NoteMask, maxChannels> heldNotes {};          // keys held on each channel (effects that follow notes: LYNX Tune)
+    std::array<std::array<std::atomic<std::uint64_t>, 2>, maxChannels> sounding {};
+    std::array<NoteMask, maxChannels> struckNotes {};        // keys started in this block (a note shorter than a block still shows)
+    std::array<NoteMask, maxChannels> publishedNotes {};     // what soundingKeys holds (stored only on a change)
+    int publishedTop = 0;                                   // channels past it have nothing published
+    void publishSoundingKeys (int channels) noexcept;
     std::array<VoiceOrder, maxChannels> voiceOrders {};      // sounding notes in order, for the channels' Max polyphony
     static constexpr int chunkCapacity = 512;               // chunks processed at once
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity

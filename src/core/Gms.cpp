@@ -1,4 +1,5 @@
 #include "core/Gms.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2049,6 +2050,8 @@ public:
     {
         bool on = false;
         double fvol = 1.0, fpan = 0.0, pitchCents = 0.0; // Final.Vol, Final.Pan, Final.Pitch − 100·(key − 60)
+        bool down = false; // the key's note off has not come yet
+        HostSlide slide;   // a slide note moving Final.Pitch (issue #14)
     };
     Engine eng;
     Held held[128];
@@ -2068,13 +2071,23 @@ public:
         key = std::clamp (key, 0, 127);
         if (held[key].on)
             eng.noteOff (key);
-        held[key] = { true, fvol, fpan, pitchCents };
+        held[key] = { true, fvol, fpan, pitchCents, true, HostSlide {} };
         eng.noteOn (key, velFromInitVol (initVol));
     }
     void noteOff (int key) noexcept
     {
         if (key >= 0 && key < 128)
+        {
+            held[key].down = false;
             eng.noteOff (key);
+        }
+    }
+    // a slide note (issue #14): the held keys glide to `to` (Final.Pitch, cents from C5) over `samples`
+    void slideTo (double to, float samples) noexcept
+    {
+        for (int k = 0; k < 128; ++k)
+            if (auto& h = held[k]; h.on && h.down)
+                h.slide.start ((float) (to - (100.0 * k - 6000.0 + h.pitchCents - (double) h.slide.cents)), samples);
     }
     void setLevels (int key, double fvol, double fpan) noexcept
     {
@@ -2115,6 +2128,12 @@ public:
     // one Gen_Render of n samples; songBeats ≥ 0 while the transport plays (song position at the first sample)
     void render (float* outL, float* outR, int n, double songBeats) noexcept
     {
+        for (auto& h : held) // a slide note moves Final.Pitch (issue #14)
+            if (h.on && h.slide.moving())
+            {
+                const auto was = h.slide.cents;
+                h.pitchCents += (double) (h.slide.advance ((float) n) - was);
+            }
         tables();
         auto tpos = songBeats;
         eng.playing = songBeats >= 0.0;
@@ -2210,6 +2229,12 @@ public:
     {
         nextPan = pan;
         nextCents = cents;
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        plugin.slideTo (100.0 * std::clamp (key, 0, 127) - 6000.0 + (double) pitchCents.load() + (double) cents, samples);
     }
 
     void noteOn (int key, float velocity) noexcept override

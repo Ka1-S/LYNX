@@ -1,4 +1,5 @@
 #include "core/PoiZone.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -1772,9 +1773,12 @@ public:
     {
         bool on = false;
         double fvol = 1.0, fpan = 0.0, pitchCents = 0.0;
+        bool released = false;
+        HostSlide slide; // a slide note moving Final.Pitch (issue #14)
     };
     Engine eng;
     Slot slots[128];
+    bool sliding = false;
     bool panLaw = true;
     double lastLevelsVol = -1.0;
 
@@ -1793,13 +1797,26 @@ public:
         key = std::clamp (key, 0, 127);
         if (slots[key].on)
             eng.noteOff (key);
-        slots[key] = { true, fvol, fpan, pitchCents };
+        slots[key] = { true, fvol, fpan, pitchCents, false, {} };
         eng.noteOn (key, velFromInitVol (initVol));
     }
     void noteOff (int key)
     {
         if (key >= 0 && key < 128 && slots[key].on)
+        {
+            slots[key].released = true;
             eng.noteOff (key);
+        }
+    }
+    // a slide note: every held, unreleased key glides to `toCents` (Final.Pitch, cents from C5) over `samples`
+    void slideTo (double toCents, float samples) noexcept
+    {
+        for (int i = 0; i < 128; ++i)
+            if (slots[i].on && ! slots[i].released)
+            {
+                slots[i].slide.start ((float) (toCents - (100.0 * i - 6000.0 + slots[i].pitchCents)), samples);
+                sliding = true;
+            }
     }
     void setLevels (int key, double fvol, double fpan) noexcept
     {
@@ -1820,7 +1837,7 @@ public:
                     lawA (s.fpan, s.fvol, cl, cr);
                 else
                     cl = cr = (float) s.fvol;
-                const auto fp = (float) (100.0 * i - 6000.0 + s.pitchCents);
+                const auto fp = (float) (100.0 * i - 6000.0 + (s.slide.cents != 0.0f ? s.pitchCents + (double) s.slide.cents : s.pitchCents));
                 cp = (float) ((double) fp * 0.01 - (double) i + 60.0);
                 if (first)
                 {
@@ -1857,6 +1874,17 @@ public:
                 tpos = tpos + eng.tempo * 0.016666666666666666 * (double) cn * (1.0 / eng.fs);
             for (int i = 0; i < cn; ++i)
                 outL[c0 + i] += l[i], outR[c0 + i] += r[i];
+            if (sliding) // (issue #14) the slide moves the pitch table chunk by chunk
+            {
+                sliding = false;
+                for (auto& h : slots)
+                    if (h.slide.moving())
+                    {
+                        h.slide.advance ((float) cn);
+                        sliding = sliding || h.slide.moving();
+                    }
+                tables();
+            }
         }
         for (int key = 0; key < 128; ++key) // FUN_1800048d0: slots whose note ended and is no longer held
             if (slots[key].on && eng.velTab[key] == 0.0f)
@@ -1938,6 +1966,13 @@ public:
         take();
         if (plugin != nullptr)
             plugin->noteOff (key);
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        if (plugin != nullptr)
+            plugin->slideTo (100.0 * (std::clamp (key, 0, 127) - 60) + (double) pitchCents.load() + (double) cents, samples);
     }
 
     void allNotesOff() noexcept override

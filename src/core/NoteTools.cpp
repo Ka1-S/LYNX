@@ -151,6 +151,30 @@ void snapNotesToScale (Pattern& pattern, const std::vector<int>& indices, int ro
     }
 }
 
+void moveKeysOnScale (Pattern& pattern, const std::vector<int>& indices, const std::vector<Note>& originals, int deltaKeys, int root, int scale)
+{
+    if (deltaKeys == 0)
+        return;
+    for (std::size_t j = 0; j < indices.size() && j < originals.size(); ++j)
+    {
+        const auto i = indices[j];
+        if (i < 0 || i >= (int) pattern.notes.size())
+            continue;
+        pattern.notes[(std::size_t) i].key = snapToScale (std::clamp (originals[j].key + deltaKeys, 0, 127), root, scale);
+    }
+}
+
+int stepOnScale (int key, int direction, int root, int scale) noexcept
+{
+    if (direction == 0)
+        return key;
+    const auto step = direction > 0 ? 1 : -1;
+    for (auto k = key + step; k >= 0 && k <= 127; k += step)
+        if (scale <= 0 || inScale (k, root, scale))
+            return k;
+    return key;
+}
+
 // --- chords -----------------------------------------------------------------------------------
 
 std::vector<std::vector<int>> chordsOf (const Pattern& pattern, const std::vector<int>& indices)

@@ -54,6 +54,10 @@ public:
     // range (FL's Misc › Pitch range, ±2 semitones by default): every sounding and new note is bent by `semitones`
     // until the wheel moves again. Audio thread. Hosted plugins get the raw MIDI pitch bend instead (midiMessage).
     virtual void pitchBend (float /*semitones*/) noexcept {}
+    // The channel's pitch as it stands now, in cents: its PITCH knob + fine tune + the main pitch (issue #14). Audio
+    // thread, before every render. Native engines take these at note on (configure / setNextNoteExpression) and ignore
+    // it; a hosted plugin turns it into MIDI pitch bend (FL's wrapper: pitch bend range).
+    virtual void setLivePitch (float /*cents*/) noexcept {}
     // A controller (CC 0…127, `value` 0..1) played live into a native instrument (the mod wheel is CC 1). Ignored by
     // engines without MIDI controllers; hosted plugins get the raw message (midiMessage).
     virtual void controlChange (int /*cc*/, float /*value*/) noexcept {}

@@ -5901,3 +5901,6 @@ countries: fr be ch ca lu
 "Metronome track" = "Piste du métronome"
 "Metronome target mixer track" = "Piste de mixage cible du métronome"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "La piste de mixage par laquelle joue le métronome (--- est le Master). Le clic n'est jamais dans un export."
+"Yes" = "Oui"
+"Make clip unique?" = "Rendre le clip unique ?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Le clip \"{0}\" est aussi utilisé sur une autre piste audio.\n\nVoulez-vous rendre cette instance unique puis la router vers cette piste audio ?"

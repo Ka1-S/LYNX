@@ -450,7 +450,12 @@ bool makeAudioTrack (Song& song, int track)
     m.name = trackName (song, track);
     if (t->colour != 0)
         m.colour = t->colour;
-    followAudioTracks (song);
+    // the audio clips already on the track play through it from now on
+    std::vector<int> onTrack;
+    for (int i = 0; i < (int) song.playlist.size(); ++i)
+        if (song.playlist[(std::size_t) i].track == track)
+            onTrack.push_back (i);
+    followAudioTracks (song, onTrack);
     return true;
 }
 
@@ -533,41 +538,95 @@ int armableInsert (const Song& song, int track)
     return t.mode == PlaylistTrackMode::audio && t.mixerTrack > 0 && t.mixerTrack < (int) song.mixer.size() ? t.mixerTrack : -1;
 }
 
-int followAudioTracks (Song& song)
+namespace
+{
+int audioMixerOf (const Song& song, int track)
+{
+    if (track < 0 || track >= (int) song.playlistTracks.size())
+        return -1;
+    const auto& t = song.playlistTracks[(std::size_t) track];
+    return t.mode == PlaylistTrackMode::audio && t.mixerTrack > 0 && t.mixerTrack < (int) song.mixer.size() ? t.mixerTrack : -1;
+}
+
+// the mixer track a touched clip asks for its channel, or -1 when it needs nothing (not an audio clip on an audio
+// track, or its channel already plays there)
+int wantedMixer (const Song& song, const Clip& clip)
+{
+    const auto mixer = audioMixerOf (song, clip.track);
+    if (clip.kind != ClipKind::audio || mixer <= 0 || clip.channel < 0 || clip.channel >= (int) song.channels.size()
+        || song.channels[(std::size_t) clip.channel].mixerTrack == mixer)
+        return -1;
+    return mixer;
+}
+
+// FL's test: another clip (any arrangement) of the same channel on an audio track linked to another mixer track
+bool sharedWithOtherAudioTrack (const Song& song, const Clip& clip, int mixer)
+{
+    bool shared = false;
+    song.forEachClipList ([&] (const std::vector<Clip>& clips) {
+        for (const auto& other : clips)
+            if (&other != &clip && other.kind == ClipKind::audio && other.channel == clip.channel)
+                if (const auto m = audioMixerOf (song, other.track); m > 0 && m != mixer)
+                    shared = true;
+    });
+    return shared;
+}
+} // namespace
+
+std::vector<int> audioTrackConflicts (const Song& song, const std::vector<int>& touched)
+{
+    std::vector<int> channels;
+    for (const auto i : touched)
+    {
+        if (i < 0 || i >= (int) song.playlist.size())
+            continue;
+        const auto& clip = song.playlist[(std::size_t) i];
+        const auto mixer = wantedMixer (song, clip);
+        if (mixer > 0 && std::find (channels.begin(), channels.end(), clip.channel) == channels.end()
+            && sharedWithOtherAudioTrack (song, clip, mixer))
+            channels.push_back (clip.channel);
+    }
+    return channels;
+}
+
+int followAudioTracks (Song& song, const std::vector<int>& touched, bool makeUnique)
 {
     int changed = 0;
-    const auto audioMixerOf = [&song] (int track) {
-        if (track < 0 || track >= (int) song.playlistTracks.size())
-            return -1;
-        const auto& t = song.playlistTracks[(std::size_t) track];
-        return t.mode == PlaylistTrackMode::audio && t.mixerTrack > 0 && t.mixerTrack < (int) song.mixer.size() ? t.mixerTrack : -1;
-    };
-    bool any = false;
-    for (int i = 0; i < (int) song.playlistTracks.size() && ! any; ++i)
-        any = audioMixerOf (i) > 0;
-    if (! any)
-        return 0;
-
-    for (std::size_t i = 0; i < song.playlist.size(); ++i)
+    std::vector<int> done; // (FL: the touched clips of a channel it asked about are handled together)
+    for (const auto i : touched)
     {
-        auto& clip = song.playlist[i];
-        const auto mixer = audioMixerOf (clip.track);
-        if (clip.kind != ClipKind::audio || mixer <= 0 || clip.channel < 0 || clip.channel >= (int) song.channels.size()
-            || song.channels[(std::size_t) clip.channel].mixerTrack == mixer)
+        if (i < 0 || i >= (int) song.playlist.size() || std::find (done.begin(), done.end(), i) != done.end())
             continue;
-        // does the channel also play clips that must keep their own route?
-        bool shared = false;
-        for (const auto& other : song.playlist)
-            if (&other != &clip && other.kind == ClipKind::audio && other.channel == clip.channel && audioMixerOf (other.track) != mixer)
-                shared = true;
-        if (shared)
+        const auto clip = song.playlist[(std::size_t) i];
+        const auto mixer = wantedMixer (song, clip);
+        if (mixer <= 0)
+            continue;
+        if (! sharedWithOtherAudioTrack (song, song.playlist[(std::size_t) i], mixer))
         {
-            auto copy = song.channels[(std::size_t) clip.channel];
-            song.channels.push_back (copy);
-            clip.channel = (int) song.channels.size() - 1;
+            song.channels[(std::size_t) clip.channel].mixerTrack = mixer; // every clip of the channel follows (FL)
+            ++changed;
+            continue;
         }
-        song.channels[(std::size_t) clip.channel].mixerTrack = mixer;
-        ++changed;
+        // "Make clip unique?": every touched clip of this channel gets the copy (Yes) or stays as it is (No)
+        auto copy = -1;
+        if (makeUnique)
+        {
+            auto def = song.channels[(std::size_t) clip.channel];
+            def.mixerTrack = mixer;
+            song.channels.push_back (def);
+            copy = (int) song.channels.size() - 1;
+        }
+        for (const auto j : touched)
+            if (j >= 0 && j < (int) song.playlist.size() && song.playlist[(std::size_t) j].channel == clip.channel
+                && song.playlist[(std::size_t) j].kind == ClipKind::audio && std::find (done.begin(), done.end(), j) == done.end())
+            {
+                done.push_back (j);
+                if (copy >= 0)
+                {
+                    song.playlist[(std::size_t) j].channel = copy;
+                    ++changed;
+                }
+            }
     }
     return changed;
 }
