@@ -11,6 +11,7 @@
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
 #include "ui/PluginSkin.h"
+#include "ui/Updater.h"
 
 namespace lynx
 {
@@ -106,7 +107,7 @@ public:
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups, &unusedTakes,
                                                                  &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote,
-                                                                 &reportsTitle, &crashLabel, &crashBox, &crashNote })
+                                                                 &reportsTitle, &crashLabel, &crashBox, &crashNote, &updatesTitle, &checkUpdates, &checkNow, &updatesNote })
             add (*c);
 
         styleLabel (languageLabel, tr ("Language"));
@@ -255,6 +256,14 @@ public:
                                   "your name, file names or projects. It goes to lynx-share.com only with your consent (Help > Report a problem... "
                                   "sends one by hand)."));
 
+        // round 166b: the update check (ui/Updater.h); the Store build has none (the Store updates it)
+        toggle (checkUpdates, tr ("Check for updates automatically"), options.checkUpdates, [this] (bool on) { options.checkUpdates = on; });
+        checkNow.onClick = [] { updater::checkNow(); };
+        styleNote (updatesNote, tr ("At start-up LYNX SHARE asks GitHub for the newest version number (nothing about you is sent) and shows a bar "
+                                    "when a new version is out. Help > Check for updates... asks at any time."));
+        for (auto* c : std::initializer_list<juce::Component*> { &updatesTitle, &checkUpdates, &checkNow, &updatesNote })
+            c->setVisible (updater::offered());
+
         for (auto* b : { &languageBox, &scaleBox, &menuBox, &wavesBox, &noteNamesBox, &blackNotesBox, &pluginStyleBox, &editInBox, &undoBox, &autosaveBox, &keepBox, &crashBox })
             styleCombo (*b);
         juce::ignoreUnused (engine, persistent);
@@ -320,6 +329,14 @@ private:
         r.section (reportsTitle);
         crashBox.setBounds (r.row (crashLabel, 260));
         crashNote.setBounds (r.full (46).translated (0, -3));
+        if (updatesTitle.isVisible())
+        {
+            r.section (updatesTitle);
+            auto row = r.full (24);
+            checkNow.setBounds (row.removeFromRight (juce::jmin (row.getWidth() / 3, 150)));
+            checkUpdates.setBounds (row.withTrimmedRight (8));
+            updatesNote.setBounds (r.full (32).translated (0, -1));
+        }
         displayTitle.setVisible (false);
         return r.bottom();
     }
@@ -371,12 +388,13 @@ private:
     bool persistent;
     GeneralOptions options;
     SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
-        backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") };
-    juce::Label languageLabel, languageNote, scaleLabel, menuLabel, wavesLabel, noteNamesLabel, blackNotesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
+        backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") }, updatesTitle { tr ("Updates") };
+    juce::Label languageLabel, languageNote, scaleLabel, menuLabel, wavesLabel, noteNamesLabel, blackNotesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote, updatesNote;
     juce::HyperlinkButton translationLink;
     juce::ComboBox crashBox, languageBox, scaleBox, menuBox, wavesBox, noteNamesBox, blackNotesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
-    juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, menuEntry, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
-    juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
+    juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, menuEntry, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes, checkUpdates;
+    juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") },
+        checkNow { tr ("Check now") };
 };
 
 // ================================================================================================================
