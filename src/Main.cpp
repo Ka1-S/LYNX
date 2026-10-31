@@ -68,6 +68,8 @@
 #include "ui/QuickAddPalette.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
+#include "core/MixerOps.h"
+#include "core/NoteTools.h"
 #include "engine/ProjectPackage.h"
 #include "ui/SetupWizard.h"
 #include "engine/FlStudio.h"
@@ -945,6 +947,17 @@ public:
             // LYNX.exe --patchershot prefix [project]: every Patcher's editor (round 141) as PNGs (a demo one without a project)
             const auto i = args.indexOf ("--patchershot");
             runPatcherShot (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].unquoted() : juce::String());
+            quit();
+            return;
+        }
+
+        if (args.contains ("--feat166shot"))
+        {
+            // LYNX.exe --feat166shot prefix [project]: round 166d (issue #14) — the Piano Roll with a scale, folded to
+            // it, with one ghost channel, the ghost channels menu, and the Mixer filled to 500 inserts (its start and
+            // its end, and the time a full repaint takes)
+            const auto i = args.indexOf ("--feat166shot");
+            runFeat166Shot (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].unquoted() : juce::String());
             quit();
             return;
         }
@@ -5839,6 +5852,86 @@ private:
             offline.dispatchPendingMessages();
             savePng (ui.createComponentSnapshot (ui.getLocalBounds()), prefix + "-mixer-renamed.png");
             offline.getPluginHost().setPluginName (key, "");
+        }
+    }
+
+    void runFeat166Shot (const juce::String& prefix, const juce::String& projectPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        {
+            lynx::MainComponent ui (offline, false);
+            const auto size = juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_SIZE", "1600x900"), "x", "");
+            ui.setSize (juce::jlimit (800, 3840, size[0].getIntValue()), juce::jlimit (450, 2160, size[1].getIntValue()));
+            if (projectPath.isNotEmpty())
+                ui.openFile (juce::File (projectPath));
+            offline.dispatchPendingMessages();
+            ui.selectTabForSnapshot (1); // the Piano Roll, on the channel with the most notes
+            offline.dispatchPendingMessages();
+
+            // the scale the pattern's notes fit best (major / minor, any root)
+            const auto& song = offline.getSong();
+            const auto& notes = song.patterns[(std::size_t) song.currentPattern].notes;
+            int bestRoot = 0, bestScale = 1, bestHits = -1;
+            for (int sc = 1; sc < (int) lynx::notetools::scales().size(); ++sc)
+            {
+                const juce::String name (lynx::notetools::scales()[(std::size_t) sc].name);
+                if (name != "Major" && name != "Minor")
+                    continue;
+                for (int root = 0; root < 12; ++root)
+                {
+                    int hits = 0;
+                    for (const auto& n : notes)
+                        hits += lynx::notetools::inScale (n.key, root, sc) ? 1 : 0;
+                    if (hits > bestHits)
+                        bestHits = hits, bestRoot = root, bestScale = sc;
+                }
+            }
+            auto& roll = ui.getPianoRollForSnapshot();
+            roll.setScaleForSnapshot (bestRoot, bestScale);
+            roll.scrollToNotes();
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-pr-scale.png");
+            roll.setFoldToScale (true);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-pr-folded.png");
+            roll.setFoldToScale (false);
+
+            // ghost channels: only the first other channel with notes stays a ghost
+            const auto selected = offline.getSelectedChannel();
+            int keep = -1;
+            for (const auto& n : notes)
+                if (n.channel != selected && keep < 0)
+                    keep = n.channel;
+            offline.editSong ([keep] (lynx::Song& s) {
+                for (int c = 0; c < (int) s.channels.size(); ++c)
+                    s.channels[(std::size_t) c].ghostHidden = c != keep;
+            }, false);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-pr-ghost-one.png");
+            saveMenus (juce::StringArray { "Ghost channels" }, { roll.ghostChannelsMenu() }, prefix + "-ghostmenu.png");
+            offline.editSong ([] (lynx::Song& s) {
+                for (auto& c : s.channels)
+                    c.ghostHidden = false;
+            }, false);
+
+            // the Mixer at 500 inserts
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            offline.editSong ([] (lynx::Song& s) { lynx::mixerops::insertTracks (s, (int) s.mixer.size(), lynx::mixerops::roomForInserts (s)); }, false);
+            const auto t1 = juce::Time::getMillisecondCounterHiRes();
+            offline.dispatchPendingMessages();
+            ui.selectTabForSnapshot (3);
+            offline.dispatchPendingMessages();
+            auto& mixer = ui.getMixerForSnapshot();
+            const auto t2 = juce::Time::getMillisecondCounterHiRes();
+            saveSnapshot (ui, prefix + "-mixer500-start.png");
+            const auto t3 = juce::Time::getMillisecondCounterHiRes();
+            mixer.selectTrack ((int) offline.getSong().mixer.size() - 1);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-mixer500-end.png");
+            juce::File (prefix + "-mixer500.txt")
+                .replaceWithText ("inserts=" + juce::String ((int) offline.getSong().mixer.size() - 1) + "\nfill_ms=" + juce::String (t1 - t0, 2)
+                                  + "\nsnapshot_ms=" + juce::String (t3 - t2, 2) + "\n");
         }
     }
 

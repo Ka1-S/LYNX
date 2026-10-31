@@ -5901,3 +5901,7 @@ countries: nl be
 "Metronome track" = "Metronoomspoor"
 "Metronome target mixer track" = "Doel-mixerspoor van de metronoom"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Het mixerspoor waardoor de metronoom speelt (--- is de Master). De klik zit nooit in een export."
+"Fold to the scale (hide the other keys and their notes)" = "Invouwen tot de toonladder (andere toetsen en hun noten verbergen)"
+"Ghost channels" = "Ghost-kanalen"
+"Add multiple..." = "Meerdere toevoegen..."
+"You can add a maximum of {0} inserts." = "Je kunt maximaal {0} inserts toevoegen."

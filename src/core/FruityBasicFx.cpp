@@ -224,6 +224,12 @@ void balanceToParams (const BalanceState& s, float* p) noexcept
 BalanceState balanceFromParams (const float* p) noexcept { return { rawFrom (p[0], -128, 128), rawFrom (p[1], 0, 320) }; }
 float sendTrackValue (int track) noexcept { return norm (std::clamp (track, 0, maxMixerTracks - 1), 0, maxMixerTracks - 1); }
 int sendTrack (float value) noexcept { return rawFrom (value, 0, maxMixerTracks - 1); }
+float rescaleSendTrackValue (float value, int savedSpan) noexcept
+{
+    if (savedSpan <= 0 || savedSpan == maxMixerTracks - 1)
+        return value;
+    return sendTrackValue (rawFrom (value, 0, savedSpan));
+}
 void sendToParams (const SendState& s, float* p) noexcept
 {
     p[0] = norm (s.pan, -128, 128);

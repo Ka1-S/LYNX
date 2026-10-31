@@ -124,6 +124,40 @@ bool inScale (int key, int root, int scale) noexcept
     return std::find (intervals.begin(), intervals.end(), degree) != intervals.end();
 }
 
+KeyRows keyRows (int root, int scale, bool fold) noexcept
+{
+    KeyRows rows;
+    rows.count = 0;
+    for (int key = 127; key >= 0; --key)
+    {
+        const auto shown = ! fold || scale <= 0 || inScale (key, root, scale);
+        rows.rowOfKey[(std::size_t) key] = shown ? rows.count : -1;
+        if (shown)
+            rows.keyOfRow[(std::size_t) rows.count++] = key;
+    }
+    return rows;
+}
+
+int KeyRows::step (int key, int rows) const noexcept
+{
+    key = std::clamp (key, 0, 127);
+    if (count <= 0)
+        return key;
+    auto row = rowOfKey[(std::size_t) key];
+    if (row < 0) // a folded key sits between two rows: one step reaches the shown key above or below it
+    {
+        int above = key;
+        while (above < 127 && rowOfKey[(std::size_t) above] < 0)
+            ++above;
+        row = rowOfKey[(std::size_t) above] >= 0 ? rowOfKey[(std::size_t) above] : -1; // −1: above the top row
+        if (rows > 0)
+            --rows;
+        else if (rows == 0)
+            row = std::max (row, 0);
+    }
+    return keyOfRow[(std::size_t) std::clamp (row - rows, 0, count - 1)];
+}
+
 int snapToScale (int key, int root, int scale) noexcept
 {
     key = std::clamp (key, 0, 127);

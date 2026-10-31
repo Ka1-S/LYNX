@@ -71,6 +71,8 @@ std::vector<int> destinationsOf (const Song& song, int track);
 std::vector<int> sourcesOf (const Song& song, int track);
 // "Insert multiple...": `count` blank inserts at `at`; returns how many were inserted (the mixer may fill up).
 int insertTracks (Song& song, int at, int count);
+// How many more inserts the mixer can take (FL 2026: "You can add a maximum of N tracks", up to 500 inserts).
+int roomForInserts (const Song& song) noexcept;
 
 // --- FL's mixer groups and docking (REA round 146a) -----------------------------------------------------
 // The order the strips are shown in: the tracks docked left, then the middle ones, then those docked right (each block

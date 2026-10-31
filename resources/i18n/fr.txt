@@ -5901,3 +5901,7 @@ countries: fr be ch ca lu
 "Metronome track" = "Piste du métronome"
 "Metronome target mixer track" = "Piste de mixage cible du métronome"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "La piste de mixage par laquelle joue le métronome (--- est le Master). Le clic n'est jamais dans un export."
+"Fold to the scale (hide the other keys and their notes)" = "Replier sur la gamme (masquer les autres touches et leurs notes)"
+"Ghost channels" = "Canaux fantômes"
+"Add multiple..." = "En ajouter plusieurs..."
+"You can add a maximum of {0} inserts." = "Vous pouvez ajouter au maximum {0} inserts."
