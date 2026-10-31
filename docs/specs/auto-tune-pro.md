@@ -278,6 +278,9 @@ therefore the primary quantitative reference.
   `flexTune = X90`. Without a readable key: the project key, else a gentle chromatic preset (50 ms, humanize 50 %).
   Not translated: Classic (X11), Natural Vibrato (X62), Formant on/off (X70), Throat (X71), Transpose (X74), Detune
   (X3), Mix (X92), Input Type (X10), Tracking (X9), per-note Bypass/Remove masks.
+  (Later rounds translate most of these; round 166c: X71 → LYNX Tune's own Throat length with the law measured in
+  round 165hb, X47 / X48 / X49 → the created vibrato's Amplitude / Formant / Variation, X179 / X181 → Transpose in
+  scale / Scale transpose — docs/analise/REA_rodada166c.md.)
 - **Residual** on her `luisa sonsa` takes (37 s, 2260 voiced 10 ms frames), Auto-Tune with her state vs LYNX Tune:
   **median 4.5 c, mean 13.0 c, 15.1 % of frames > 20 c**. The earlier 20 ms translation gave 5.7 / 14.2 / 16.8 %, and
   no correction gives 24.1 / 26.5 / 58.1 % [MEAS][S17 §5].

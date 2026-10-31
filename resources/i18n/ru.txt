@@ -5908,3 +5908,9 @@ countries: ru by kz
 "Yes" = "Да"
 "Make clip unique?" = "Сделать клип уникальным?"
 "The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Клип \"{0}\" также используется на другой аудиодорожке.\n\nСделать этот экземпляр уникальным и затем направить его на эту аудиодорожку?"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "ГОРТАНЬ"
+"Scale steps" = "Ступени лада"
+"In scale" = "В ладу"
+"AMPLITUDE" = "АМПЛИТУДА"
+"VARIATION" = "ВАРИАЦИЯ"

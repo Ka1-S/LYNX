@@ -92,8 +92,27 @@ enum Param : int
     // output at −18 … +18 dB (0 dB = −12 dBFS peak per note [model]); off by default
     referenceTone = keyMap1 + 12,
     referenceToneLevel,
+    // round 165hb / 166c (appended; neutral defaults = the old sound). The auto-mode corrector's remaining controls
+    // (Auto-Tune Pro parity, REA_rodada165hb, REA_rodada166c):
+    throatLength,            // 50 … 180 % (default 100 %): the modelled throat — longer lowers the formants (formant on only)
+    vibratoAmplitude,        // created vibrato: 0 … 30 (the reference's units), the level swing that goes with it
+    vibratoFormant,          // created vibrato: 0 … 100 %: how far the formants follow its pitch swing (formant on only)
+    vibratoVariation,        // created vibrato: 0 … 100 %: random drift of its rate and depth
+    transposeInScale,        // on: Scale transpose moves the target notes by steps of the scale (Transpose is ignored)
+    scaleTranspose,          // −7 … +7 steps of the scale (default 0)
     count
 };
+// round 165hb: the throat length (%) of a value and back, and its formant shift in semitones (measured law)
+double throatPercent (float v) noexcept;
+float throatValue (double percent) noexcept;
+double throatSemitones (double percent) noexcept;
+double vibratoAmplitudeOf (float v) noexcept;   // 0 … 30
+double vibratoAmplitudeDepth (double amount) noexcept; // the created vibrato's level swing (± fraction of the level)
+int scaleTransposeSteps (float v) noexcept;      // −7 … +7
+float scaleTransposeValue (int steps) noexcept;
+// the target note moved by `steps` steps of the scale `mask` (the note itself counts as a step when it is in the scale;
+// a note outside the scale moves from the nearest scale note below it)
+int transposeInScaleNote (int note, std::uint16_t mask, int steps) noexcept;
 double referenceToneDb (float v) noexcept; // −18 … +18 dB
 // round 152: the key map of Group Octaves off
 enum class KeyStatus { follow, legal, removed, removedUp, removedDown, bypass };

@@ -1110,7 +1110,7 @@ using RawTranslator = int (*) (const std::vector<std::uint8_t>& state, EffectSlo
 // parameter texts — X3 Detune (cents, A4 = 440·2^(c/1200); LYNX Tune's reference reaches ±39 c), X74 Transpose
 // (semitones), X92 Wet-Dry Mix (%), X10 Input Type (Soprano, Alto-Tenor, Low Male, Instrument, Bass Instrument →
 // LYNX Tune's ranges, the two instrument types on Instrument), X70 Formant Correction off → formants move with the
-// pitch, X71 Throat Length (%: a longer modelled tract lowers the formants, −12·log2(L/100) semitones [model]),
+// pitch, X71 Throat Length (%: LYNX Tune's Throat length, measured in round 165hb),
 // X11 Classic mode ("Auto-Tune 5": no formant correction, no Flex-Tune — the manual) and X9 Tracking (50 = LYNX
 // Tune's default strictness; the rest of the law [model]). All 143 states of her main projects use Detune 0,
 // Transpose 0, Mix 100 %, Alto-Tenor, Throat 100 %, Tracking 50 (round 120 §5), so these only matter elsewhere.
@@ -1164,15 +1164,10 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     }
     if (has (70) || classic)
         set (lynxtune::formantPreserve, ! classic && at (70, 1.0) >= 0.5 ? 1.0 : 0.0);
-    if (has (71) && ! classic && at (70, 1.0) >= 0.5)
-    {
-        // round 138 (REA_rodada138 §3.4, [EXEC] the vowel envelopes of the official trial at throat 50 … 180 %): the formants
-        // move −0.0146·(L − 100)^1.4 semitones for a longer throat (−3.5 at 150 %, −6.8 at 180 %) and about
-        // +0.03·(100 − L)^1.4 for a shorter one (+2.7 at 75 %) — about half of the old −12·log2 (L / 100) model
-        const auto L = std::clamp (at (71, 100.0), 50.0, 180.0);
-        const auto st = L >= 100.0 ? -0.0146 * std::pow (L - 100.0, 1.4) : 0.03 * std::pow (100.0 - L, 1.4);
-        set (lynxtune::formantShift, st / 14.0 + 0.5);
-    }
+    // round 166c: X71 Throat Length → LYNX Tune's own Throat length (the law measured in REA_rodada165hb §2 lives in
+    // the engine; round 138's half-size law on Formant shift, fitted on a synthetic vowel, is superseded)
+    if (has (71) && ! classic)
+        set (lynxtune::throatLength, lynxtune::throatValue (at (71, 100.0)));
     if (has (9))
         set (lynxtune::tracking, std::clamp (at (9, 50.0), 1.0, 100.0) * 0.4 / 50.0);
     // round 128: natural vibrato (X62, dB), ignore vibrato (X44), Create Vibrato (X5 shape, X7 rate, X6 cents, X46 / X50
@@ -1184,6 +1179,13 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     if (has (6)) set (lynxtune::vibratoDepth, at (6, 18.0) / 100.0);
     if (has (46)) set (lynxtune::vibratoDelay, at (46, 500.0) / 1500.0);
     if (has (50)) set (lynxtune::vibratoOnset, at (50, 500.0) / 1500.0);
+    // round 166c: the created vibrato's Amplitude (X47, 0 … 30), Formant (X48, 0 … 100) and Variation (X49, 0 … 100),
+    // and Transpose In Scale (X179 on / off) with Scale Transpose (X181, −7 … +7 steps)
+    if (has (47)) set (lynxtune::vibratoAmplitude, at (47, 10.0) / 30.0);
+    if (has (48)) set (lynxtune::vibratoFormant, at (48, 70.0) / 100.0);
+    if (has (49)) set (lynxtune::vibratoVariation, at (49, 20.0) / 100.0);
+    if (has (179) && ! classic) set (lynxtune::transposeInScale, at (179, 0.0) >= 0.5 ? 1.0 : 0.0);
+    if (has (181)) set (lynxtune::scaleTranspose, lynxtune::scaleTransposeValue ((int) std::lround (std::clamp (at (181, 0.0), -7.0, 7.0))));
     if (const auto edits = autoTuneProNoteEdits (state, key->first, key->second))
         for (int k = 0; k < 12; ++k)
         {
@@ -1245,11 +1247,12 @@ int translateAutoTuneEfx (const std::vector<std::uint8_t>& state, EffectSlot& sl
     p[lynxtune::transpose] = (float) ((std::clamp (std::round (at ("pPitchShift", 0.0)), -12.0, 12.0) + 12.0) / 24.0);
     const auto formant = at ("pFormant", 1.0) >= 0.5;
     p[lynxtune::formantPreserve] = formant ? 1.0f : 0.0f;
-    p[lynxtune::formantShift] = formant ? (float) std::clamp (-12.0 * std::log2 (std::clamp (at ("pThroatLength", 100.0), 50.0, 180.0) / 100.0) / 14.0 + 0.5, 0.0, 1.0) : 0.5f;
+    p[lynxtune::formantShift] = 0.5f;
+    p[lynxtune::throatLength] = lynxtune::throatValue (at ("pThroatLength", 100.0)); // round 166c: the engine's throat
     static constexpr int rangeOf[5] { 0, 1, 2, 3, 3 };
     p[lynxtune::range] = (float) rangeOf[std::clamp ((int) std::lround (at ("pInputType", 1.0)), 0, 4)] / (float) (lynxtune::rangeCount - 1);
     p[lynxtune::mix] = (float) std::clamp (at ("pDryWetMix", 100.0) / 100.0, 0.0, 1.0);
-    return 23;
+    return 24;
 }
 
 // Waves Tune Real-Time: the key and scale saved in its state (wavesTuneScale; [DATA] every one of the 11 distinct

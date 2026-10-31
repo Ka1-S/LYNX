@@ -5908,3 +5908,9 @@ countries: pl
 "Yes" = "Tak"
 "Make clip unique?" = "Uczynić klip unikalnym?"
 "The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Klip \"{0}\" jest używany również na innej ścieżce audio.\n\nCzy chcesz uczynić tę instancję unikalną, a następnie skierować ją do tej ścieżki audio?"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "GARDŁO"
+"Scale steps" = "Stopnie skali"
+"In scale" = "W skali"
+"AMPLITUDE" = "AMPLITUDA"
+"VARIATION" = "WARIACJA"
