@@ -254,3 +254,48 @@ TEST (eq166f_peq2_heatmap_colours_follow_the_level)
     CHECK (sh::strength (sh::Position::full, 0.9) == 1.0 && sh::strength (sh::Position::top, 0.0) == 1.0 && sh::strength (sh::Position::top, 0.7) == 0.0);
     CHECK (sh::strength (sh::Position::bottom, 1.0) == 1.0 && sh::strength (sh::Position::bottom, 0.2) == 0.0 && sh::strength (sh::Position::top, 0.3) == 0.5);
 }
+
+// Round 166f: the selftest's effect fuzz found Echoform giving non-finite output (its random values moved when Facet EQ
+// got 2 parameters): the tape voicings' loop (G·F(z)) had no bound, so feedback at the top with a short time grew until
+// it overflowed. Every parameter at 0 / 1 / random, three rates, noise in: the output stays finite.
+TEST (eq166f_echoform_stays_finite_with_extreme_parameters)
+{
+    using namespace lynx;
+    const auto& info = effectInfo (EffectKind::echoform);
+    std::mt19937 rng (166);
+    std::uniform_real_distribution<float> u (0.0f, 1.0f);
+    std::uniform_int_distribution<int> pick (0, 5);
+    int broken = 0;
+    for (int set = 0; set < 300 && broken < 3; ++set)
+    {
+        auto p = makeEffectSlot (EffectKind::echoform).params;
+        for (std::size_t i = 0; i < info.params.size(); ++i)
+        {
+            const auto r = pick (rng);
+            p[i] = r == 0 ? 0.0f : r == 1 ? 1.0f : u (rng);
+        }
+        for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        {
+            auto fx = makeEffect (EffectKind::echoform);
+            fx->prepare (rate);
+            std::vector<float> l (512), r (512);
+            bool finite = true;
+            for (int block = 0; block < 40 && finite; ++block)
+            {
+                for (int i = 0; i < 512; ++i) { l[(std::size_t) i] = u (rng) * 2.0f - 1.0f; r[(std::size_t) i] = u (rng) * 2.0f - 1.0f; }
+                fx->process (l.data(), r.data(), 512, p, 120.0);
+                for (int i = 0; i < 512; ++i)
+                    finite = finite && std::isfinite (l[(std::size_t) i]) && std::isfinite (r[(std::size_t) i]);
+            }
+            if (! finite)
+            {
+                ++broken;
+                std::printf ("  echoform non-finite at %.0f Hz with:", rate);
+                for (std::size_t i = 0; i < info.params.size(); ++i) std::printf (" %zu=%.4f", i, (double) p[i]);
+                std::printf ("\n");
+                break;
+            }
+        }
+    }
+    CHECK (broken == 0);
+}
