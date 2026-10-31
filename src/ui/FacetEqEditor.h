@@ -23,4 +23,6 @@ void drawFacetEqCurve (juce::Graphics& g, juce::Rectangle<float> area, const Eff
 
 // The editor alone (for --plugui / --snapshot); `demo` fills the analyser with a synthetic spectrum.
 std::unique_ptr<juce::Component> makeFacetEqEditor (AudioEngine& engine, int track, int slot, bool demo = false);
+// Round 166f (--eq166fshot): one analyser tick without the editor's timer (claims the slot's analyser tap)
+void tickFacetEqEditor (juce::Component& editor);
 } // namespace lynx

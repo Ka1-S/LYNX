@@ -1940,7 +1940,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             && slots[i].kind != EffectKind::controlSurface
             // round 164c: a visual plugin keeps recording silence (its display falls, the video export stays in time)
             && slots[i].kind != EffectKind::waveCandy && slots[i].kind != EffectKind::visualizer
-            && slots[i].kind != EffectKind::tuner) // (round 165g: the tuner's display follows the signal into silence)
+            && slots[i].kind != EffectKind::tuner // (round 165g: the tuner's display follows the signal into silence)
+            // (round 166f: nor Facet EQ playing its comparative target — the sidechain plays while this track is silent)
+            && ! (slots[i].kind == EffectKind::facetEq && facet::listensToTarget (slots[i].params)))
         {
             auto& sd = smartDisable[key];
 
@@ -1970,6 +1972,15 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             const auto w = tap.written.load (std::memory_order_relaxed);
             for (int k = 0; k < n; ++k)
                 tap.pre[(std::size_t) ((w + (std::uint32_t) k) & (ProcessTimes::AnalyzerTap::size - 1))].store (0.5f * (l[k] + r[k]), std::memory_order_relaxed);
+            // round 166f: and its sidechain (Facet EQ draws its comparative target)
+            const auto source = slots[i].sidechain;
+            const bool side = source >= 0 && source != track && source < (int) state.song.mixer.size();
+            const bool sounding = side && (std::size_t) source < trackActive.size() && trackActive[(std::size_t) source] != 0;
+            const auto* sl = sounding ? trackBuffer (source, 0) : nullptr;
+            const auto* sr = sounding ? trackBuffer (source, 1) : nullptr;
+            for (int k = 0; k < n; ++k)
+                tap.side[(std::size_t) ((w + (std::uint32_t) k) & (ProcessTimes::AnalyzerTap::size - 1))].store (sl != nullptr ? 0.5f * (sl[k] + sr[k]) : 0.0f, std::memory_order_relaxed);
+            tap.sideOn.store (side, std::memory_order_relaxed);
         }
 
         // dry/wet: keep the dry signal to mix later

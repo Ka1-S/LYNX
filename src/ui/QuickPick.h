@@ -58,6 +58,17 @@ struct Pick
 std::vector<Pick> renamedEffects (AudioEngine& engine, std::function<void (EffectSlot)> add);
 std::vector<Pick> renamedGenerators (AudioEngine& engine, std::function<void (ChannelDef)> add);
 
+// Round 166f (issue #16, FL's Plugin database folders): the plugins the user put in folders (the Browser's Plugin
+// database), one heading per folder ("Stock", "Stock › EQ") with its plugins under it; nothing when no plugin of this
+// kind is in a folder. Returns whether anything was added.
+bool addFolderGroups (juce::PopupMenu& menu, AudioEngine& engine, std::function<void (EffectSlot)> add);
+bool addFolderGroups (juce::PopupMenu& menu, AudioEngine& engine, std::function<void (ChannelDef)> add);
+// FL's view switch at the bottom of those menus (radio items Categories / Simple / Tree), when any folder is in use
+void addFolderViewItems (juce::PopupMenu& menu, AudioEngine& engine);
+// Whether the plugin with this database key ("lynx:fx:Facet EQ") sits in one of the user's folders (it is then listed
+// under its folder's heading only, as in FL where every plugin is in one folder)
+bool inUserFolder (AudioEngine& engine, const std::string& key);
+
 // Adds `picks` at the top of `menu` under a header ("Renamed plugins: type the first character").
 void addPicks (juce::PopupMenu& menu, const std::vector<Pick>& picks);
 

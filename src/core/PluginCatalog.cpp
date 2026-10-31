@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <functional>
+#include <sstream>
 
 namespace lynx::plugincatalog
 {
@@ -196,5 +199,234 @@ int countIn (const std::vector<Entry>& entries, bool instruments, const std::str
 {
     return (int) std::count_if (entries.begin(), entries.end(),
                                 [&] (const Entry& e) { return e.instrument == instruments && (category.empty() || categoryOf (e) == category); });
+}
+// --- round 166f: the user's plugin folders ------------------------------------------------------------------------
+
+namespace
+{
+std::vector<std::string> splitPath (const std::string& path)
+{
+    std::vector<std::string> parts;
+    std::string part;
+    auto flush = [&] {
+        const auto a = part.find_first_not_of (" \t");
+        if (a != std::string::npos) parts.push_back (part.substr (a, part.find_last_not_of (" \t") - a + 1));
+        part.clear();
+    };
+    for (const auto c : path)
+        if (c == '/' || c == '\\') flush();
+        else if (c != '\t' && c != '\n' && c != '\r') part += c;
+    flush();
+    return parts;
+}
+
+bool within (const std::string& path, const std::string& folder) // path == folder or inside it
+{
+    return path == folder || (path.size() > folder.size() && path.compare (0, folder.size(), folder) == 0 && path[folder.size()] == '/');
+}
+
+std::string nameKey (const std::string& s)
+{
+    std::string k;
+    for (const auto c : s)
+        if (std::isalnum ((unsigned char) c)) k += (char) std::tolower ((unsigned char) c);
+    return k;
+}
+
+// natural order ("EQ 2" before "EQ 10"), case-insensitive, by path parts
+int naturalCompare (const std::string& a, const std::string& b)
+{
+    std::size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size())
+    {
+        if (std::isdigit ((unsigned char) a[i]) && std::isdigit ((unsigned char) b[j]))
+        {
+            std::size_t i2 = i, j2 = j;
+            while (i2 < a.size() && std::isdigit ((unsigned char) a[i2])) ++i2;
+            while (j2 < b.size() && std::isdigit ((unsigned char) b[j2])) ++j2;
+            const auto na = std::stoull (a.substr (i, std::min<std::size_t> (18, i2 - i))), nb = std::stoull (b.substr (j, std::min<std::size_t> (18, j2 - j)));
+            if (na != nb) return na < nb ? -1 : 1;
+            i = i2; j = j2;
+            continue;
+        }
+        // '/' sorts first so a parent comes right before its children
+        const auto ca = a[i] == '/' ? (char) 1 : (char) std::tolower ((unsigned char) a[i]);
+        const auto cb = b[j] == '/' ? (char) 1 : (char) std::tolower ((unsigned char) b[j]);
+        if (ca != cb) return ca < cb ? -1 : 1;
+        ++i; ++j;
+    }
+    return a.size() - i == b.size() - j ? 0 : (a.size() - i < b.size() - j ? -1 : 1);
+}
+} // namespace
+
+std::string cleanFolder (const std::string& path)
+{
+    auto parts = splitPath (path);
+    if ((int) parts.size() > maxFolderDepth) parts.resize ((std::size_t) maxFolderDepth);
+    std::string out;
+    for (const auto& p : parts) out += (out.empty() ? "" : "/") + p;
+    return out;
+}
+
+std::string parentFolder (const std::string& path)
+{
+    const auto slash = path.rfind ('/');
+    return slash == std::string::npos ? std::string() : path.substr (0, slash);
+}
+
+std::string folderLeaf (const std::string& path)
+{
+    const auto slash = path.rfind ('/');
+    return slash == std::string::npos ? path : path.substr (slash + 1);
+}
+
+std::string addFolder (Folders& folders, bool instruments, const std::string& path)
+{
+    const auto clean = cleanFolder (path);
+    for (auto p = clean; ! p.empty(); p = parentFolder (p))
+        folders.kind (instruments).insert (p);
+    return clean;
+}
+
+Folders parseFolders (const std::string& text)
+{
+    Folders f;
+    std::istringstream in (text);
+    std::string line;
+    while (std::getline (in, line))
+    {
+        if (! line.empty() && line.back() == '\r') line.pop_back();
+        const auto t1 = line.find ('\t');
+        if (t1 == std::string::npos) continue;
+        const auto tag = line.substr (0, t1);
+        const auto rest = line.substr (t1 + 1);
+        if (tag == "fx" || tag == "gen")
+            addFolder (f, tag == "gen", rest);
+        else if (tag == "view")
+            f.view = std::clamp (std::atoi (rest.c_str()), 0, 2);
+        else if (tag == "key")
+        {
+            const auto t2 = rest.rfind ('\t');
+            if (t2 == std::string::npos || t2 == 0) continue;
+            const auto key = rest.substr (0, t2);
+            if (const auto path = cleanFolder (rest.substr (t2 + 1)); ! path.empty()) f.of[key] = path;
+        }
+    }
+    return f;
+}
+
+std::string formatFolders (const Folders& folders)
+{
+    std::string out;
+    if (folders.view != 0) out += "view\t" + std::to_string (folders.view) + "\n";
+    for (const auto* kind : { "fx", "gen" })
+        for (const auto& path : folders.kind (std::string (kind) == "gen"))
+            out += std::string (kind) + "\t" + path + "\n";
+    for (const auto& [key, path] : folders.of)
+        if (! key.empty() && key.find_first_of ("\t\n") == std::string::npos && ! path.empty())
+            out += "key\t" + key + "\t" + path + "\n";
+    return out;
+}
+
+bool renameFolder (Folders& folders, bool instruments, const std::string& from, const std::string& to)
+{
+    const auto target = cleanFolder (to);
+    auto& set = folders.kind (instruments);
+    if (target.empty() || ! set.count (from) || within (target, from) || (target != from && set.count (target))) return target == from && ! target.empty();
+    std::set<std::string> moved;
+    for (auto it = set.begin(); it != set.end();)
+        if (within (*it, from)) { moved.insert (target + it->substr (from.size())); it = set.erase (it); }
+        else ++it;
+    for (const auto& m : moved) addFolder (folders, instruments, m);
+    for (auto& [key, path] : folders.of)
+        if (within (path, from) && set.count (target + path.substr (from.size())))
+            path = target + path.substr (from.size());
+    return true;
+}
+
+void removeFolder (Folders& folders, bool instruments, const std::string& path, const std::vector<std::string>& keys)
+{
+    auto& set = folders.kind (instruments);
+    for (auto it = set.begin(); it != set.end();)
+        it = within (*it, path) ? set.erase (it) : std::next (it);
+    for (const auto& key : keys)
+        if (const auto it = folders.of.find (key); it != folders.of.end() && within (it->second, path))
+            folders.of.erase (it);
+}
+
+void moveToFolder (Folders& folders, bool instruments, const std::string& key, const std::string& path)
+{
+    const auto clean = addFolder (folders, instruments, path);
+    if (clean.empty()) folders.of.erase (key);
+    else folders.of[key] = clean;
+}
+
+std::vector<MenuFolder> menuTree (const Folders& folders, bool instruments, const std::vector<std::string>& keys)
+{
+    const auto& set = folders.kind (instruments);
+    std::map<std::string, std::vector<int>> direct;
+    for (int i = 0; i < (int) keys.size(); ++i)
+        if (const auto it = folders.of.find (keys[(std::size_t) i]); it != folders.of.end() && set.count (it->second))
+            direct[it->second].push_back (i);
+    std::function<std::vector<MenuFolder> (const std::string&)> build = [&] (const std::string& parent) {
+        std::vector<MenuFolder> out;
+        for (const auto& path : set)
+            if (parentFolder (path) == parent)
+            {
+                MenuFolder f;
+                f.path = path;
+                f.name = folderLeaf (path);
+                f.sub = build (path);
+                if (const auto it = direct.find (path); it != direct.end()) f.items = it->second;
+                if (! f.items.empty() || ! f.sub.empty()) out.push_back (std::move (f));
+            }
+        std::sort (out.begin(), out.end(), [] (const MenuFolder& a, const MenuFolder& b) { return naturalCompare (a.name, b.name) < 0; });
+        return out;
+    };
+    return build ({});
+}
+
+std::vector<int> allItems (const std::vector<MenuFolder>& tree)
+{
+    std::vector<int> out;
+    for (const auto& f : tree)
+    {
+        const auto inner = allItems (f.sub);
+        out.insert (out.end(), inner.begin(), inner.end());
+        out.insert (out.end(), f.items.begin(), f.items.end());
+    }
+    return out;
+}
+
+std::string groupHeading (const std::string& path)
+{
+    std::string out;
+    for (const auto c : path)
+        out += c == '/' ? std::string (" \xe2\x80\xba ") : std::string (1, c); // " › "
+    return out;
+}
+
+int importFlFolders (Folders& folders, bool instruments, const std::vector<std::string>& files,
+                     const std::vector<std::pair<std::string, std::string>>& keyAndName)
+{
+    std::map<std::string, std::string> keyOfName;
+    for (const auto& [key, name] : keyAndName)
+        keyOfName.emplace (nameKey (name), key);
+    int placed = 0;
+    for (const auto& file : files)
+    {
+        auto parts = splitPath (file);
+        if (parts.size() < 2) continue; // a preset at the top of the folder: no folder
+        auto stem = parts.back();
+        if (const auto dot = stem.rfind ('.'); dot != std::string::npos) stem = stem.substr (0, dot);
+        parts.pop_back();
+        std::string folder;
+        for (const auto& p : parts) folder += (folder.empty() ? "" : "/") + p;
+        const auto it = keyOfName.find (nameKey (stem));
+        if (it == keyOfName.end() || cleanFolder (folder).empty()) continue;
+        moveToFolder (folders, instruments, it->second, folder);
+        ++placed;
+    }
+    return placed;
 }
 } // namespace lynx::plugincatalog

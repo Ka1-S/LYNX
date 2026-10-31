@@ -787,6 +787,17 @@ public:
             return;
         }
 
+        if (args.contains ("--eq166fshot"))
+        {
+            // LYNX.exe --eq166fshot <folder>: round 166f's pictures (issue #16) — Parametric EQ 2's spectrum and heatmap
+            // (flat, a +12 dB band, a -12 dB band, Top position) and Facet EQ's comparative EQ (listening to the target,
+            // its spectrum over the source's), each fed by the demo song rendered offline
+            const auto i = args.indexOf ("--eq166fshot");
+            runEq166fShots (args[i + 1].unquoted());
+            quit();
+            return;
+        }
+
         if (args.contains ("--editorcpu"))
         {
             // LYNX.exe --editorcpu report.txt: opens built-in plugin editors one at a time in a small window (no audio
@@ -4873,6 +4884,100 @@ private:
                 editorCpu->cases.push_back (c);
         editorCpu->done = [this] { juce::MessageManager::callAsync ([this] { editorCpu.reset(); quit(); }); };
         editorCpu->start();
+    }
+
+    void runEq166fShots (const juce::String& folder)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        const juce::File out (folder);
+        out.createDirectory();
+        lynx::AudioEngine offline (false);
+        auto save = [&] (juce::Component& editor, const juce::String& name) {
+            juce::Image image (juce::Image::ARGB, editor.getWidth(), editor.getHeight(), true);
+            {
+                juce::Graphics g (image);
+                g.fillAll (lynx::theme::panel);
+                editor.paintEntireComponent (g, false);
+            }
+            const auto f = out.getChildFile (name);
+            f.deleteFile();
+            juce::PNGImageFormat png;
+            if (auto stream = f.createOutputStream())
+                png.writeImageToStream (image, *stream);
+        };
+        // a song whose demo beat plays into insert 1 (the source) and, for Facet's target, its other half into insert 2
+        auto songWith = [] (const lynx::EffectSlot& fx, bool split) {
+            auto song = lynx::Song::makeDefault();
+            song.mixer.resize (3);
+            song.mixer[0].name = "Master";
+            song.mixer[1].name = "Vocal";
+            song.mixer[2].name = "Reference mix";
+            song.mixer[1].effects.assign (1, fx);
+            for (std::size_t c = 0; c < song.channels.size(); ++c)
+                song.channels[c].mixerTrack = split && c % 2 == 1 ? 2 : 1;
+            return song;
+        };
+        auto feed = [&] (juce::Component& editor, bool facet, int frames) {
+            // one continuous render of the song, the editor ticked 30 times a second of audio, as its timer would
+            lynx::AudioEngine::RenderOptions o;
+            o.seconds = frames / 30.0;
+            o.sampleRate = 48000.0;
+            o.pluginWarmUp = false;
+            int sinceTick = 0;
+            o.capture = [&] (const float*, const float*, int n) {
+                sinceTick += n;
+                if (sinceTick < 1600) return;
+                sinceTick = 0;
+                if (facet) lynx::tickFacetEqEditor (editor);
+                else lynx::tickNativeEffectEditor (editor);
+            };
+            offline.renderOffline (o);
+            if (facet) lynx::tickFacetEqEditor (editor);
+            else lynx::tickNativeEffectEditor (editor);
+        };
+
+        // Parametric EQ 2: spectrum + heatmap (Full), flat / band 4 +12 dB / band 4 -12 dB, then the Top position
+        auto& display = lynx::peqview::displaySettings();
+        const auto kept = display;
+        display.spectrum = display.heatmap = true;
+        display.position = 0;
+        for (const auto& [gain, name] : { std::pair { 0.0, "peq2-heatmap-flat.png" }, { 12.0, "peq2-heatmap-boost.png" }, { -12.0, "peq2-heatmap-cut.png" },
+                                          { 0.0, "peq2-heatmap-top.png" } })
+        {
+            auto eq = lynx::makeEffectSlot (lynx::EffectKind::parametricEq);
+            eq.params[(std::size_t) lynx::peq::param (3, 2)] = lynx::peq::gainValue (gain);
+            eq.params[(std::size_t) lynx::peq::param (3, 1)] = lynx::peq::hzValue (900.0);
+            display.position = juce::String (name).contains ("top") ? 1 : 0;
+            offline.setSong (songWith (eq, false));
+            offline.dispatchPendingMessages();
+            auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.25f, 0);
+            feed (*editor, false, 120);
+            save (*editor, name);
+        }
+        display = kept;
+
+        // Facet EQ's comparative EQ: listening to the target (insert 2) with its spectrum over the source's
+        {
+            using namespace lynx::facet;
+            auto eq = lynx::makeEffectSlot (lynx::EffectKind::facetEq);
+            eq.params[(std::size_t) param (0, 0)] = shapeValue (Shape::bell);
+            eq.params[(std::size_t) param (0, 1)] = hzValue (250.0);
+            eq.params[(std::size_t) param (0, 2)] = gainValue (-4.0);
+            eq.params[(std::size_t) param (1, 0)] = shapeValue (Shape::highShelf);
+            eq.params[(std::size_t) param (1, 1)] = hzValue (6000.0);
+            eq.params[(std::size_t) param (1, 2)] = gainValue (3.0);
+            eq.params[(std::size_t) analyzerParam] = analyzerValue (Analyzer::both);
+            eq.sidechain = 2;
+            for (const auto& [l, name] : { std::pair { Listen::target, "facet-compare-target.png" }, { Listen::eq, "facet-compare-eq.png" } })
+            {
+                eq.params[(std::size_t) listenParam] = listenValue (l);
+                offline.setSong (songWith (eq, true));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeFacetEqEditor (offline, 1, 0, false);
+                feed (*editor, true, 90);
+                save (*editor, name);
+            }
+        }
     }
 
     void runPluginEditorSnapshots (const juce::String& folder)

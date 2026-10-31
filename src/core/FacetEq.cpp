@@ -720,6 +720,15 @@ public:
         delay[1].assign ((std::size_t) delayLen, 0.0f);
         cached.fill (-1.0f);
         spectral.prepare (sr); // round 152 (with the slot's parameters, so PDC knows its latency from the start)
+        {
+            // round 166f: the comparative EQ's delay lines: the longest latency this instance can have + one block
+            std::uint32_t len = 1;
+            while (len < (std::uint32_t) (latencyFor (Phase::linear, sr, allocRes) + spectralLatency (sr) + compareMaxBlock + 1)) len <<= 1;
+            for (auto* r : { &srcRing[0], &srcRing[1], &tgtRing[0], &tgtRing[1] }) r->assign (len, 0.0f);
+            cmpMask = len - 1;
+            cmpStep = (float) (1.0 / (0.01 * sr));
+            powCoef = 1.0 - std::exp (-1.0 / (3.0 * sr));
+        }
         if (seenParams || haveInitial)
         {
             const auto& q = seenParams ? current : initialParams;
@@ -743,6 +752,10 @@ public:
         dynUsed.fill (0.0);
         spectral.reset();
         for (auto& m : meters) m.store (0.0f, std::memory_order_relaxed);
+        for (auto* r : { &srcRing[0], &srcRing[1], &tgtRing[0], &tgtRing[1] }) std::fill (r->begin(), r->end(), 0.0f);
+        cmpPos = 0;
+        powSrc = powTgt = 0.0;
+        tgtGain = 1.0f;
     }
 
     void setSidechain (const float* left, const float* right) noexcept override
@@ -766,6 +779,32 @@ public:
             if (params[(std::size_t) i] != cached[(std::size_t) i]) { changed = true; break; }
         if (changed)
             update (params);
+
+        // round 166f: comparative EQ — keep the source (this input) and the target (the sidechain) for `listen`
+        const auto want = n <= compareMaxBlock && cmpMask > 0 ? listen (params[(std::size_t) listenParam]) : Listen::eq;
+        const bool comparing = want != Listen::eq || gEq < 1.0f;
+        const bool keep = comparing || (sideGiven && cmpMask > 0 && n <= compareMaxBlock) || (latencyNow.load (std::memory_order_relaxed) > 0 && cmpMask > 0 && n <= compareMaxBlock);
+        const auto blockPos = cmpPos;
+        if (keep)
+        {
+            const float* tl = sideGiven ? sideL : nullptr;
+            const float* tr = sideGiven ? (sideR != nullptr ? sideR : sideL) : nullptr;
+            double ps = powSrc, pt = powTgt;
+            const double a = powCoef;
+            for (int i = 0; i < n; ++i)
+            {
+                const auto k = (std::size_t) ((blockPos + (std::uint32_t) i) & cmpMask);
+                const float sl = left[i], sr = right[i];
+                const float xl = tl != nullptr ? tl[i] : 0.0f, xr = tr != nullptr ? tr[i] : 0.0f;
+                srcRing[0][k] = sl; srcRing[1][k] = sr;
+                tgtRing[0][k] = xl; tgtRing[1][k] = xr;
+                ps += a * (0.5 * ((double) sl * sl + (double) sr * sr) - ps);
+                pt += a * (0.5 * ((double) xl * xl + (double) xr * xr) - pt);
+            }
+            powSrc = std::isfinite (ps) && ps > 1e-30 ? ps : 0.0;
+            powTgt = std::isfinite (pt) && pt > 1e-30 ? pt : 0.0;
+            cmpPos = blockPos + (std::uint32_t) n;
+        }
 
         // the detector: the slot's sidechain when asked for and routed (nullptr = a silent source), else the input
         const bool useSide = sideGiven && sidechainDetector (params[(std::size_t) detectorParam]);
@@ -831,6 +870,24 @@ public:
                 left[i] = characterSample (characterNow, left[i]);
                 right[i] = characterSample (characterNow, right[i]);
             }
+        if (comparing && keep) // round 166f: the source / the target instead of (crossfaded with) the EQ's output
+        {
+            const auto wantGain = params[(std::size_t) targetLevelParam] >= 0.5f ? (float) targetMatchGain (powSrc, powTgt) : 1.0f;
+            const float g0 = tgtGain, g1 = tgtGain + 0.25f * (wantGain - tgtGain); // the level match moves gently per block
+            tgtGain = g1;
+            const float tE = want == Listen::eq ? 1.0f : 0.0f, tS = want == Listen::source ? 1.0f : 0.0f, tT = want == Listen::target ? 1.0f : 0.0f;
+            const auto lat = (std::uint32_t) std::max (0, latencyNow.load (std::memory_order_relaxed));
+            const float step = cmpStep;
+            auto toward = [step] (float g, float t) { return g < t ? std::min (t, g + step) : std::max (t, g - step); };
+            for (int i = 0; i < n; ++i)
+            {
+                gEq = toward (gEq, tE); gSrc = toward (gSrc, tS); gTgt = toward (gTgt, tT);
+                const auto k = (std::size_t) ((blockPos + (std::uint32_t) i - lat) & cmpMask);
+                const float tg = (g0 + (g1 - g0) * ((float) i / (float) n)) * gTgt;
+                left[i] = gEq * left[i] + gSrc * srcRing[0][k] + tg * tgtRing[0][k];
+                right[i] = gEq * right[i] + gSrc * srcRing[1][k] + tg * tgtRing[1][k];
+            }
+        }
         for (int b = 0; b < bands; ++b)
             meters[(std::size_t) b].store ((float) (spectralNow && isSpectral (current, b) ? spectral.extreme (b) : det[(std::size_t) b].gain), std::memory_order_relaxed);
     }
@@ -1190,6 +1247,12 @@ private:
     SpectralStage spectral;
     EffectParams initialParams {};
     bool haveInitial = false;
+    // round 166f: comparative EQ — the source (the input) and the target (the sidechain), delayed by the latency
+    static constexpr int compareMaxBlock = 16384;
+    std::vector<float> srcRing[2], tgtRing[2];
+    std::uint32_t cmpMask = 0, cmpPos = 0;
+    float gEq = 1.0f, gSrc = 0.0f, gTgt = 0.0f, cmpStep = 1.0f / 480.0f, tgtGain = 1.0f;
+    double powSrc = 0.0, powTgt = 0.0, powCoef = 1e-5;
 };
 } // namespace
 
@@ -1303,6 +1366,8 @@ const EffectInfo& info()
             std::snprintf (n.data(), n.size(), k < bands ? "%d Spectral" : k < 2 * bands ? "%d Density" : "%d Spectral Tilt", k % bands + 1);
             e.params.push_back ({ n.data(), k >= bands && k < 2 * bands ? 0.5f : 0.0f });
         }
+        e.params.push_back ({ "Listen", 0.0f });       // round 166f: the EQ's output (the old behaviour)
+        e.params.push_back ({ "Target Level", 1.0f }); // level match on
         return e;
     }();
     return i;
@@ -1342,6 +1407,8 @@ std::string paramText (int p, float v)
     if (p >= spectralParam0 && p < spectralParam0 + bands) return v >= 0.5f ? "Spectral" : "Off";
     if (p >= densityParam0 && p < densityParam0 + bands) { std::snprintf (t, sizeof (t), "%.0f%%", density (v) * 100.0); return t; }
     if (p >= spectralTiltParam0 && p < spectralTiltParam0 + bands) return v >= 0.5f ? "On" : "Off";
+    if (p == listenParam) return listenName (listen (v));
+    if (p == targetLevelParam) return v >= 0.5f ? "Matched" : "As is";
     switch (p % fieldsPerBand)
     {
         case 0: return shapeName (shape (v));
@@ -1445,6 +1512,37 @@ const char* phaseName (Phase p) noexcept
 bool isDynamic (const EffectParams& p, int b) noexcept
 {
     return hasGain (shape (p[(std::size_t) param (b, 0)])) && bandPower (p, b) && std::abs (rangeDb (p[(std::size_t) (rangeParam0 + b)])) > 0.01;
+}
+
+GraphHit pickGraphTarget (const float* nodeX, const float* nodeY, const bool* on, const bool* dynamic, const float* rangeX,
+                          const float* rangeY, int count, int selectedBand, float px, float py, float nodeRadius, float rangeRadius) noexcept
+{
+    auto distance = [px, py] (float x, float y) { return std::hypot (x - px, y - py); };
+    GraphHit hit;
+    // 1. a node: the nearest one within its radius always wins (moving a band is what a press near it means)
+    float best = nodeRadius;
+    for (int b = 0; b < count; ++b)
+        if (on[b])
+            if (const auto d = distance (nodeX[b], nodeY[b]); d < best) { best = d; hit = { b, false }; }
+    if (hit.band >= 0) return hit;
+    // 2. the range handle of a dynamic band, a small target of its own (the selected band's first on a tie)
+    best = rangeRadius;
+    for (int b = 0; b < count; ++b)
+        if (on[b] && dynamic[b])
+            if (const auto d = distance (rangeX[b], rangeY[b]) - (b == selectedBand ? 0.01f : 0.0f); d < best) { best = d; hit = { b, true }; }
+    return hit;
+}
+
+Listen listen (float v) noexcept { return v < 0.25f ? Listen::eq : v < 0.75f ? Listen::source : Listen::target; }
+float listenValue (Listen l) noexcept { return l == Listen::eq ? 0.0f : l == Listen::source ? 0.5f : 1.0f; }
+const char* listenName (Listen l) noexcept { return l == Listen::eq ? "EQ" : l == Listen::source ? "Source" : "Target"; }
+bool listensToTarget (const EffectParams& p) noexcept { return listen (p[(std::size_t) listenParam]) == Listen::target; }
+
+double targetMatchGain (double sourcePower, double targetPower) noexcept
+{
+    constexpr double floor = 1e-10; // -100 dB: silence on either side keeps unity
+    if (! (sourcePower > floor) || ! (targetPower > floor)) return 1.0;
+    return std::clamp (std::sqrt (sourcePower / targetPower), 0.0630957, 15.8489); // ±24 dB
 }
 
 bool isSpectral (const EffectParams& p, int b) noexcept

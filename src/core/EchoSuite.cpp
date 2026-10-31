@@ -1836,6 +1836,13 @@ private:
         return y;
     }
 
+    static double loopBound (double x) noexcept
+    {
+        if (! std::isfinite (x)) return 0.0;
+        const auto a = std::abs (x);
+        return a <= 4.0 ? x : std::copysign (4.0 + std::tanh (a - 4.0), x);
+    }
+
     static double tapeSide (double x, double c, double p) noexcept
     {
         return x / std::pow (1.0 + std::pow (std::abs (x / c), p), 1.0 / p);
@@ -1938,7 +1945,10 @@ private:
                 }
                 // the loop: G·F(z)[n − P]
                 const double y = colour (v, tape.z[c].tap (P), tape.loopX[c], tape.loopY[c]);
-                const double z = acc + G * y;
+                // round 166f: a loop gain at or above 1 (feedback at the top with a short time) grew the loop without
+                // bound until it overflowed (inf − inf = NaN, the selftest's effect fuzz); bounded at ±5 like a loop
+                // that clips, unchanged below ±4 (+12 dBFS), so every normal level sounds exactly as before
+                const double z = loopBound (acc + G * y);
                 tape.in[c].push ((float) sat); // (after the reads: tap (d) = x[n − d])
                 tape.z[c].push ((float) z);
                 out[c] = z;

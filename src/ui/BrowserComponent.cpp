@@ -1,5 +1,6 @@
 #include "ui/PluginPresetMenu.h"
 #include "ui/QuickPick.h"
+#include "engine/FlStudio.h"
 #include "ui/BrowserComponent.h"
 #include "ui/UiTrace.h"
 
@@ -331,6 +332,10 @@ public:
         std::function<std::optional<EffectSlot>()> effect;
         std::string pluginKey;  // kind == plugin: what a user name is stored under (ui/QuickPick.h, issue #11)
         juce::String original;  // kind == plugin: the name before the user renamed it
+        // round 166f (issue #16): kind == plugins — 0 the Effects folder or one of the user's effect folders, 1 the
+        // Generators' (-1 the other database folders); userFolder = the user's folder path ("" = Effects / Generators)
+        int folderKind = -1;
+        std::string userFolder;
     };
 
     // tree mode: the given top-level nodes
@@ -361,6 +366,43 @@ public:
         n->label = label;
         n->colour = colour;
         return n;
+    }
+
+    // round 166f (issue #16): the user's folders of one kind (FL's Plugin database folders) as nodes under `kindNode`,
+    // parents before children; the map gives each path's node
+    template <typename MakeFolder>
+    static std::map<std::string, Node*> userFolderNodes (Node& kindNode, bool instruments, MakeFolder& folder, AudioEngine& engine)
+    {
+        std::map<std::string, Node*> out;
+        for (const auto& path : engine.getPluginHost().databaseFolders().kind (instruments)) // (a std::set: "A" before "A/B")
+        {
+            const auto parentPath = plugincatalog::parentFolder (path);
+            auto* parent = parentPath.empty() ? &kindNode : (out.count (parentPath) ? out[parentPath] : nullptr);
+            if (parent == nullptr) continue;
+            auto n = folder (parent, juce::String::fromUTF8 (plugincatalog::folderLeaf (path).c_str()), Icon::folder);
+            n->folderKind = instruments ? 1 : 0;
+            n->userFolder = path;
+            n->colour = theme::colour::info;
+            out[path] = n.get();
+            parent->children.push_back (std::move (n));
+        }
+        return out;
+    }
+    static Node* userFolderOf (const std::map<std::string, Node*>& nodes, AudioEngine& engine, bool instruments, const std::string& key)
+    {
+        const auto& folders = engine.getPluginHost().databaseFolders();
+        const auto it = folders.of.find (key);
+        if (it == folders.of.end() || ! folders.kind (instruments).count (it->second)) return nullptr;
+        const auto n = nodes.find (it->second);
+        return n != nodes.end() ? n->second : nullptr;
+    }
+    // subfolders first, then the plugins, each A-Z
+    static void sortFolder (Node& n)
+    {
+        std::stable_sort (n.children.begin(), n.children.end(), [] (const auto& a, const auto& b) {
+            if (a->folder != b->folder) return a->folder;
+            return a->label.compareNatural (b->label) < 0;
+        });
     }
 
     // FL's "Plugin database", interpreted (round 142, issue #5): Generators and Effects, each with LYNX's built-in ones,
@@ -429,12 +471,17 @@ public:
             auto vfxGens = folder (gens.get(), tr ("VFX (note effects)"), Icon::folder);
             auto installed = folder (gens.get(), tr ("Installed"), Icon::folder);
             Node* folders[] = { lynxGens.get(), flGens.get(), vfxGens.get(), installed.get() };
+            gens->folderKind = 1;
+            const auto mine = userFolderNodes (*gens, true, folder, engine); // round 166f: the user's folders first
             for (auto& e : quickpick::generatorEntries (engine))
             {
-                generatorEntry (*folders[juce::jlimit (0, 3, e.folder)], named (e.key, e.label), e.detail, e.folder == 3 ? Icon::plugin : Icon::keyboard, e.make);
-                folders[juce::jlimit (0, 3, e.folder)]->children.back()->pluginKey = e.key;
-                folders[juce::jlimit (0, 3, e.folder)]->children.back()->original = e.label;
+                auto* target = userFolderOf (mine, engine, true, e.key);
+                if (target == nullptr) target = folders[juce::jlimit (0, 3, e.folder)];
+                generatorEntry (*target, named (e.key, e.label), e.detail, e.folder == 3 ? Icon::plugin : Icon::keyboard, e.make);
+                target->children.back()->pluginKey = e.key;
+                target->children.back()->original = e.label;
             }
+            for (auto& [path, n] : mine) sortFolder (*n);
             for (auto* f : { &lynxGens, &flGens, &vfxGens, &installed })
                 if (! (*f)->children.empty())
                 {
@@ -450,13 +497,17 @@ public:
             auto flFx = folder (fxs.get(), tr ("FL engines"), Icon::folder);
             auto installed = folder (fxs.get(), tr ("Installed"), Icon::folder);
             Node* folders[] = { lynxFx.get(), flFx.get(), installed.get(), installed.get() };
+            fxs->folderKind = 0;
+            const auto mine = userFolderNodes (*fxs, false, folder, engine); // round 166f: the user's folders first
             for (auto& e : quickpick::effectEntries (engine))
             {
-                auto* target = folders[juce::jlimit (0, 3, e.folder)];
+                auto* target = userFolderOf (mine, engine, false, e.key);
+                if (target == nullptr) target = folders[juce::jlimit (0, 3, e.folder)];
                 effectEntry (*target, named (e.key, e.label), e.detail, e.folder == 3 ? Icon::plugin : Icon::mixer, e.make);
                 target->children.back()->pluginKey = e.key;
                 target->children.back()->original = e.label;
             }
+            for (auto& [path, n] : mine) sortFolder (*n);
             for (auto* f : { &lynxFx, &flFx, &installed })
                 if (! (*f)->children.empty())
                 {
@@ -1513,6 +1564,88 @@ private:
         return h;
     }
 
+    // --- round 166f (issue #16): the user's Plugin database folders (FL's folders, shown as headings in the slot menus)
+    void setPluginFolder (const std::string& key, bool instruments, const std::string& path)
+    {
+        auto& host = browser.engine.getPluginHost();
+        auto folders = host.databaseFolders();
+        plugincatalog::moveToFolder (folders, instruments, key, path);
+        host.setDatabaseFolders (folders);
+        browser.rebuildTree();
+    }
+
+    void askFolderName (const juce::String& title, const juce::String& initial, std::function<void (const std::string&)> done)
+    {
+        auto* window = new juce::AlertWindow (title, tr ("Folders hold plugins in the Plugin database; the mixer slot and the Channel Rack menus list each folder under its own heading. A / makes a subfolder (\"Stock/EQ\")."),
+                                              juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("name", initial);
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([window, done] (int result) {
+                                     const auto name = plugincatalog::cleanFolder (window->getTextEditorContents ("name").toStdString());
+                                     if (result == 1 && ! name.empty() && done) done (name);
+                                 }),
+                                 true);
+    }
+
+    void addFolderItems (juce::PopupMenu& menu, Node& n)
+    {
+        auto safe = juce::Component::SafePointer<FileTree> (this);
+        const bool instruments = n.folderKind == 1;
+        const auto path = n.userFolder;
+        auto update = [safe, instruments] (std::function<void (plugincatalog::Folders&)> change) {
+            if (safe == nullptr) return;
+            auto& host = safe->browser.engine.getPluginHost();
+            auto folders = host.databaseFolders();
+            change (folders);
+            host.setDatabaseFolders (folders);
+            safe->browser.rebuildTree();
+        };
+        menu.addSeparator();
+        menu.addItem (path.empty() ? tr ("New folder...") : tr ("New subfolder..."), [safe, update, instruments, path] {
+            if (safe != nullptr)
+                safe->askFolderName (tr ("New folder"), {}, [update, instruments, path] (const std::string& name) {
+                    update ([=] (plugincatalog::Folders& f) { plugincatalog::addFolder (f, instruments, path.empty() ? name : path + "/" + name); });
+                });
+        });
+        if (! path.empty())
+        {
+            menu.addItem (tr ("Rename folder..."), [safe, update, instruments, path] {
+                if (safe != nullptr)
+                    safe->askFolderName (tr ("Rename folder"), juce::String::fromUTF8 (path.c_str()), [update, instruments, path] (const std::string& name) {
+                        update ([=] (plugincatalog::Folders& f) { plugincatalog::renameFolder (f, instruments, path, name); });
+                    });
+            });
+            menu.addItem (tr ("Delete folder (its plugins go back to their usual folder)"), [safe, update, instruments, path] {
+                if (safe == nullptr) return;
+                std::vector<std::string> keys;
+                if (instruments) for (const auto& e : quickpick::generatorEntries (safe->browser.engine)) keys.push_back (e.key);
+                else for (const auto& e : quickpick::effectEntries (safe->browser.engine)) keys.push_back (e.key);
+                update ([=] (plugincatalog::Folders& f) { plugincatalog::removeFolder (f, instruments, path, keys); });
+            });
+        }
+        else
+        {
+            // FL's own arrangement: the folders of FL Studio's Plugin database (Effects / Generators), when FL is here
+            const auto fl = findFlStudio();
+            const auto base = fl.userData.getChildFile ("Presets").getChildFile ("Plugin database").getChildFile (instruments ? "Generators" : "Effects");
+            menu.addItem (tr ("Folders from FL Studio's Plugin database"), base.isDirectory(), false, [safe, update, instruments, base] {
+                if (safe == nullptr) return;
+                std::vector<std::string> files;
+                for (const auto& entry : juce::RangedDirectoryIterator (base, true, "*.fst", juce::File::findFiles))
+                    files.push_back (entry.getFile().getRelativePathFrom (base).replaceCharacter ('\\', '/').toStdString());
+                std::vector<std::pair<std::string, std::string>> names;
+                auto& engine = safe->browser.engine;
+                if (instruments) for (const auto& e : quickpick::generatorEntries (engine)) names.push_back ({ e.key, e.label.toStdString() });
+                else for (const auto& e : quickpick::effectEntries (engine)) names.push_back ({ e.key, e.label.toStdString() });
+                int placed = 0;
+                update ([&] (plugincatalog::Folders& f) { placed = plugincatalog::importFlFolders (f, instruments, files, names); });
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin database"),
+                                                        tr ("{0} plugins placed in the folders of FL Studio's Plugin database.", { juce::String (placed) }));
+            });
+        }
+    }
+
 public:
     void renamePlugin (const std::string& key, const juce::String& original)
     {
@@ -1575,6 +1708,27 @@ private:
                         safe->browser.rebuildTree();
                     }
                 });
+                // round 166f (issue #16): FL's Plugin database folders — the slot menus list each folder under a heading
+                const bool instruments = (bool) n.generator;
+                const auto& folders = engine.getPluginHost().databaseFolders();
+                const auto it = folders.of.find (n.pluginKey);
+                const auto now = it != folders.of.end() && folders.kind (instruments).count (it->second) ? it->second : std::string();
+                juce::PopupMenu move;
+                for (const auto& path : folders.kind (instruments))
+                    move.addItem (juce::String::fromUTF8 (plugincatalog::groupHeading (path).c_str()), true, path == now, [safe, key = n.pluginKey, instruments, path] {
+                        if (safe != nullptr) safe->setPluginFolder (key, instruments, path);
+                    });
+                if (! folders.kind (instruments).empty()) move.addSeparator();
+                move.addItem (tr ("New folder..."), [safe, key = n.pluginKey, instruments] {
+                    if (safe != nullptr)
+                        safe->askFolderName (tr ("New folder"), {}, [safe, key, instruments] (const std::string& name) {
+                            if (safe != nullptr) safe->setPluginFolder (key, instruments, name);
+                        });
+                });
+                move.addItem (tr ("No folder"), ! now.empty(), now.empty(), [safe, key = n.pluginKey, instruments] {
+                    if (safe != nullptr) safe->setPluginFolder (key, instruments, {});
+                });
+                menu.addSubMenu (tr ("Move to folder"), move);
             }
             menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
             return;
@@ -1583,6 +1737,8 @@ private:
         {
             menu.addSectionHeader (n.label);
             expandItems();
+            if (n.kind == Kind::plugins && n.folderKind >= 0) // round 166f (issue #16): the user's folders
+                addFolderItems (menu, n);
             if ((n.kind == Kind::project || n.kind == Kind::plugins) && n.parent == nullptr && browser.tab == allTab) // round 163
             {
                 menu.addSeparator();
