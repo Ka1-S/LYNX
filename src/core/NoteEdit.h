@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -174,4 +175,56 @@ void groupWithAbove (Song& song, int track);                 // no-op on track 0
 void ungroupTrack (Song& song, int track);                   // a member leaves its group (headers stay)
 void setGroupCollapsed (Song& song, int track, bool collapsed); // the group of `track`
 void colourGroup (Song& song, int track);                    // "Auto color group": members take the header's colour
+
+// --- Piano roll note template and Alt+wheel (round 166e, FL 2026 measured in docs/analise/REA_rodada166e.md) --------
+// FL: clicking a note (or Alt+wheel-editing the nearest one) makes its properties the ones new notes get. Velocity and
+// pan were measured; release, fine pitch and mod X / Y travel with them (the length already did: lastLength).
+struct NoteTemplate
+{
+    float velocity = Note {}.velocity, pan = Note {}.pan, release = Note {}.release, finePitch = Note {}.finePitch;
+    float modX = Note {}.modX, modY = Note {}.modY;
+
+    void takeFrom (const Note& n) noexcept
+    {
+        velocity = n.velocity;
+        pan = n.pan;
+        release = n.release;
+        finePitch = n.finePitch;
+        modX = n.modX;
+        modY = n.modY;
+    }
+    void applyTo (Note& n) const noexcept
+    {
+        n.velocity = velocity;
+        n.pan = pan;
+        n.release = release;
+        n.finePitch = finePitch;
+        n.modX = modX;
+        n.modY = modY;
+    }
+};
+
+// FL's Alt+wheel with nothing selected: the note of `candidates` nearest to the mouse at (tick, key), measured in
+// pixels to the note's rectangle (`pixelsPerTick` across, `rowHeight` per key); −1 when there are none.
+inline int nearestNote (const std::vector<Note>& notes, const std::vector<int>& candidates, double tick, int key, double pixelsPerTick,
+                        double rowHeight)
+{
+    int best = -1;
+    double bestDistance = 0.0;
+    for (auto i : candidates)
+    {
+        if (i < 0 || i >= (int) notes.size())
+            continue;
+        const auto& n = notes[(std::size_t) i];
+        const auto dx = std::max ({ 0.0, (double) n.start - tick, tick - (double) (n.start + n.length) }) * pixelsPerTick;
+        const auto dy = (double) std::abs (n.key - key) * rowHeight;
+        const auto d = dx * dx + dy * dy;
+        if (best < 0 || d < bestDistance)
+        {
+            best = i;
+            bestDistance = d;
+        }
+    }
+    return best;
+}
 } // namespace lynx::noteedit

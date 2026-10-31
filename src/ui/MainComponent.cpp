@@ -132,15 +132,15 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         if (safe != nullptr)
             safe->mixer.getStripsForSnapshot().setShowUsedOnly (on);
     };
-    mixeroptions::renderTracks = [safe = juce::Component::SafePointer<MainComponent> (this)] (std::vector<int> tracks) {
+    mixeroptions::renderTracks = [safe = juce::Component::SafePointer<MainComponent> (this)] (std::vector<int> tracks, std::function<void()> done) {
         if (safe != nullptr)
-            showExportDialogForTracks (safe->engine, safe->currentFile.getParentDirectory(), safe->projectName, tracks);
+            showExportDialogForTracks (safe->engine, safe->currentFile.getParentDirectory(), safe->projectName, tracks, std::move (done));
     };
     if (persistent)
     {
         loadUiSettings();
-        if (! (newProjectDefaults() == NewProjectDefaults {})) // the start-up song follows Options › Mixer too (round 163)
-            engine.setSong (makeNewProject());
+        // the start-up song follows Options › Mixer too (round 163) and the automatic crossfades of new projects (166e)
+        engine.setSong (makeNewProject());
         skin::onStyleSettingsChanged = [safe = juce::Component::SafePointer<MainComponent> (this)] { // an editor's own style was picked
             if (safe != nullptr) safe->saveUiSettings();
         };
@@ -1553,11 +1553,13 @@ void MainComponent::loadUiSettings()
             rack.setPianoRollView (on);
         else if (key == "undoLevels")
             engine.setUndoLevels (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
-        else if (key == "askWhatToRecord" || key == "recordNotes" || key == "recordAudio" || key == "recordStartsPlayback" || key == "disarmOnStop")
+        else if (key == "askWhatToRecord" || key == "recordNotes" || key == "recordAudio" || key == "recordStartsPlayback" || key == "disarmOnStop"
+                 || key == "recordOffOnStop" || key == "unarmAfterRender")
         {
             auto o = engine.getRecordOptions();
             (key == "askWhatToRecord" ? o.askWhatToRecord : key == "recordNotes" ? o.recordNotes : key == "recordAudio" ? o.recordAudio
-             : key == "disarmOnStop" ? o.disarmOnStop : o.startsPlayback) = on;
+             : key == "disarmOnStop" ? o.disarmOnStop : key == "recordOffOnStop" ? o.recordOffOnStop : key == "unarmAfterRender" ? o.unarmAfterRender
+                                                                                                                                  : o.startsPlayback) = on;
             engine.setRecordOptions (o);
         }
         else if (key == "recordAutomation" || key == "recordQuantiseAutomation" || key == "recordClips")
@@ -1590,7 +1592,7 @@ void MainComponent::loadUiSettings()
             recordQuantiseOn = on;
             updateRecordQuantise();
         }
-        else if (key == "newInserts" || key == "newMasterChain" || key == "newCleanMixer" || key == "playlistTracks")
+        else if (key == "newInserts" || key == "newMasterChain" || key == "newCleanMixer" || key == "playlistTracks" || key == "newAutoCrossfades")
             newProjectDefaults().readKey (key.toStdString(), line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
         else if (key == "mixerUsedOnly")
             MixerStrips::showUsedOnly = on;
@@ -1644,6 +1646,8 @@ void MainComponent::saveUiSettings()
                                       + "\nrecordAudio=" + juce::String (engine.getRecordOptions().recordAudio ? 1 : 0)
                                       + "\nrecordStartsPlayback=" + juce::String (engine.getRecordOptions().startsPlayback ? 1 : 0)
                                       + "\ndisarmOnStop=" + juce::String (engine.getRecordOptions().disarmOnStop ? 1 : 0)
+                                      + "\nrecordOffOnStop=" + juce::String (engine.getRecordOptions().recordOffOnStop ? 1 : 0)
+                                      + "\nunarmAfterRender=" + juce::String (engine.getRecordOptions().unarmAfterRender ? 1 : 0)
                                       + "\nrecordQuantiseStarts=" + juce::String (recordQuantiseOn ? 1 : 0)
                                       + "\nrecordNoteEnd=" + juce::String ((int) engine.getRecordOptions().noteEnd)
                                       + "\nrecordToStepSequencer=" + juce::String (engine.getRecordOptions().toStepSequencer ? 1 : 0)
@@ -1952,6 +1956,7 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
             menu.addSeparator();
             action (menu, "playlist.ripple", tr ("Ripple editing (resizing and deleting move the later clips)"), true, playlist.isRippleOn());
             action (menu, "playlist.rippleDelete", tr ("Delete the selected clips and close the gaps"));
+            action (menu, "playlist.autoCrossfades", tr ("Automatic crossfades (current project)"), true, engine.getSong().autoCrossfades);
             action (menu, "playlist.follow", tr ("Follow the playhead (auto scrolling)"), true, EditorGlobals::get().isFollowing (false));
             action (menu, "playlist.quantizeStarts", tr ("Quantize the clips' starts"));
             action (menu, "playlist.quantizeHalf", tr ("Quantize the clips' starts 50% (halfway to the grid)"));
@@ -2395,6 +2400,9 @@ void MainComponent::showRecordMenu()
     menu.addSectionHeader (tr ("Options"));
     menu.addItem (tr ("Recording starts playback"), true, o.startsPlayback,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.startsPlayback = ! r.startsPlayback; }); });
+    menu.addItem (tr ("Disarm on stop (recording switches off when playback stops)"), true, o.recordOffOnStop,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordOffOnStop = ! r.recordOffOnStop; }); });
+    // LYNX's own (issue #16; FL has no such option): also in Mixer › Disk recording
     menu.addItem (tr ("Disarm the inserts when recording stops"), true, o.disarmOnStop,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.disarmOnStop = ! r.disarmOnStop; }); });
     menu.addItem (tr ("Enable recording markers (Start / Stop recording markers in the Playlist)"), true, o.recordingMarkers,
@@ -4060,6 +4068,7 @@ void MainComponent::openSettings (int page)
         o.autosaveMinutes = safe->autosaveMinutes;
         o.autosaveKeep = safe->autosaveKeep;
         o.askUnusedRecordings = safe->askUnusedRecordings;
+        o.crossfadesInNewProjects = newProjectDefaults().autoCrossfades;
         o.pluginSandbox = pluginSandboxEnabled();
         o.menuEntry = appImageMenuEntryInstalled();
         o.pluginSubstitutes = pluginSubstitutesEnabled();
@@ -4122,6 +4131,7 @@ void MainComponent::openSettings (int page)
         self.autosaveMinutes = prefs::clampAutosaveMinutes (o.autosaveMinutes);
         self.autosaveKeep = prefs::clampAutosaveKeep (o.autosaveKeep);
         self.askUnusedRecordings = o.askUnusedRecordings;
+        newProjectDefaults().autoCrossfades = o.crossfadesInNewProjects;
         self.autosaveTicks = 0;
         self.saveUiSettings();
         if (o.language != i18n::saved())

@@ -185,6 +185,8 @@ std::vector<Action> makeActions()
         { "playlist.centrePlayhead", TR_NOOP ("Centre the view on the playhead"), Context::playlist, { chord ('0', shift) }, true },
         { "playlist.rippleDelete", TR_NOOP ("Delete the selected clips and close the gaps"), Context::playlist, { chord (del, shift) } },
         { "playlist.ripple", TR_NOOP ("Ripple editing on/off"), Context::playlist, { chord ('S', shift) } },
+        // FL's Playlist › Edit › "Automatic crossfades (current project)" (round 166e)
+        { "playlist.autoCrossfades", TR_NOOP ("Automatic crossfades (current project) on/off"), Context::playlist, {} },
         { "playlist.quantizeStarts", TR_NOOP ("Quantize the clips' starts"), Context::playlist, { chord ('Q', ctrl) } },
         { "playlist.quantizeHalf", TR_NOOP ("Quantize the clips' starts 50% (halfway to the grid)"), Context::playlist, {} },
         { "playlist.follow", TR_NOOP ("Follow the playhead (auto scrolling) on/off"), Context::playlist, {} },

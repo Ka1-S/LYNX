@@ -57,6 +57,29 @@ struct TakeQuantize
 void quantizeTake (std::vector<Note>& notes, const TakeQuantize& q);
 void commitTake (Pattern& pattern, std::vector<Note> notes, RecordMode mode, const TakeQuantize& q, std::vector<int>& clearedChannels);
 
+// FL's record menu "Disarm on stop" (round 166e, measured in FL 2026): when playback stops after playing with the
+// record switch on, the switch goes off. update() is called with the transport's state; true = switch it off now.
+struct RecordOffOnStop
+{
+    bool recordedWhilePlaying = false;
+    bool update (bool playing, bool recording, bool enabled) noexcept
+    {
+        if (! recording)
+        {
+            recordedWhilePlaying = false;
+            return false;
+        }
+        if (playing)
+        {
+            recordedWhilePlaying = true;
+            return false;
+        }
+        const auto stopped = recordedWhilePlaying;
+        recordedWhilePlaying = false;
+        return stopped && enabled;
+    }
+};
+
 // FL's "Enable recording markers" (REA round 139, setting EnablePunchInOutMarkers): the Playlist's "Start recording"
 // markers open a range and the next "Stop recording" closes it (no stop: to the end; a stop with no start before it:
 // from the song start). No such markers = no ranges (everything is recorded).

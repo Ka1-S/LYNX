@@ -594,6 +594,7 @@ void PianoRollComponent::drumPaintAt (juce::Point<int> p, bool snapOn)
         return;
 
     Note n;
+    noteTemplate.applyTo (n);
     n.start = start;
     n.length = cell;
     n.key = key;
@@ -1257,6 +1258,7 @@ void PianoRollComponent::paintNoteAt (std::int64_t start, int key, bool monophon
 {
     // a brush stroke lays single notes (or the chosen chord) at the default length
     Note n;
+    noteTemplate.applyTo (n);
     n.start = juce::jmax<std::int64_t> (0, start);
     n.length = paintLength;
     n.key = key;
@@ -1602,6 +1604,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         drag = rightEdge ? Drag::resize : leftEdge ? Drag::resizeLeft : Drag::move;
         grabOffset = n.start - snap (xToTick (e.x), snapOn);
         lastLength = n.length;
+        noteTemplate.takeFrom (n); // FL: new notes get the clicked note's properties (round 166e)
         previewOn (n.key, n.velocity);
         return;
     }
@@ -1626,11 +1629,12 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         const auto start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
         paintNoteAt (start, snapKey (yToKey (e.y)), e.mods.isShiftDown());
         nextPaintTick = start + paintLength;
-        previewOn (snapKey (yToKey (e.y)), 0.78f);
+        previewOn (snapKey (yToKey (e.y)), noteTemplate.velocity);
         return;
     }
 
     Note n;
+    noteTemplate.applyTo (n);
     n.start = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn));
     n.length = newNoteLength();
     n.key = snapKey (yToKey (e.y));
@@ -1895,7 +1899,7 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             }
 
             if (snapKey (yToKey (e.y)) != previewKey)
-                previewOn (snapKey (yToKey (e.y)), 0.78f);
+                previewOn (snapKey (yToKey (e.y)), noteTemplate.velocity);
             return;
         }
 
@@ -3054,10 +3058,12 @@ bool PianoRollComponent::runAction (const std::string& id)
     return true;
 }
 
-void PianoRollComponent::wheelNoteProperty (int note, float deltaY, bool fine)
+void PianoRollComponent::wheelNoteProperty (int note, float deltaY, bool fine, juce::Point<int> mouse)
 {
-    // the hovered note, or the whole selection when the hovered note is part of it
-    const auto targets = isSelected (note) ? selection : std::vector<int> { note };
+    // FL 2026 [SHOT round 166e]: the whole selection wherever the mouse is, else the one note
+    const auto targets = note < 0 ? selection : std::vector<int> { note };
+    if (targets.empty())
+        return;
     const auto now = juce::Time::getMillisecondCounter();
     const auto newBurst = now - lastWheelEdit > 700; // one undo step per burst of wheel moves
     lastWheelEdit = now;
@@ -3068,6 +3074,22 @@ void PianoRollComponent::wheelNoteProperty (int note, float deltaY, bool fine)
             setLaneValue (n, (float) gesture::wheelStepValue (laneValue (n), deltaY, fine));
         }
     }, newBurst);
+
+    // hear it (FL previews the single note; the selection's nearest note too is LYNX's own, issue #16) and a single
+    // note becomes the template for new notes (FL)
+    const auto& notes = currentPattern (engine.getSong()).notes;
+    const auto heard = note >= 0 ? note : noteedit::nearestNote (notes, targets, xToTick (mouse.x), yToKey (mouse.y), pixelsPerTick, rowHeight);
+    if (heard < 0 || heard >= (int) notes.size())
+        return;
+    const auto& n = notes[(std::size_t) heard];
+    if (note >= 0)
+        noteTemplate.takeFrom (n);
+    previewOn (n.key, n.velocity);
+    const auto serial = ++wheelPreviewSerial;
+    juce::Timer::callAfterDelay (180, [safe = juce::Component::SafePointer<PianoRollComponent> (this), serial] {
+        if (safe != nullptr && safe->wheelPreviewSerial == serial && safe->drag == Drag::none)
+            safe->previewOff();
+    });
 }
 
 void PianoRollComponent::glideBy (double ticks, double pixels)
@@ -3111,13 +3133,24 @@ void PianoRollComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::
     const auto ctrl = e.mods.isCtrlDown(), alt = e.mods.isAltDown(), shift = e.mods.isShiftDown();
     const auto overGrid = gridArea().contains (e.getPosition()) || velocityArea().contains (e.getPosition());
 
-    // Alt+wheel over a note: its velocity (or the lane's property); Ctrl+Alt: fine steps
+    // Alt+wheel: the velocity (or the lane's property) of the selected notes wherever the mouse is, with nothing
+    // selected of the note nearest to the mouse (FL 2026, round 166e); Ctrl+Alt: fine steps
     if (alt && ! shift && overGrid && wheel.deltaY != 0.0f)
-        if (const auto note = hoverAt (e.getPosition()).note; note >= 0)
+    {
+        auto note = -1;
+        if (selection.empty())
         {
-            wheelNoteProperty (note, wheel.deltaY, ctrl);
+            note = hoverAt (e.getPosition()).note;
+            if (note < 0)
+                note = noteedit::nearestNote (currentPattern (engine.getSong()).notes, channelNotes(), xToTick (e.x), yToKey (e.y), pixelsPerTick,
+                                              velocityArea().contains (e.getPosition()) ? 0.0 : rowHeight);
+        }
+        if (note >= 0 || ! selection.empty())
+        {
+            wheelNoteProperty (note, wheel.deltaY, ctrl, e.getPosition());
             return;
         }
+    }
 
     if (shift && alt) // nudge the selection by the grid
     {
