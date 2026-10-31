@@ -3,6 +3,7 @@
 #include "core/MixerOps.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "core/Effects.h"
 #include "core/PluginSubstitutes.h"
@@ -791,7 +792,13 @@ juce::var clipsToVar (const std::vector<Clip>& list)
         {
             clip.add ((juce::int64) c.fadeIn);
             clip.add ((juce::int64) c.fadeOut);
-            clip.add (juce::roundToInt (c.gain * 1000.0f) / 1000.0);
+            // (round 166e: the gain handle reaches −96 dB, so the value keeps 6 significant digits)
+            clip.add ([g = (double) c.gain] {
+                if (g <= 0.0)
+                    return 0.0;
+                const auto scale = std::pow (10.0, 5.0 - std::floor (std::log10 (g)));
+                return std::round (g * scale) / scale;
+            }());
             if (c.muted || fraction != 0.0 || pan != 0.0)
                 clip.add (c.muted);
             if (fraction != 0.0 || pan != 0.0)
@@ -828,7 +835,7 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
             {
                 clip.fadeIn = juce::jmax<juce::int64> (0, (juce::int64) c[7]);
                 clip.fadeOut = juce::jmax<juce::int64> (0, (juce::int64) c[8]);
-                clip.gain = juce::jlimit (0.0f, 4.0f, (float) (double) c[9]);
+                clip.gain = juce::jlimit (0.0f, 63.1f, (float) (double) c[9]); // FL: +36 dB
                 clip.muted = c.size() >= 11 && (bool) c[10];
                 clip.offsetFraction = c.size() >= 12 ? juce::jlimit (-0.5f, 0.5f, (float) (double) c[11]) : 0.0f;
                 clip.pan = c.size() >= 13 ? juce::jlimit (-1.0f, 1.0f, (float) (double) c[12]) : 0.0f;
@@ -1522,6 +1529,8 @@ juce::String toJson (const Song& song)
         root->setProperty ("cleanMixer", true);
     if (song.performanceMode)
         root->setProperty ("performanceMode", true);
+    if (song.autoCrossfades)
+        root->setProperty ("autoCrossfades", true);
     if (! song.info.empty())
     {
         auto info = std::make_unique<juce::DynamicObject>();
@@ -1823,6 +1832,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
     song.substitutesBypassed = (bool) root.getProperty ("substitutesBypassed", false);
     song.cleanMixer = (bool) root.getProperty ("cleanMixer", false);
     song.performanceMode = (bool) root.getProperty ("performanceMode", false);
+    song.autoCrossfades = (bool) root.getProperty ("autoCrossfades", false);
     if (const auto info = root.getProperty ("info", {}); info.isObject())
     {
         auto get = [&info] (const char* key) { return info.getProperty (key, {}).toString().toStdString(); };

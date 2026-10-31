@@ -22,7 +22,7 @@ class ProjectPage final : public juce::Component,
                           private juce::ChangeListener
 {
 public:
-    explicit ProjectPage (AudioEngine& e) : engine (e)
+    ProjectPage (AudioEngine& e, const SettingsHooks& h) : engine (e), hooks (h)
     {
         addAndMakeVisible (timeTitle);
         addAndMakeVisible (grooveTitle);
@@ -68,6 +68,23 @@ public:
         signatureText.setText (tr ("Time signature changes along the song: add a time signature marker on the Playlist ruler."),
                                juce::dontSendNotification);
 
+        // FL's Options › Project general settings › Playlist (round 166e)
+        addAndMakeVisible (playlistTitle);
+        crossfades.setButtonText (tr ("Automatic crossfades (overlapping audio clips on a track crossfade over the overlap)"));
+        crossfades.onClick = [this] { edit ([on = crossfades.getToggleState()] (Song& s) { s.autoCrossfades = on; }); };
+        addAndMakeVisible (crossfades);
+        crossfadesNew.setButtonText (tr ("Enable automatic crossfades in new projects"));
+        crossfadesNew.onClick = [this] {
+            if (hooks.getGeneral == nullptr || hooks.setGeneral == nullptr)
+                return;
+            auto o = hooks.getGeneral();
+            o.crossfadesInNewProjects = crossfadesNew.getToggleState();
+            hooks.setGeneral (o);
+        };
+        crossfadesNew.setEnabled (hooks.getGeneral != nullptr);
+        crossfadesNew.setToggleState (hooks.getGeneral != nullptr ? hooks.getGeneral().crossfadesInNewProjects : true, juce::dontSendNotification);
+        addAndMakeVisible (crossfadesNew);
+
         engine.addChangeListener (this);
         load();
     }
@@ -95,6 +112,11 @@ public:
         area.removeFromTop (6);
         for (auto* l : { &ppqText, &stepsText, &signatureText })
             l->setBounds (area.removeFromTop (22));
+        area.removeFromTop (8);
+        playlistTitle.setBounds (area.removeFromTop (28));
+        area.removeFromTop (6);
+        crossfades.setBounds (area.removeFromTop (26));
+        crossfadesNew.setBounds (area.removeFromTop (26));
     }
 
 private:
@@ -113,6 +135,7 @@ private:
         beats.setValue (s.beatsPerBar, juce::dontSendNotification);
         swing.setValue (s.swing * 100.0, juce::dontSendNotification);
         pitch.setValue (s.masterPitch, juce::dontSendNotification);
+        crossfades.setToggleState (s.autoCrossfades, juce::dontSendNotification);
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
@@ -122,10 +145,13 @@ private:
     }
 
     AudioEngine& engine;
+    SettingsHooks hooks;
     bool loading = false;
-    SectionTitle timeTitle { tr ("Time settings") }, grooveTitle { tr ("Groove and tuning") }, gridTitle { tr ("Timebase") };
+    SectionTitle timeTitle { tr ("Time settings") }, grooveTitle { tr ("Groove and tuning") }, gridTitle { tr ("Timebase") },
+        playlistTitle { tr ("Playlist") };
     juce::Label tempoLabel, beatsLabel, swingLabel, pitchLabel, ppqText, stepsText, signatureText;
     juce::Slider tempo, beats, swing, pitch;
+    juce::ToggleButton crossfades, crossfadesNew;
 };
 
 // --- Info page -------------------------------------------------------------------------------------
@@ -522,7 +548,7 @@ public:
                 case SettingsPage::general: content = makeGeneralPage (engine, hooks, persistent).release(); break;
                 case SettingsPage::theme: content = themeui::makeThemePage().release(); break;
                 case SettingsPage::files: content = new FilesPage (engine, persistent, hooks.browserFoldersChanged, hooks.managePlugins); break;
-                case SettingsPage::project: content = new ProjectPage (engine); break;
+                case SettingsPage::project: content = new ProjectPage (engine, hooks); break;
                 case SettingsPage::info: content = new InfoPage (engine); break;
             }
             tabs.addTab (name, theme::colour::bg2, content, true);

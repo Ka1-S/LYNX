@@ -142,7 +142,7 @@ public:
 
 private:
     enum class Drag { none, move, resize, trimLeft, slip, erase, seek, loop, select, fadeIn, fadeOut, paint, muting, knife, zoomRange, listen, pan, timeMove, autoPoint, autoTension,
-                      trackResize, preview, trackZoom, perfLaunch };
+                      trackResize, preview, trackZoom, perfLaunch, clipGain };
     // Performance mode (round 165m): the clip a click launched (its release goes with the mouse button)
     int perfTrack = -1;
     std::int64_t perfClip = -1;
@@ -291,6 +291,16 @@ private:
     gesture::MuteSweep muteSweep;        // the mute drag takes its target (mute / unmute) from the first clip crossed
     // inline automation editing: points of automation clips are dragged, added on the curve, deleted by right-click
     int autoClip = -1, autoPoint = -1;
+    // FL 2026's audio clip gain handle (round 166e): a semicircle at the bottom centre of the clip; a vertical drag
+    // changes the gain of the clip (or of every selected audio clip, each from its own value) by 0.05 dB per pixel
+    juce::Rectangle<float> gainHandle (int clip) const; // empty: the clip has none (not audio, too small)
+    void showGainMenu (int clip);
+    std::vector<double> gainStartDb; // per dragIndices, when the gain drag started
+    int gainStartY = 0;
+    static inline double copiedGainDb = 0.0;
+    static inline bool hasCopiedGain = false;
+    // FL: a double click held on the ruler drags a time selection (as Ctrl+drag); released without moving it clears
+    bool rulerDoubleDrag = false;
     juce::Rectangle<float> automationBody (const Clip& clip) const;
     int automationPointAt (int clip, juce::Point<int> p) const;
     bool isOnAutomationCurve (int clip, juce::Point<int> p) const;

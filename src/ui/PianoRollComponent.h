@@ -249,7 +249,11 @@ private:
     void updateHover (juce::Point<int> p, juce::ModifierKeys mods);
     void updateCursor (juce::ModifierKeys mods);
     void applyLaneValue (int x, float value, int fromX); // sets the lane value of the notes between fromX and x
-    void wheelNoteProperty (int note, float deltaY, bool fine);
+    // Alt+wheel (FL 2026, round 166e): `note` < 0 = the selection, else that note alone; the note is heard (with the
+    // selection: the selected note nearest to `mouse`), and a single note's properties become the new-note template
+    void wheelNoteProperty (int note, float deltaY, bool fine, juce::Point<int> mouse);
+    noteedit::NoteTemplate noteTemplate; // FL: the properties new notes get from the last clicked note (round 166e)
+    juce::uint32 wheelPreviewSerial = 0;
     void postDragHint (const juce::MouseEvent& e); // what the gesture in progress does (hint bar)
     juce::uint32 lastWheelEdit = 0;    // wheel edits within a burst are one undo step
     std::vector<Note> laneOriginals;   // right-drag line / Shift+drag: the pattern's notes when it started

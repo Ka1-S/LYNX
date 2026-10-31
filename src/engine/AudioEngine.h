@@ -120,10 +120,18 @@ public:
         bool recordNotes = true;        // notes played (MIDI and PC keyboard)
         bool recordAudio = true;        // audio of the armed inserts' inputs
         bool askWhatToRecord = true;    // the record button asks first ("What would you like to record?")
-        // FL's record menu "Options" (REA round 134): arming recording also starts playback; the armed inserts are
-        // disarmed when a take stops
+        // FL's record menu "Options" (REA round 134): arming recording also starts playback
         bool startsPlayback = false;
+        // LYNX's own "Disarm the inserts when recording stops" (record menu and Mixer › Disk recording; issue #16): the
+        // armed inserts are disarmed when a take stops. FL has no such option (round 166e measured: neither its
+        // "Disarm on stop" nor the mixer's "Auto-unarm" disarms the inserts after a live take).
         bool disarmOnStop = false;
+        // FL's record menu "Disarm on stop" (RecDisableOnStopMenu, round 166e measured): the record switch turns off when
+        // playback stops after recording
+        bool recordOffOnStop = false;
+        // FL's Mixer › Disk recording › "Auto-unarm" (round 166e measured): "Render armed tracks to wave file(s)"
+        // disarms the tracks it rendered
+        bool unarmAfterRender = false;
         // FL's record menu "Quantize" section (REA round 139); `quantise` is the grid. quantiseStarts = "Note start
         // time", noteEnd = "Note end time" (quantize) / "Leave note duration" (keepLength) / neither (keepEnd),
         // toStepSequencer = "Record to step sequencer"
@@ -714,6 +722,7 @@ private:
     std::vector<int> armedInserts;
     juce::String releasedInputDevice; // the input device releaseAudioInputIfUnused closed (reopened by name)
     double lastPlayingTick = 0.0;
+    RecordOffOnStop recordSwitch; // FL's "Disarm on stop"
     std::atomic<int> inputScale { 0 }, inputScaleRoot { 0 };
     std::atomic<int> liveChannel { 0 };              // selected channel, read by the MIDI thread
     static constexpr int maxLiveChannels = 16;       // other selected channels that also get MIDI input

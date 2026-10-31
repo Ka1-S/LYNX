@@ -1,5 +1,6 @@
 #include "engine/AudioEngine.h"
 
+#include "core/ClipOps.h"
 #include "core/MarkerPlan.h"
 #include "engine/AudioLogger.h"
 
@@ -1412,7 +1413,7 @@ void AudioEngine::finishAudioTake()
         }
     }
 
-    if (recordOptions.disarmOnStop) // FL's "Disarm on stop"
+    if (recordOptions.disarmOnStop) // LYNX's "Disarm the inserts when recording stops" (not FL's "Disarm on stop")
         for (const auto t : std::vector<int> (armedInserts))
             setInsertArmed (t, false);
 
@@ -1997,6 +1998,14 @@ void AudioEngine::setRecording (bool shouldRecord)
 void AudioEngine::updateRecording()
 {
     const auto playing = transport.playing.load();
+
+    // FL's "Disarm on stop" (round 166e): the record switch goes off once playback stops after recording
+    if (recordSwitch.update (playing, transport.recording.load(), recordOptions.recordOffOnStop))
+    {
+        transport.recording.store (false);
+        liveInput.recording.store (false);
+        sendChangeMessage();
+    }
     const auto active = transport.recording.load() && playing;
 
     if (playing)
@@ -2088,6 +2097,7 @@ void AudioEngine::setSong (Song newSong)
     undoStack.clear();
     redoStack.clear();
     song = std::move (newSong);
+    clipops::updateCrossfades (song);
     selectedChannel = 0;
     selectedChannels = { 0 };
     modified = false;
@@ -2156,6 +2166,7 @@ void AudioEngine::editSong (const std::function<void (Song&)>& edit, bool undoab
     const auto lengthsBefore = patternLengths (song);
     edit (song);
     followPatternLengths (lengthsBefore, song);
+    clipops::updateCrossfades (song); // FL's automatic crossfades follow every edit (round 166e)
     publishSong();
 }
 
