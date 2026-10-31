@@ -1962,14 +1962,33 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
             if (engine.isInsertArmed (x))
                 armed.push_back (x);
         juce::PopupMenu disk;
-        disk.addItem (tr ("Render armed tracks to wave file(s)..."), ! armed.empty(), false, [armed] {
+        auto& eng = engine;
+        disk.addItem (tr ("Render armed tracks to wave file(s)..."), ! armed.empty(), false, [armed, &eng] {
             if (mixeroptions::renderTracks)
-                mixeroptions::renderTracks (armed);
+                mixeroptions::renderTracks (armed, [armed, &eng] {
+                    if (eng.getRecordOptions().unarmAfterRender) // FL's "Auto-unarm" (round 166e)
+                        for (auto t : armed)
+                            eng.setInsertArmed (t, false);
+                });
         });
         disk.addItem (tr ("Render selected tracks to wave file(s)..."), ! targets.empty(), false, [targets] {
             if (mixeroptions::renderTracks)
-                mixeroptions::renderTracks (targets);
+                mixeroptions::renderTracks (targets, {});
         });
+        // FL's Disk recording "Options" (round 166e) and LYNX's own disarm after a take (issue #16)
+        disk.addSectionHeader (tr ("Options"));
+        const auto& ro = engine.getRecordOptions();
+        auto setRecord = [&eng] (std::function<void (AudioEngine::RecordOptions&)> change) {
+            auto o = eng.getRecordOptions();
+            change (o);
+            eng.setRecordOptions (o);
+            if (mixeroptions::changed)
+                mixeroptions::changed();
+        };
+        disk.addItem (tr ("Auto-unarm (rendering the armed tracks disarms them)"), true, ro.unarmAfterRender,
+                      [setRecord] { setRecord ([] (AudioEngine::RecordOptions& r) { r.unarmAfterRender = ! r.unarmAfterRender; }); });
+        disk.addItem (tr ("Disarm the inserts when recording stops"), true, ro.disarmOnStop,
+                      [setRecord] { setRecord ([] (AudioEngine::RecordOptions& r) { r.disarmOnStop = ! r.disarmOnStop; }); });
         menu.addSubMenu (tr ("Disk recording"), disk);
         juce::PopupMenu pdc;
         const auto manual = std::count_if (song.mixer.begin(), song.mixer.end(), [] (const MixerTrack& m) { return m.latencyMs != 0.0f; });
@@ -2566,7 +2585,7 @@ namespace mixeroptions
 {
 std::function<void()> changed;
 std::function<void (bool)> setShowUsedOnly;
-std::function<void (std::vector<int>)> renderTracks;
+std::function<void (std::vector<int>, std::function<void()>)> renderTracks;
 
 namespace
 {

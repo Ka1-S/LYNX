@@ -74,7 +74,7 @@ public:
     // "Slide" note: sounding notes glide to `key` over `samples`, without retriggering. Ignored if unsupported.
     virtual void slideTo (int /*key*/, float /*cents*/, float /*samples*/) noexcept {}
     // Audio clip: fades and in-clip position of the next note (before noteOn), in samples.
-    virtual void setNextClipFades (float /*elapsed*/, float /*remaining*/, float /*fadeIn*/, float /*fadeOut*/) noexcept {}
+    virtual void setNextClipFades (float /*elapsed*/, float /*remaining*/, float /*fadeIn*/, float /*fadeOut*/, std::uint8_t /*shape*/ = 0) noexcept {}
     // Pan, fine tuning and "porta" (inverts the channel's porta) of the next note (called right before
     // noteOn). Ignored if unsupported.
     virtual void setNextNoteExpression (float /*pan*/, float /*cents*/, bool /*porta*/ = false) noexcept {}

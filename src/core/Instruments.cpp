@@ -5,6 +5,7 @@
 #include "core/Vfx.h"
 #include "core/VideoPlayer.h"
 #include "core/Scheduler.h"
+#include "core/ClipOps.h"
 
 #include "core/DirectWave.h"
 #include "core/FlSynths.h"
@@ -49,6 +50,17 @@ namespace lynx
 {
 namespace
 {
+// An audio clip voice's fade gain at its position: linear fades, or FL's S curve for an automatic crossfade
+float clipFadeGainOf (float elapsed, float remaining, float in, float out, std::uint8_t shape) noexcept
+{
+    auto gain = 1.0f;
+    if (in > 0.0f && elapsed < in)
+        gain *= (shape & 1) != 0 ? clipops::crossfadeCurve (elapsed / in) : elapsed / in;
+    if (out > 0.0f && remaining < out)
+        gain *= (shape & 2) != 0 ? clipops::crossfadeCurve (std::max (0.0f, remaining) / out) : std::max (0.0f, remaining) / out;
+    return gain;
+}
+
 // 1 / channelGain at FL's default channel volume (10000 of 12800)
 float audioClipUnity() noexcept
 {
@@ -1429,6 +1441,7 @@ struct SamplerVoice
     int stage = 1;         // 0 attack, 1 decay, 2 sustain, 3 release
     double first = 0.0, last = 0.0; // played region: first and last frame (inclusive)
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f; // clip fades
+    std::uint8_t fadeShape = 0; // bit 0 / 1: the fade-in / fade-out is an automatic crossfade (S curve, round 166e)
     float panL = 1.0f, panR = 1.0f;
     double glideRatio = 1.0;
     int glideLeft = 0;
@@ -1721,7 +1734,9 @@ public:
         target->clipRemaining = nextClip[1];
         target->fadeIn = nextClip[2];
         target->fadeOut = nextClip[3];
+        target->fadeShape = nextClipShape;
         nextClip = {};
+        nextClipShape = 0;
         // FL's read speed: the rate ratio at the original pitch, else exp(cents·ln2/1200)·ratio
         target->rate = flrs::speedFor ((float) (semitones * 100.0), base);
         target->reversed = backwards;
@@ -1989,9 +2004,10 @@ public:
         nextPorta = porta;
     }
 
-    void setNextClipFades (float elapsed, float remaining, float in, float out) noexcept override
+    void setNextClipFades (float elapsed, float remaining, float in, float out, std::uint8_t shape) noexcept override
     {
         nextClip = { elapsed, remaining, in, out };
+        nextClipShape = shape;
     }
 
     bool setNextNoteGain (float gain) noexcept override
@@ -2250,10 +2266,7 @@ public:
 
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
                 {
-                    if (v.fadeIn > 0.0f && v.clipElapsed < v.fadeIn)
-                        gain *= v.clipElapsed / v.fadeIn;
-                    if (v.fadeOut > 0.0f && v.clipRemaining < v.fadeOut)
-                        gain *= std::max (0.0f, v.clipRemaining) / v.fadeOut;
+                    gain *= clipFadeGainOf (v.clipElapsed, v.clipRemaining, v.fadeIn, v.fadeOut, v.fadeShape);
 
                     v.clipElapsed += 1.0f;
                     v.clipRemaining -= 1.0f;
@@ -2455,10 +2468,7 @@ public:
                 auto gain = v.fade * v.zoneGain * outGain.load (std::memory_order_relaxed);
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
                 {
-                    if (v.fadeIn > 0.0f && v.clipElapsed < v.fadeIn)
-                        gain *= v.clipElapsed / v.fadeIn;
-                    if (v.fadeOut > 0.0f && v.clipRemaining < v.fadeOut)
-                        gain *= std::max (0.0f, v.clipRemaining) / v.fadeOut;
+                    gain *= clipFadeGainOf (v.clipElapsed, v.clipRemaining, v.fadeIn, v.fadeOut, v.fadeShape);
                     v.clipElapsed += 1.0f;
                     v.clipRemaining -= 1.0f;
                 }
@@ -2693,6 +2703,7 @@ private:
     }
     std::array<ModCoefficients, 2> modEnv {};
     std::array<float, 4> nextClip {}; // fades for the next noteOn (only the audio thread touches it)
+    std::uint8_t nextClipShape = 0;
 
     struct SliceTable
     {

@@ -166,7 +166,7 @@ std::string NewProjectDefaults::toText() const
 {
     const char* chain = master == MasterChain::empty ? "empty" : master == MasterChain::clipper ? "clipper" : "default";
     return "newInserts=" + std::to_string (inserts) + "\nnewMasterChain=" + chain + "\nnewCleanMixer=" + (cleanMixer ? "1" : "0")
-           + "\nplaylistTracks=" + std::to_string (playlistTracks) + "\n";
+           + "\nplaylistTracks=" + std::to_string (playlistTracks) + "\nnewAutoCrossfades=" + (autoCrossfades ? "1" : "0") + "\n";
 }
 
 void NewProjectDefaults::readKey (const std::string& key, const std::string& value)
@@ -190,6 +190,8 @@ void NewProjectDefaults::readKey (const std::string& key, const std::string& val
         cleanMixer = value == "1";
     else if (key == "playlistTracks")
         playlistTracks = std::clamp (number (16), 1, 500);
+    else if (key == "newAutoCrossfades")
+        autoCrossfades = value != "0";
 }
 
 void applyNewProjectDefaults (Song& song, const NewProjectDefaults& defaults)
@@ -229,6 +231,7 @@ void applyNewProjectDefaults (Song& song, const NewProjectDefaults& defaults)
     }
 
     song.cleanMixer = defaults.cleanMixer;
+    song.autoCrossfades = defaults.autoCrossfades;
 }
 
 NewProjectDefaults& newProjectDefaults()
