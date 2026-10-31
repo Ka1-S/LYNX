@@ -7,8 +7,13 @@ Shots: C:\Users\kauan\lynx-test\pl166e\*.png (not in the repo). FLEngine_x64.dll
 
 ## Where I stopped
 
-- FL measured (all 7 items), everything implemented with tests (tests/Round166eTests.inc), 15 languages.
-- Next: build-local with FL Data, Windows build + LYNX shots, land.
+- Done. FL measured (all 7 items); implemented with tests (tests/Round166eTests.inc); build-local with FL Data:
+  1,887,404 checks, 0 failures; Windows build checked by hand in test mode (E:\lynx-work\pl166e\*.png): crossfade
+  S-curves on and off, gain handle hint / drag (100 px = +5.0 dB) / menu, ruler double-click drag (selection, clips
+  selected, position at its start), Settings › Project › Playlist, record menu, Mixer › Disk recording › Options,
+  Piano roll Alt+wheel (nearest note, selection from anywhere) and the note template.
+- Not done: FL .flp import of FL's crossfade flag (imported FL projects keep it off); FL's render of armed tracks also
+  drops the rendered audio on the Playlist (not part of this issue).
 
 ## 1. Playlist: automatic crossfades toggle
 
