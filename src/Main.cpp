@@ -5199,6 +5199,13 @@ private:
                     tune.params[(std::size_t) (lynx::lynxtune::bypassC + 4)] = 1.0f;
                     tune.params[(std::size_t) (lynx::lynxtune::noteC + 9)] = 0.0f;
                     tune.params[lynx::lynxtune::vibratoShape] = 1.0f / 3.0f;
+                    // round 166c: the created vibrato's amplitude / formant / variation, a short throat, In scale +2
+                    tune.params[lynx::lynxtune::vibratoAmplitude] = 1.0f / 3.0f;
+                    tune.params[lynx::lynxtune::vibratoFormant] = 0.7f;
+                    tune.params[lynx::lynxtune::vibratoVariation] = 0.2f;
+                    tune.params[lynx::lynxtune::throatLength] = lynx::lynxtune::throatValue (80.0);
+                    tune.params[lynx::lynxtune::transposeInScale] = 1.0f;
+                    tune.params[lynx::lynxtune::scaleTranspose] = lynx::lynxtune::scaleTransposeValue (2);
                     own (tune, "LYNX Tune-p2.png", false, 1);
                 }
                 own (lynx::makeEffectSlot (lynx::EffectKind::lynxTune), "LYNX Tune-p3.png", false, 2); // round 135w: Real-time

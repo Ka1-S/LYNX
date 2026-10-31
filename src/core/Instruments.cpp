@@ -755,6 +755,7 @@ public:
     void configure (const ChannelDef& channel, double songBpm) noexcept override
     {
         bpm.store (std::max (1.0, songBpm)); // first: the synced LFO uses it when reading the settings
+        channelPitch.store (channel.sampler.pitch * 100.0f); // the channel's PITCH knob (issue #14)
         updateFrames (channel.synth);
         mailbox.write (channel.synth);
     }
@@ -828,8 +829,9 @@ public:
                 v.releasing = false;
                 v.stage = 0;
                 v.age = 0;
-                const auto target = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
-                v.cents = nextCents;
+                const auto cents = nextCents + channelPitch.load (std::memory_order_relaxed);
+                const auto target = midiToHz (key) / sampleRate * std::pow (2.0, cents / 1200.0);
+                v.cents = cents;
                 glide (v, v.phaseDelta, target);
                 lastPhaseDelta = target;
                 for (auto& m : v.mod)
@@ -861,8 +863,9 @@ public:
         target->active = true;
         target->key = key;
         target->velocity = velocity;
-        const auto delta = midiToHz (key) / sampleRate * std::pow (2.0, nextCents / 1200.0);
-        target->cents = nextCents;
+        const auto cents = nextCents + channelPitch.load (std::memory_order_relaxed);
+        const auto delta = midiToHz (key) / sampleRate * std::pow (2.0, cents / 1200.0);
+        target->cents = cents;
         glide (*target, lastPhaseDelta, delta); // with porta, starts from the previous note's pitch
         lastPhaseDelta = delta;
         voicePan (nextPan, target->panL, target->panR);
@@ -908,7 +911,7 @@ public:
 
     void slideTo (int key, float cents, float samples) noexcept override
     {
-        const auto target = midiToHz (key) / sampleRate * std::pow (2.0, cents / 1200.0);
+        const auto target = midiToHz (key) / sampleRate * std::pow (2.0, (cents + channelPitch.load (std::memory_order_relaxed)) / 1200.0);
         const auto steps = std::max (1, (int) samples);
 
         for (auto& v : voices)
@@ -1392,6 +1395,7 @@ private:
     bool useBands = false;
     float toneCoeff[2] { 0.025f, 0.155f };
     float nextPan = 0.0f, nextCents = 0.0f;
+    std::atomic<float> channelPitch { 0.0f }; // cents
     double bendMul = 1.0; // the pitch wheel (round 162), audio thread
     bool nextPorta = false;
     Noise noise;

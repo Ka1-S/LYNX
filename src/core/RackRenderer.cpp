@@ -1606,6 +1606,8 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
     auto& instrument = *state.instruments[(std::size_t) i];
     instrument.beginChunk (n); // (extra outputs: a generator Patcher's, REA_rodada141)
+    // issue #14: the channel's pitch as it is now (a hosted plugin bends to it; native engines took it at note on)
+    instrument.setLivePitch (c.sampler.pitch * 100.0f + c.misc.fineTune + (c.misc.mainPitch ? state.song.masterPitch : 0.0f));
     if (c.instrument == InstrumentKind::patcher) // its Hardware Insert nodes: this chunk's device buses (round 165c)
         instrument.setHardwareIo (liveInput, hwOut != nullptr && hwOut->active.load (std::memory_order_relaxed) ? hwOut : nullptr, liveInputOffset);
 
@@ -1741,7 +1743,10 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         if (e.type == NoteEvent::Type::on)
         {
             if (e.key >= 0 && e.key < 128)
+            {
                 held[(std::size_t) (e.key >> 6)] |= bit;
+                struckNotes[(std::size_t) i][(std::size_t) (e.key >> 6)] |= bit;
+            }
             // FL's key region (round 164): the channel plays only the notes inside it (audio clips: the key is the clip)
             const auto inRegion = c.instrument == InstrumentKind::audioClip || c.inKeyRegion (list[index].key);
             if (! c.muted && inRegion)
@@ -2291,7 +2296,10 @@ void RackRenderer::process (const RackState* state,
                 }
                 instrument.noteOn (e.key, e.velocity);
                 if (inRange)
+                {
                     held[(std::size_t) (e.key >> 6)] |= bit;
+                    struckNotes[(std::size_t) std::min (e.channel, maxChannels - 1)][(std::size_t) (e.key >> 6)] |= bit;
+                }
             }
             else
             {
@@ -2323,11 +2331,38 @@ void RackRenderer::process (const RackState* state,
         resumeAudio = false;
         done += n;
     }
+    publishSoundingKeys ((int) state->song.channels.size());
 
     if (timing)
     {
         times->wallNs.fetch_add (ProcessTimes::now() - wallStart, std::memory_order_relaxed);
         times->audioNs.fetch_add ((std::uint64_t) ((double) numSamples / sampleRate * 1.0e9), std::memory_order_relaxed);
+    }
+}
+
+void RackRenderer::publishSoundingKeys (int channels) noexcept
+{
+    channels = std::clamp (channels, 0, maxChannels);
+    const auto top = std::max (channels, publishedTop);
+    publishedTop = 0;
+    for (int i = 0; i < top; ++i)
+    {
+        auto& was = publishedNotes[(std::size_t) i];
+        NoteMask now {};
+        if (i < channels)
+        {
+            const auto& held = heldNotes[(std::size_t) i];
+            auto& struck = struckNotes[(std::size_t) i];
+            now = { held[0] | struck[0], held[1] | struck[1] };
+            struck = {};
+        }
+        if (now[0] != 0 || now[1] != 0)
+            publishedTop = i + 1;
+        if (now == was)
+            continue;
+        was = now;
+        sounding[(std::size_t) i][0].store (now[0], std::memory_order_relaxed);
+        sounding[(std::size_t) i][1].store (now[1], std::memory_order_relaxed);
     }
 }
 

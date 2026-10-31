@@ -1146,8 +1146,13 @@ Layout lynxTune()
     // --- output: formant, transpose, reference, mix
     v.push_back (section (482, 0, 318, 92, TR_NOOP ("OUTPUT")));
     v.push_back (toggle (490, 22, 82, 18, "Formant preserve", TR_NOOP ("Formant")));
-    v.push_back (knob (531, 58, 26, "Formant shift", TR_NOOP ("SHIFT"), 82, bipolar));
-    v.push_back (stepper (580, 40, 78, 22, "Transpose", TR_NOOP ("Transpose"), 25));
+    // round 166c: SHIFT and the THROAT beside it (the modelled throat length, formant on only); Transpose, or the
+    // steps of the scale while IN SCALE is on
+    v.push_back (knob (510, 60, 22, "Formant shift", TR_NOOP ("SHIFT"), 82, bipolar));
+    v.push_back (knob (552, 60, 22, "Throat length", TR_NOOP ("THROAT"), 82, 0));
+    v.push_back (when (stepper (584, 40, 78, 22, "Transpose", TR_NOOP ("Transpose"), 25), "Transpose in scale", 0.0f, 0.49f));
+    v.push_back (when (stepper (584, 40, 78, 22, "Scale transpose", TR_NOOP ("Scale steps"), 15), "Transpose in scale", 0.5f, 1.0f));
+    v.push_back (toggle (584, 66, 78, 18, "Transpose in scale", TR_NOOP ("In scale")));
     v.push_back (knob (700, 44, 30, "Reference", TR_NOOP ("A4"), 70, showValue));
     v.push_back (knob (760, 44, 30, "Mix", TR_NOOP ("MIX"), 70, showValue));
     // --- correction row
@@ -1169,21 +1174,23 @@ Layout lynxTune()
     {
         LayoutItem m;
         m.type = Item::menu;
-        m.x = 14, m.y = 408, m.w = 110, m.h = 22;
+        m.x = 14, m.y = 404, m.w = 110, m.h = 22;
         m.param = "Vibrato shape";
         m.label = TR_NOOP ("Shape");
         m.options = TR_NOOP ("No vibrato|Sine|Square|Sawtooth");
         adv (m);
-        adv (label (14, 392, 110, 14, TR_NOOP ("Shape")));
+        adv (label (14, 388, 110, 14, TR_NOOP ("Shape")));
     }
-    adv (knob (176, 420, 34, "Vibrato rate", TR_NOOP ("RATE"), 452, showValue));
-    adv (knob (250, 420, 34, "Vibrato depth", TR_NOOP ("DEPTH"), 452, showValue));
-    adv (knob (324, 420, 34, "Onset delay", TR_NOOP ("ONSET DELAY"), 452, showValue));
-    adv (knob (398, 420, 34, "Onset rate", TR_NOOP ("ONSET RATE"), 452, showValue));
-    adv (label (470, 368, 300, 16, TR_NOOP ("Pitch tracking"), alignLeft));
-    adv (toggle (470, 400, 150, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
-    adv (label (470, 430, 160, 14, TR_NOOP ("Notes are picked from the pitch"), alignLeft | dim));
-    adv (label (470, 444, 160, 14, TR_NOOP ("with its vibrato smoothed"), alignLeft | dim));
+    // round 166c: + the created vibrato's AMPLITUDE (level swing), FORMANT (how far the formants follow it) and
+    // VARIATION (random drift); Ignore vibrato moves under the shape menu
+    adv (knob (164, 420, 30, "Vibrato rate", TR_NOOP ("RATE"), 452, showValue));
+    adv (knob (230, 420, 30, "Vibrato depth", TR_NOOP ("DEPTH"), 452, showValue));
+    adv (knob (296, 420, 30, "Vibrato amplitude", TR_NOOP ("AMPLITUDE"), 452, showValue));
+    adv (knob (362, 420, 30, "Vibrato formant", TR_NOOP ("FORMANT"), 452, showValue));
+    adv (knob (428, 420, 30, "Vibrato variation", TR_NOOP ("VARIATION"), 452, showValue));
+    adv (knob (494, 420, 30, "Onset delay", TR_NOOP ("ONSET DELAY"), 452, showValue));
+    adv (knob (564, 420, 30, "Onset rate", TR_NOOP ("ONSET RATE"), 452, showValue));
+    adv (toggle (14, 440, 120, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
     // round 136: the voice-shifter extras (the Drive stage it measured, a ±12 st formant range, an output trim)
     adv (label (640, 368, 150, 16, TR_NOOP ("Voice shifter"), alignLeft));
     adv (toggle (640, 386, 150, 18, "Drive stage", TR_NOOP ("Drive stage")));

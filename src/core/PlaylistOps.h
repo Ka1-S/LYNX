@@ -133,10 +133,18 @@ std::string describe (const Song& song, int track);
 // source", "Recording / Monitoring" and "Arm/disarm recording" buttons that act on its linked mixer track; unassigned and
 // instrument tracks have none). -1 when `track` is not an audio track linked to an existing insert.
 int armableInsert (const Song& song, int track);
-// Audio clips on an audio track play through its mixer track: each one's channel is routed there; a channel that
-// also plays clips elsewhere gets a copy of its own first (FL: "make this instance unique and then route it to this
-// audio track"). Returns how many clips were changed.
-int followAudioTracks (Song& song);
+// Audio clips placed on an audio track play through its mixer track (issue #15, FL 2026 [DECOMP FLEngine FUN_00e66ba0 /
+// FUN_00e66580]): only the clips an edit placed (`touched`: moved, painted, pasted, duplicated, dropped — indices into
+// song.playlist) are routed, never the others, so a channel routed by hand stays where the user put it until its clip
+// is placed again. A touched audio clip on an audio track linked to mixer track M routes its channel to M — unless
+// another clip of that channel sits on an audio track linked to a different mixer track: then FL asks "Make clip
+// unique?" (`conflicts`), and only with `makeUnique` the touched clips of that channel get a copy of it routed to M
+// (No: they keep their channel and its route). Clips of the channel on unassigned / instrument tracks don't count.
+// Returns how many clips were routed.
+int followAudioTracks (Song& song, const std::vector<int>& touched, bool makeUnique = false);
+// The channels of `touched` clips that need FL's "Make clip unique?" question before followAudioTracks routes them
+// (see above), each once, in clip order.
+std::vector<int> audioTrackConflicts (const Song& song, const std::vector<int>& touched);
 
 // The copy of the song rendered by "Consolidate track(s)": only the (unmuted) clips of `track` play, moved so the render
 // starts at `start` (the track's first clip, or 0 with `fromSongStart`); the Master without effects, at unity.

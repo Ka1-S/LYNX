@@ -1,4 +1,5 @@
 #include "core/DirectWave.h"
+#include "core/HostSlide.h"
 
 #include "core/BassDrum.h"
 #include "core/PitchShifterFl.h"
@@ -2159,6 +2160,13 @@ public:
         nextCents = cents;
     }
 
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        const auto to = 100.0 * (std::clamp (key, 0, 127) - 60) + (double) pitchCents.load() + (double) cents;
+        for (auto& nt : notes)
+            nt.slide.start ((float) (to - (100.0 * (nt.key - 60) + nt.cents)), samples);
+    }
+
     void noteOn (int key, float velocity) noexcept override
     {
         if (! usable)
@@ -2210,7 +2218,8 @@ public:
         {
             channelVol = vol, channelPan = pan;
             for (const auto& nt : notes)
-                engine.setLevels (nt.id, channelVol * nt.initVol, std::clamp ((double) nt.pan + pan, -1.0, 1.0), nt.cents);
+                engine.setLevels (nt.id, channelVol * nt.initVol, std::clamp ((double) nt.pan + pan, -1.0, 1.0),
+                                  nt.cents + (double) nt.slide.cents);
         }
         if (! usable)
             return;
@@ -2218,6 +2227,13 @@ public:
         for (int done = 0; done < n;)
         {
             const int len = std::min (256, n - done);
+            for (auto& nt : notes) // a slide note moves the voices' Final.Pitch (issue #14)
+                if (nt.slide.moving())
+                {
+                    nt.slide.advance ((float) len);
+                    engine.setLevels (nt.id, channelVol * nt.initVol, std::clamp ((double) nt.pan + channelPan, -1.0, 1.0),
+                                      nt.cents + (double) nt.slide.cents);
+                }
             std::fill (tmp, tmp + 2 * len, 0.0f);
             engine.render (tmp, len);
             for (int i = 0; i < len; ++i)
@@ -2230,7 +2246,13 @@ public:
     }
 
 private:
-    struct Note { std::uint64_t id = 0; int key = 0; double initVol = 1.0, pan = 0.0, cents = 0.0; };
+    struct Note
+    {
+        std::uint64_t id = 0;
+        int key = 0;
+        double initVol = 1.0, pan = 0.0, cents = 0.0;
+        HostSlide slide {}; // a slide note moving its Final.Pitch (issue #14; the zone stays the key's)
+    };
     Engine engine;
     std::vector<std::shared_ptr<const ZoneSamples>> samples;
     std::vector<Note> notes;

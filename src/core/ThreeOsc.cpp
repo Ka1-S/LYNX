@@ -1,4 +1,5 @@
 #include "core/ThreeOsc.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -390,6 +391,7 @@ struct Voice
     int key = 60;
     std::uint64_t serial = 0;
     flvp::Proc proc;
+    HostSlide slide; // a slide note moving Final.Pitch (issue #14)
 };
 
 class Engine
@@ -501,6 +503,7 @@ public:
         }
         v.stereo = stereo;
         v.fpitch = v.fpitchBase = finalPitch;
+        v.slide = {};
         v.fvol = finalVol;
         v.fpan = finalPan;
         v.proc.init (S);
@@ -988,6 +991,17 @@ public:
         delete incoming.exchange (s.release());
     }
 
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        const auto to = (float) (100.0 * (std::clamp (key, 0, 127) - 60) + (double) pitchCents.load() + (double) cents);
+        for (int i = 0; i < engine.count; ++i)
+        {
+            auto& v = engine.voices[(std::size_t) engine.order[(std::size_t) i]];
+            if (! v.proc.released)
+                v.slide.start (to - (v.fpitchBase - v.slide.cents), samples);
+        }
+    }
+
     void setNextNoteExpression (float pan, float cents, bool) noexcept override
     {
         nextPan = pan;
@@ -1075,6 +1089,17 @@ public:
             const auto toNext = std::max (1, (int) std::ceil ((next - tickPhase) / perSample - 1e-9));
             const auto len = std::min ({ blockSize, n - done, toNext });
             engine.render (bufL.data(), bufR.data(), len);
+            for (int i = 0; i < engine.count; ++i) // a slide note moves the voices' Final.Pitch (issue #14)
+            {
+                auto& v = engine.voices[(std::size_t) engine.order[(std::size_t) i]];
+                if (v.slide.moving())
+                {
+                    const auto was = v.slide.cents;
+                    const auto d = v.slide.advance ((float) len) - was;
+                    v.fpitchBase += d;
+                    v.fpitch += d;
+                }
+            }
             for (int j = 0; j < len; ++j)
             {
                 left[done + j] += bufL[(std::size_t) j];

@@ -5941,3 +5941,12 @@ countries: tw hk mo
 "Metronome track" = "節拍器軌道"
 "Metronome target mixer track" = "節拍器的目標混音器軌道"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "節拍器經由的混音器軌道（--- 為主控）。節拍聲永遠不會進入匯出。"
+"Yes" = "是"
+"Make clip unique?" = "將片段設為唯一？"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "片段 \"{0}\" 也用於另一條音訊軌道。\n\n是否將此實例設為唯一，然後路由到此音訊軌道？"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "喉部"
+"Scale steps" = "音階級數"
+"In scale" = "按音階"
+"AMPLITUDE" = "幅度"
+"VARIATION" = "變化"

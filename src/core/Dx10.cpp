@@ -1,4 +1,5 @@
 #include "core/Dx10.h"
+#include "core/HostSlide.h"
 #include "core/FlVoiceProcessor.h"
 
 #include <algorithm>
@@ -66,6 +67,7 @@ std::optional<Params> parseState (const std::vector<std::uint8_t>& d)
 struct Voice
 {
     float fpitch = 0, fpitchBase = 0, fvol = 1, fpan = 0, curPitch = 0;
+    HostSlide slide; // a slide note moving Final.Pitch (issue #14)
     float phi = 0, D = 0, vibofs = 0;
     float L1 = 0, T1 = 0, c1 = 0, k1 = 1, L2 = 0, T2 = 0, c2 = 0, k2 = 1;
     std::uint32_t ph1 = 0, inc1 = 0, ph2 = 0, inc2 = 0;
@@ -189,6 +191,7 @@ public:
         v.key = key;
         v.serial = ++serials;
         v.fpitch = v.fpitchBase = v.curPitch = finalPitch;
+        v.slide = {};
         v.fvol = finalVol;
         v.fpan = finalPan;
         const auto k = roundEven ((double) finalPitch);
@@ -577,6 +580,17 @@ public:
         }
     }
 
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        const auto to = (float) (100.0 * (std::clamp (key, 0, 127) - 60) + (double) pitchCents.load() + (double) cents);
+        for (int i = 0; i < engine.count; ++i)
+        {
+            auto& v = engine.voices[(std::size_t) engine.order[(std::size_t) i]];
+            if (! v.released)
+                v.slide.start (to - (v.fpitchBase - v.slide.cents), samples);
+        }
+    }
+
     void setNextNoteExpression (float pan, float cents, bool) noexcept override
     {
         nextPan = pan;
@@ -664,6 +678,17 @@ public:
             const auto toNext = std::max (1, (int) std::ceil ((next - tickPhase) / perSample - 1e-9));
             const auto len = std::min ({ blockSize, n - done, toNext });
             engine.render (bufL.data(), bufR.data(), len);
+            for (int i = 0; i < engine.count; ++i) // a slide note moves the voices' Final.Pitch (issue #14)
+            {
+                auto& v = engine.voices[(std::size_t) engine.order[(std::size_t) i]];
+                if (v.slide.moving())
+                {
+                    const auto was = v.slide.cents;
+                    const auto d = v.slide.advance ((float) len) - was;
+                    v.fpitchBase += d;
+                    v.fpitch += d;
+                }
+            }
             for (int j = 0; j < len; ++j)
             {
                 left[done + j] += bufL[(std::size_t) j];
