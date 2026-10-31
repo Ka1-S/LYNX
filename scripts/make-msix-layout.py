@@ -30,12 +30,18 @@ UNSIGNED_OID = "OID.2.25.311729368913984317654407730594956997722=1"
 APP_FILES = ("LYNX.exe", "lynx-asio.dll")  # (lynx-asio32.dll is for registering with 32-bit hosts: not in the package)
 
 
-def msix_version(version):
-    """'0.1.20' / '0.1.20-alpha' -> '0.1.20.0' (the Store wants the fourth part 0; each part 0..65535)."""
+def msix_version(version, store_build=0):
+    """'0.1.20' / '0.1.20-alpha' -> '0.1.200.0'. The Store reserves the fourth part (it must be 0), so a repackaged
+    build of the same release (a resubmission after a failed certification) needs a higher third part: the third part
+    is patch * 10 + store_build (0..9), which keeps every later release above every rebuild (0.1.209 < 0.1.210).
+    0.1.20 shipped as 0.1.20.0, below all of these. Each part 0..65535."""
     m = re.match(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$", version.strip())
     if not m:
         raise ValueError(f"not a version: {version!r}")
-    parts = [int(p) for p in m.groups()]
+    if not 0 <= store_build <= 9:
+        raise ValueError(f"store build must be 0..9: {store_build!r}")
+    major, minor, patch = (int(p) for p in m.groups())
+    parts = [major, minor, patch * 10 + store_build]
     if any(p > 65535 for p in parts):
         raise ValueError(f"version part above 65535: {version!r}")
     return ".".join(str(p) for p in parts) + ".0"
@@ -54,6 +60,8 @@ def main(argv):
     ap.add_argument("--publisher", default=os.environ.get("MSIX_PUBLISHER") or DEFAULT_PUBLISHER)
     ap.add_argument("--publisher-display", default=os.environ.get("MSIX_PUBLISHER_DISPLAY") or DEFAULT_DISPLAY)
     ap.add_argument("--display-name", default=os.environ.get("MSIX_DISPLAY_NAME") or "LYNX SHARE")
+    ap.add_argument("--store-build", type=int, default=int(os.environ.get("MSIX_STORE_BUILD") or 0),
+                    help="0..9: repackaged build of the same release (see msix_version)")
     ap.add_argument("--test-identity", action="store_true")
     ap.add_argument("--loose", action="store_true",
                     help="also write unqualified logo names, for Add-AppxPackage -Register without makepri's resources.pri")
@@ -89,7 +97,7 @@ def main(argv):
         "@IDENTITY_NAME@": a.identity_name,
         "@PUBLISHER@": publisher,
         "@PUBLISHER_DISPLAY@": a.publisher_display,
-        "@VERSION@": msix_version(a.version),
+        "@VERSION@": msix_version(a.version, a.store_build),
         "@DISPLAY_NAME@": a.display_name,
     }
     for key, value in fields.items():

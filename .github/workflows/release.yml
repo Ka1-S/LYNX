@@ -21,6 +21,10 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      store_build:
+        description: 'MSIX store build 0..9 (a repackaged Store resubmission of the same release; scripts/make-msix-layout.py)'
+        default: '0'
 
 permissions:
   contents: read
@@ -243,6 +247,7 @@ jobs:
           MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
           MSIX_PUBLISHER_DISPLAY: ${{ vars.MSIX_PUBLISHER_DISPLAY }}
           MSIX_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME }}
+          MSIX_STORE_BUILD: ${{ inputs.store_build || '0' }}
         run: |
           $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
           if (-not $sdk) { throw "Windows SDK (makeappx) not found" }

@@ -32,8 +32,10 @@ is in the repository:
   `Package/Properties/DisplayName` and the listing title. Since v0.1.20 the product itself is named LYNX SHARE, so
   Start menu, taskbar, Explorer's *Open with* and the app say **LYNX SHARE** too (`VisualElements DisplayName` /
   `ShortName`); the Application Id, `LYNX.exe` and the settings folders keep "LYNX".
-- **Version:** `project(LYNX VERSION x.y.z)` → `x.y.z.0` (the Store requires the fourth part to be 0). Every
-  submission needs a higher version than the last one.
+- **Version:** `project(LYNX VERSION x.y.z)` → `x.y.(z·10 + b).0`. The Store requires the fourth part to be 0 and
+  never accepts a different package under a version it has seen, so `b` (0..9, the `store_build` input of a manual
+  Release run) numbers repackaged builds of one release: 0.1.20 → 0.1.200.0, a resubmission → 0.1.201.0, 0.1.21 →
+  0.1.210.0. (0.1.20 was first uploaded as 0.1.20.0, below all of these.)
 - **Identity:** Partner Center › the app › *Product management › Product identity* shows `Package/Identity/Name`,
   `Package/Identity/Publisher` and `Package/Properties/PublisherDisplayName`. Copy them into the repository variables
   (GitHub › Settings › Secrets and variables › Actions › *Variables*):
