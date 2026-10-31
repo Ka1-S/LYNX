@@ -135,7 +135,8 @@ TEST (auto_tune_pro_extra_controls_translate_round127)
         const auto s = vm127::tuneSlot (vm127::autoTuneState (2, 0, { { 4, 20 }, { 3, 20 }, { 74, -5 }, { 92, 60 }, { 10, 2 }, { 70, 1 }, { 71, 120 }, { 9, 75 } }), n);
         CHECK (std::abs (t::referenceHz (s.params[t::reference]) - 440.0 * std::exp2 (20.0 / 1200.0)) < 0.01);
         CHECK (t::transposeSemitones (s.params[t::transpose]) == -5 && std::abs (s.params[t::mix] - 0.6f) < 1e-6f);
-        CHECK (t::rangeIndex (s.params[t::range]) == 2 && std::abs (t::formantSemitones (s.params[t::formantShift]) + 0.0146 * std::pow (20.0, 1.4)) < 0.01); // round 138's measured throat law
+        CHECK (t::rangeIndex (s.params[t::range]) == 2 && std::abs (t::throatPercent (s.params[t::throatLength]) - 120.0) < 0.01); // round 166c: the engine's throat
+        CHECK (std::abs (t::formantSemitones (s.params[t::formantShift])) < 1e-4);
         CHECK (std::abs (s.params[t::tracking] - 0.6f) < 1e-6f);
     }
     // Classic mode: no formant correction, no Flex-Tune, no transpose; Bass Instrument → Instrument
@@ -161,11 +162,12 @@ TEST (auto_tune_efx_states_translate_round127)
     {
         int n = 0;
         const auto s = vm127::tuneSlot (vm127::efxState (11, 1, "011011110101", 20.0, -12.0, 50.0, 100.0), n);
-        CHECK (n == 23 && t::keyIndex (s.params[t::key]) == 11 && t::scaleIndex (s.params[t::scale]) == (int) vocal::Scale::custom);
+        CHECK (n == 24 && t::keyIndex (s.params[t::key]) == 11 && t::scaleIndex (s.params[t::scale]) == (int) vocal::Scale::custom);
         const char* notes = "011011110101";
         for (int k = 0; k < 12; ++k)
             CHECK ((s.params[(std::size_t) (t::noteC + k)] >= 0.5f) == (notes[k] == '1'));
-        CHECK (t::transposeSemitones (s.params[t::transpose]) == -12 && std::abs (t::formantSemitones (s.params[t::formantShift]) - 7.0) < 1e-4);
+        CHECK (t::transposeSemitones (s.params[t::transpose]) == -12 && std::abs (t::formantSemitones (s.params[t::formantShift])) < 1e-4);
+        CHECK (std::abs (t::throatPercent (s.params[t::throatLength]) - 50.0) < 0.01); // round 166c: the engine's throat
         CHECK (std::abs (t::retuneMs (s.params[t::retune]) - (1.36 * 20.0 - 3.0)) < 0.01);
     }
     // plain B minor, mix 95 %

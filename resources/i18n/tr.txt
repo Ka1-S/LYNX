@@ -5901,3 +5901,9 @@ countries: tr
 "Metronome track" = "Metronom kanalı"
 "Metronome target mixer track" = "Metronomun hedef mikser kanalı"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Metronomun çaldığı mikser kanalı (--- Master'dır). Tık sesi hiçbir zaman dışa aktarıma girmez."
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "GIRTLAK"
+"Scale steps" = "Gam basamakları"
+"In scale" = "Gamda"
+"AMPLITUDE" = "GENLİK"
+"VARIATION" = "VARYASYON"

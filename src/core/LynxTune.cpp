@@ -77,6 +77,29 @@ double throatSemitones (double percent) noexcept
     const auto st = -12.0 * std::log2 (percent / 100.0);
     return st * (percent < 100.0 ? 1.08 : 0.93);
 }
+// round 166c: the created vibrato's amplitude (the reference's 0 … 30 units) and the steps of Scale transpose
+double vibratoAmplitudeOf (float v) noexcept { return 30.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+// [model] (the reference trial could no longer be hosted in round 166c, REA_rodada166c §2): amount A swings the level
+// by ±A % with the vibrato's pitch (30 = ±30 %: +2.3 / −3.1 dB), up when the pitch is up
+double vibratoAmplitudeDepth (double amount) noexcept { return std::clamp (amount, 0.0, 30.0) / 100.0; }
+int scaleTransposeSteps (float v) noexcept { return stepped (v, 15) - 7; }
+float scaleTransposeValue (int steps) noexcept { return (float) (std::clamp (steps, -7, 7) + 7) / 14.0f; }
+int transposeInScaleNote (int note, std::uint16_t mask, int steps) noexcept
+{
+    mask &= 0xfff;
+    if (mask == 0 || steps == 0)
+        return note;
+    auto in = [mask] (int n) { return ((mask >> (((n % 12) + 12) % 12)) & 1u) != 0; };
+    auto base = note;
+    for (int k = 0; k < 12 && ! in (base); ++k)
+        --base; // a note outside the scale moves from the nearest scale note below it, keeping its distance
+    auto out = base;
+    for (int k = 0; k < std::abs (steps); ++k)
+        do
+            out += steps > 0 ? 1 : -1;
+        while (! in (out));
+    return out + (note - base);
+}
 // [EXEC] the trial's taper (round 120, docs/specs/waves-tune-real-time.md): 0 … 0.5 → 0.1 … 50 ms, 0.5 … 2/3 → 50 …
 // 120 ms, 2/3 … 1 → 120 … 800 ms
 double speedMs (float v) noexcept
@@ -178,6 +201,13 @@ const EffectInfo& info()
             e.params.push_back ({ nm, 0.0f });
         e.params.push_back ({ "Reference tone", 0.0f });
         e.params.push_back ({ "Tone level", 0.5f });
+        // round 165hb / 166c: throat, the created vibrato's amplitude / formant / variation, transpose in scale
+        e.params.push_back ({ "Throat length", 0.5f }); // 100 %
+        e.params.push_back ({ "Vibrato amplitude", 0.0f });
+        e.params.push_back ({ "Vibrato formant", 0.0f });
+        e.params.push_back ({ "Vibrato variation", 0.0f });
+        e.params.push_back ({ "Transpose in scale", 0.0f });
+        e.params.push_back ({ "Scale transpose", 0.5f }); // 0 steps
         return e;
     }();
     return i;
@@ -363,6 +393,28 @@ std::string paramText (int param, float v)
     }
     if (param == receiveScale || param == groupOctaves || param == referenceTone) // round 152: Group Octaves, reference tone
         return onOff();
+    if (param == throatLength) // round 165hb / 166c
+    {
+        std::snprintf (t, sizeof t, "%.0f%%", throatPercent (v));
+        return t;
+    }
+    if (param == vibratoAmplitude)
+    {
+        std::snprintf (t, sizeof t, "%.1f", vibratoAmplitudeOf (v));
+        return t;
+    }
+    if (param == vibratoFormant || param == vibratoVariation)
+    {
+        std::snprintf (t, sizeof t, "%.0f%%", 100.0 * (double) std::clamp (v, 0.0f, 1.0f));
+        return t;
+    }
+    if (param == transposeInScale)
+        return v >= 0.5f ? "In scale" : "Ignoring scale";
+    if (param == scaleTranspose)
+    {
+        std::snprintf (t, sizeof t, "%+d steps", scaleTransposeSteps (v));
+        return t;
+    }
     if (param == referenceToneLevel)
     {
         std::snprintf (t, sizeof t, "%+.1f dB", referenceToneDb (v));
@@ -416,6 +468,8 @@ public:
         lfoPhase = 0.0;
         candidateTime = 0.0;
         candidate = -1;
+        scaleOffset = 0;
+        varRate = varDepth = varRateAim = varDepthAim = 1.0;
     }
 
     void setHeldNotes (const NoteMask* channels, int count) noexcept override
@@ -467,6 +521,14 @@ public:
         const auto vibDepth = vibratoDepthCents (p[vibratoDepth]) / 100.0;
         const auto vibDelay = vibratoOnsetMs (p[vibratoDelay]) * 0.001;
         const auto vibOnset = vibratoOnsetMs (p[vibratoOnset]) * 0.001;
+        // round 166c: the created vibrato's level swing, formant following and random variation [model]
+        const auto vibAmp = vibratoAmplitudeDepth (vibratoAmplitudeOf (p[vibratoAmplitude]));
+        const auto vibFormant = (double) std::clamp (p[vibratoFormant], 0.0f, 1.0f);
+        const auto vibVar = (double) std::clamp (p[vibratoVariation], 0.0f, 1.0f);
+        // round 165hb: the throat (measured law, formant correction on only); round 166c: transpose in scale
+        const auto throatRatio = std::exp2 (throatSemitones (throatPercent (p[throatLength])) / 12.0);
+        const auto inScale = p[transposeInScale] >= 0.5f;
+        const auto scaleSteps = scaleTransposeSteps (p[scaleTranspose]);
         auto mask = (std::uint16_t) (vocal::scaleMask (sc, keyIndex (p[key]), notes) & notes);
         // round 147: the illegal notes' directions and the keyboard range (outside it: uncorrected)
         std::array<NoteDir, 12> dirs {};
@@ -498,7 +560,7 @@ public:
         const auto tau = retuneMs (p[retune]) * 0.001;
         const auto human = std::clamp ((double) p[humanize], 0.0, 1.0);
         const auto flex = std::clamp ((double) p[flexTune], 0.0, 1.0);
-        const auto trans = (double) transposeSemitones (p[transpose]);
+        const auto knobTrans = (double) transposeSemitones (p[transpose]);
         const auto fShift = std::exp2 (formantSemitones (p[formantShift], p[wideFormant] >= 0.5f) / 12.0);
         // round 136: the drive stage — [EXEC] the voice shifter's Drive on 200 Hz stairs (−40 … 0 dBFS, drive 0 … 10):
         // y = K·(s(G·x + b) − s(b)), s(v) = v / (1 + |v / c|^p)^(1/p), G = −2.646 + 3.653·drive dB, K = 0.751 − 1.988·drive
@@ -521,6 +583,8 @@ public:
             const float xin[2] { clean (l[i]), clean (stereo ? r[i] : l[i]) };
             const auto mid = stereo ? 0.5f * (xin[0] + xin[1]) : xin[0];
 
+            // round 166c: In scale, the transposition is the target note's own (steps of the scale), else the knob's
+            const auto trans = inScale ? (double) scaleOffset : knobTrans;
             if (det.push (mid))
             {
                 const auto& e = det.estimate();
@@ -608,6 +672,8 @@ public:
                     if (newPhrase)
                         noteTime = 0.0;
                     wanted = (double) target - heard;
+                    if (target >= 0) // round 166c: the target note moved by Scale transpose's steps of the scale
+                        scaleOffset = transposeInScaleNote (target, mask, scaleSteps) - target;
                     if (keyed ? noteStatus (p.data(), target, mask) == KeyStatus::bypass : ((bypass >> (((target % 12) + 12) % 12)) & 1u) != 0)
                         wanted = 0.0; // a bypassed note passes as sung
                     if (ranged && (sung < (double) lowNote - 0.5 || sung > (double) highNote + 0.5))
@@ -660,22 +726,39 @@ public:
             }
             if (amount < 1.0)
                 semis = (semis - trans) * amount + trans; // round 135w: Correction % (the transpose stays whole)
+            double vibSemis = 0.0, vibLevel = 0.0; // round 166c: the created vibrato's pitch (st) and level swing
             if (vibShape > 0)
             {
-                lfoPhase += vibInc;
-                lfoPhase -= std::floor (lfoPhase);
+                // round 166c: Variation drifts the rate and the depth at random, a new aim every cycle [model]: up to
+                // ±25 % of the rate and ±50 % of the depth at 100 %, glided over about a cycle
+                lfoPhase += vibInc * varRate;
+                if (lfoPhase >= 1.0)
+                {
+                    lfoPhase -= std::floor (lfoPhase);
+                    varRateAim = 1.0 + 0.25 * vibVar * nextRandom();
+                    varDepthAim = 1.0 + 0.5 * vibVar * nextRandom();
+                }
+                if (vibVar <= 0.0)
+                    varRateAim = varDepthAim = 1.0;
+                const auto glide = 1.0 - std::exp (-vibInc * 2.0);
+                varRate += glide * (varRateAim - varRate);
+                varDepth += glide * (varDepthAim - varDepth);
                 if (unvoicedFor <= 0.0 && noteTime > vibDelay)
                 {
                     const auto env = vibOnset > 0.0 ? std::min (1.0, (noteTime - vibDelay) / vibOnset) : 1.0;
                     const auto w = vibShape == 1 ? std::sin (2.0 * 3.14159265358979323846 * lfoPhase)
                                  : vibShape == 2 ? (lfoPhase < 0.5 ? 1.0 : -1.0)
                                                  : 2.0 * lfoPhase - 1.0;
-                    semis += vibDepth * env * w;
+                    vibSemis = vibDepth * varDepth * env * w;
+                    vibLevel = vibAmp * varDepth * env * w;
+                    semis += vibSemis;
                 }
             }
             semis = std::clamp (semis, -24.0, 24.0);
             const auto ratio = std::exp2 (semis / 12.0);
-            psola.setShift (ratio, preserve ? fShift : ratio * fShift);
+            // round 165hb: the throat moves the corrected formants; round 166c: Vibrato formant lets them follow the
+            // created vibrato's pitch swing by that share (both only while the formants are preserved)
+            psola.setShift (ratio, preserve ? fShift * throatRatio * (vibFormant > 0.0 ? std::exp2 (vibFormant * vibSemis / 12.0) : 1.0) : ratio * fShift);
             // round 165j: the normalised overlap-add follows the high shelf's activity (below): only while a voiced
             // sound is being corrected — a voice already on its note and unvoiced sounds keep the plain overlap-add
             // (bit-transparent consonants, no level modulation from marks that jump between noise peaks)
@@ -713,6 +796,9 @@ public:
                     y[c] = (float) (y[c] + activity * lift * hpY[c]);
                 }
             }
+            if (vibLevel != 0.0) // round 166c: the created vibrato's level swing
+                for (auto& v : y)
+                    v = (float) (v * (1.0 + vibLevel));
             if (driveOn)
                 for (auto& v : y)
                     v = (float) (dK * (side (dG * v + 0.341) - sideB));
@@ -810,6 +896,16 @@ private:
     double activity = 0.0, hpX[2] {}, hpY[2] {}; // round 148: the high-frequency make-up
     double candidateTime = 0.0; // round 135w: Tolerance time
     int candidate = -1;
+    int scaleOffset = 0; // round 166c: transpose in scale — the current target's offset (semitones)
+    double varRate = 1.0, varDepth = 1.0, varRateAim = 1.0, varDepthAim = 1.0; // round 166c: vibrato variation
+    std::uint32_t rng = 0x2545F491u;
+    double nextRandom() noexcept // −1 … 1 (xorshift; real-time safe)
+    {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        return (double) rng / 2147483647.5 - 1.0;
+    }
 };
 } // namespace
 

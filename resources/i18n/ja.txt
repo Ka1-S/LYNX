@@ -5901,3 +5901,9 @@ countries: jp
 "Metronome track" = "メトロノームのトラック"
 "Metronome target mixer track" = "メトロノームの出力先ミキサートラック"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "メトロノームが鳴るミキサートラック（--- はマスター）。クリック音はエクスポートには含まれません。"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "喉の長さ"
+"Scale steps" = "スケール度数"
+"In scale" = "スケール内"
+"AMPLITUDE" = "振幅"
+"VARIATION" = "揺らぎ"

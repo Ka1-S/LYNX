@@ -5901,3 +5901,9 @@ countries: es mx ar co cl pe ve
 "Metronome track" = "Pista del metrónomo"
 "Metronome target mixer track" = "Pista del mezclador de destino del metrónomo"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "La pista del mezclador por la que suena el metrónomo (--- es el Master). El clic nunca entra en una exportación."
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "GARGANTA"
+"Scale steps" = "Grados de escala"
+"In scale" = "En escala"
+"AMPLITUDE" = "AMPLITUD"
+"VARIATION" = "VARIACIÓN"

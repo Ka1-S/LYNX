@@ -5901,3 +5901,9 @@ countries: kr
 "Metronome track" = "메트로놈 트랙"
 "Metronome target mixer track" = "메트로놈 대상 믹서 트랙"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "메트로놈이 재생되는 믹서 트랙 (---은 마스터). 클릭 소리는 내보내기에 포함되지 않습니다."
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "목 길이"
+"Scale steps" = "스케일 단계"
+"In scale" = "스케일 내"
+"AMPLITUDE" = "진폭"
+"VARIATION" = "변화"

@@ -5901,3 +5901,9 @@ countries: id
 "Metronome track" = "Trek metronom"
 "Metronome target mixer track" = "Trek mixer tujuan metronom"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Trek mixer tempat metronom berbunyi (--- adalah Master). Klik tidak pernah masuk ke ekspor."
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "TENGGOROKAN"
+"Scale steps" = "Langkah skala"
+"In scale" = "Dalam skala"
+"AMPLITUDE" = "AMPLITUDO"
+"VARIATION" = "VARIASI"
