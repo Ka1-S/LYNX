@@ -5905,3 +5905,6 @@ countries: fr be ch ca lu
 "Ghost channels" = "Canaux fantômes"
 "Add multiple..." = "En ajouter plusieurs..."
 "You can add a maximum of {0} inserts." = "Vous pouvez ajouter au maximum {0} inserts."
+"Yes" = "Oui"
+"Make clip unique?" = "Rendre le clip unique ?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Le clip \"{0}\" est aussi utilisé sur une autre piste audio.\n\nVoulez-vous rendre cette instance unique puis la router vers cette piste audio ?"

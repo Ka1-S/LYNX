@@ -5905,3 +5905,6 @@ countries: ru by kz
 "Ghost channels" = "Ghost-каналы"
 "Add multiple..." = "Добавить несколько..."
 "You can add a maximum of {0} inserts." = "Можно добавить не более {0} инсертов."
+"Yes" = "Да"
+"Make clip unique?" = "Сделать клип уникальным?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Клип \"{0}\" также используется на другой аудиодорожке.\n\nСделать этот экземпляр уникальным и затем направить его на эту аудиодорожку?"

@@ -5905,3 +5905,6 @@ countries: jp
 "Ghost channels" = "ゴーストチャンネル"
 "Add multiple..." = "複数追加..."
 "You can add a maximum of {0} inserts." = "追加できるインサートは最大 {0} 個です。"
+"Yes" = "はい"
+"Make clip unique?" = "クリップをユニークにしますか？"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "クリップ \"{0}\" は別のオーディオトラックでも使用されています。\n\nこのインスタンスをユニークにしてから、このオーディオトラックにルーティングしますか？"

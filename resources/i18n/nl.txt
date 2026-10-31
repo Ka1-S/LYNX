@@ -5905,3 +5905,6 @@ countries: nl be
 "Ghost channels" = "Ghost-kanalen"
 "Add multiple..." = "Meerdere toevoegen..."
 "You can add a maximum of {0} inserts." = "Je kunt maximaal {0} inserts toevoegen."
+"Yes" = "Ja"
+"Make clip unique?" = "Clip uniek maken?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "De clip \"{0}\" wordt ook op een andere audiotrack gebruikt.\n\nWil je deze instantie uniek maken en daarna naar deze audiotrack routen?"

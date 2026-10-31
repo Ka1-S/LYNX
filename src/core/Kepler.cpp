@@ -2,6 +2,7 @@
 // formulas described in that document. Section numbers (§) below refer to it.
 
 #include "core/Kepler.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -2298,12 +2299,23 @@ public:
         sounding[(std::size_t) k] = true;
         notePan[(std::size_t) k] = nextPan;
         noteCents[(std::size_t) k] = (float) channelCents.load() + nextCents;
+        slides[(std::size_t) k] = {};
         synth->noteOn (k, v7);
         synth->setPanExpression (k, nextPan);
         sentPan[(std::size_t) k] = -10000.0f;
         sentCents[(std::size_t) k] = -10000.0f;
         nextPan = 0.0f, nextCents = 0.0f;
         quiet = 0;
+    }
+
+    // a slide note (issue #14): the sounding keys glide their Final.Pitch to the slide's pitch
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        const auto to = (float) (100.0 * (std::clamp (key, 0, 127) - 60)) + channelCents.load() + cents;
+        for (int k = 0; k < 128; ++k)
+            if (sounding[(std::size_t) k])
+                slides[(std::size_t) k].start (to - ((float) (100 * (k - 60)) + noteCents[(std::size_t) k]), samples);
     }
 
     void noteOff (int key) noexcept override
@@ -2341,8 +2353,10 @@ public:
                 const auto p = (float) std::clamp ((double) notePan[(std::size_t) k] + pan, -1.0, 1.0);
                 if (p != sentPan[(std::size_t) k])
                     synth->setPanExpression (k, sentPan[(std::size_t) k] = p);
-                if (noteCents[(std::size_t) k] != sentCents[(std::size_t) k])
-                    synth->setPitchExpression (k, sentCents[(std::size_t) k] = noteCents[(std::size_t) k]);
+                const auto& slide = slides[(std::size_t) k];
+                const auto c = slide.cents != 0.0f ? noteCents[(std::size_t) k] + slide.cents : noteCents[(std::size_t) k];
+                if (c != sentCents[(std::size_t) k])
+                    synth->setPitchExpression (k, sentCents[(std::size_t) k] = c);
             }
         // the channel volume and pan as FL sends them (§3 of REA_rodada165g-flbeta165k): MIDI volume = raw volume
         // (0…12800)·128/12800 truncated, at most 127; MIDI pan = (raw pan − 6400)/100 truncated. LYNX's gains are
@@ -2373,6 +2387,9 @@ public:
             done += m;
         }
         quiet = synth->silent() ? std::min (quiet + n, 1 << 30) : 0;
+        for (int k = 0; k < 128; ++k) // (issue #14) a slide moves on block by block
+            if (sounding[(std::size_t) k] && slides[(std::size_t) k].moving())
+                slides[(std::size_t) k].advance ((float) n);
     }
 
 private:
@@ -2412,6 +2429,7 @@ private:
     int quiet = 0, sentVolume = -1000, sentMidiPan = -1000;
     std::array<bool, 128> sounding {};
     std::array<float, 128> notePan {}, noteCents {}, sentPan {}, sentCents {};
+    std::array<HostSlide, 128> slides {};
     float nextPan = 0.0f, nextCents = 0.0f;
     std::array<float, 512> scratchL {}, scratchR {};
 };

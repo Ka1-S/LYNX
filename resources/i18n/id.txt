@@ -5905,3 +5905,6 @@ countries: id
 "Ghost channels" = "Channel ghost"
 "Add multiple..." = "Tambah beberapa..."
 "You can add a maximum of {0} inserts." = "Anda dapat menambahkan paling banyak {0} insert."
+"Yes" = "Ya"
+"Make clip unique?" = "Jadikan klip unik?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Klip \"{0}\" juga digunakan di trek audio lain.\n\nApakah Anda ingin menjadikan instans ini unik lalu merutekannya ke trek audio ini?"

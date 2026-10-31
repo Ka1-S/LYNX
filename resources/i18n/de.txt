@@ -5905,3 +5905,6 @@ countries: de at ch li lu
 "Ghost channels" = "Ghost-Kanäle"
 "Add multiple..." = "Mehrere hinzufügen..."
 "You can add a maximum of {0} inserts." = "Du kannst höchstens {0} Inserts hinzufügen."
+"Yes" = "Ja"
+"Make clip unique?" = "Clip eindeutig machen?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Der Clip \"{0}\" wird auch auf einer anderen Audiospur verwendet.\n\nMöchtest du diese Instanz eindeutig machen und dann auf diese Audiospur routen?"

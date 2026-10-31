@@ -92,23 +92,26 @@ TEST (rea146a_playlist_track_modes)
     CHECK (mixer == 6 && song.playlistTracks[2].mode == PlaylistTrackMode::audio && song.mixer[(std::size_t) mixer].name == "Vocals");
     CHECK (trackmodes::describe (song, 2) == "(Audio track, linked to mixer track 6)" && trackmodes::describe (song, 0).empty());
 
-    // audio clips placed on it play through its mixer track; a channel also used elsewhere gets its own copy
+    // audio clips placed on it play through its mixer track (issue #15: only the placed ones); a channel also used on
+    // an unassigned track simply follows (FL), one used on another audio track needs "Make clip unique?"
     Clip a;
     a.kind = ClipKind::audio;
     a.channel = vox;
     a.track = 2;
     a.length = 384;
     song.playlist = { a };
-    CHECK (trackmodes::followAudioTracks (song) == 1 && song.channels[(std::size_t) vox].mixerTrack == mixer);
+    CHECK (trackmodes::followAudioTracks (song, {}) == 0 && song.channels[(std::size_t) vox].mixerTrack == 0);
+    CHECK (trackmodes::followAudioTracks (song, { 0 }) == 1 && song.channels[(std::size_t) vox].mixerTrack == mixer);
     Clip b = a;
     b.track = 0;
     b.start = 1000;
     song.playlist.push_back (b);
-    song.channels[(std::size_t) vox].mixerTrack = 0; // the clip on track 0 plays on the Master
+    song.channels[(std::size_t) vox].mixerTrack = 0; // routed by hand: stays until the clip is placed again
+    CHECK (trackmodes::followAudioTracks (song, { 1 }) == 0 && song.channels[(std::size_t) vox].mixerTrack == 0);
     const auto channels = song.channels.size();
-    CHECK (trackmodes::followAudioTracks (song) == 1 && song.channels.size() == channels + 1);
-    CHECK (song.playlist[0].channel == (int) channels && song.channels.back().mixerTrack == mixer && song.channels[(std::size_t) vox].mixerTrack == 0);
-    CHECK (trackmodes::followAudioTracks (song) == 0);
+    CHECK (trackmodes::audioTrackConflicts (song, { 0 }).empty());
+    CHECK (trackmodes::followAudioTracks (song, { 0 }) == 1 && song.channels.size() == channels && song.channels[(std::size_t) vox].mixerTrack == mixer);
+    CHECK (trackmodes::followAudioTracks (song, { 0 }) == 0);
 
     // an instrument track: a generator (not an audio clip channel) and its mixer track
     CHECK (! trackmodes::makeInstrumentTrack (song, 1, vox));

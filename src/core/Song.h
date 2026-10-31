@@ -1231,6 +1231,14 @@ struct Song
             if ((int) i != currentArrangement)
                 fn (arrangements[i].clips);
     }
+    template <typename Fn>
+    void forEachClipList (Fn&& fn) const
+    {
+        fn (playlist);
+        for (std::size_t i = 0; i < arrangements.size(); ++i)
+            if ((int) i != currentArrangement)
+                fn (arrangements[i].clips);
+    }
 
     bool hasLoop() const noexcept { return loopEnd > loopStart; }
 

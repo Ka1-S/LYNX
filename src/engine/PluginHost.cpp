@@ -353,9 +353,52 @@ void PluginInstrument::flushMidiControls() noexcept
     midiControls.flush (0, [this] (const std::uint8_t* bytes, int size) { midi.addEvent (bytes, size, 0); });
 }
 
+void PluginInstrument::addBend (int offset) noexcept
+{
+    const auto range = (float) juce::jlimit (1, 48, options.bendRange);
+    const auto semitones = livePitch / 100.0f + slideNow;
+    const auto value = juce::jlimit (0, 16383, 8192 + juce::roundToInt (juce::jlimit (-1.0f, 1.0f, semitones / range) * 8191.0f));
+    if (value == sentBend)
+        return;
+    sentBend = value;
+    (bendInto != nullptr ? *bendInto : midi).addEvent (juce::MidiMessage::pitchWheel (1, value), offset);
+}
+
+void PluginInstrument::bendBlock (juce::MidiBuffer& into, int base, int count) noexcept
+{
+    bendInto = &into;
+    if (slideLeft <= 0.0f)
+        addBend (base);
+    else
+        for (int o = 0; o < count; o += 64) // a slide moves in steps of 64 samples (~1.5 ms)
+        {
+            const auto step = (float) juce::jmin (64, count - o);
+            if (slideLeft > 0.0f)
+            {
+                const auto t = juce::jmin (1.0f, step / slideLeft);
+                slideNow += (slideTarget - slideNow) * t;
+                slideLeft = juce::jmax (0.0f, slideLeft - step);
+            }
+            addBend (base + o);
+        }
+    bendInto = nullptr;
+}
+
+void PluginInstrument::slideTo (int key, float, float samples) noexcept
+{
+    if (lastKey < 0)
+        return; // nothing sounds that could slide
+    slideTarget = (float) (key - lastKey);
+    slideLeft = juce::jmax (1.0f, samples);
+}
+
 void PluginInstrument::noteOn (int key, float velocity) noexcept
 {
     const auto k = juce::jlimit (0, 127, key);
+    // a new note starts at its own key: a slide's bend is undone before it
+    lastKey = k;
+    slideNow = slideTarget = slideLeft = 0.0f;
+    addBend (0);
     midi.addEvent (juce::MidiMessage::noteOn (1, k, juce::jlimit (0.0f, 1.0f, velocity)), 0);
     hold (0, k, true);
     // FL's "Send MOD X as polyphonic aftertouch": the note's Mod X right after its note on
@@ -419,6 +462,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
 
     if (fixed != nullptr)
     {
+        bendBlock (midi, 0, n);
         // events of this chunk start where the block being collected stands now
         const auto at = fixed->position();
         for (const auto event : midi)
@@ -462,6 +506,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
         const auto count = juce::jmin (blockSize, n - done);
         juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
         view.clear();
+        bendBlock (midi, 0, count);
         if (const auto code = runBlock (BlockCall { plugin.get(), &view, &midi }); code != 0)
         {
             midi.clear();

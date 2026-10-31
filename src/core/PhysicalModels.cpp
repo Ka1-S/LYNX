@@ -1,4 +1,5 @@
 #include "core/PhysicalModels.h"
+#include "core/HostSlide.h"
 #include "core/Sha256.h"
 
 #include <algorithm>
@@ -208,6 +209,10 @@ struct SakuraVoice
     double acc = 0.0, prev[2] {}, cur[2] {};
     double env = 0.0, elapsed = 0.0, release = -1.0;
     HighPass lowCut;
+    // FL's Final.Pitch beyond the key (issue #14): the channel's PITCH knob + fine / main pitch at note on (cents) and
+    // a slide note's glide (round 28 §4: T_note = Final.Pitch/100 − note + 60 shifts the string)
+    float noteCents = 0.0f;
+    lynx::HostSlide slide;
 };
 
 // ---- effects (REA_rodada29 §1.4–1.8): all at the host rate, float arithmetic where the engine rounds ----
@@ -934,6 +939,17 @@ public:
             s.params[i] = std::isfinite (channel.modelParams[i]) ? channel.modelParams[i] : 0.0f;
         s.bpm = bpm;
         mailbox.write (s);
+        pitchCents.store (channel.sampler.pitch * 100.0f);
+    }
+
+    void setNextNoteExpression (float, float cents, bool) noexcept override { nextCents = cents; }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        const auto to = 100.0f * (float) (key - 60) + pitchCents.load() + cents;
+        for (auto& v : voices)
+            if (v.active && v.release < 0.0)
+                v.slide.start (to - (100.0f * (float) (v.key - 60) + v.noteCents), samples * (float) (fs / hostRate));
     }
 
     void noteOn (int key, float velocity) noexcept override
@@ -949,6 +965,9 @@ public:
         if (target == nullptr)
             target = &voices[(std::size_t) (nextSteal++ % maxVoices)];
         start (*target, key, velocity);
+        target->noteCents = pitchCents.load() + nextCents;
+        target->slide = {};
+        nextCents = 0.0f;
     }
 
     // release (and matrix source 8 "release gate") from the next chunk on, i.e. the start of the next host block
@@ -1191,6 +1210,8 @@ private:
         for (int done = 0; done < count;)
         {
             const auto n = std::min (48, count - done);
+            if (v.slide.moving())
+                v.slide.advance ((float) n);
             if (! chunkLaws (v, n))
             {
                 v.active = false;
@@ -1229,6 +1250,8 @@ private:
         // pitch (destination 3) is evaluated before the EG/LFO update: it uses the previous chunk's values
         const auto m3 = mod (3);
         v.step = v.freq / v.rate * std::pow (2.0, tune / 12.0 + m3 / 6.0);
+        if (const auto shift = v.noteCents + v.slide.cents; shift != 0.0f) // FL's Final.Pitch (issue #14)
+            v.step *= std::exp2 ((double) shift / 1200.0);
         v.egValue = src[1] = v.eg.tick (n);
         v.lfoValue = src[2] = mod (0) * lfoValue;
         v.threshold = 0.996 * std::pow (1.0 - clamp01 (p (32) + mod (14)), 0.25);
@@ -1354,6 +1377,8 @@ private:
     double bpm = 0.0;
     std::array<SakuraVoice, maxVoices> voices {};
     int nextSteal = 0;
+    std::atomic<float> pitchCents { 0.0f }; // the channel's PITCH knob (configure)
+    float nextCents = 0.0f;                 // the next note's fine pitch + main pitch (setNextNoteExpression)
     double hostRate = 48000.0, position = 1.0;
     int maxHostBlock = 4096, quietSamples = 0;
     std::array<float, 2> previous {}, current {};
@@ -1439,11 +1464,26 @@ public:
         for (std::size_t i = 0; i < p.size() && i < channel.modelParams.size(); ++i)
             p[i] = std::isfinite (channel.modelParams[i]) ? channel.modelParams[i] : 0.0f;
         mailbox.write (p);
+        pitchCents.store (channel.sampler.pitch * 100.0f);
+    }
+
+    void setNextNoteExpression (float, float cents, bool) noexcept override { nextCents = cents; }
+
+    // a slide note moves Final.Pitch: Drumpad follows it like the channel pitch (round 28 §4, issue #14)
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        if (sounding && noteKey >= 0)
+            slide.start (100.0f * (float) (key - noteKey) + pitchCents.load() + cents - noteCents, samples);
     }
 
     // one voice (Drumpad retriggers it; the loops keep their contents across notes)
-    void noteOn (int, float velocity) noexcept override
+    void noteOn (int key, float velocity) noexcept override
     {
+        // the channel's pitch / fine / main pitch shift it (not the key: round 28 §4, ±12 semitones)
+        noteKey = key;
+        noteCents = pitchCents.load() + nextCents;
+        nextCents = 0.0f;
+        slide = {};
         mailbox.read (raw);
         computeParams (std::sqrt (std::clamp ((double) velocity, 0.0, 1.0)));
         e = amp;
@@ -1485,13 +1525,22 @@ public:
             }
         } source { *this };
         // × 1/√2: FL's per-voice levels are Vol·cos/sin((1 + pan)π/4), LYNX's channel gains √2·cos/sin (REA_rodada28 §4)
-        renderResampled (source, fs * pitch, hostRate, position, left, right, n, gl * 0.70710678f, gr * 0.70710678f, previous, current);
+        auto rate = fs * pitch;
+        if (slide.moving())
+            slide.advance ((float) n);
+        if (const auto shift = noteCents + slide.cents; shift != 0.0f) // FL's Final.Pitch: 2^(clamp(T, ±12)/12)
+            rate *= std::exp2 (std::clamp ((double) shift / 100.0, -12.0, 12.0) / 12.0);
+        renderResampled (source, rate, hostRate, position, left, right, n, gl * 0.70710678f, gr * 0.70710678f, previous, current);
         // the voice ends when the hold gain has decayed and the bank is quiet
         if (gain < 1e-5 && std::abs (current[0]) < 1e-6f)
             sounding = false;
     }
 
 private:
+    std::atomic<float> pitchCents { 0.0f }; // the channel's PITCH knob (configure)
+    float nextCents = 0.0f, noteCents = 0.0f; // the next / current note's pitch beyond the key (cents)
+    int noteKey = -1;
+    lynx::HostSlide slide;
     double g (int k, double velocity) const noexcept
     {
         const auto value = (double) raw[(std::size_t) k];
@@ -1844,6 +1893,16 @@ public:
         for (std::size_t i = 0; i < 3 && i < channel.modelParams.size(); ++i)
             k[i] = channel.modelParams[i];
         knobs.write (k);
+        pitchCents.store (channel.sampler.pitch * 100.0f);
+    }
+
+    void setNextNoteExpression (float, float cents, bool) noexcept override { nextCents = cents; }
+
+    // a slide note moves Final.Pitch, which BooBass reads every block (REA_rodada29 §4.2; issue #14)
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        if (active && stage < 3)
+            slide.start (100.0f * (float) (key - 60) + pitchCents.load() + cents - finalPitch, samples);
     }
 
     void noteOn (int key, float) noexcept override
@@ -1854,7 +1913,11 @@ public:
         // FL's final pitch = 100·(key − 60) cents (round 28 §4); p = trunc(pitch + 2400) cents above 16.35 Hz.
         // Keys below 36 (p < 0) read outside FL's table: LYNX clamps p at 0 (its own choice)
         currentKey = key;
-        const auto p = std::clamp ((int) (100.0f * (key - 60) + 2400.0f), 0, 9600);
+        // + the channel's PITCH knob, fine tune and main pitch: FL's Final.Pitch (issue #14)
+        finalPitch = 100.0f * (key - 60) + (pitchCents.load() + nextCents);
+        nextCents = 0.0f;
+        slide = {};
+        const auto p = std::clamp ((int) (finalPitch + 2400.0f), 0, 9600);
         int z = 5;
         while (z >= 0 && tables->zones[(std::size_t) z].root > p)
             --z;
@@ -2026,6 +2089,11 @@ private:
 
     void renderBlock (int n) noexcept
     {
+        if (slide.moving() || slide.cents != 0.0f) // the zone and the decay stay as chosen at note on
+        {
+            slide.advance ((float) n);
+            pitch = std::clamp ((int) (finalPitch + slide.cents + 2400.0f), 0, 9600);
+        }
         setPitch (pitch);
         std::array<float, 3> delta {};
         for (std::size_t k = 0; k < 3; ++k)
@@ -2076,6 +2144,9 @@ private:
     float bassSat = 0.0f;
     bool active = false;
     int zone = 0, pitch = 0, currentKey = -1, stage = 0, countdown = 0;
+    std::atomic<float> pitchCents { 0.0f }; // the channel's PITCH knob (configure)
+    float nextCents = 0.0f, finalPitch = 0.0f;
+    lynx::HostSlide slide;
     std::array<int, 5> counts {};
     std::array<float, 5> targets {}, slopes {};
     float slope = 0.0f, value = 0.0f, increment = 0.0f, rate = 0.0f, attackPos = 0.0f, phase = 0.0f, slew = 0.0f;

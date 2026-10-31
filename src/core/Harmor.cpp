@@ -1,4 +1,5 @@
 #include "core/Harmor.h"
+#include "core/HostSlide.h"
 #include "core/HarmlessFx.h"
 #include "core/Song.h"
 
@@ -3899,6 +3900,7 @@ struct Record
     bool imgEnd = false;      // a one-shot image ran out (record state 9)
     double v1b0 = 0.0;        // voice +0x1b0: pitch in cents incl. the unison detune (formant reference)
     float agref = 1.6428422f; // auto-gain reference energy
+    HostSlide slide;          // a slide note moving the voice's pitch (issue #14)
 };
 
 struct NoteRec
@@ -4281,7 +4283,15 @@ public:
         for (int ai = 0; ai < P->actCount; ++ai)
             tremolo (P->act[(std::size_t) ai], n);
         for (int i = 0; i < liveCount; ++i)
-            renderRecord (records[(std::size_t) live[(std::size_t) i]], n);
+        {
+            auto& v = records[(std::size_t) live[(std::size_t) i]];
+            if (v.slide.moving()) // a slide note moves the voice's pitch (issue #14)
+            {
+                const auto was = v.slide.cents;
+                v.fpitch += (double) (v.slide.advance ((float) n) - was);
+            }
+            renderRecord (v, n);
+        }
         // records that finished their declick go back to the pool; ended ones start the declick next block
         int kept = 0;
         for (int i = 0; i < liveCount; ++i)
@@ -4317,6 +4327,17 @@ public:
             right[j] += (float) mixR[(std::size_t) j];
         }
         advance (n);
+    }
+
+    // a slide note (issue #14): the sounding, unreleased voices glide to `to` (Final.Pitch, cents) over `samples`
+    void slideTo (double to, float samples) noexcept
+    {
+        for (int i = 0; i < liveCount; ++i)
+        {
+            auto& v = records[(std::size_t) live[(std::size_t) i]];
+            if (! v.released && v.dpos < 0)
+                v.slide.start ((float) (to - (v.fpitch - (double) v.slide.cents)), samples);
+        }
     }
 
     // nothing sounds: only the plugin-wide phases and the master-volume ramp run
@@ -4437,6 +4458,7 @@ private:
     {
         const auto& nt = notes[(std::size_t) slot];
         v.fpan = nt.fp, v.fvol = nt.fv, v.fpitch = nt.fpitch, v.vel = nt.vel, v.note = slot;
+        v.slide = {};
     }
 
     void releaseNote (int slot) noexcept
@@ -4566,6 +4588,7 @@ private:
                 v.uGain = -v.uGain;
         }
         v.fvol = nt.fv, v.fpan = nt.fp, v.fpitch = nt.fpitch, v.vel = nt.vel;
+        v.slide = {};
         v.n = 0, v.firstblk = true;
         v.a.fill (0.0f), v.T.fill (0.0f), v.kg.fill ((float) p.glide), v.ph.fill (0.0), v.f.fill (0.0);
         v.centsValid = false, v.prismValid = false, v.hbValid = false;
@@ -6391,6 +6414,12 @@ public:
     {
         nextPan = pan;
         nextCents = cents;
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        engine.slideTo (100.0 * std::clamp (key, 0, 127) - 6000.0 + (double) pitchCents.load() + (double) cents, samples);
     }
 
     void noteOn (int key, float velocity) noexcept override

@@ -5905,3 +5905,6 @@ countries: tr
 "Ghost channels" = "Hayalet kanallar"
 "Add multiple..." = "Birden fazla ekle..."
 "You can add a maximum of {0} inserts." = "En fazla {0} insert ekleyebilirsiniz."
+"Yes" = "Evet"
+"Make clip unique?" = "Klip benzersiz yapılsın mı?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "\"{0}\" klibi başka bir ses parçasında da kullanılıyor.\n\nBu örneği benzersiz yapıp ardından bu ses parçasına yönlendirmek ister misiniz?"

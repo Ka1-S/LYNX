@@ -5905,3 +5905,6 @@ countries: cn sg
 "Ghost channels" = "幽灵通道"
 "Add multiple..." = "添加多个..."
 "You can add a maximum of {0} inserts." = "最多可以添加 {0} 个插入轨。"
+"Yes" = "是"
+"Make clip unique?" = "将片段设为唯一？"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "片段 \"{0}\" 也用于另一条音频轨道。\n\n是否将此实例设为唯一，然后路由到此音频轨道？"

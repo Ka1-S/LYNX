@@ -16533,3 +16533,5 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Audit165zATests.inc"
 #include "Audit165zA2Tests.inc"
 #include "Feat166dTests.inc"
+#include "Issue15Tests.inc"
+#include "Issue14bugsTests.inc"
