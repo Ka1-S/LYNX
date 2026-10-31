@@ -98,9 +98,21 @@ public:
     void noteOffMidi (int key, int midiChannel) noexcept override;
     void midiMessage (const std::uint8_t* bytes, int size) noexcept override { midi.addEvent (bytes, size, 0); }
     int takeMidiOutput (MidiOutNote* out, int max) noexcept override;
+    // Issue #14: the channel's PITCH knob, fine tune and main pitch reach the plugin as MIDI pitch bend (scaled by the
+    // wrapper's pitch bend range), and a slide note bends the sounding notes to its key over its length
+    void setLivePitch (float cents) noexcept override { livePitch = cents; }
+    void slideTo (int key, float cents, float samples) noexcept override;
+    int sentPitchBend() const noexcept { return sentBend; } // the last 14-bit bend sent (8192 = centre), for the tests
 
 private:
     void failed (std::uint32_t code) noexcept;
+    void addBend (int offset) noexcept;         // the bend the pitch asks for now, if it changed
+    void bendBlock (juce::MidiBuffer& into, int base, int count) noexcept; // advances a slide over `count` samples
+    float livePitch = 0.0f;                     // cents
+    float slideNow = 0.0f, slideTarget = 0.0f;  // semitones away from the last note's key
+    float slideLeft = 0.0f;                     // samples
+    int lastKey = -1, sentBend = 8192;
+    juce::MidiBuffer* bendInto = nullptr;
     void flushMidiControls() noexcept;
     void collectMidiOutput (const juce::MidiBuffer& buffer) noexcept; // the plugin's MIDI output (wrapper Output port)
     bool producesMidi = false;

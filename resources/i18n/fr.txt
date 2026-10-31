@@ -5914,3 +5914,6 @@ countries: fr be ch ca lu
 "Enable automatic crossfades in new projects" = "Activer les fondus enchaînés automatiques dans les nouveaux projets"
 "Disarm on stop (recording switches off when playback stops)" = "Désarmer à l'arrêt (l'enregistrement s'éteint quand la lecture s'arrête)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "Désarmement automatique (le rendu des pistes armées les désarme)"
+"Yes" = "Oui"
+"Make clip unique?" = "Rendre le clip unique ?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Le clip \"{0}\" est aussi utilisé sur une autre piste audio.\n\nVoulez-vous rendre cette instance unique puis la router vers cette piste audio ?"

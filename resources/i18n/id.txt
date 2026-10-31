@@ -5914,3 +5914,6 @@ countries: id
 "Enable automatic crossfades in new projects" = "Aktifkan crossfade otomatis di proyek baru"
 "Disarm on stop (recording switches off when playback stops)" = "Lepas arm saat berhenti (rekaman mati saat pemutaran berhenti)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "Lepas arm otomatis (merender track yang di-arm melepas arm-nya)"
+"Yes" = "Ya"
+"Make clip unique?" = "Jadikan klip unik?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Klip \"{0}\" juga digunakan di trek audio lain.\n\nApakah Anda ingin menjadikan instans ini unik lalu merutekannya ke trek audio ini?"

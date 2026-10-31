@@ -1025,7 +1025,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 continue;
 
             const auto black = isBlackKey (key);
-            const auto pressed = key == previewKey;
+            const auto pressed = key == previewKey || isLit (key);
             const auto hovered = key == hover.key && ! pressed;
             auto colour = black ? keyBlack : keyWhite;
             if (inScale (key))
@@ -1576,6 +1576,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         setSelection (added);
         dragIndices = added;
         dragOriginals = ordered;
+        lastScaleDragKeys = -1000;
         dragNote = added[grabbedAt];
         drag = Drag::move;
         grabOffset = ordered[grabbedAt].start - snap (xToTick (e.x), snapOn);
@@ -1656,6 +1657,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     dragNote = added.front(); // the root leads the drag
     dragIndices = added;
     dragOriginals = stamp;
+    lastScaleDragKeys = -1000;
 
     if (added.size() > 1)
         setSelection (added);
@@ -1906,26 +1908,38 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             const auto& grabbed = dragOriginals[(std::size_t) (std::find (dragIndices.begin(), dragIndices.end(), dragNote) - dragIndices.begin())];
             auto deltaTicks = juce::jmax<std::int64_t> (0, snap (xToTick (e.x), snapOn) + grabOffset) - grabbed.start;
             auto deltaKeys = snapKey (yToKey (e.y)) - grabbed.key;
+            auto rawKeys = yToKey (e.y) - grabbed.key; // (snap to scale: every moved note snaps on its own, issue #14)
 
             // locks: Shift pressed after the click keeps the pitch, Ctrl keeps the time
             if (e.mods.isShiftDown() && ! downMods.isShiftDown())
-                deltaKeys = 0;
+                deltaKeys = rawKeys = 0;
             if (e.mods.isCtrlDown() && ! downMods.isCtrlDown())
                 deltaTicks = 0;
 
             const auto& current = currentPattern (engine.getSong()).notes[(std::size_t) dragNote];
+            const auto onScale = scaleSnap && scaleIndex() > 0 && dragIndices.size() > 1;
 
-            if (current.start == grabbed.start + deltaTicks && current.key == grabbed.key + deltaKeys)
+            if (current.start == grabbed.start + deltaTicks && current.key == grabbed.key + deltaKeys
+                && (! onScale || rawKeys == lastScaleDragKeys))
                 return;
+            lastScaleDragKeys = rawKeys;
 
             const auto oldKey = current.key;
 
             // from the original positions: the group keeps its shape even when hitting the limits
-            editNotes ([this, &deltaTicks, &deltaKeys] (Pattern& p) {
+            editNotes ([this, &deltaTicks, &deltaKeys, rawKeys, onScale] (Pattern& p) {
                 for (std::size_t j = 0; j < dragIndices.size(); ++j)
                     p.notes[(std::size_t) dragIndices[j]] = dragOriginals[j];
 
-                noteedit::move (p, dragIndices, deltaTicks, deltaKeys);
+                if (! onScale)
+                {
+                    noteedit::move (p, dragIndices, deltaTicks, deltaKeys);
+                    return;
+                }
+                // snap to scale: the time moves as a group, then each note goes to the scale near its own new key
+                auto noKeys = 0;
+                noteedit::move (p, dragIndices, deltaTicks, noKeys);
+                notetools::moveKeysOnScale (p, dragIndices, dragOriginals, rawKeys, scaleRoot(), scaleIndex());
             });
 
             const auto& moved = currentPattern (engine.getSong()).notes[(std::size_t) dragNote];
@@ -3257,6 +3271,22 @@ void PianoRollComponent::nudge (std::int64_t ticks, int keys)
     if (selection.empty())
         return;
 
+    if (keys == 1 || keys == -1) // snap to scale: up / down step along the scale (every selected note, issue #14)
+        if (scaleSnap && scaleIndex() > 0)
+        {
+            editNotes ([this, keys] (Pattern& p) {
+                for (const auto i : selection)
+                    if (i >= 0 && i < (int) p.notes.size())
+                        p.notes[(std::size_t) i].key = notetools::stepOnScale (p.notes[(std::size_t) i].key, keys, scaleRoot(), scaleIndex());
+            });
+            keys = 0;
+            if (ticks == 0)
+            {
+                sortNotes();
+                return;
+            }
+        }
+
     editNotes ([this, &ticks, &keys] (Pattern& p) { noteedit::move (p, selection, ticks, keys); });
 
     if (keys != 0 && selection.size() == 1)
@@ -3619,11 +3649,41 @@ void PianoRollComponent::drawEvents (int fromX, int toX, int y, bool erase)
     repaint (velocityArea());
 }
 
+NoteMask PianoRollComponent::soundingNow() const
+{
+    if (! allChannels)
+        return engine.soundingKeys (engine.getSelectedChannel());
+    // "All": every channel with notes in this pattern
+    NoteMask all {};
+    const auto& song = engine.getSong();
+    std::vector<char> seen (song.channels.size(), 0);
+    for (const auto& n : currentPattern (song).notes)
+        if (n.channel >= 0 && n.channel < (int) seen.size() && ! seen[(std::size_t) n.channel])
+        {
+            seen[(std::size_t) n.channel] = 1;
+            const auto k = engine.soundingKeys (n.channel);
+            all[0] |= k[0], all[1] |= k[1];
+        }
+    if (const auto selected = engine.getSelectedChannel(); selected >= 0 && selected < (int) seen.size() && ! seen[(std::size_t) selected])
+    {
+        const auto k = engine.soundingKeys (selected);
+        all[0] |= k[0], all[1] |= k[1];
+    }
+    return all;
+}
+
 void PianoRollComponent::timerCallback()
 {
     if (channelBox.getSelectedId() != (allChannels ? allChannelsId : engine.getSelectedChannel() + 1))
         refreshChannelBox();
     updateChordReadout();
+
+    // the keys the channel plays light up on the keyboard (song, pattern, typing keyboard, MIDI)
+    if (const auto lit = isShowing() ? soundingNow() : NoteMask {}; lit != litKeys)
+    {
+        litKeys = lit;
+        repaint (0, headerHeight, keyboardWidth, getHeight() - headerHeight);
+    }
 
     auto& transport = engine.getTransport();
     auto tick = -1.0;

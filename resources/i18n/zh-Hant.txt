@@ -5914,3 +5914,6 @@ countries: tw hk mo
 "Enable automatic crossfades in new projects" = "在新專案中啟用自動交叉淡化"
 "Disarm on stop (recording switches off when playback stops)" = "停止時解除錄音（播放停止時錄音開關關閉）"
 "Auto-unarm (rendering the armed tracks disarms them)" = "自動解除預備（算繪已預備的軌道後解除預備）"
+"Yes" = "是"
+"Make clip unique?" = "將片段設為唯一？"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "片段 \"{0}\" 也用於另一條音訊軌道。\n\n是否將此實例設為唯一，然後路由到此音訊軌道？"

@@ -5914,3 +5914,6 @@ countries: jp
 "Enable automatic crossfades in new projects" = "新規プロジェクトで自動クロスフェードを有効にする"
 "Disarm on stop (recording switches off when playback stops)" = "停止時に解除 (再生が止まると録音がオフになる)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "自動アーム解除 (アームしたトラックをレンダリングすると解除される)"
+"Yes" = "はい"
+"Make clip unique?" = "クリップをユニークにしますか？"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "クリップ \"{0}\" は別のオーディオトラックでも使用されています。\n\nこのインスタンスをユニークにしてから、このオーディオトラックにルーティングしますか？"

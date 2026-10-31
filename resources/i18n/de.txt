@@ -5914,3 +5914,6 @@ countries: de at ch li lu
 "Enable automatic crossfades in new projects" = "Automatische Crossfades in neuen Projekten aktivieren"
 "Disarm on stop (recording switches off when playback stops)" = "Bei Stopp entschärfen (die Aufnahme schaltet ab, wenn die Wiedergabe stoppt)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "Automatisch entschärfen (das Rendern der scharfgeschalteten Spuren entschärft sie)"
+"Yes" = "Ja"
+"Make clip unique?" = "Clip eindeutig machen?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Der Clip \"{0}\" wird auch auf einer anderen Audiospur verwendet.\n\nMöchtest du diese Instanz eindeutig machen und dann auf diese Audiospur routen?"

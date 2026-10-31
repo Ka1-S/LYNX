@@ -1791,14 +1791,67 @@ void PlaylistComponent::setSelection (std::vector<int> indices)
     repaint();
 }
 
-void PlaylistComponent::sortClips()
+void PlaylistComponent::sortClips (std::vector<int> placed)
 {
     auto tracked = selection;
-    engine.editSong ([&tracked] (Song& s) {
+    const auto selected = tracked.size();
+    tracked.insert (tracked.end(), placed.begin(), placed.end());
+    std::vector<int> conflicts;
+    engine.editSong ([&tracked, &conflicts, selected] (Song& s) {
         noteedit::sortByStartTracking (s.playlist, tracked);
-        trackmodes::followAudioTracks (s); // audio clips on an audio track play through its mixer track (round 146a)
+        // the placed audio clips on an audio track play through its mixer track (round 146a; issue #15: only those,
+        // FL's way — a shared channel waits for the "Make clip unique?" answer)
+        const std::vector<int> moved (tracked.begin() + (std::ptrdiff_t) selected, tracked.end());
+        conflicts = trackmodes::audioTrackConflicts (s, moved);
+        trackmodes::followAudioTracks (s, moved);
     }, false);
+    placed.assign (tracked.begin() + (std::ptrdiff_t) selected, tracked.end());
+    tracked.resize (selected);
     setSelection (tracked);
+    if (! conflicts.empty())
+        askToMakeClipsUnique (std::move (placed), std::move (conflicts));
+}
+
+void PlaylistComponent::askToMakeClipsUnique (std::vector<int> placed, std::vector<int> channels)
+{
+    // FL 2026 asks once per channel; Yes = a copy of the channel for the placed clips, routed to the audio track
+    if (channels.empty())
+        return;
+    const auto channel = channels.front();
+    channels.erase (channels.begin());
+    const auto& song = engine.getSong();
+    if (channel < 0 || channel >= (int) song.channels.size())
+        return askToMakeClipsUnique (std::move (placed), std::move (channels));
+    // what the clips were when asked: an edit in between (the box is not modal) must not hit other clips
+    std::vector<std::tuple<int, int, std::int64_t>> was;
+    for (const auto i : placed)
+        if (i >= 0 && i < (int) song.playlist.size())
+            was.emplace_back (i, song.playlist[(std::size_t) i].track, song.playlist[(std::size_t) i].start);
+    const auto name = juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str());
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                       .withTitle (tr ("Make clip unique?"))
+                       .withMessage (tr ("The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?",
+                                         { name }))
+                       .withButton (tr ("Yes"))
+                       .withButton (tr ("No"))
+                       .withAssociatedComponent (this);
+    juce::AlertWindow::showAsync (options, [safe = juce::Component::SafePointer<PlaylistComponent> (this), placed, channels, channel, was] (int result) mutable {
+        if (safe == nullptr)
+            return;
+        if (result == 1)
+        {
+            std::vector<int> still;
+            const auto& now = safe->engine.getSong().playlist;
+            for (const auto& [i, track, start] : was)
+                if (i < (int) now.size() && now[(std::size_t) i].track == track && now[(std::size_t) i].start == start
+                    && now[(std::size_t) i].channel == channel)
+                    still.push_back (i);
+            if (! still.empty())
+                safe->engine.editSong ([&still] (Song& s) { trackmodes::followAudioTracks (s, still, true); });
+        }
+        safe->askToMakeClipsUnique (std::move (placed), std::move (channels));
+    });
 }
 
 Clip PlaylistComponent::makeBrushClip (int track, std::int64_t start) const
@@ -2973,7 +3026,28 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
 
     resizeTrack = -1;
 
-    if (drag == Drag::move || drag == Drag::resize || drag == Drag::trimLeft || drag == Drag::paint || drag == Drag::timeMove)
+    if (drag == Drag::move)
+    {
+        // FL reroutes only the clips that landed on another track: sliding a clip
+        // along its own audio track leaves its channel's insert alone
+        std::vector<int> moved;
+        const auto& playlist = engine.getSong().playlist;
+        for (std::size_t j = 0; j < dragIndices.size() && j < dragOriginals.size(); ++j)
+        {
+            const auto i = dragIndices[j];
+            if (i >= 0 && i < (int) playlist.size() && playlist[(std::size_t) i].track != dragOriginals[j].track)
+                moved.push_back (i);
+        }
+        sortClips (moved);
+    }
+    else if (drag == Drag::paint)
+    {
+        std::vector<int> painted; // the first painted clip and the copies appended after it
+        for (auto i = dragClip; i >= 0 && i < (int) engine.getSong().playlist.size(); ++i)
+            painted.push_back (i);
+        sortClips (painted);
+    }
+    else if (drag == Drag::resize || drag == Drag::trimLeft || drag == Drag::timeMove)
         sortClips();
 
     rippleOriginals.clear();
@@ -4332,7 +4406,7 @@ void PlaylistComponent::pasteClips (std::int64_t at)
         }
     });
     setSelection (added);
-    sortClips();
+    sortClips (added);
 }
 
 void PlaylistComponent::duplicateSelection()
@@ -4357,7 +4431,7 @@ void PlaylistComponent::duplicateSelection()
             s.loopEnd = to + (to - from);
         });
         setSelection (added);
-        sortClips();
+        sortClips (added);
         return;
     }
 
@@ -4387,7 +4461,7 @@ void PlaylistComponent::duplicateSelection()
         }
     });
     setSelection (added);
-    sortClips();
+    sortClips (added);
 }
 
 bool PlaylistComponent::handleKey (const juce::KeyPress& key)
@@ -4832,7 +4906,9 @@ bool addAudioClip (AudioEngine& engine, const juce::File& file, std::int64_t sta
             c.name = name;
             c.instrument = InstrumentKind::audioClip;
             c.samplePath = path;
-            c.mixerTrack = s.claimFreeInsert();
+            // dropped on an audio track: the new channel plays through its mixer track (FL [DECOMP FUN_012f2a10])
+            const auto linked = trackmodes::armableInsert (s, track);
+            c.mixerTrack = linked > 0 ? linked : s.claimFreeInsert();
             s.channels.push_back (c);
             channel = (int) s.channels.size() - 1;
         }
@@ -4844,6 +4920,7 @@ bool addAudioClip (AudioEngine& engine, const juce::File& file, std::int64_t sta
         clip.start = start;
         clip.length = length;
         s.playlist.push_back (clip);
+        trackmodes::followAudioTracks (s, { (int) s.playlist.size() - 1 }); // (a reused channel)
         s.mode = PlayMode::song;
     });
     return true;

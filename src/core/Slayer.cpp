@@ -1,5 +1,6 @@
 // FL Slayer's engine (REA_rodada68). Clean-room: our own code from the documented behaviour; field names are ours.
 #include "core/Slayer.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2417,6 +2418,15 @@ public:
 
     void setNextNoteExpression (float, float cents, bool) noexcept override { nextCents = cents; }
 
+    // a slide note (issue #14): FL hands this MIDI-driven plugin its pitch as a pitch bend (ProcessEvent 4), so the
+    // glide from the last note to the slide's pitch goes out the same way, on top of the channel pitch
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        if (lastKey < 0 || std::none_of (sounding.begin(), sounding.end(), [] (int k) { return k >= 0; }))
+            return;
+        slide.start (100.0f * (float) (key - lastKey) + cents - lastCents, samples);
+    }
+
     // automation of a plugin parameter (0…1): ProcessParam with REC_FromMIDI → min + Round(value·(max − min))
     void setParameter (int index, float value) noexcept override
     {
@@ -2437,6 +2447,9 @@ public:
         const auto initVol = (std::pow (11.0, 1.28 * std::clamp ((double) velocity, 0.0, 1.0)) - 1.0) / 10.0;
         const int v = velocityFromInitVol (initVol);
         const int midiKey = keyFromPitch ((float) ((k - 60) * 100) + nextCents + keyCents.load() + 6000.0f);
+        lastKey = k;
+        lastCents = nextCents;
+        slide = {};
         nextCents = 0.0f;
         if (sounding[(std::size_t) k] >= 0)
             engine->midi (0x80, sounding[(std::size_t) k], soundingVel[(std::size_t) k]);
@@ -2483,12 +2496,15 @@ public:
             }
         }
         // channel pitch: ProcessEvent 4 → a pitch bend, sent when it changes
-        const auto bend = bendFromCents (bendCents.load());
-        if (bend != engine->sentBend)
-        {
-            engine->sentBend = bend;
-            engine->midi (0xe0, bend & 0x7f, bend >> 7);
-        }
+        auto sendBend = [this] {
+            const auto bend = bendFromCents (bendCents.load() + (int) std::lround (slide.cents));
+            if (bend != engine->sentBend)
+            {
+                engine->sentBend = bend;
+                engine->midi (0xe0, bend & 0x7f, bend >> 7);
+            }
+        };
+        sendBend();
         // channel volume and pan (LYNX's gains: g·√2·cos/sin((1 + pan)·π/4)) → ProcessEvent 3 / 2 → the front-end's gains
         const auto vol = std::sqrt (((double) gl * gl + (double) gr * gr) * 0.5);
         const auto pan = vol > 0.0 ? std::atan2 ((double) gr, (double) gl) * (4.0 / 3.141592653589793) - 1.0 : 0.0;
@@ -2496,7 +2512,13 @@ public:
         hostGainsFor (midiPanFrom (pan), (float) vol, hostL, hostR);
         for (int done = 0; done < n;)
         {
-            const auto m = std::min (n - done, (int) scratchL.size());
+            auto m = std::min (n - done, (int) scratchL.size());
+            if (slide.moving()) // a slide's bend moves in steps of 64 samples
+            {
+                m = std::min (m, 64);
+                slide.advance ((float) m);
+                sendBend();
+            }
             std::fill (scratchL.begin(), scratchL.begin() + m, 0.0f);
             std::fill (scratchR.begin(), scratchR.begin() + m, 0.0f);
             engine->process (scratchL.data(), scratchR.data(), m);
@@ -2563,6 +2585,9 @@ private:
     std::atomic<double> rate { 44100.0 }, tempo { 140.0 };
     std::atomic<float> keyCents { 0.0f };
     std::atomic<int> bendCents { 0 };
+    int lastKey = -1;      // the last note played (a slide glides from it)
+    float lastCents = 0.0f; // its fine pitch + main pitch
+    HostSlide slide;       // the slide's bend (cents) on top of the channel pitch
     std::array<std::atomic<int>, 29> uiParams {};
     std::atomic<int> uiGeneration { 0 };
     int appliedGeneration = 0;

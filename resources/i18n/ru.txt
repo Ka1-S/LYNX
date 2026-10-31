@@ -5914,3 +5914,6 @@ countries: ru by kz
 "Enable automatic crossfades in new projects" = "Включать автоматические кроссфейды в новых проектах"
 "Disarm on stop (recording switches off when playback stops)" = "Снять запись при остановке (запись выключается, когда воспроизведение останавливается)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "Автоснятие готовности (рендер подготовленных дорожек снимает с них готовность)"
+"Yes" = "Да"
+"Make clip unique?" = "Сделать клип уникальным?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Клип \"{0}\" также используется на другой аудиодорожке.\n\nСделать этот экземпляр уникальным и затем направить его на эту аудиодорожку?"

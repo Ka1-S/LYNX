@@ -5914,3 +5914,6 @@ countries: kr
 "Enable automatic crossfades in new projects" = "새 프로젝트에서 자동 크로스페이드 사용"
 "Disarm on stop (recording switches off when playback stops)" = "정지 시 해제 (재생이 멈추면 녹음이 꺼짐)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "자동 암 해제 (암된 트랙을 렌더링하면 해제됨)"
+"Yes" = "예"
+"Make clip unique?" = "클립을 고유하게 만들까요?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "클립 \"{0}\"이(가) 다른 오디오 트랙에서도 사용되고 있습니다.\n\n이 인스턴스를 고유하게 만든 다음 이 오디오 트랙으로 라우팅할까요?"

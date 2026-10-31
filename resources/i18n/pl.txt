@@ -5914,3 +5914,6 @@ countries: pl
 "Enable automatic crossfades in new projects" = "Włącz automatyczne przenikanie w nowych projektach"
 "Disarm on stop (recording switches off when playback stops)" = "Rozbrój po zatrzymaniu (nagrywanie wyłącza się, gdy odtwarzanie się zatrzyma)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "Automatyczne rozbrojenie (renderowanie uzbrojonych ścieżek je rozbraja)"
+"Yes" = "Tak"
+"Make clip unique?" = "Uczynić klip unikalnym?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Klip \"{0}\" jest używany również na innej ścieżce audio.\n\nCzy chcesz uczynić tę instancję unikalną, a następnie skierować ją do tej ścieżki audio?"

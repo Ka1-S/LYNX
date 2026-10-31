@@ -5914,3 +5914,6 @@ countries: tr
 "Enable automatic crossfades in new projects" = "Yeni projelerde otomatik çapraz geçişleri etkinleştir"
 "Disarm on stop (recording switches off when playback stops)" = "Durunca kaydı kapat (çalma durunca kayıt anahtarı kapanır)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "Otomatik kurulum kaldırma (kayda hazır parçaları render etmek hazırlığı kaldırır)"
+"Yes" = "Evet"
+"Make clip unique?" = "Klip benzersiz yapılsın mı?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "\"{0}\" klibi başka bir ses parçasında da kullanılıyor.\n\nBu örneği benzersiz yapıp ardından bu ses parçasına yönlendirmek ister misiniz?"

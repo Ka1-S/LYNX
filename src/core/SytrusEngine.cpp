@@ -7,6 +7,7 @@
 // (rne), int() is truncation.
 
 #include "core/SytrusEngine.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -2881,6 +2882,9 @@ struct Voice
     u32 lcg = 0;                // the noise generator's position for this voice in the current block
     Voice* lcgOwner = nullptr;  // grouped unison: slaves draw from their master's sequence
     int noiseOps = 0;           // noise operators rendered per sample
+    float notePitch = 0;        // `pitch` at the note on
+    double noteFinal = 0;       // the note's Final.Pitch (cents from C5) at the note on
+    HostSlide slide;            // a slide note moving the pitch (issue #14)
 
     float out (int u, int k) const noexcept { return (float) arts[(std::size_t) (kArtBase[u] + k)].out; }
     bool artActive (int u, int k) const noexcept { return arts[(std::size_t) (kArtBase[u] + k)].active(); }
@@ -3515,6 +3519,7 @@ struct Engine::Impl
         v.vel = nt.vel, v.relvel = nt.relvel;
         v.fvol = nt.fvol, v.fpan = nt.fpan;
         v.pitch = F (100.0 * nt.key + nt.cents - 6000.0) + F (S.mget (2) * 100);
+        v.notePitch = v.pitch, v.noteFinal = 100.0 * nt.key + nt.cents - 6000.0, v.slide = {};
         v.master = gCurve (S.mget (0), 128);
         v.tick = tick;
         v.base = F (523.251130601197 / fsv);
@@ -4532,6 +4537,17 @@ struct Engine::Impl
                 act.push_back (created[j]);
     }
 
+    // a slide note (issue #14): the voice's pitch (and its operators' frequencies) moved over `n` samples
+    void slideVoice (Voice& v, int n) noexcept
+    {
+        if (! v.slide.moving())
+            return;
+        v.pitch = v.notePitch + v.slide.advance ((float) n);
+        for (auto& o : v.ops)
+            if (o.active)
+                o.freq = opFreq (v, o);
+    }
+
     void releaseVoice (Voice& v) noexcept
     {
         if (v.state < 5)
@@ -4823,6 +4839,17 @@ void Engine::releaseKey (int key) noexcept
             impl->releaseVoice (*v);
 }
 
+void Engine::slideTo (double toCents, float samples) noexcept
+{
+    for (auto* v : impl->act)
+        if (v->state < 5)
+        {
+            v->slide.start ((float) (toCents - v->noteFinal), samples);
+            for (int s = 0; s < v->nslaves; ++s)
+                v->slaves[s]->slide.start ((float) (toCents - v->slaves[s]->noteFinal), samples);
+        }
+}
+
 void Engine::killAll() noexcept
 {
     for (auto* v : impl->act)
@@ -4845,6 +4872,12 @@ void Engine::render (float* left, float* right, int n, float finalVol, float fin
     while (n > 0)
     {
         const auto hb = std::min (n, impl->maxBlock);
+        for (auto* v : impl->act)
+        {
+            impl->slideVoice (*v, hb);
+            for (int s = 0; s < v->nslaves; ++s)
+                impl->slideVoice (*v->slaves[s], hb);
+        }
         impl->renderBlock (left, right, hb, finalVol, finalPan);
         left += hb;
         right += hb;
@@ -4959,6 +4992,13 @@ public:
         nextPan = 0.0f, nextCents = 0.0f, nextPorta = false;
         engine->setMaxPolyphony (mono.load() ? 1 : 1 << 20);
         engine->noteOn (p);
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        if (engine != nullptr)
+            engine->slideTo (100.0 * std::clamp (key, 0, 127) - 6000.0 + (double) channelCents.load() + (double) cents, samples);
     }
 
     void noteOff (int key) noexcept override

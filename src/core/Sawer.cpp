@@ -6,6 +6,7 @@
 // DLL's, so contraction stays off. Clean-room: behaviour described in our own words; no Image-Line code.
 
 #include "core/Sawer.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -2306,6 +2307,7 @@ public:
     {
         bool on = false;
         double fvol = 1.0, fpan = 0.0, pitchCents = 0.0;
+        HostSlide slide; // a slide note moving the key's Final.Pitch (issue #14)
     };
     Engine eng;
     Slot slots[128];
@@ -2373,8 +2375,16 @@ public:
         key = std::clamp (key, 0, 127);
         if (slots[key].on)
             eng.noteOff (key);
-        slots[key] = { true, fvol, fpan, pitchCents };
+        slots[key] = { true, fvol, fpan, pitchCents, {} };
         eng.noteOn (key, velFromInitVol (initVol));
+    }
+    // FL's slide note: the held keys' Final.Pitch glides to `to` (cents from C5); the wrapper's per-key pitch table
+    // carries it to the engine every block
+    void slide (double to, float samples) noexcept
+    {
+        for (int i = 0; i < 128; ++i)
+            if (slots[i].on && eng.velTab[i] != 0.0f)
+                slots[i].slide.start ((float) (to - (100.0 * i - 6000.0 + slots[i].pitchCents)), samples);
     }
     void noteOff (int key)
     {
@@ -2399,7 +2409,8 @@ public:
                     lawA (s.fpan, s.fvol, cl, cr);
                 else
                     cl = cr = (float) s.fvol;
-                const auto fp = (float) (100.0 * i - 6000.0 + s.pitchCents);
+                const auto fp = s.slide.cents != 0.0f ? (float) (100.0 * i - 6000.0 + s.pitchCents + (double) s.slide.cents)
+                                                      : (float) (100.0 * i - 6000.0 + s.pitchCents);
                 cp = (float) ((double) fp * 0.01 - (double) i + 60.0);
                 if (first)
                 {
@@ -2422,6 +2433,9 @@ public:
     }
     void render (float* outL, float* outR, int n, double songBeats) noexcept
     {
+        for (auto& s : slots)
+            if (s.slide.moving())
+                s.slide.advance ((float) n);
         tables();
         auto tpos = songBeats;
         eng.playing = songBeats >= 0.0;
@@ -2499,6 +2513,13 @@ public:
     {
         nextPan = pan;
         nextCents = cents;
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        if (plugin != nullptr)
+            plugin->slide (100.0 * (std::clamp (key, 0, 127) - 60) + (double) pitchCents.load() + (double) cents, samples);
     }
 
     void noteOn (int key, float velocity) noexcept override

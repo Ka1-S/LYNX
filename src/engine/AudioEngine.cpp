@@ -950,6 +950,11 @@ void AudioEngine::clearScoreLog()
     scoreLog.clear();
 }
 
+NoteMask AudioEngine::soundingKeys (int channel) const noexcept
+{
+    return rackProcessor != nullptr ? rackProcessor->getRenderer().soundingKeys (channel) : NoteMask {};
+}
+
 std::vector<int> AudioEngine::heldInputKeys() const
 {
     std::vector<int> keys;

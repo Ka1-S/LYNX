@@ -5914,3 +5914,6 @@ countries: nl be
 "Enable automatic crossfades in new projects" = "Automatische crossfades inschakelen in nieuwe projecten"
 "Disarm on stop (recording switches off when playback stops)" = "Ontwapenen bij stop (opnemen gaat uit als het afspelen stopt)"
 "Auto-unarm (rendering the armed tracks disarms them)" = "Automatisch ontwapenen (het renderen van de gewapende tracks ontwapent ze)"
+"Yes" = "Ja"
+"Make clip unique?" = "Clip uniek maken?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "De clip \"{0}\" wordt ook op een andere audiotrack gebruikt.\n\nWil je deze instantie uniek maken en daarna naar deze audiotrack routen?"
