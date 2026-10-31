@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/NoteTools.h"
 #include "engine/AudioEngine.h"
 #include "ui/EditorTools.h"
 #include "ui/NoteToolDialogs.h"
