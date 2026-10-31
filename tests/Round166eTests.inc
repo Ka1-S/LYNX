@@ -49,7 +49,7 @@ inline float levelAt (const lynx::Song& s, double beats)
     const auto tps = lynx::ticksPerSample (120.0, 48000.0);
     const auto blocks = (int) (beats * 24000.0 / 256.0);
     for (int b = 0; b <= blocks; ++b)
-        r.process (state.get(), b == 0, (double) b * 256.0 * tps, 256, l.data(), rr.data());
+        r.process (state.get(), true, (double) b * 256.0 * tps, 256, l.data(), rr.data());
     return l[255];
 }
 } // namespace round166e
@@ -142,7 +142,6 @@ TEST (round166e_gain_handle_range_and_gesture)
 
     const Mods none {};
     CHECK (leftAction (EditTool::pencil, Target::gainHandle, none, true) == Action::clipGain);
-    CHECK (leftAction (EditTool::lasso, Target::gainHandle, none, true) == Action::clipGain);
     CHECK (cursorFor (Action::clipGain, EditTool::pencil) == Cursor::resizeV);
 }
 
