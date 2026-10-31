@@ -77,8 +77,9 @@ private:
 class StemsThread final : public juce::ThreadWithProgressWindow
 {
 public:
-    StemsThread (const AudioEngine& e, exportopts::Options o, juce::File base, const std::vector<int>& onlyTracks = {})
+    StemsThread (const AudioEngine& e, exportopts::Options o, juce::File base, const std::vector<int>& onlyTracks = {}, std::function<void()> done = {})
         : juce::ThreadWithProgressWindow (tr ("Exporting stems..."), true, true),
+          afterRender (std::move (done)),
           options (o),
           baseFile (std::move (base)),
           song (e.getSong())
@@ -138,6 +139,8 @@ public:
 
     void threadComplete (bool cancelled) override
     {
+        if (! cancelled && written > 0 && afterRender)
+            afterRender();
         if (! cancelled && options.showWhenDone && written > 0)
             baseFile.getParentDirectory().startAsProcess();
         else if (! cancelled)
@@ -154,6 +157,7 @@ private:
         juce::File file;
         Song song;
     };
+    std::function<void()> afterRender;
     exportopts::Options options;
     juce::File baseFile;
     Song song;
@@ -703,7 +707,7 @@ private:
         auto& engineRef = engine;
 
         chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                              [this, o, extension, &engineRef, tracks = onlyTracks, realtime = realtime] (const juce::FileChooser& fc) {
+                              [this, o, extension, &engineRef, tracks = onlyTracks, realtime = realtime, after = afterRender] (const juce::FileChooser& fc) {
                                   auto file = fc.getResult();
 
                                   if (file == juce::File())
@@ -727,7 +731,7 @@ private:
                                   if (o.stems != exportopts::Stems::none)
                                   {
                                       close();
-                                      (new StemsThread (engineRef, o, file, tracks))->launchThread();
+                                      (new StemsThread (engineRef, o, file, tracks, after))->launchThread();
                                       return;
                                   }
 
@@ -739,6 +743,10 @@ private:
                               });
     }
 
+public:
+    std::function<void()> afterRender; // showExportDialogForTracks: once the files are written
+
+private:
     AudioEngine& engine;
     juce::File suggestedFolder;
     juce::String suggestedName;
@@ -844,11 +852,12 @@ std::unique_ptr<juce::Component> makeExportPanelForTracks (AudioEngine& engine, 
 }
 
 void showExportDialogForTracks (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName,
-                                const std::vector<int>& tracks)
+                                const std::vector<int>& tracks, std::function<void()> afterRender)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (fitContentToScreen (std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX SHARE",
-                                                                                 true, -1, tracks)).release());
+    auto panel = std::make_unique<ExportPanel> (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX SHARE", true, -1, tracks);
+    panel->afterRender = std::move (afterRender);
+    options.content.setOwned (fitContentToScreen (std::move (panel)).release());
     options.dialogTitle = tr ("Render mixer tracks to audio files");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;

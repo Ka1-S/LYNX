@@ -1768,7 +1768,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                 instrument.setNextNoteColour (e.colour);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
-                    instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut);
+                    instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut, e.fadeShape);
 
                 // an echo's volume: the instrument scales the voice, else (engines without it) the velocity
                 auto velocity = e.velocity;

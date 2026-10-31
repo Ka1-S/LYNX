@@ -82,6 +82,7 @@ enum class Target
     leftEdge,    // left edge of a note / clip
     rightEdge,   // right edge of a note / clip
     fadeHandle,  // Playlist: fade handle of an audio clip
+    gainHandle,  // Playlist: an audio clip's gain handle (bottom centre, FL 2026; round 166e)
     autoPoint,   // Playlist: a point of an inline automation curve
     autoCurve,   // Playlist: on an automation curve (a click adds a point)
     autoTension, // Playlist: the tension handle between two automation points (drag up / down bends)
@@ -118,6 +119,7 @@ enum class Action
     zoomRange,
     listen,
     fade,         // drags an audio fade
+    clipGain,     // drags an audio clip's gain up / down
     movePoint,    // drags an automation point
     addPoint,     // adds an automation point on the curve
     bendSegment,  // drags an automation segment's tension handle
@@ -166,6 +168,8 @@ inline Action leftAction (EditTool tool, Target target, Mods mods, bool playlist
             return Action::addPoint;
         if (target == Target::fadeHandle)
             return Action::fade;
+        if (target == Target::gainHandle)
+            return Action::clipGain;
         if (mods.alt && mods.shift && target == Target::item)
             return Action::slipContent;
     }
@@ -176,7 +180,8 @@ inline Action leftAction (EditTool tool, Target target, Mods mods, bool playlist
         case Target::autoPoint:
         case Target::autoCurve:
         case Target::autoTension:
-        case Target::fadeHandle: return mods.shift ? Action::copyMove : Action::move;
+        case Target::fadeHandle:
+        case Target::gainHandle: return mods.shift ? Action::copyMove : Action::move;
         case Target::rightEdge: return Action::resizeRight;
         case Target::leftEdge: return Action::resizeLeft;
         case Target::empty: return painter ? Action::paint : Action::create;
@@ -196,6 +201,7 @@ enum class Cursor
     move,      // four-way: moving an item
     copy,      // moving a copy
     resizeH,   // left-right: an edge
+    resizeV,   // up-down: a gain handle
     erase,
     mute,
     slice,
@@ -218,6 +224,7 @@ inline Cursor cursorFor (Action action, EditTool tool)
         case Action::resizeRight:
         case Action::resizeLeft:
         case Action::fade: return Cursor::resizeH;
+        case Action::clipGain: return Cursor::resizeV;
         case Action::slipContent: return Cursor::slip;
         case Action::toggleSelect:
         case Action::boxSelect: return Cursor::select;

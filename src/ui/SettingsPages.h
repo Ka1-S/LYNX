@@ -30,6 +30,7 @@ struct GeneralOptions
     int autosaveMinutes = prefs::defaultAutosaveMinutes; // 0 = never
     int autosaveKeep = prefs::defaultAutosaveKeep;
     bool askUnusedRecordings = true; // offer to delete takes a project no longer uses when it closes
+    bool crossfadesInNewProjects = true; // FL's "Enable automatic crossfades in new projects" (Settings › Project; round 166e)
     bool pluginSandbox = false;
     bool pluginSubstitutes = true; // missing plugins play a LYNX equivalent (core/PluginSubstitutes.h)
     int crashReports = 0;          // crashreport::Consent: 0 ask, 1 always send, 2 never (round 159)
