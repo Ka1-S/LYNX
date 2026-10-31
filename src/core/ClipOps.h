@@ -156,6 +156,62 @@ inline std::vector<int> overlappingClips (const Song& song)
     return out;
 }
 
+// FL's automatic crossfades (round 166e, FL 2026 measured in docs/analise/REA_rodada166e.md §1): with the project's
+// "Automatic crossfades" on, where an audio clip starts inside the previous audio clip of its track and ends after
+// it, the two crossfade over the whole overlap (the earlier one fades out, the later one fades in). Clips lying
+// completely inside another get none. Recomputed after every edit (AudioEngine::editSong / setSong); off = none.
+inline void updateCrossfades (std::vector<Clip>& clips, bool on)
+{
+    for (auto& c : clips)
+        c.crossfadeIn = c.crossfadeOut = 0;
+    if (! on)
+        return;
+
+    std::vector<int> order;
+    order.reserve (clips.size());
+    for (std::size_t i = 0; i < clips.size(); ++i)
+        if (clips[i].kind == ClipKind::audio && clips[i].length > 0)
+            order.push_back ((int) i);
+    std::stable_sort (order.begin(), order.end(), [&clips] (int a, int b) {
+        const auto& ca = clips[(std::size_t) a];
+        const auto& cb = clips[(std::size_t) b];
+        return ca.track != cb.track ? ca.track < cb.track : ca.start < cb.start;
+    });
+    for (std::size_t k = 1; k < order.size(); ++k)
+    {
+        auto& a = clips[(std::size_t) order[k - 1]];
+        auto& b = clips[(std::size_t) order[k]];
+        if (a.track != b.track || b.start <= a.start || b.start >= a.end() || b.end() <= a.end())
+            continue;
+        const auto overlap = a.end() - b.start;
+        a.crossfadeOut = std::max (a.crossfadeOut, overlap);
+        b.crossfadeIn = std::max (b.crossfadeIn, overlap);
+    }
+}
+
+inline void updateCrossfades (Song& song)
+{
+    song.forEachClipList ([on = song.autoCrossfades] (std::vector<Clip>& clips) { updateCrossfades (clips, on); });
+}
+
+// FL's crossfade curve (round 166e): an S (raised cosine) whose fade-in and fade-out add up to 1 at every point.
+inline float crossfadeCurve (float x) noexcept
+{
+    x = std::clamp (x, 0.0f, 1.0f);
+    return 0.5f - 0.5f * std::cos (3.14159265358979f * x);
+}
+
+// FL's audio clip gain handle (round 166e §2): −96.1 dB (shown "-INF") … +36 dB, 0.05 dB per pixel of drag.
+constexpr double clipGainMinDb = -96.1, clipGainMaxDb = 36.0, clipGainDbPerPixel = 0.05;
+inline double clipGainToDb (float gain) noexcept
+{
+    return gain <= 0.0f ? clipGainMinDb : std::clamp (20.0 * std::log10 ((double) gain), clipGainMinDb, clipGainMaxDb);
+}
+inline float clipGainFromDb (double db) noexcept
+{
+    return (float) std::pow (10.0, std::clamp (db, clipGainMinDb, clipGainMaxDb) / 20.0);
+}
+
 inline std::vector<int> stackedClips (const Song& song)
 {
     std::vector<int> out;

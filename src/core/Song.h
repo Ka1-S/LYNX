@@ -1060,11 +1060,17 @@ struct Clip
     int channel = -1;         // audio clips: channel (audioClip) that holds the sample
     int automation = -1;      // automation clips: index into Song::automations
     std::int64_t fadeIn = 0, fadeOut = 0; // audio clips: fades (ticks)
-    float gain = 1.0f;        // audio clips: clip volume
+    float gain = 1.0f;        // audio clips: clip volume (linear; FL's gain handle: −96.1 … +36 dB, round 166e)
     float pan = 0.0f;         // audio clips: clip pan -1..1 (FL 2026's clip pan; REA round 153)
     bool muted = false;       // clip-level mute (the Mute tool); independent of the track mute
+    // FL's automatic crossfades (round 166e): where this audio clip overlaps the previous / next audio clip on its
+    // track, the overlap in ticks — derived from the arrangement by clipops::updateCrossfades while
+    // Song::autoCrossfades is on (never saved). A crossfade replaces that side's fade, with an S-shaped curve.
+    std::int64_t crossfadeIn = 0, crossfadeOut = 0;
 
     std::int64_t end() const noexcept { return start + length; }
+    std::int64_t effectiveFadeIn() const noexcept { return crossfadeIn > 0 ? crossfadeIn : fadeIn; }
+    std::int64_t effectiveFadeOut() const noexcept { return crossfadeOut > 0 ? crossfadeOut : fadeOut; }
 };
 
 enum class PlayMode : std::uint8_t
@@ -1263,6 +1269,11 @@ struct Song
     // Clean mixer (round 163, Options › Mixer): the inserts have no built-in processing — the per-track EQ is bypassed
     // (its settings are kept, nothing is computed) and hidden from the mixer. Saved with the project.
     bool cleanMixer = false;
+    // FL's Options › Project settings › Playlist › "Automatic crossfades" (round 166e): overlapping audio clips on a
+    // track crossfade over the overlap (Clip::crossfadeIn / crossfadeOut). Saved with the project; a project saved
+    // without it loads with it off (FL: "old projects now load with automatic crossfades turned off"); new projects
+    // take Settings' "Enable automatic crossfades in new projects".
+    bool autoCrossfades = false;
     // whether an effect slot processes: switched on, and not a substitute while the substitutes are bypassed
     bool slotActive (const EffectSlot& slot) const noexcept { return slot.enabled && ! (substitutesBypassed && slot.isSubstitute()); }
     std::vector<Automation> automations;

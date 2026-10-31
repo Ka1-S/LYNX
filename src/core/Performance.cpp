@@ -463,9 +463,9 @@ void Player::process (const Song& song, const std::vector<int>& zone, Live* live
             {
                 // the fades belong to the clip's own start / end only
                 if (vs > ws + 0.5)
-                    v.clip.fadeIn = 0;
+                    v.clip.fadeIn = v.clip.crossfadeIn = 0;
                 if (ve < we - 0.5)
-                    v.clip.fadeOut = 0;
+                    v.clip.fadeOut = v.clip.crossfadeOut = 0;
             }
         }
     };
