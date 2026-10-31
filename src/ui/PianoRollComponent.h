@@ -6,6 +6,7 @@
 #include "ui/EditorTools.h"
 #include "ui/NoteToolDialogs.h"
 #include "ui/ValueControl.h"
+#include "core/NoteEdit.h"
 
 namespace lynx
 {
