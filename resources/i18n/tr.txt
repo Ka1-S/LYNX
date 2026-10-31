@@ -5904,3 +5904,9 @@ countries: tr
 "Yes" = "Evet"
 "Make clip unique?" = "Klip benzersiz yapılsın mı?"
 "The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "\"{0}\" klibi başka bir ses parçasında da kullanılıyor.\n\nBu örneği benzersiz yapıp ardından bu ses parçasına yönlendirmek ister misiniz?"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "GIRTLAK"
+"Scale steps" = "Gam basamakları"
+"In scale" = "Gamda"
+"AMPLITUDE" = "GENLİK"
+"VARIATION" = "VARYASYON"

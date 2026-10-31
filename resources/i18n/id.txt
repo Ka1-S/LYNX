@@ -5904,3 +5904,9 @@ countries: id
 "Yes" = "Ya"
 "Make clip unique?" = "Jadikan klip unik?"
 "The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Klip \"{0}\" juga digunakan di trek audio lain.\n\nApakah Anda ingin menjadikan instans ini unik lalu merutekannya ke trek audio ini?"
+# round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
+"THROAT" = "TENGGOROKAN"
+"Scale steps" = "Langkah skala"
+"In scale" = "Dalam skala"
+"AMPLITUDE" = "AMPLITUDO"
+"VARIATION" = "VARIASI"
