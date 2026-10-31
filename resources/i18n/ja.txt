@@ -5901,3 +5901,6 @@ countries: jp
 "Metronome track" = "メトロノームのトラック"
 "Metronome target mixer track" = "メトロノームの出力先ミキサートラック"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "メトロノームが鳴るミキサートラック（--- はマスター）。クリック音はエクスポートには含まれません。"
+"Yes" = "はい"
+"Make clip unique?" = "クリップをユニークにしますか？"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "クリップ \"{0}\" は別のオーディオトラックでも使用されています。\n\nこのインスタンスをユニークにしてから、このオーディオトラックにルーティングしますか？"

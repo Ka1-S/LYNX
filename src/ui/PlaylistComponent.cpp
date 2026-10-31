@@ -2874,7 +2874,19 @@ void PlaylistComponent::mouseUp (const juce::MouseEvent& e)
     resizeTrack = -1;
 
     if (drag == Drag::move)
-        sortClips (dragIndices); // the moved clips (or the painted / cloned ones) are placed
+    {
+        // FL reroutes only the clips that landed on another track: sliding a clip
+        // along its own audio track leaves its channel's insert alone
+        std::vector<int> moved;
+        const auto& playlist = engine.getSong().playlist;
+        for (std::size_t j = 0; j < dragIndices.size() && j < dragOriginals.size(); ++j)
+        {
+            const auto i = dragIndices[j];
+            if (i >= 0 && i < (int) playlist.size() && playlist[(std::size_t) i].track != dragOriginals[j].track)
+                moved.push_back (i);
+        }
+        sortClips (moved);
+    }
     else if (drag == Drag::paint)
     {
         std::vector<int> painted; // the first painted clip and the copies appended after it

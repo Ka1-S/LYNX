@@ -1,4 +1,5 @@
 #include "core/Toxic.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -1341,9 +1342,12 @@ public:
     {
         bool on = false;
         double fvol = 1.0, fpan = 0.0, pitchCents = 0.0;
+        bool released = false;
+        HostSlide slide; // a slide note moving Final.Pitch (issue #14)
     };
     Engine eng;
     Held held[128];
+    bool sliding = false;
     float chunkL[chunk] {}, chunkR[chunk] {};
 
     void init (double fs, const Patch& p, std::shared_ptr<const BuiltinSpectra> spectra, bool withEffects)
@@ -1358,13 +1362,26 @@ public:
         key = std::clamp (key, 0, 127);
         if (held[key].on)
             eng.noteOff (key);
-        held[key] = { true, fvol, fpan, pitchCents };
+        held[key] = { true, fvol, fpan, pitchCents, false, {} };
         eng.noteOn (key, velFromInitVol (initVol));
     }
     void noteOff (int key)
     {
         if (key >= 0 && key < 128)
+        {
+            held[key].released = true;
             eng.noteOff (key);
+        }
+    }
+    // a slide note: every held, unreleased key glides to `toCents` (Final.Pitch, cents from C5) over `samples`
+    void slideTo (double toCents, float samples) noexcept
+    {
+        for (int i = 0; i < 128; ++i)
+            if (held[i].on && ! held[i].released)
+            {
+                held[i].slide.start ((float) (toCents - (100.0 * i - 6000.0 + held[i].pitchCents)), samples);
+                sliding = true;
+            }
     }
     void setLevels (int key, double fvol, double fpan) noexcept
     {
@@ -1382,7 +1399,8 @@ public:
             {
                 const auto& h = held[i];
                 lawA ((double) (float) h.fpan, (double) (float) h.fvol, cl, cr); // TVoiceParams hold floats
-                const auto fp = (100.0f * (float) i - 6000.0f) + (float) h.pitchCents;
+                const auto fp = (100.0f * (float) i - 6000.0f)
+                                + (h.slide.cents != 0.0f ? (float) (h.pitchCents + (double) h.slide.cents) : (float) h.pitchCents);
                 cp = (float) ((double) (float) fp * 0.01 - (double) i + 60.0);
                 if (first)
                 {
@@ -1411,6 +1429,17 @@ public:
             eng.process (cn, chunkL, chunkR);
             for (int i = 0; i < cn; ++i)
                 outL[c0 + i] += chunkL[i], outR[c0 + i] += chunkR[i];
+            if (sliding) // (issue #14) the slide moves the pitch table chunk by chunk
+            {
+                sliding = false;
+                for (auto& h : held)
+                    if (h.slide.moving())
+                    {
+                        h.slide.advance ((float) cn);
+                        sliding = sliding || h.slide.moving();
+                    }
+                tables();
+            }
         }
         for (int key = 0; key < 128; ++key)
             if (held[key].on && eng.vtab[(std::size_t) key] == 0
@@ -1513,6 +1542,12 @@ public:
     {
         take();
         plugin->noteOff (key);
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        plugin->slideTo (100.0 * (std::clamp (key, 0, 127) - 60) + (double) pitchCents.load() + (double) cents, samples);
     }
 
     void allNotesOff() noexcept override

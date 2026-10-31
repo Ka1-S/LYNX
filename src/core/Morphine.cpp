@@ -1,4 +1,5 @@
 #include "core/Morphine.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -1330,6 +1331,8 @@ struct Synth
     double lrL[128] {}, lrR[128] {};
     bool hasPtab[128] {}, hasLr[128] {};
     int held[128] {};
+    double notePofs[128] {};  // each key's Final.Pitch offset at its note on (cents)
+    HostSlide slides[128] {}; // a slide note moving a key's Final.Pitch (issue #14)
     std::uint32_t rng = 2222;
     int lastnote = -1;
     long long age = 0;
@@ -1360,6 +1363,7 @@ struct Synth
     }
     void noteOn (int key, double ivol, double fvol, double fpan, double pofs) noexcept;
     void noteOff (int key) noexcept;
+    void slideTo (double to, float samples) noexcept; // issue #14: `to` = Final.Pitch, cents from C5
     void setLevels (int key, double fvol, double fpan) noexcept;
     void render (float* L, float* R, int n) noexcept;
     bool idle() const noexcept;
@@ -1901,6 +1905,7 @@ void Synth::init (const Patch* patch, std::shared_ptr<const NoiseSample> ns, dou
     std::fill (std::begin (hasPtab), std::end (hasPtab), false);
     std::fill (std::begin (hasLr), std::end (hasLr), false);
     std::fill (std::begin (held), std::end (held), 0);
+    std::fill (std::begin (slides), std::end (slides), HostSlide {});
     rng = 2222, lastnote = -1, age = 0;
     poly = pyInt (A[3]) + 1;
     if (poly < 1 || poly > 32)
@@ -1924,6 +1929,7 @@ void Synth::noteOn (int key, double ivol, double fvol, double fpan, double pofs)
     const auto velf = F (vel7 * F (0.007874015718698502));
     ptab[key] = F ((F (100.0 * key - 6000.0 + pofs) * 0.01 - key) + 60.0);
     hasPtab[key] = true;
+    notePofs[key] = pofs, slides[key] = {};
     const auto t = (1.0 + clampD (fpan, -1.0, 1.0)) * 0.78539816339744831;
     lrL[key] = F (fvol * std::cos (t)), lrR[key] = F (fvol * std::sin (t)), hasLr[key] = true;
     held[key] = pyInt (F (velf * 127.0));
@@ -2039,10 +2045,23 @@ void Synth::setLevels (int key, double fvol, double fpan) noexcept
     lrL[key] = F (fvol * std::cos (t)), lrR[key] = F (fvol * std::sin (t));
 }
 
+void Synth::slideTo (double to, float samples) noexcept
+{
+    for (int k = 0; k < 128; ++k)
+        if (held[k] != 0 && hasPtab[k])
+            slides[k].start ((float) (to - (100.0 * k - 6000.0 + notePofs[k])), samples);
+}
+
 void Synth::render (float* L, float* R, int n) noexcept
 {
     std::fill (L, L + n, 0.0f);
     std::fill (R, R + n, 0.0f);
+    for (int k = 0; k < 128; ++k) // a slide note moves the key's Final.Pitch (issue #14)
+        if (slides[k].moving())
+        {
+            const auto c = (double) slides[k].advance ((float) n);
+            ptab[k] = F ((F (100.0 * k - 6000.0 + notePofs[k] + c) * 0.01 - k) + 60.0);
+        }
     for (auto& v : pool)
         v.render (L, R, n);
     fx.process (L, R, n);
@@ -2148,6 +2167,13 @@ public:
     {
         nextPan = pan;
         nextCents = cents;
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        if (synth != nullptr)
+            synth->slideTo (100.0 * std::clamp (key, 0, 127) - 6000.0 + (double) pitchCents.load() + (double) cents, samples);
     }
 
     void noteOn (int key, float velocity) noexcept override

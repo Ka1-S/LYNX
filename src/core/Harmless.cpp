@@ -1,4 +1,5 @@
 #include "core/Harmless.h"
+#include "core/HostSlide.h"
 #include "core/HarmlessFx.h"
 #include "core/Song.h"
 
@@ -912,6 +913,7 @@ struct Note
     long long start = 0, stamp = 0;
     std::array<int, 9> records {};
     int count = 0;
+    HostSlide slide; // a slide note moving the note's Final.Pitch (issue #14)
 };
 
 // pseudo-random draws for the per-record seeds and the LFO "voice random" (FL seeds its generator from the clock, so
@@ -1140,6 +1142,14 @@ public:
     }
 
     // adds n (≤ maxHostBlock) samples; channelVol / channelPan: FL's chan.Vol and chan.Pan this block
+    // a slide note (issue #14): the sounding, unreleased notes glide to `to` (Final.Pitch, cents) over `samples`
+    void slideTo (double to, float samples) noexcept
+    {
+        for (const auto ni : order)
+            if (auto& nt = notes[(std::size_t) ni]; ! nt.released && ! nt.ghost && nt.count > 0)
+                nt.slide.start ((float) (to - (nt.finalPitch - (double) nt.slide.cents)), samples);
+    }
+
     void render (float* left, float* right, int n, double channelVol, double channelPan) noexcept
     {
         std::fill (mixL.begin(), mixL.begin() + n, 0.0);
@@ -1170,6 +1180,14 @@ public:
         {
             const auto ni = order[oi];
             auto& nt = notes[(std::size_t) ni];
+            if (nt.slide.moving()) // a slide note moves Final.Pitch (issue #14)
+            {
+                const auto was = nt.slide.cents;
+                const auto d = (double) (nt.slide.advance ((float) n) - was);
+                nt.finalPitch += d;
+                for (int k = 0; k < nt.count; ++k)
+                    records[(std::size_t) nt.records[(std::size_t) k]].finalPitch += d;
+            }
             for (int k = 0; k < nt.count; ++k)
             {
                 auto& v = records[(std::size_t) nt.records[(std::size_t) k]];
@@ -2258,6 +2276,12 @@ public:
     {
         nextPan = pan;
         nextCents = cents;
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        engine.slideTo (100.0 * std::clamp (key, 0, 127) - 6000.0 + (double) settings.pitchCents + (double) cents, samples);
     }
 
     void noteOn (int key, float velocity) noexcept override

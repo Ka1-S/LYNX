@@ -1,4 +1,5 @@
 #include "core/FlKeys.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <atomic>
@@ -621,6 +622,7 @@ struct Voice
     float f0 = 0.0f, f1 = 0.0f, r0 = 0.0f, r1 = 0.0f, ff = 0.0f; // muffle filter
     float outl = 0.0f, outr = 0.0f, note = 0.0f, velSens = 1.0f, L = 0.0f, R = 0.0f;
     float initVol = 1.0f, finalVol = 1.0f, finalPan = 0.0f, finalPitch = 0.0f;
+    HostSlide slide; // a slide note moving Final.Pitch (issue #14); the render retunes the voice when it moves
 };
 
 class Engine
@@ -1060,6 +1062,14 @@ public:
 
     void allNotesOff() noexcept override { engine.releaseAll(); }
 
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        const auto to = (float) (100.0 * (std::clamp (key, 0, 127) - 60) + (double) pitchCents.load() + (double) cents);
+        for (auto& v : engine.voices)
+            if (v.active && ! v.released)
+                v.slide.start (to - (v.finalPitch - v.slide.cents), samples);
+    }
+
     bool idle() const noexcept override { return engine.idle(); }
 
     void render (float* left, float* right, int n, float gl, float gr) noexcept override
@@ -1083,6 +1093,12 @@ public:
         {
             const auto len = std::min (512, n - done);
             engine.render (left + done, right + done, len);
+            for (auto& v : engine.voices) // a slide note moves the voices' Final.Pitch (issue #14)
+                if (v.active && v.slide.moving())
+                {
+                    const auto was = v.slide.cents;
+                    v.finalPitch += v.slide.advance ((float) len) - was;
+                }
             done += len;
         }
     }

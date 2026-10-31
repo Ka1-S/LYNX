@@ -5901,3 +5901,6 @@ countries: id
 "Metronome track" = "Trek metronom"
 "Metronome target mixer track" = "Trek mixer tujuan metronom"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Trek mixer tempat metronom berbunyi (--- adalah Master). Klik tidak pernah masuk ke ekspor."
+"Yes" = "Ya"
+"Make clip unique?" = "Jadikan klip unik?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "Klip \"{0}\" juga digunakan di trek audio lain.\n\nApakah Anda ingin menjadikan instans ini unik lalu merutekannya ke trek audio ini?"

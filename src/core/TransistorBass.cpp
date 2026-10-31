@@ -2,6 +2,7 @@
 // layouts and formulas described in that document. Section numbers (§) below refer to it.
 
 #include "core/TransistorBass.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -2636,6 +2637,8 @@ public:
         sounding[(std::size_t) k] = true;
         notePan[(std::size_t) k] = nextPan;
         noteCents[(std::size_t) k] = (float) channelCents.load() + nextCents;
+        slide = {};
+        slideKey = k;
         plugin->noteOn (0, k, v7);
         sent[(std::size_t) k] = false;
         nextPan = 0.0f, nextCents = 0.0f;
@@ -2650,6 +2653,17 @@ public:
             return;
         sounding[(std::size_t) k] = false;
         plugin->noteOff (0, k);
+    }
+
+    // a piano-roll slide note (issue #14): FL's host glides the sounding note's Final.Pitch (the bass is monophonic:
+    // one pitch expression), separate from Transistor Bass's own sequencer slides
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        if (plugin == nullptr || slideKey < 0 || ! sounding[(std::size_t) slideKey])
+            return;
+        const auto to = (float) (100.0 * (std::clamp (key, 0, 127) - 60)) + channelCents.load() + cents;
+        slide.start (to - ((float) (100 * (slideKey - 60)) + noteCents[(std::size_t) slideKey]), samples);
     }
 
     void allNotesOff() noexcept override
@@ -2683,7 +2697,14 @@ public:
         float peak = 0.0f;
         for (int done = 0; done < n;)
         {
-            const auto m = std::min (n - done, (int) scratchL.size());
+            auto m = std::min (n - done, (int) scratchL.size());
+            if (slideKey >= 0 && (slide.moving() || slide.cents != 0.0f)) // (issue #14) the slide, 64 samples at a time
+            {
+                if (slide.moving())
+                    m = std::min (m, 64);
+                plugin->setPitchExpression (noteCents[(std::size_t) slideKey] + slide.cents);
+                slide.advance ((float) m);
+            }
             plugin->render (scratchL.data(), scratchR.data(), m);
             const auto g = (float) vol;
             for (int i = 0; i < m; ++i)
@@ -2732,6 +2753,8 @@ private:
     int quiet = 0;
     std::array<bool, 128> sounding {}, sent {};
     std::array<float, 128> notePan {}, noteCents {};
+    HostSlide slide;   // a piano-roll slide note (issue #14)
+    int slideKey = -1; // the last note started
     float nextPan = 0.0f, nextCents = 0.0f;
     std::array<float, 512> scratchL {}, scratchR {};
 };

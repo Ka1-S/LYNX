@@ -5901,3 +5901,6 @@ countries: nl be
 "Metronome track" = "Metronoomspoor"
 "Metronome target mixer track" = "Doel-mixerspoor van de metronoom"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "Het mixerspoor waardoor de metronoom speelt (--- is de Master). De klik zit nooit in een export."
+"Yes" = "Ja"
+"Make clip unique?" = "Clip uniek maken?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "De clip \"{0}\" wordt ook op een andere audiotrack gebruikt.\n\nWil je deze instantie uniek maken en daarna naar deze audiotrack routen?"

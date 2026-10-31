@@ -3,6 +3,7 @@
 // Image-Line code or data). Section numbers (§) refer to that document.
 
 #include "core/SimSynth.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -591,6 +592,8 @@ public:
         float lastRes = 0.0f;
         std::uint32_t started = 0, released = 0;
         int id = -1;
+        int notePitch = 0; // Final.Pitch at the trigger (cents); a slide note moves `pitch` away from it (issue #14)
+        HostSlide slide;
     };
     Slot slots[numVoices];
     std::uint32_t samples = 0; // +0x40dd8
@@ -1316,7 +1319,7 @@ public:
         s = Slot {};
         s.used = true;
         s.id = id;
-        s.pan = pan, s.vol = vol, s.pitch = pitch, s.fcut = fcut, s.fres = fres;
+        s.pan = pan, s.vol = vol, s.pitch = s.notePitch = pitch, s.fcut = fcut, s.fres = fres;
         hostLR (pan, gain * vol, s.l, s.r);
         s.ramp = 0;
         noteOnVoice (voices[slot], (int) ((std::uint32_t) pitchAsFloat (pitch) + 0x960u), (int) (vol * 127.0f), samples, fcut, fres);
@@ -1730,6 +1733,16 @@ public:
         nextCents = 0.0f;
     }
 
+    // a slide note (issue #14): the held keys' voices glide their Final.Pitch to the slide's pitch
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        const auto to = (float) (100.0 * (std::clamp (key, 0, 127) - 60)) + pitchCents.load() + cents;
+        for (const auto h : held)
+            if (h >= 0 && eng->slots[h].used)
+                eng->slots[h].slide.start (to - (float) eng->slots[h].notePitch, samples);
+    }
+
     void noteOff (int key) noexcept override
     {
         take();
@@ -1776,6 +1789,9 @@ public:
             const auto cn = std::min (chunk, n - c0);
             finished.clear();
             eng->render (left + c0, right + c0, cn, &finished);
+            for (auto& s : eng->slots) // (issue #14) a slide moves the voices' pitch chunk by chunk
+                if (s.used && s.slide.moving())
+                    s.pitch = s.notePitch + (int) std::lround (s.slide.advance ((float) cn));
             for (auto i : finished)
             {
                 for (auto& h : held)
