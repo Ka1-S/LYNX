@@ -4,8 +4,10 @@ Issue #14 (kubapl2004gmail, Linux), "Feature Requests". The three bugs of the sa
 
 ## Where I stopped
 
-- All three items implemented; build-local with FL Data: 1 887 598 checks, 0 failures. Landing via land.sh, then the
-  Windows GUI check (shots) on the landed build.
+- All three items implemented and merged with round 166a (snap to scale moves every note, lit keys): when the view is
+  folded, dragging / Up-Down move by shown rows; otherwise 166a's snap-to-scale rules apply. build-local with FL Data
+  after the merge: 1 887 689 checks, 0 failures. Piano Roll, Mixer, Main and ProjectFile also syntax-checked against
+  the Linux JUCE build. Next: landing (land.sh), then the Windows GUI check (shots) on the landed build.
 
 ## FL evidence (FL Studio 2026.1, this PC)
 
