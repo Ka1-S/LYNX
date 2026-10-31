@@ -223,6 +223,84 @@ std::vector<Pick> renamedGenerators (AudioEngine& engine, std::function<void (Ch
     return renamed<GeneratorEntry, ChannelDef> (engine, generatorEntries (engine), std::move (add));
 }
 
+namespace
+{
+template <typename Entry, typename Thing>
+bool folderGroups (juce::PopupMenu& menu, AudioEngine& engine, const std::vector<Entry>& entries, bool instruments, std::function<void (Thing)> add)
+{
+    std::vector<std::string> keys;
+    for (const auto& e : entries) keys.push_back (e.key);
+    auto& host = engine.getPluginHost();
+    const auto tree = plugincatalog::menuTree (host.databaseFolders(), instruments, keys);
+    if (tree.empty()) return false;
+    const auto view = (plugincatalog::MenuView) host.databaseFolders().view;
+    auto label = [&] (int i) { return shownName (engine, entries[(std::size_t) i].key, entries[(std::size_t) i].label); };
+    // the plugins of a folder, A-Z by their shown name (FL's database order)
+    auto addItems = [&] (juce::PopupMenu& m, std::vector<int> items) {
+        std::sort (items.begin(), items.end(), [&] (int a, int b) { return label (a).compareNatural (label (b)) < 0; });
+        for (const auto i : items)
+            m.addItem (label (i), [make = entries[(std::size_t) i].make, add] {
+                if (auto thing = make())
+                    add (std::move (*thing));
+            });
+    };
+    std::function<juce::PopupMenu (const plugincatalog::MenuFolder&)> submenu = [&] (const plugincatalog::MenuFolder& f) {
+        juce::PopupMenu m;
+        for (const auto& sub : f.sub) m.addSubMenu (juce::String::fromUTF8 (sub.name.c_str()), submenu (sub));
+        addItems (m, f.items);
+        return m;
+    };
+    if (view == plugincatalog::MenuView::simple)
+        addItems (menu, plugincatalog::allItems (tree));
+    else
+        for (const auto& f : tree)
+        {
+            if (view == plugincatalog::MenuView::tree)
+            {
+                menu.addSubMenu (juce::String::fromUTF8 (f.name.c_str()), submenu (f));
+                continue;
+            }
+            // Categories (FL's default): the folder's heading, its subfolders as submenus, then its plugins
+            menu.addSectionHeader (juce::String::fromUTF8 (f.name.c_str()));
+            for (const auto& sub : f.sub) menu.addSubMenu (juce::String::fromUTF8 (sub.name.c_str()), submenu (sub));
+            addItems (menu, f.items);
+        }
+    menu.addSeparator();
+    return true;
+}
+} // namespace
+
+void addFolderViewItems (juce::PopupMenu& menu, AudioEngine& engine)
+{
+    const auto& folders = engine.getPluginHost().databaseFolders();
+    if (folders.of.empty()) return;
+    // FL's view switch under the list (radio items): Categories / Simple / Tree
+    menu.addSeparator();
+    static const char* const names[] { TR_NOOP ("Categories"), TR_NOOP ("Simple"), TR_NOOP ("Tree") };
+    for (int v = 0; v < 3; ++v)
+        menu.addItem (tr (names[v]), true, folders.view == v, [&engine, v] {
+            auto& h = engine.getPluginHost();
+            auto f = h.databaseFolders();
+            f.view = v;
+            h.setDatabaseFolders (f);
+        });
+}
+
+bool inUserFolder (AudioEngine& engine, const std::string& key)
+{
+    return engine.getPluginHost().databaseFolders().of.count (key) > 0;
+}
+
+bool addFolderGroups (juce::PopupMenu& menu, AudioEngine& engine, std::function<void (EffectSlot)> add)
+{
+    return folderGroups<EffectEntry, EffectSlot> (menu, engine, effectEntries (engine), false, std::move (add));
+}
+
+bool addFolderGroups (juce::PopupMenu& menu, AudioEngine& engine, std::function<void (ChannelDef)> add)
+{
+    return folderGroups<GeneratorEntry, ChannelDef> (menu, engine, generatorEntries (engine), true, std::move (add));
+}
+
 void addPicks (juce::PopupMenu& menu, const std::vector<Pick>& picks)
 {
     if (picks.empty())

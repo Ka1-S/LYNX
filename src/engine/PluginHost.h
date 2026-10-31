@@ -13,6 +13,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "core/Effects.h"
+#include "core/PluginCatalog.h"
 #include "core/FixedBlock.h"
 #include "core/FlPluginDb.h"
 #include "core/PluginSubstitutes.h"
@@ -252,6 +253,11 @@ public:
     const std::map<std::string, std::string>& pluginNames() const noexcept { return userNames; }
     void setPluginName (const std::string& key, const std::string& name); // "" = the original name again
 
+    // The user's Plugin database folders (round 166f, issue #16; core/PluginCatalog.h): the slot / channel menus
+    // list the plugins of each folder under its heading. Saved in %APPDATA%\LYNX\plugin-folders.txt. UI thread.
+    const plugincatalog::Folders& databaseFolders() const noexcept { return userFolders; }
+    void setDatabaseFolders (const plugincatalog::Folders& folders);
+
     // Scan child mode: describes a file's plugins into `output` (XML). Returns the number found.
     static int scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output);
 
@@ -368,6 +374,7 @@ private:
 
     std::set<std::string> favouriteIds;
     std::map<std::string, std::string> userNames;
+    plugincatalog::Folders userFolders;
 
     class BackgroundScan;
     std::unique_ptr<BackgroundScan> background;

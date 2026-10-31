@@ -52,7 +52,7 @@ inline std::vector<double> toneGains (const lynx::EffectParams& p, const std::ve
 TEST (facet_spectral_params_round152c)
 {
     using namespace lynx::facet;
-    CHECK ((int) info().params.size() == paramCount && paramCount == 114 && paramCount <= lynx::maxEffectParams);
+    CHECK ((int) info().params.size() == paramCount && paramCount >= 114 && paramCount <= lynx::maxEffectParams);
     auto p = facet103::defaults();
     for (int b = 0; b < bands; ++b)
         CHECK (p[(std::size_t) (spectralParam0 + b)] == 0.0f && p[(std::size_t) (densityParam0 + b)] == 0.5f && ! isSpectral (p, b));

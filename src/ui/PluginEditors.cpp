@@ -2879,7 +2879,8 @@ public:
             g.drawFittedText (caps (tr (range.name)), plate.toNearestInt(), juce::Justification::centred, 1, 0.6f);
         }
 
-        drawParametricEqCurve (g, graph, fx.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), fx.enabled, eqSelected, eqRange, false);
+        drawParametricEqCurve (g, graph, fx.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), fx.enabled, eqSelected, eqRange, false,
+                               node.locate ? nullptr : &eqAnalyser); // round 166f: FL's spectrum and heatmap
 
         // frequencies under the graph, dB at its right
         g.setColour (colour::textDisabled);
@@ -2935,6 +2936,15 @@ public:
         const auto band = peqview::bandAt (graph, fx->params, e.position, eqRange);
         eqSelected = band;
         repaint();
+        if (band < 0 && e.mods.isPopupMenu() && ! node.locate) // round 166f: the display (FL's Options › Histogram / Heatmap)
+        {
+            juce::PopupMenu menu;
+            peqview::addDisplayItems (menu, [safe = juce::Component::SafePointer<juce::Component> (this)] {
+                if (safe != nullptr) safe->repaint();
+            });
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+            return true;
+        }
         if (band < 0)
             return true;
         if (e.mods.isPopupMenu())
@@ -4333,11 +4343,30 @@ public:
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
 
+public:
+    // round 166f: the analyser part of the timer, for off-screen pictures (--eq166fshot)
+    void tickDisplaysForSnapshot()
+    {
+        if (kind == EffectKind::parametricEq && ! node.locate)
+            for (const auto& item : activeLayout().items)
+                if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "eq") == 0)
+                    eqAnalyser.update (engine, track, slot, true, eqGraph (rectOf (item)));
+    }
+
+private:
     void timerCallback() override
     {
         if (! isShowing()) return; // a hidden editor costs nothing
         if (! node.locate && shownSlot.changed (engine.getAutomationDisplay(), track, slot)) // the controls follow their automation
             repaint();
+        if (kind == EffectKind::parametricEq && ! node.locate) // round 166f: the spectrum / heatmap of the EQ's output
+            for (const auto& item : activeLayout().items)
+                if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "eq") == 0)
+                {
+                    const auto graph = eqGraph (rectOf (item));
+                    if (eqAnalyser.update (engine, track, slot, isMouseOver (true) || hasKeyboardFocus (true), graph))
+                        repaint (graph.getSmallestIntegerContainer().expanded (2));
+                }
         if (! liveDisplays) return;
         learnScaleFromMidi();
         if (kind == EffectKind::hardwareInsert)
@@ -4398,6 +4427,7 @@ private:
     ui::ValueDrag drag;
     juce::String presetName;
     pluginheader::PresetBar bar { engine, track, slot }; // undo / redo, A / B, presets (round 129)
+    peqview::Analyser eqAnalyser; // round 166f: Parametric EQ 2's spectrum and heatmap
     int eqSelected = -1;
     bool eqDragging = false, xyDragging = false, sgDragging = false;
     struct PitchPoint { float sung, target, shift; }; // MIDI note numbers (0 = none) and the applied correction in semitones
@@ -4505,6 +4535,14 @@ void NativeEffectWindow::closeButtonPressed()
 void setNativeEditorDemo (bool on)
 {
     demoDisplays = on;
+}
+
+bool tickNativeEffectEditor (juce::Component& editor)
+{
+    auto* native = dynamic_cast<NativeEffectEditor*> (&editor);
+    if (native == nullptr) return false;
+    native->tickDisplaysForSnapshot();
+    return true;
 }
 
 std::unique_ptr<juce::Component> makeNativeEffectEditor (AudioEngine& engine, int track, int slot, float scale, int page)

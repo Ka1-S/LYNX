@@ -29,4 +29,7 @@ std::unique_ptr<juce::Component> makeNodeEffectEditor (AudioEngine& engine, std:
                                                        std::function<std::shared_ptr<Effect>()> running, const juce::String& name, float scale = 1.25f);
 // --plugui: live displays (LYNX Tune's pitch graph) draw a synthetic signal instead of waiting for audio
 void setNativeEditorDemo (bool on);
+// Round 166f (--eq166fshot): one display tick of a native editor without its timer (Parametric EQ 2's spectrum and
+// heatmap read the slot's analyser tap, which this claims); false when `editor` is not a native effect editor.
+bool tickNativeEffectEditor (juce::Component& editor);
 } // namespace lynx

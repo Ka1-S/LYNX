@@ -743,6 +743,7 @@ PluginHost::PluginHost (bool keep)
             known.recreateFromXml (*xml);
         favouriteIds = prefs::parseFavourites (settingsFolder().getChildFile ("plugin-favourites.txt").loadFileAsString().toStdString());
         userNames = prefs::parsePluginNames (settingsFolder().getChildFile ("plugin-names.txt").loadFileAsString().toStdString());
+        userFolders = plugincatalog::parseFolders (settingsFolder().getChildFile ("plugin-folders.txt").loadFileAsString().toStdString());
         // once: files marked as failed by scans before the class-count timeout (REA_rodada107 §2) get another try,
         // since a large bundle (Waves shell) was marked "hung" only for taking longer than 30 s
         const auto retried = settingsFolder().getChildFile ("scan-retry.txt");
@@ -1206,6 +1207,13 @@ void PluginHost::setPluginName (const std::string& key, const std::string& name)
         userNames[key] = clean;
     if (persistent)
         settingsFolder().getChildFile ("plugin-names.txt").replaceWithText (juce::String::fromUTF8 (prefs::formatPluginNames (userNames).c_str()));
+}
+
+void PluginHost::setDatabaseFolders (const plugincatalog::Folders& folders)
+{
+    userFolders = folders;
+    if (persistent)
+        settingsFolder().getChildFile ("plugin-folders.txt").replaceWithText (juce::String::fromUTF8 (plugincatalog::formatFolders (userFolders).c_str()));
 }
 
 void PluginHost::startBackgroundScan (const juce::FileSearchPath& paths)

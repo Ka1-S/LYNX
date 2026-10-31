@@ -83,6 +83,7 @@ class FacetEqEditor final : public juce::Component,
                             private juce::Timer
 {
 public:
+    friend void ::lynx::tickFacetEqEditor (juce::Component&); // round 166f (--eq166fshot)
     FacetEqEditor (AudioEngine& e, int t, int s, bool demoSpectrum)
         : engine (e),
           track (t),
@@ -141,6 +142,12 @@ public:
     juce::Rectangle<float> headerArea() const { return { 0.0f, 0.0f, (float) getWidth(), 30.0f }; }
     juce::Rectangle<float> barArea() const { return { 0.0f, (float) getHeight() - 30.0f, (float) getWidth(), 30.0f }; }
     juce::Rectangle<float> graphArea() const { return { 0.0f, 30.0f, (float) getWidth(), barArea().getY() - 30.0f }; }
+    // round 166f: the comparative EQ's switch, segments 0 EQ, 1 Source, 2 Target, 3 its menu (top left of the graph)
+    juce::Rectangle<float> listenSegment (int k) const
+    {
+        const auto x = 50.0f + (k < 3 ? 58.0f * (float) k : 174.0f);
+        return { x, 40.0f, k < 3 ? 56.0f : 20.0f, 18.0f };
+    }
     juce::Rectangle<float> plotArea() const { return graphArea().withTrimmedRight (64.0f).withTrimmedBottom (20.0f).withTrimmedTop (6.0f); }
     juce::Rectangle<float> panelArea() const
     {
@@ -226,34 +233,34 @@ public:
 
     double rangeDb_ (int b) const { return facet::rangeDb (param01 (rangeParam0 + b)); }
 
-    int nodeAt (juce::Point<float> p) const
+    // round 166f (issue #16): one rule for both targets (core/FacetEq.h pickGraphTarget) — a press on a node always
+    // moves the band; the range handle of a dynamic band is a small target of its own, off the node
+    GraphHit hitAt (juce::Point<float> p) const
     {
-        int best = -1;
-        float bestDistance = 11.0f;
+        float nx[bands], ny[bands], rx[bands], ry[bands];
+        bool on[bands], dyn[bands];
+        const auto* fx = current();
         for (int b = 0; b < bands; ++b)
-            if (bandOn (b))
-                if (const auto d = nodePosition (b).getDistanceFrom (p); d < bestDistance)
-                {
-                    best = b;
-                    bestDistance = d;
-                }
-        return best;
+        {
+            on[b] = bandOn (b);
+            dyn[b] = on[b] && fx != nullptr && isDynamic (fx->params, b);
+            const auto n = nodePosition (b);
+            nx[b] = n.x; ny[b] = n.y;
+            const auto r = dyn[b] ? rangeHandle (b) : n;
+            rx[b] = r.x; ry[b] = r.y;
+        }
+        return pickGraphTarget (nx, ny, on, dyn, rx, ry, bands, selected, p.x, p.y);
     }
-
-    int rangeHandleAt (juce::Point<float> p) const
-    {
-        for (int b = 0; b < bands; ++b)
-            if (bandOn (b) && hasGain (bandShape (b)) && b == selected && rangeHandle (b).getDistanceFrom (p) < 8.0f)
-                return b;
-        return -1;
-    }
+    int nodeAt (juce::Point<float> p) const { const auto h = hitAt (p); return h.range ? -1 : h.band; }
+    int rangeHandleAt (juce::Point<float> p) const { const auto h = hitAt (p); return h.range ? h.band : -1; }
 
     // --- controls of the bottom strip and the header -------------------------------------------------
 
     enum class Ctl { none, shapeMenu, freq, gain, q, slopeMenu, range, threshold, solo, dynamic, remove, attack, release,
                      phase, analyzer, detector, output, scale, scaleDb, prevBand, nextBand, close, piano, tipSolo, tipRemove,
                      power, placementMenu, tipPower, autoGain, pan,
-                     spectral, spectralTilt, match }; // round 152
+                     spectral, spectralTilt, match, // round 152
+                     listen, compareMenu }; // round 166f: the comparative EQ's switch
     struct Control { Ctl type; juce::Rectangle<float> r; int param = -1; int index = 0; };
 
     std::vector<Control> controls() const
@@ -273,6 +280,10 @@ public:
         out.push_back ({ Ctl::autoGain, { bar.getRight() - 372.0f, cy - 11.0f, 84.0f, 22.0f }, autoGainParam });
         // the graph's dB range (top right: ±3 / 6 / 12 / 30)
         const auto plot = plotArea();
+        // round 166f (issue #16): the comparative EQ — listen to the EQ, the source or the target (top left of the graph)
+        for (int k = 0; k < 3; ++k)
+            out.push_back ({ Ctl::listen, listenSegment (k), listenParam, k });
+        out.push_back ({ Ctl::compareMenu, listenSegment (3) });
         out.push_back ({ Ctl::scaleDb, { plot.getRight() + 6.0f, plot.getY() + 2.0f, 50.0f, 18.0f } });
 
         // the hovered node's read-out: solo and remove
@@ -489,13 +500,69 @@ public:
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
+    // round 166f (issue #16): the comparative EQ — the target is the slot's sidechain track
+    bool hasTarget() const
+    {
+        const auto* fx = current();
+        return fx != nullptr && fx->sidechain > 0 && fx->sidechain != track && fx->sidechain < (int) engine.getSong().mixer.size();
+    }
+    juce::String targetName() const
+    {
+        if (! hasTarget()) return {};
+        const auto t = current()->sidechain;
+        return juce::String (t) + " " + juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) t].name.c_str());
+    }
+    void showCompareMenu (bool thenListen = false)
+    {
+        const auto* fx = current();
+        if (fx == nullptr) return;
+        juce::PopupMenu menu;
+        menu.addSectionHeader (tr ("Compare: listen to the EQ, to this track without it (source) or to another track (target)"));
+        const auto now = listen (param01 (listenParam));
+        for (const auto l : { Listen::eq, Listen::source, Listen::target })
+            menu.addItem (tr (listenLabel (l)), l != Listen::target || hasTarget(), now == l, [this, l] { set ({ { listenParam, listenValue (l) } }, false); });
+        menu.addSeparator();
+        juce::PopupMenu from;
+        const auto assign = [this, thenListen] (int source) {
+            engine.editSong ([tk = track, sl = slot, source, thenListen] (Song& s) {
+                auto& target = s.mixer[(std::size_t) tk].effects[(std::size_t) sl];
+                target.sidechain = source; // (the same input the dynamic bands' sidechain detector hears)
+                if (source < 0 && listen (target.params[(std::size_t) listenParam]) == Listen::target) target.params[(std::size_t) listenParam] = listenValue (Listen::eq);
+                if (source >= 0 && thenListen) target.params[(std::size_t) listenParam] = listenValue (Listen::target);
+            }, false);
+        };
+        from.addItem (tr ("None"), true, fx->sidechain < 0, [assign] { assign (-1); });
+        const auto& song = engine.getSong();
+        for (int t = 1; t < (int) song.mixer.size(); ++t)
+            if (t != track)
+                from.addItem (juce::String (t) + " " + juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()), true, fx->sidechain == t, [assign, t] { assign (t); });
+        menu.addSubMenu (tr ("Target track (sidechain)"), from);
+        menu.addItem (tr ("Match the target's level to this track"), true, param01 (targetLevelParam) >= 0.5f,
+                      [this] { set ({ { targetLevelParam, param01 (targetLevelParam) >= 0.5f ? 0.0f : 1.0f } }); });
+        menu.addItem (tr ("Show the target's spectrum"), hasTarget(), showTarget, [this] { showTarget = ! showTarget; repaint(); });
+        menu.addSeparator();
+        menu.addItem (tr ("Capture this track and the target together (play now), then Match"), hasTarget() && analyzer (param01 (analyzerParam)) != Analyzer::off,
+                      capture == Capture::both, [this] {
+                          if (capture == Capture::both) capture = Capture::none;
+                          else { capture = Capture::both; matchRef.clear(); matchCur.clear(); refFrames = curFrames = 0; }
+                          repaint();
+                      });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+    static const char* listenLabel (Listen l)
+    {
+        return l == Listen::eq ? TR_NOOP ("EQ") : l == Listen::source ? TR_NOOP ("Source") : TR_NOOP ("Target");
+    }
+    bool showTarget = true;
+
     // round 152: EQ match — capture the reference (play it through this slot), capture this track, then match
-    enum class Capture { none, reference, current };
+    enum class Capture { none, reference, current, both }; // (round 166f: both = this track and the target at once)
     juce::String matchStateText() const
     {
         const auto secs = [] (int frames) { return juce::String (frames / 30); }; // the editor's 30 Hz frames
         if (capture == Capture::reference) return tr ("reference {0} s", { secs (refFrames) });
         if (capture == Capture::current) return tr ("this track {0} s", { secs (curFrames) });
+        if (capture == Capture::both) return tr ("this track and the target {0} s", { secs (curFrames) });
         if (refFrames > 0 && curFrames > 0) return tr ("ready");
         if (refFrames > 0) return tr ("reference captured");
         return tr ("off");
@@ -511,6 +578,8 @@ public:
                           else { capture = Capture::reference; matchRef.clear(); refFrames = 0; }
                           repaint();
                       });
+        if (capture == Capture::both) // round 166f: started from the Compare menu
+            menu.addItem (tr ("Stop capturing this track and the target"), true, true, [this] { capture = Capture::none; repaint(); });
         menu.addItem (capture == Capture::current ? tr ("Stop capturing this track") : tr ("Capture this track (play it now)"), true,
                       capture == Capture::current, [this] {
                           if (capture == Capture::current) capture = Capture::none;
@@ -719,6 +788,7 @@ public:
                 if (type == Ctl::spectral) { showDensityMenu (selected); return; }
                 if (type == Ctl::match) { showMatchMenu(); return; }
                 if (type == Ctl::spectralTilt) return;
+                if (type == Ctl::listen || type == Ctl::compareMenu) { showCompareMenu(); return; } // round 166f
                 if (prm >= 0 && type != Ctl::solo && type != Ctl::dynamic && type != Ctl::shapeMenu && type != Ctl::slopeMenu && type != Ctl::power
                     && type != Ctl::autoGain)
                     ui::showValueMenu (*this, &engine, specFor (prm), param01 (prm), [this, prm] (double v) { set ({ { prm, (float) v } }); });
@@ -742,6 +812,14 @@ public:
                 case Ctl::dynamic: set ({ { prm, isDynamic (current()->params, selected) ? 0.5f : rangeValue (-6.0) } }); return;
                 case Ctl::spectral: case Ctl::spectralTilt: set ({ { prm, param01 (prm) >= 0.5f ? 0.0f : 1.0f } }); return;
                 case Ctl::match: showMatchMenu(); return;
+                case Ctl::compareMenu: showCompareMenu(); return; // round 166f
+                case Ctl::listen:
+                {
+                    const auto l = (Listen) juce::jlimit (0, 2, index);
+                    if (l == Listen::target && ! hasTarget()) { showCompareMenu (true); return; } // pick the target first
+                    set ({ { listenParam, listenValue (l) } }, false);
+                    return;
+                }
                 case Ctl::phase: showPhaseMenu(); return;
                 case Ctl::analyzer: showAnalyzerMenu(); return;
                 case Ctl::detector: showDetectorMenu(); return;
@@ -846,6 +924,8 @@ public:
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         if (! plotArea().contains (e.position)) return;
+        std::vector<Control> all;
+        if (controlAt (e.position, all) != nullptr) return; // (round 166f: e.g. the Compare switch over the graph)
         if (const auto b = nodeAt (e.position); b >= 0) removeBand (b);
         else addBand (e.position);
     }
@@ -854,7 +934,7 @@ public:
     {
         std::vector<Control> all;
         if (const auto* c = controlAt (e.position, all); c != nullptr && c->param >= 0 && c->type != Ctl::phase && c->type != Ctl::power
-            && c->type != Ctl::autoGain && c->type != Ctl::placementMenu && c->type != Ctl::spectral && c->type != Ctl::spectralTilt && c->type != Ctl::match)
+            && c->type != Ctl::autoGain && c->type != Ctl::placementMenu && c->type != Ctl::spectral && c->type != Ctl::spectralTilt && c->type != Ctl::match && c->type != Ctl::listen)
         {
             const auto prm = c->param;
             const auto spec = specFor (prm);
@@ -949,6 +1029,12 @@ public:
                 case Ctl::dynamic: h.text = tr ("Dynamic EQ: the band's gain moves by up to its range when its region goes over the threshold"); return h;
                 case Ctl::spectral: h.text = tr ("Spectral dynamics: the band works frequency by frequency, only where the sound goes over the threshold (adds 5120 samples of latency) - right-click: density"); h.hasMenu = true; return h;
                 case Ctl::spectralTilt: h.text = tr ("Tilt: the spectral threshold slopes 4.5 dB/oct so the band treats a natural (pink) spectrum evenly"); return h;
+                case Ctl::listen:
+                case Ctl::compareMenu:
+                    h.text = tr ("Compare: listen to the EQ, to this track without it (source) or to another track (target), level-matched; right-click or the arrow = target track and options")
+                             + (hasTarget() ? " (" + tr ("target") + " " + targetName() + ")" : juce::String());
+                    h.hasMenu = true;
+                    return h;
                 case Ctl::match: h.text = tr ("EQ match: capture a reference spectrum and this track's, then let Facet place bands that make this track sound like the reference") + " (" + matchStateText() + ")"; h.hasMenu = true; return h;
                 case Ctl::shapeMenu: h.text = tr ("Band shape"); h.hasMenu = true; return h;
                 case Ctl::slopeMenu: h.text = tr ("Slope"); h.hasMenu = true; return h;
@@ -1040,6 +1126,28 @@ public:
                 g.setColour (on || (refFrames > 0 && curFrames > 0) ? colour::textPrimary : colour::textSecondary);
                 g.setFont (font (type::small, on));
                 g.drawText (tr ("Match"), c.r, juce::Justification::centred);
+            }
+            else if (c.type == Ctl::listen) // round 166f: EQ | Source | Target
+            {
+                const auto l = (Listen) c.index;
+                const auto on = listen (param01 (listenParam)) == l;
+                const auto usable = l != Listen::target || hasTarget();
+                const auto tint = l == Listen::target ? colour::info : l == Listen::source ? colour::warning : colour::accent;
+                g.setColour (colour::bg0.withAlpha (0.75f));
+                g.fillRoundedRectangle (c.r, radius::sm);
+                skin::button (g, c.r, on, hover, tint);
+                g.setColour (on ? colour::textPrimary : usable ? colour::textSecondary : colour::textDisabled);
+                g.setFont (font (type::small, on));
+                g.drawFittedText (tr (listenLabel (l)), c.r.toNearestInt(), juce::Justification::centred, 1, 0.7f);
+            }
+            else if (c.type == Ctl::compareMenu)
+            {
+                g.setColour (colour::bg0.withAlpha (0.75f));
+                g.fillRoundedRectangle (c.r, radius::sm);
+                skin::button (g, c.r, capture == Capture::both, hover, colour::info);
+                g.setColour (colour::textSecondary);
+                g.setFont (font (type::small));
+                g.drawText (juce::String::fromUTF8 ("\xe2\x96\xbe"), c.r, juce::Justification::centred);
             }
             else if (c.type == Ctl::phase || c.type == Ctl::analyzer || c.type == Ctl::detector)
             {
@@ -1271,6 +1379,15 @@ public:
                 }
                 g.setColour (colour::accent.brighter (0.2f).withAlpha (0.85f));
                 g.strokePath (edge, juce::PathStrokeType (1.2f));
+            }
+            // round 166f: the comparative target's spectrum, a cool line over the source's
+            if (showTarget && hasTarget() && ! specSide.empty())
+            {
+                const auto edge = spectrumPath (specSide, false);
+                g.setColour (colour::info.withAlpha (0.25f));
+                g.strokePath (edge, juce::PathStrokeType (3.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                g.setColour (colour::info.withAlpha (0.9f));
+                g.strokePath (edge, juce::PathStrokeType (1.3f));
             }
             g.restoreState();
         }
@@ -1606,7 +1723,7 @@ private:
         updateSpectrum();
         // redraw the graph only when the analyser or a dynamic band moved (an idle editor stops drawing)
         double signature = 0.0;
-        for (const auto* v : { &specPre, &specPost })
+        for (const auto* v : { &specPre, &specPost, &specSide })
             for (const auto x : *v) signature += x;
         for (int b = 0; b < bands; ++b) signature += liveDynamic (b) * (b + 1);
         if (signature != lastSignature || demo) repaint (graphArea().toNearestInt());
@@ -1650,22 +1767,26 @@ private:
         if (written == lastWritten) { decay(); return; }
         lastWritten = written;
         const auto sr = displayRate();
-        for (int which = 0; which < 2; ++which)
+        const bool side = tap.sideOn.load (std::memory_order_relaxed) && hasTarget(); // round 166f: the comparative target
+        if ((int) specSide.size() != columns) specSide.assign ((std::size_t) columns, (float) specFloor());
+        for (int which = 0; which < (side ? 3 : 2); ++which)
         {
-            auto& ring = which == 0 ? tap.pre : tap.post;
+            auto& ring = which == 0 ? tap.pre : which == 1 ? tap.post : tap.side;
             std::fill (fftData.begin(), fftData.end(), 0.0f);
             for (int i = 0; i < fftSize; ++i)
                 fftData[(std::size_t) i] = ring[(std::size_t) ((written - (std::uint32_t) fftSize + (std::uint32_t) i) & (ProcessTimes::AnalyzerTap::size - 1))]
                                                .load (std::memory_order_relaxed) * window[(std::size_t) i];
             fft.performFrequencyOnlyForwardTransform (fftData.data(), true);
-            if (which == 0 && capture != Capture::none) // round 152: EQ match — the input's long-term spectrum
+            // round 152: EQ match — the input's long-term spectrum (round 166f: with Capture::both, the target's too)
+            if ((which == 0 && capture != Capture::none) || (which == 2 && capture == Capture::both))
             {
-                auto& acc = capture == Capture::reference ? matchRef : matchCur;
+                const bool ref = which == 2 || capture == Capture::reference;
+                auto& acc = ref ? matchRef : matchCur;
                 if (acc.size() != (std::size_t) (fftSize / 2)) acc.assign ((std::size_t) (fftSize / 2), 0.0);
                 for (int k = 0; k < fftSize / 2; ++k) acc[(std::size_t) k] += (double) fftData[(std::size_t) k] * fftData[(std::size_t) k];
-                ++(capture == Capture::reference ? refFrames : curFrames);
+                ++(ref ? refFrames : curFrames);
             }
-            auto& out = which == 0 ? specPre : specPost;
+            auto& out = which == 0 ? specPre : which == 1 ? specPost : specSide;
             const auto norm = 4.0f / (float) fftSize; // Hann (coherent gain ½) and one side
             for (int i = 0; i < columns; ++i)
             {
@@ -1695,7 +1816,7 @@ private:
     void decay()
     {
         if (frozen) return;
-        for (auto* v : { &specPre, &specPost })
+        for (auto* v : { &specPre, &specPost, &specSide })
             for (auto& x : *v) x = juce::jmax ((float) specFloor(), x - fallPerFrame());
     }
 
@@ -1715,7 +1836,7 @@ private:
     juce::Rectangle<float> dragRect;
     ui::ValueDrag valueDrag;
     juce::dsp::FFT fft;
-    std::vector<float> fftData, window, specPre, specPost;
+    std::vector<float> fftData, window, specPre, specPost, specSide;
     std::uint32_t lastWritten = 0;
 };
 
@@ -1800,6 +1921,15 @@ void drawFacetEqCurve (juce::Graphics& g, juce::Rectangle<float> area, const Eff
         const auto db = hasGain (sh) ? gainDb (params[(std::size_t) param (b, 2)]) * gainScale (params[(std::size_t) scaleParam]) : 0.0;
         g.setColour (bandColour (b));
         g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ xFor (f), area.getCentreY() - area.getHeight() * 0.45f * (float) (juce::jlimit (-24.0, 24.0, db) / 24.0) }));
+    }
+}
+
+void tickFacetEqEditor (juce::Component& editor)
+{
+    if (auto* facetEditor = dynamic_cast<FacetEqEditor*> (&editor))
+    {
+        facetEditor->claimTap();
+        facetEditor->updateSpectrum();
     }
 }
 

@@ -259,6 +259,9 @@ struct ProcessTimes
         std::atomic<std::uint32_t> written { 0 };
         std::atomic<double> sampleRate { 48000.0 };
         std::array<std::atomic<float>, size> pre {}, post {};
+        // round 166f: the slot's sidechain (Facet EQ's comparative target), written while one is routed (sideOn)
+        std::array<std::atomic<float>, size> side {};
+        std::atomic<bool> sideOn { false };
     };
     AnalyzerTap analyzer;
 

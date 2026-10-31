@@ -4286,7 +4286,7 @@ void EffectsPanel::showAddMenu (int)
     juce::PopupMenu menu;
 
     // FL's renamed plugins first (issue #11): "1_EQ" renamed in the Browser's Plugin database is added by typing 1
-    auto picks = quickpick::renamedEffects (engine, [this] (EffectSlot fx) {
+    auto addFx = [this] (EffectSlot fx) {
         const auto t = track;
         bool added = false;
         engine.editSong ([t, &fx, &added] (Song& song) {
@@ -4305,10 +4305,14 @@ void EffectsPanel::showAddMenu (int)
         if ((*slots())[(std::size_t) selectedSlot].kind == EffectKind::plugin)
             openPluginWindow (selectedSlot);
         repaint();
-    });
+    };
+    auto picks = quickpick::renamedEffects (engine, addFx);
     quickpick::addPicks (menu, picks);
+    // round 166f (issue #16): then the user's Plugin database folders, one heading each (FL's folder headings)
+    quickpick::addFolderGroups (menu, engine, std::function<void (EffectSlot)> (addFx));
 
     for (auto kind : allEffects)
+        if (! quickpick::inUserFolder (engine, std::string ("lynx:fx:") + effectInfo (kind).name)) // listed under its folder
         menu.addItem (addableEffectName (kind), addableEffectAvailable (kind), false, [this, kind] {
             const auto made = newAddableEffect (kind, engine.getSong().bpm);
             if (! made)
@@ -4358,6 +4362,7 @@ void EffectsPanel::showAddMenu (int)
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
     menu.addSeparator();
     menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
+    quickpick::addFolderViewItems (menu, engine); // FL: Categories / Simple / Tree at the bottom
 
     quickpick::showMenu (menu, juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), std::move (picks));
 }
@@ -4371,6 +4376,24 @@ void EffectsPanel::showSlotMenu (int slot)
             if (const auto made = newAddableEffect (kind, engine.getSong().bpm))
                 engine.editSong ([t = track, slot, fx = *made] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot] = fx; });
         });
+
+    // round 166f (issue #16): the user's Plugin database folders first, one heading each
+    {
+        juce::PopupMenu folders;
+        if (quickpick::addFolderGroups (folders, engine, std::function<void (EffectSlot)> ([this, slot] (EffectSlot fx) {
+                engine.editSong ([t = track, slot, fx] (Song& song) {
+                    if (t < (int) song.mixer.size() && slot < (int) song.mixer[(std::size_t) t].effects.size())
+                        song.mixer[(std::size_t) t].effects[(std::size_t) slot] = fx;
+                });
+                if (slot < (int) slots()->size() && (*slots())[(std::size_t) slot].kind == EffectKind::plugin)
+                    openPluginWindow (slot);
+            })))
+        {
+            folders.addSubMenu (tr ("All effects"), replace);
+            quickpick::addFolderViewItems (folders, engine);
+            replace = folders;
+        }
+    }
 
     const auto count = (int) slots()->size();
     juce::PopupMenu menu;

@@ -70,7 +70,11 @@ constexpr int resolutionParam = 89; // round 144: the linear-phase resolution (L
 constexpr int spectralParam0 = 90;  // + band
 constexpr int densityParam0 = 98;   // + band (default 50 %)
 constexpr int spectralTiltParam0 = 106; // + band
-constexpr int paramCount = 114;
+// round 166f (issue #16, LYNX's own comparative EQ): [114] listen (the EQ's output / the source = this track without
+// the EQ / the target = the slot's sidechain track, both delayed by the EQ's latency), [115] target level match
+constexpr int listenParam = 114;
+constexpr int targetLevelParam = 115;
+constexpr int paramCount = 116;
 constexpr int maxSections = 8; // 96 dB/oct = 16th order
 
 enum class Shape { off, bell, lowShelf, highShelf, lowCut, highCut, notch, bandPass, tiltShelf, flatTilt, allPass };
@@ -172,8 +176,32 @@ void spectralGainsDb (const EffectParams& params, int band, double sampleRate, c
 int matchEq (const EffectParams& params, const double* hz, const double* currentDb, const double* referenceDb, int n, double amount,
              int maxBands, double smoothingOct, std::vector<std::pair<int, float>>& changes);
 
+// Round 166f (issue #16, "dragging near a bell's centre changes its range instead of moving it"): what a press on the
+// graph grabs. Every band's node is a target of `nodeRadius`; the range handle of a dynamic band is a smaller explicit
+// target (`rangeRadius`) that only counts where it does not sit on its node, so a press anywhere on a node moves the
+// band; a static band (range 0) has no range handle at all. Positions in pixels; `rangeX/Y` only read for bands with
+// `dynamic[b]`. Returns the band and whether its range handle was hit (band -1: nothing).
+struct GraphHit { int band = -1; bool range = false; };
+GraphHit pickGraphTarget (const float* nodeX, const float* nodeY, const bool* on, const bool* dynamic, const float* rangeX,
+                          const float* rangeY, int count, int selectedBand, float px, float py, float nodeRadius = 11.0f,
+                          float rangeRadius = 6.0f) noexcept;
+
 const EffectInfo& info();
 std::string paramText (int param, float v);
+
+// Round 166f (issue #16): comparative EQ — LYNX's own (no FL equivalent). The slot's sidechain track is the *target*
+// (a reference mix, the other take); "listen" switches what the slot outputs between the EQ's output, the *source* (this
+// track before the EQ) and the target, crossfaded over 10 ms and delayed by the EQ's latency so a switch never jumps in
+// time. With target level match on, the target is scaled to the source's loudness (slow RMS, 3 s; ±24 dB at most) so
+// the comparison is about tone, not level. The editor draws the target's spectrum over the source's, and EQ match can
+// capture both at once.
+enum class Listen { eq, source, target };
+Listen listen (float v) noexcept;
+float listenValue (Listen l) noexcept;
+const char* listenName (Listen l) noexcept;
+bool listensToTarget (const EffectParams& params) noexcept;
+// The level-match gain (linear) for the target from the two mean powers (0 power: unity)
+double targetMatchGain (double sourcePower, double targetPower) noexcept;
 
 // One digital section: b0 + b1 z^-1 + b2 z^-2 over 1 + a1 z^-1 + a2 z^-2 (first-order sections have b2 = a2 = 0).
 struct Section { double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0; };
