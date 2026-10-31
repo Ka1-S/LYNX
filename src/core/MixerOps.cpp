@@ -30,14 +30,12 @@ bool isTrackTarget (AutomationTargetKind k) noexcept
 }
 } // namespace
 
-void swapTracks (Song& song, int a, int b)
+namespace
 {
-    if (a == b || ! isInsert (song, a) || ! isInsert (song, b))
-        return;
-
-    auto map = [a, b] (int t) { return t == a ? b : t == b ? a : t; };
-    std::swap (song.mixer[(std::size_t) a], song.mixer[(std::size_t) b]);
-
+// every reference to an insert (channels, Playlist tracks, sends, side-chains, automation) through `map`
+template <typename Map>
+void remapTrackReferences (Song& song, Map&& map)
+{
     for (auto& c : song.channels)
         c.mixerTrack = map (c.mixerTrack);
     for (auto& pt : song.playlistTracks) // audio / instrument tracks (round 146a)
@@ -67,6 +65,16 @@ void swapTracks (Song& song, int a, int b)
     for (auto& automation : song.automations)
         if (automation.source.track > 0)
             automation.source.track = map (automation.source.track);
+}
+} // namespace
+
+void swapTracks (Song& song, int a, int b)
+{
+    if (a == b || ! isInsert (song, a) || ! isInsert (song, b))
+        return;
+
+    std::swap (song.mixer[(std::size_t) a], song.mixer[(std::size_t) b]);
+    remapTrackReferences (song, [a, b] (int t) { return t == a ? b : t == b ? a : t; });
 }
 
 bool moveTracks (Song& song, std::vector<int>& selection, int delta)
@@ -116,15 +124,7 @@ void renumberDefaultNames (Song& song, int from, int delta)
 
 bool insertTrack (Song& song, int at)
 {
-    const auto count = (int) song.mixer.size();
-    if (at < 1 || at > count || count >= maxMixerTracks)
-        return false;
-
-    song.mixer.emplace_back().name = "Insert " + std::to_string (at);
-    for (int t = count; t > at; --t)
-        swapTracks (song, t, t - 1);
-    renumberDefaultNames (song, at + 1, 1);
-    return true;
+    return insertTracks (song, at, 1) == 1;
 }
 
 int removeUnusedTrailingInserts (Song& song, int keep)
@@ -531,10 +531,25 @@ std::vector<int> sourcesOf (const Song& song, int track)
 
 int insertTracks (Song& song, int at, int count)
 {
-    int done = 0;
-    for (int i = 0; i < count && insertTrack (song, at + i); ++i)
-        ++done;
-    return done;
+    // one shift of every reference (round 166d: hundreds of inserts at once stay instant; it used to swap the new
+    // insert into place one neighbour at a time)
+    const auto tracks = (int) song.mixer.size();
+    count = std::min (count, maxMixerTracks - tracks);
+    if (at < 1 || at > tracks || count <= 0)
+        return 0;
+
+    remapTrackReferences (song, [at, count] (int t) { return t >= at ? t + count : t; });
+    std::vector<MixerTrack> added ((std::size_t) count);
+    for (int i = 0; i < count; ++i)
+        added[(std::size_t) i].name = "Insert " + std::to_string (at + i);
+    song.mixer.insert (song.mixer.begin() + at, std::make_move_iterator (added.begin()), std::make_move_iterator (added.end()));
+    renumberDefaultNames (song, at + count, count);
+    return count;
+}
+
+int roomForInserts (const Song& song) noexcept
+{
+    return std::max (0, maxMixerTracks - std::max (1, (int) song.mixer.size()));
 }
 
 std::vector<int> displayOrder (const Song& song)

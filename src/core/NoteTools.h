@@ -5,6 +5,7 @@
 // LYNX's own designs of the behaviours the manual describes; pure functions over Pattern, no JUCE.
 
 #include <cstdint>
+#include <array>
 #include <vector>
 
 #include "core/Song.h"
@@ -52,6 +53,19 @@ void snapNotesToScale (Pattern& pattern, const std::vector<int>& indices, int ro
 void moveKeysOnScale (Pattern& pattern, const std::vector<int>& indices, const std::vector<Note>& originals, int deltaKeys, int root, int scale);
 // The keyboard's up / down by one (issue #14): with a scale, a note steps to the next in-scale key in that direction.
 int stepOnScale (int key, int direction, int root, int scale) noexcept;
+
+// The Piano Roll's key rows, top to bottom. "Fold to scale" (round 166d, issue #14 — LYNX's own: FL 2026 only
+// highlights the scale, its Piano Roll menus have no fold; like Ableton's Scale fold) keeps only the in-scale keys.
+struct KeyRows
+{
+    std::array<int, 128> keyOfRow {}; // the first `count` rows
+    std::array<int, 128> rowOfKey {}; // −1 = folded away
+    int count = 128;
+    bool shown (int key) const noexcept { return key >= 0 && key < 128 && rowOfKey[(std::size_t) key] >= 0; }
+    // the key `rows` rows above (+) or below (−) `key` (the nearest shown key for a folded one), clamped to the rows
+    int step (int key, int rows) const noexcept;
+};
+KeyRows keyRows (int root, int scale, bool fold) noexcept;
 
 // --- chords -----------------------------------------------------------------------------------
 // Groups the notes into chords: same channel and same start. Each group is sorted by key (low first);

@@ -818,6 +818,23 @@ void MixerStrips::mouseDown (const juce::MouseEvent& e)
     headerDragTrack = -1;
     headerDragged = false;
 
+    if (part == Part::add && e.mods.isPopupMenu())
+    {
+        // FL's "+" menu (round 166d [SHOT]): Add one / Add multiple...
+        juce::PopupMenu menu;
+        const auto count = (int) engine.getSong().mixer.size();
+        const auto room = mixerops::roomForInserts (engine.getSong()) > 0;
+        menu.addItem (tr ("Add one"), room, false, [this, count] {
+            engine.editSong ([count] (Song& s) { mixerops::insertTracks (s, juce::jmax (1, count), 1); });
+            revealed.insert (juce::jmax (1, count));
+            updateSize();
+            selectTrack (juce::jmax (1, count));
+        });
+        menu.addItem (tr ("Add multiple..."), room, false, [this, count] { askInsertMultiple (juce::jmax (1, count)); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+        return;
+    }
+
     if (part == Part::add)
     {
         if (showUsedOnly) // the first unused insert (hidden) comes back before a new one is added
@@ -1644,6 +1661,37 @@ bool saveMixerTrackState (AudioEngine& engine, int track, const juce::File& file
     return file.replaceWithText (ProjectFile::mixerTrackStateToJson (engine.getSong().mixer[(std::size_t) track]));
 }
 
+void MixerStrips::askInsertMultiple (int at)
+{
+    auto* window = new juce::AlertWindow (tr ("Insert multiple"), tr ("How many blank inserts?"), juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor ("count", "2");
+    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MixerStrips> safe (this);
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, at, window] (int result) {
+                                 if (safe == nullptr || result != 1)
+                                     return;
+                                 const auto n = window->getTextEditorContents ("count").getIntValue();
+                                 const auto room = mixerops::roomForInserts (safe->engine.getSong());
+                                 if (n > room) // FL 2026 shows "You can add a maximum of 375 tracks." (round 166d [SHOT]); nothing is added then
+                                 {
+                                     juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Insert multiple"),
+                                                                             tr ("You can add a maximum of {0} inserts.", { juce::String (room) }));
+                                     return;
+                                 }
+                                 if (n > 0)
+                                 {
+                                     const auto first = juce::jlimit (1, (int) safe->engine.getSong().mixer.size(), at);
+                                     safe->engine.editSong ([first, n] (Song& s) { mixerops::insertTracks (s, first, n); });
+                                     for (int i = 0; i < n; ++i)
+                                         safe->revealed.insert (first + i); // shown even while unused
+                                     safe->updateSize();
+                                     safe->selectTrack (first);
+                                 }
+                             }),
+                             true);
+}
+
 void MixerStrips::showMenu (int t)
 {
     buildMenu (t).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
@@ -1929,19 +1977,7 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
             engine.editSong ([t] (Song& s) { mixerops::insertTrack (s, t); });
             setSelection ({ t }, t);
         });
-        menu.addItem (tr ("Insert multiple..."), room, false, [this, t] {
-            auto* window = new juce::AlertWindow (tr ("Insert multiple"), tr ("How many blank inserts?"), juce::MessageBoxIconType::NoIcon);
-            window->addTextEditor ("count", "2");
-            window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-            window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-            juce::Component::SafePointer<MixerStrips> safe (this);
-            window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, t, window] (int result) {
-                                         const auto n = juce::jlimit (0, maxMixerTracks, window->getTextEditorContents ("count").getIntValue());
-                                         if (safe != nullptr && result == 1 && n > 0)
-                                             safe->engine.editSong ([t, n] (Song& s) { mixerops::insertTracks (s, t, n); });
-                                     }),
-                                     true);
-        });
+        menu.addItem (tr ("Insert multiple..."), room, false, [this, t] { askInsertMultiple (t); });
         juce::PopupMenu fromState;
         for (const auto& f : savedMixerStates())
             fromState.addItem (f.getFileNameWithoutExtension(), room, false, [this, t, f] { loadMixerTrackState (engine, t - 1, f, true); });

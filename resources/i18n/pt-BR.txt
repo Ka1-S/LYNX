@@ -6126,6 +6126,10 @@ countries: br
 "target" = "alvo"
 "this track and the target {0} s" = "esta faixa e o alvo {0} s"
 "{0} plugins placed in the folders of FL Studio's Plugin database." = "{0} plugins colocados nas pastas do Plugin database do FL Studio."
+"Fold to the scale (hide the other keys and their notes)" = "Recolher à escala (ocultar as outras teclas e suas notas)"
+"Ghost channels" = "Canais fantasma"
+"Add multiple..." = "Adicionar vários..."
+"You can add a maximum of {0} inserts." = "Você pode adicionar no máximo {0} inserts."
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "Ganho do clipe: [LMB] arraste para cima / baixo (os clipes selecionados juntos)  [RMB] menu"

@@ -5969,6 +5969,10 @@ countries: tr
 "target" = "hedef"
 "this track and the target {0} s" = "bu kanal ve hedef {0} sn"
 "{0} plugins placed in the folders of FL Studio's Plugin database." = "{0} eklenti FL Studio Plugin database klasörlerine yerleştirildi."
+"Fold to the scale (hide the other keys and their notes)" = "Gama katla (diğer tuşları ve notalarını gizle)"
+"Ghost channels" = "Hayalet kanallar"
+"Add multiple..." = "Birden fazla ekle..."
+"You can add a maximum of {0} inserts." = "En fazla {0} insert ekleyebilirsiniz."
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "Klip kazancı: [LMB] yukarı / aşağı sürükle (seçili klipler birlikte)  [RMB] menü"

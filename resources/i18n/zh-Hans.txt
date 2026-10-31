@@ -5969,6 +5969,10 @@ countries: cn sg
 "target" = "目标"
 "this track and the target {0} s" = "此轨道和目标 {0} 秒"
 "{0} plugins placed in the folders of FL Studio's Plugin database." = "已将 {0} 个插件放入 FL Studio Plugin database 的文件夹。"
+"Fold to the scale (hide the other keys and their notes)" = "折叠到音阶（隐藏其他琴键及其音符）"
+"Ghost channels" = "幽灵通道"
+"Add multiple..." = "添加多个..."
+"You can add a maximum of {0} inserts." = "最多可以添加 {0} 个插入轨。"
 
 # round 166e (issue #16): automatic crossfades, clip gain handle, Disarm on stop / Auto-unarm
 "Clip gain: [LMB] drag up / down (the selected clips together)  [RMB] menu" = "片段增益：[LMB] 上下拖动（选中的片段一起）  [RMB] 菜单"

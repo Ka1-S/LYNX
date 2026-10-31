@@ -151,6 +151,9 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
         showGhosts = ghostButton.getToggleState();
         repaint();
     };
+    ghostButton.onRightClick = [this] { // FL: the ghost notes button's menu picks the channels (round 166d)
+        ghostChannelsMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&ghostButton));
+    };
 
     moreButton.setFlat (true);
     moreButton.setTooltip (tr ("Note operations, left-edge resizing and MIDI import/export"));
@@ -230,6 +233,8 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
         box->onChange = [this] {
             publishScale();
             scaleSnapButton.setEnabled (scaleIndex() > 0);
+            if (rows.count < 128 || foldToScale)
+                updateKeyRows(); // the folded rows follow the scale
             repaint();
         };
         addAndMakeVisible (box);
@@ -285,12 +290,36 @@ double PianoRollComponent::xToTick (int x) const
 
 int PianoRollComponent::keyToY (int key) const
 {
-    return headerHeight + (127 - key) * rowHeight - scrollY;
+    return headerHeight + rowFor (key) * rowHeight - scrollY;
+}
+
+int PianoRollComponent::rowFor (int key) const noexcept
+{
+    key = juce::jlimit (0, 127, key);
+    const auto row = rows.rowOfKey[(std::size_t) key];
+    return row >= 0 ? row : rows.rowOfKey[(std::size_t) rows.step (key, 0)]; // a folded key: the row above it
+}
+
+void PianoRollComponent::updateKeyRows()
+{
+    // keep the key at the top of the view where it is when the rows change (fold on/off, another scale)
+    const auto topKey = yToKey (headerHeight);
+    rows = notetools::keyRows (scaleRoot(), scaleIndex(), foldToScale);
+    scrollY = juce::jlimit (0, juce::jmax (0, rows.count * rowHeight - gridArea().getHeight()), rowFor (topKey) * rowHeight);
+    updateScrollBars();
+    repaint();
+}
+
+void PianoRollComponent::setFoldToScale (bool on)
+{
+    foldToScale = on;
+    updateKeyRows();
 }
 
 int PianoRollComponent::yToKey (int y) const
 {
-    return juce::jlimit (0, 127, 127 - (y - headerHeight + scrollY) / rowHeight);
+    const auto row = juce::jlimit (0, juce::jmax (0, rows.count - 1), (y - headerHeight + scrollY) / rowHeight);
+    return rows.keyOfRow[(std::size_t) row];
 }
 
 std::int64_t PianoRollComponent::gridTicks() const
@@ -320,7 +349,7 @@ std::vector<std::int64_t> PianoRollComponent::snapCandidates() const
     {
         const auto& n = notes[(std::size_t) i];
 
-        if ((! edits (n) && ! showGhosts) || std::find (dragIndices.begin(), dragIndices.end(), i) != dragIndices.end())
+        if ((! edits (n) && (! showGhosts || ! ghostShown (n.channel))) || std::find (dragIndices.begin(), dragIndices.end(), i) != dragIndices.end())
             continue;
 
         out.push_back (n.start);
@@ -361,7 +390,7 @@ void PianoRollComponent::updateScrollBars()
     const auto total = (double) viewLengthTicks();
     hBar.setRangeLimits (0.0, total, juce::dontSendNotification);
     hBar.setCurrentRange (scrollTicks, grid.getWidth() / pixelsPerTick, juce::dontSendNotification);
-    vBar.setRangeLimits (0.0, 128.0 * rowHeight, juce::dontSendNotification);
+    vBar.setRangeLimits (0.0, (double) rows.count * rowHeight, juce::dontSendNotification);
     vBar.setCurrentRange (scrollY, grid.getHeight(), juce::dontSendNotification);
     scrollTicks = hBar.getCurrentRangeStart();
     scrollY = (int) vBar.getCurrentRangeStart();
@@ -427,7 +456,7 @@ void PianoRollComponent::scrollToNotes (bool fitPattern)
 
     refreshChannelBox();
     const auto centreKey = high >= 0 ? (low + high) / 2 : 66;
-    scrollY = (127 - centreKey) * rowHeight - gridArea().getHeight() / 2;
+    scrollY = rowFor (centreKey) * rowHeight - gridArea().getHeight() / 2;
     scrollTicks = 0.0;
 
     // FL opens the Piano Roll with the whole pattern across the view (at least one bar)
@@ -504,7 +533,7 @@ std::vector<int> PianoRollComponent::channelNotes() const
     std::vector<int> out;
 
     for (int i = 0; i < (int) notes.size(); ++i)
-        if (edits (notes[(std::size_t) i]))
+        if (edits (notes[(std::size_t) i]) && rows.shown (notes[(std::size_t) i].key)) // (folded-away notes are left alone)
             out.push_back (i);
 
     return out;
@@ -715,7 +744,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             const auto y = keyToY (key);
 
-            if (y > grid.getBottom() || y + rowHeight < grid.getY())
+            if (! rows.shown (key) || y > grid.getBottom() || y + rowHeight < grid.getY())
                 continue;
 
             auto row = isBlackKey (key) ? rowBlack : rowWhite;
@@ -726,7 +755,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
             g.setColour (row);
             g.fillRect (grid.getX(), y, grid.getWidth(), rowHeight);
 
-            if (key % 12 == 0)
+            if (key % 12 == (folded() ? scaleRoot() : 0)) // folded: the octave line under each root
             {
                 g.setColour (gridBeat);
                 g.drawHorizontalLine (y + rowHeight - 1, (float) grid.getX(), (float) grid.getRight());
@@ -747,6 +776,8 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             for (const auto& n : polish::clipGhostNotes (song, song.currentPattern, channel))
             {
+                if (! rows.shown (n.key))
+                    continue;
                 const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
                                                        juce::jmax (4.0f, (float) (n.length * pixelsPerTick) - 1.0f), (float) rowHeight - 2);
                 if (r.getRight() < (float) grid.getX() || r.getX() > (float) grid.getRight())
@@ -758,7 +789,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
 
         for (const auto& n : pattern.notes)
         {
-            if (edits (n) || ! showGhosts)
+            if (edits (n) || ! showGhosts || ! ghostShown (n.channel) || ! rows.shown (n.key))
                 continue;
 
             const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
@@ -780,7 +811,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             const auto& n = pattern.notes[(std::size_t) i];
 
-            if (! edits (n))
+            if (! edits (n) || ! rows.shown (n.key))
                 continue;
 
             const auto selected = isSelected (i);
@@ -946,7 +977,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             const auto& n = pattern.notes[(std::size_t) i];
 
-            if (! edits (n))
+            if (! edits (n) || ! rows.shown (n.key))
                 continue;
 
             const auto x = (float) tickToX ((double) n.start);
@@ -1017,14 +1048,16 @@ void PianoRollComponent::paint (juce::Graphics& g)
         const auto& labels = selectedChannel >= 0 && selectedChannel < (int) song.channels.size()
                                  ? song.channels[(std::size_t) selectedChannel].keyLabels : noLabels;
 
+        // folded to the scale (round 166d) the keys no longer alternate like a piano: one full-width named row each
+        const auto list = folded();
         for (int key = 0; key < 128; ++key)
         {
             const auto y = keyToY (key);
 
-            if (y > keys.getBottom() || y + rowHeight < keys.getY())
+            if (! rows.shown (key) || y > keys.getBottom() || y + rowHeight < keys.getY())
                 continue;
 
-            const auto black = isBlackKey (key);
+            const auto black = isBlackKey (key) && ! list;
             const auto pressed = key == previewKey || isLit (key);
             const auto hovered = key == hover.key && ! pressed;
             auto colour = black ? keyBlack : keyWhite;
@@ -1043,7 +1076,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
 
             const auto isC = key % 12 == 0;
 
-            if (isC || hovered || pressed || (! black && rowHeight >= 16))
+            if (isC || hovered || pressed || (! black && rowHeight >= (list ? 8 : 16)))
             {
                 g.setFont (theme::font (fontHeight, isC));
                 g.setColour (pressed ? onAccent : black ? textPrimary : isC ? bg0 : bg0.withAlpha (0.55f));
@@ -1126,7 +1159,7 @@ int PianoRollComponent::ghostAt (int x, int y) const
     {
         const auto& n = notes[(std::size_t) i];
 
-        if (! edits (n) && n.key == key && x >= tickToX ((double) n.start) && x < tickToX ((double) (n.start + n.length)))
+        if (! edits (n) && n.key == key && ghostShown (n.channel) && x >= tickToX ((double) n.start) && x < tickToX ((double) (n.start + n.length)))
             return i;
     }
 
@@ -1684,7 +1717,7 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
 
         case Drag::pan:
             scrollTicks = juce::jmax (0.0, panStartTicks - e.getDistanceFromDragStartX() / pixelsPerTick);
-            scrollY = juce::jlimit (0, juce::jmax (0, 128 * rowHeight - gridArea().getHeight()), panStartY - e.getDistanceFromDragStartY());
+            scrollY = juce::jlimit (0, juce::jmax (0, rows.count * rowHeight - gridArea().getHeight()), panStartY - e.getDistanceFromDragStartY());
             updateScrollBars();
             repaint();
             return;
@@ -1702,7 +1735,7 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             // up = taller keys; the clicked key stays under the mouse
             const auto offset = e.getMouseDownY() - headerHeight;
             rowHeight = juce::jlimit (6, 32, keyZoomStartRow - e.getDistanceFromDragStartY() / 8);
-            scrollY = juce::jmax (0, (127 - keyZoomKey) * rowHeight + rowHeight / 2 - offset);
+            scrollY = juce::jmax (0, rowFor (keyZoomKey) * rowHeight + rowHeight / 2 - offset);
             updateScrollBars();
             repaint();
             return;
@@ -1927,10 +1960,21 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             const auto oldKey = current.key;
 
             // from the original positions: the group keeps its shape even when hitting the limits
-            editNotes ([this, &deltaTicks, &deltaKeys, rawKeys, onScale] (Pattern& p) {
+            // folded to the scale (round 166d): the notes move by rows (scale degrees), so they stay on shown keys
+            const auto deltaRows = folded() ? rowFor (grabbed.key) - rowFor (grabbed.key + deltaKeys) : 0;
+            editNotes ([this, &deltaTicks, &deltaKeys, rawKeys, onScale, deltaRows] (Pattern& p) {
                 for (std::size_t j = 0; j < dragIndices.size(); ++j)
                     p.notes[(std::size_t) dragIndices[j]] = dragOriginals[j];
 
+                if (folded())
+                {
+                    auto noKeys = 0;
+                    noteedit::move (p, dragIndices, deltaTicks, noKeys);
+                    if (deltaRows != 0)
+                        for (std::size_t j = 0; j < dragIndices.size(); ++j)
+                            p.notes[(std::size_t) dragIndices[j]].key = rows.step (dragOriginals[j].key, deltaRows);
+                    return;
+                }
                 if (! onScale)
                 {
                     noteedit::move (p, dragIndices, deltaTicks, deltaKeys);
@@ -2660,6 +2704,8 @@ void PianoRollComponent::showMoreMenu()
     }
     menu.addSeparator();
     menu.addItem (tr ("Snap notes to the scale"), scaleIndex() > 0, scaleSnap, [this] { setScaleSnap (! scaleSnap); });
+    menu.addItem (tr ("Fold to the scale (hide the other keys and their notes)"), scaleIndex() > 0, foldToScale,
+                  [this] { setFoldToScale (! foldToScale); });
     menu.addItem (tr ("Chord stamp: the clicked key is the top note"), true, chordTopDown, [this] { chordTopDown = ! chordTopDown; });
     menu.addItem (tr ("Move the notes onto the scale"), scaleIndex() > 0, false, [this] {
         const auto root = scaleRoot(), scale = scaleIndex();
@@ -2675,9 +2721,77 @@ void PianoRollComponent::showMoreMenu()
             ghostButton.setToggleState (true, juce::sendNotificationSync);
         repaint();
     });
+    menu.addSubMenu (tr ("Ghost channels"), ghostChannelsMenu());
     menu.addSeparator();
     menu.addSubMenu ("MIDI", midiMenu());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton));
+}
+
+bool PianoRollComponent::ghostShown (int channel) const noexcept
+{
+    const auto& channels = engine.getSong().channels;
+    return channel < 0 || channel >= (int) channels.size() || ! channels[(std::size_t) channel].ghostHidden;
+}
+
+void PianoRollComponent::setGhostChannels (const std::function<bool (int channel, bool shown)>& show)
+{
+    engine.editSong ([&show] (Song& s) {
+        for (int c = 0; c < (int) s.channels.size(); ++c)
+            s.channels[(std::size_t) c].ghostHidden = ! show (c, ! s.channels[(std::size_t) c].ghostHidden);
+    }, false);
+    engine.markModified();
+    if (! showGhosts) // choosing what to ghost shows the ghosts
+        ghostButton.setToggleState (true, juce::sendNotificationSync);
+    repaint();
+}
+
+juce::PopupMenu PianoRollComponent::ghostChannelsMenu()
+{
+    // FL 2026's ghost notes button menu (round 166d [SHOT], right-click on it): "Ghost channels", All, None, then every
+    // channel with a check mark (the edited one in bold); a click toggles that channel's ghost notes
+    struct ChannelItem final : juce::PopupMenu::CustomComponent
+    {
+        ChannelItem (juce::String t, bool tick, bool bold) : text (std::move (t)), ticked (tick), strong (bold) {}
+        void getIdealSize (int& w, int& h) override
+        {
+            w = juce::jlimit (140, 420, 40 + juce::GlyphArrangement::getStringWidthInt (theme::font (theme::type::body, true), text));
+            h = 22;
+        }
+        void paint (juce::Graphics& g) override
+        {
+            if (isItemHighlighted())
+            {
+                g.setColour (theme::colour::accent.withAlpha (0.35f));
+                g.fillRect (getLocalBounds());
+            }
+            auto area = getLocalBounds();
+            const auto tickArea = area.removeFromLeft (24).toFloat();
+            if (ticked)
+                icons::draw (g, Icon::check, tickArea.withSizeKeepingCentre (12.0f, 12.0f), theme::colour::textPrimary);
+            g.setColour (ticked ? theme::colour::textPrimary : theme::colour::textSecondary);
+            g.setFont (theme::font (theme::type::body, strong));
+            g.drawText (text, area.withTrimmedRight (8), juce::Justification::centredLeft, true);
+        }
+        juce::String text;
+        bool ticked, strong;
+    };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Ghost channels"));
+    menu.addItem (tr ("All"), [this] { setGhostChannels ([] (int, bool) { return true; }); });
+    menu.addItem (tr ("None"), [this] { setGhostChannels ([] (int, bool) { return false; }); });
+    menu.addSeparator();
+    const auto& song = engine.getSong();
+    const auto current = engine.getSelectedChannel();
+    for (int c = 0; c < (int) song.channels.size(); ++c)
+    {
+        const auto name = juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str());
+        juce::PopupMenu::Item item (name);
+        item.customComponent = new ChannelItem (name, ghostShown (c), c == current);
+        item.action = [this, c] { setGhostChannels ([c] (int k, bool shown) { return k == c ? ! shown : shown; }); };
+        menu.addItem (std::move (item));
+    }
+    return menu;
 }
 
 juce::PopupMenu PianoRollComponent::toolsMenu()
@@ -2811,7 +2925,7 @@ void PianoRollComponent::zoomToSelection()
 
     const auto margin = (double) ticksPerStep;
     zoomToTicks (juce::jmax (0.0, (double) from - margin), (double) to + margin);
-    scrollY = juce::jmax (0, (127 - (low + high) / 2) * rowHeight - gridArea().getHeight() / 2);
+    scrollY = juce::jmax (0, rowFor ((low + high) / 2) * rowHeight - gridArea().getHeight() / 2);
     updateScrollBars();
     repaint();
 }
@@ -3103,7 +3217,7 @@ void PianoRollComponent::glideBy (double ticks, double pixels)
 
     const auto grid = gridArea();
     glideX.target = juce::jlimit (0.0, juce::jmax (0.0, (double) viewLengthTicks() - grid.getWidth() / pixelsPerTick), glideX.target + ticks);
-    glideY.target = juce::jlimit (0.0, juce::jmax (0.0, 128.0 * rowHeight - grid.getHeight()), glideY.target + pixels);
+    glideY.target = juce::jlimit (0.0, juce::jmax (0.0, (double) rows.count * rowHeight - grid.getHeight()), glideY.target + pixels);
     glideFrame();
 }
 
@@ -3178,7 +3292,7 @@ void PianoRollComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::
         const auto key = yToKey (e.y);
         const auto offset = e.y - keyToY (key);
         rowHeight = juce::jlimit (6, 32, rowHeight + (wheel.deltaY > 0 ? 2 : -2));
-        scrollY = juce::jmax (0, (127 - key) * rowHeight + offset - (e.y - headerHeight));
+        scrollY = juce::jmax (0, rowFor (key) * rowHeight + offset - (e.y - headerHeight));
     }
     else if (ctrl)
     {
@@ -3271,23 +3385,37 @@ void PianoRollComponent::nudge (std::int64_t ticks, int keys)
     if (selection.empty())
         return;
 
-    if (keys == 1 || keys == -1) // snap to scale: up / down step along the scale (every selected note, issue #14)
-        if (scaleSnap && scaleIndex() > 0)
-        {
-            editNotes ([this, keys] (Pattern& p) {
-                for (const auto i : selection)
-                    if (i >= 0 && i < (int) p.notes.size())
-                        p.notes[(std::size_t) i].key = notetools::stepOnScale (p.notes[(std::size_t) i].key, keys, scaleRoot(), scaleIndex());
-            });
-            keys = 0;
-            if (ticks == 0)
+    // folded to the scale (round 166d): Up / Down step through the shown keys (an octave stays an octave)
+    if (folded() && keys != 0 && std::abs (keys) < 12)
+    {
+        editNotes ([this, &ticks, keys] (Pattern& p) {
+            auto noKeys = 0;
+            noteedit::move (p, selection, ticks, noKeys);
+            for (auto i : selection)
+                if (i >= 0 && i < (int) p.notes.size())
+                    p.notes[(std::size_t) i].key = rows.step (p.notes[(std::size_t) i].key, keys);
+        });
+    }
+    else
+    {
+        if (keys == 1 || keys == -1) // snap to scale: up / down step along the scale (every selected note, issue #14)
+            if (scaleSnap && scaleIndex() > 0)
             {
-                sortNotes();
-                return;
+                editNotes ([this, keys] (Pattern& p) {
+                    for (const auto i : selection)
+                        if (i >= 0 && i < (int) p.notes.size())
+                            p.notes[(std::size_t) i].key = notetools::stepOnScale (p.notes[(std::size_t) i].key, keys, scaleRoot(), scaleIndex());
+                });
+                keys = 0;
+                if (ticks == 0)
+                {
+                    sortNotes();
+                    return;
+                }
             }
-        }
 
-    editNotes ([this, &ticks, &keys] (Pattern& p) { noteedit::move (p, selection, ticks, keys); });
+        editNotes ([this, &ticks, &keys] (Pattern& p) { noteedit::move (p, selection, ticks, keys); });
+    }
 
     if (keys != 0 && selection.size() == 1)
     {

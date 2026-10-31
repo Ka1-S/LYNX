@@ -200,6 +200,7 @@ private:
     std::vector<std::pair<int, float>> groupStart; // (track, value) of the selection when a group drag starts
     float groupGrab = 0.0f;
     void showMenu (int track);
+    void askInsertMultiple (int at); // "Insert multiple..." / the "+" menu's "Add multiple..." (at most the room left)
     void showTrackEq (int track);
     ui::ValueSpec specFor (Part part, int track) const;
     void setValue (Part part, int track, double value);
