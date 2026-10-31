@@ -1024,7 +1024,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 continue;
 
             const auto black = isBlackKey (key);
-            const auto pressed = key == previewKey;
+            const auto pressed = key == previewKey || isLit (key);
             const auto hovered = key == hover.key && ! pressed;
             auto colour = black ? keyBlack : keyWhite;
             if (inScale (key))
@@ -3586,11 +3586,41 @@ void PianoRollComponent::drawEvents (int fromX, int toX, int y, bool erase)
     repaint (velocityArea());
 }
 
+NoteMask PianoRollComponent::soundingNow() const
+{
+    if (! allChannels)
+        return engine.soundingKeys (engine.getSelectedChannel());
+    // "All": every channel with notes in this pattern
+    NoteMask all {};
+    const auto& song = engine.getSong();
+    std::vector<char> seen (song.channels.size(), 0);
+    for (const auto& n : currentPattern (song).notes)
+        if (n.channel >= 0 && n.channel < (int) seen.size() && ! seen[(std::size_t) n.channel])
+        {
+            seen[(std::size_t) n.channel] = 1;
+            const auto k = engine.soundingKeys (n.channel);
+            all[0] |= k[0], all[1] |= k[1];
+        }
+    if (const auto selected = engine.getSelectedChannel(); selected >= 0 && selected < (int) seen.size() && ! seen[(std::size_t) selected])
+    {
+        const auto k = engine.soundingKeys (selected);
+        all[0] |= k[0], all[1] |= k[1];
+    }
+    return all;
+}
+
 void PianoRollComponent::timerCallback()
 {
     if (channelBox.getSelectedId() != (allChannels ? allChannelsId : engine.getSelectedChannel() + 1))
         refreshChannelBox();
     updateChordReadout();
+
+    // the keys the channel plays light up on the keyboard (song, pattern, typing keyboard, MIDI)
+    if (const auto lit = isShowing() ? soundingNow() : NoteMask {}; lit != litKeys)
+    {
+        litKeys = lit;
+        repaint (0, headerHeight, keyboardWidth, getHeight() - headerHeight);
+    }
 
     auto& transport = engine.getTransport();
     auto tick = -1.0;

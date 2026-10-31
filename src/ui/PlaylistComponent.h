@@ -204,7 +204,10 @@ private:
     void updateScrollBars();
     bool isSelected (int index) const;
     void setSelection (std::vector<int> indices);
-    void sortClips(); // sorts while keeping the selection (no undo step)
+    // sorts while keeping the selection (no undo step); `placed` = the clips the edit put somewhere (moved, painted,
+    // pasted…): their audio clips follow an audio track (issue #15, trackmodes::followAudioTracks)
+    void sortClips (std::vector<int> placed = {});
+    void askToMakeClipsUnique (std::vector<int> placed, std::vector<int> channels);
     void showClipMenu (int clip);
     void showRulerMenu (int x);                           // markers, time signature and loop
     static juce::String markerLabel (const Marker& m);   // the text of a marker's tag on the ruler

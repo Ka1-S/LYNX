@@ -279,6 +279,9 @@ private:
     std::int64_t grabOffset = 0;    // note tick - mouse tick at drag start
     std::int64_t lastLength = ticksPerStep * 2;
     int previewKey = -1;
+    NoteMask litKeys {}; // keys sounding on the channel(s) shown: lit on the keyboard (issue #14, FL)
+    NoteMask soundingNow() const;
+    bool isLit (int key) const noexcept { return key >= 0 && key < 128 && ((litKeys[(std::size_t) (key >> 6)] >> (key & 63)) & 1u) != 0; }
     double playheadTick = -1.0;
 
     std::vector<int> selection;     // indices into Pattern::notes, sorted
