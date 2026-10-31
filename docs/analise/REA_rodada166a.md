@@ -145,8 +145,13 @@ Only the key clicked with the mouse was drawn pressed.
 - `Instrument::setLivePitch (cents)`: the renderer passes each channel's PITCH knob + fine tune + main pitch before
   every block. A hosted plugin (`PluginInstrument`) turns it into MIDI pitch bend scaled by the wrapper's pitch bend
   range, and a slide note into a pitch-bend glide (64-sample steps) that a new note resets.
-- Tests: `issue14_pitch_audit_of_the_instruments` (now with checks: every engine within 40 cents of +700 for main
-  pitch, knob and slide, except the ones whose pitch the estimate can't read), and
+- After [TEST, same audit, 2026-10-31 02:35]: every engine within 10 cents of +700 for main pitch, knob and slide
+  (LYNX Synth +701/+701/+701, 3x Osc +700/+700/+701, Sytrus +699/+699/+700, … Transistor Bass +700/+700/+698, BooBass
+  +692/+692/+694); Plucked! main pitch and knob +699, slide +0 (as FL). Ogun, Sakura and Drumpad: the autocorrelation
+  estimate can't read their pitch (Ogun's own held C4 jumps 2 octaves between 0.3 s and 1.0 s; its slide reads +726…+740
+  cents right after the glide); FL Slayer (guitar model) slide +700.
+- Tests: `issue14_pitch_audit_of_the_instruments` (now with checks: within 40 cents of the same note played 7
+  semitones up, or of base + 700, for main pitch, knob and slide, except the engines the estimate can't read), and
   `issue14_plugin_channels_get_the_pitch_knob_main_pitch_and_slides`.
 - Linux: the core tests run natively on Linux (WSL); the JUCE side (PluginHost, Piano roll, Playlist) compiles in the
   Linux build.

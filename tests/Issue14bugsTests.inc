@@ -123,8 +123,10 @@ TEST (issue14_pitch_audit_of_the_instruments)
     if (realFlpDir.empty())
         return;
     const auto print = std::getenv ("LYNX_PITCH_AUDIT") != nullptr;
-    // the pitch of a guitar model / drums can't be read by the autocorrelation estimate (Drumpad doesn't follow the key)
-    const std::set<std::string> unreadable { "FL Slayer", "Fruity Granulizer", "Drumaxx", "Fruit Kick", "BassDrum", "Drumpad" };
+    // the pitch of a guitar / string model and of drums can't be read by the autocorrelation estimate (Sakura: C4 reads as
+    // 870 Hz and G4 lower than C4; Ogun's held C4 reads 2 octaves apart at 0.3 s and 1.0 s, its slide +726…+740 cents at
+    // 0.6…0.65 s with LYNX_PITCH_TRACE; Drumpad doesn't follow the key)
+    const std::set<std::string> unreadable { "FL Slayer", "Fruity Granulizer", "Drumaxx", "Fruit Kick", "BassDrum", "Drumpad", "Sakura", "Ogun" };
     // Plucked! reads Final.Pitch only when a voice starts (REA_rodada65 §1.2: it sizes the delay line): FL can't glide it
     const std::set<std::string> noSlide { "Plucked!" };
     const auto fl = natives142::flAccess();
@@ -160,13 +162,21 @@ TEST (issue14_pitch_audit_of_the_instruments)
         bent.misc.pitchRange = 12;
         bent.sampler.pitch += 7.0f;
         const auto knob = issue14::pitchAt (issue14::renderPattern (bent, { held }, 0.0f, 1.5), 1.0);
-        const auto slid = issue14::pitchAt (issue14::renderPattern (c, { held, slide }, 0.0f, 1.5), 1.0);
+        const auto slidOut = issue14::renderPattern (c, { held, slide }, 0.0f, 1.5);
+        const auto slid = issue14::pitchAt (slidOut, 1.0);
+        if (print && std::getenv ("LYNX_PITCH_TRACE") != nullptr)
+            for (const auto t : { 0.3, 0.45, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0 })
+                std::printf ("    %s slide t=%.2f %+.0f cents\n", name.c_str(), t, issue14::cents (base, issue14::pitchAt (slidOut, t)));
         if (print)
             std::printf ("  %-28s %9.1f %+9.0f %+9.0f %+9.0f\n", name.c_str(), base, issue14::cents (base, master), issue14::cents (base, knob),
                          issue14::cents (base, slid));
         if (unreadable.count (name) == 0)
         {
-            const auto same = [ref] (double hz) { return std::abs (issue14::cents (ref, hz)) < 40.0; };
+            // within 40 cents of the key played 7 semitones up, or (an engine whose key doesn't move its pitch, like a
+            // Transistor Bass preset running its own sequence) of the base pitch + 700 cents
+            const auto same = [ref, base] (double hz) {
+                return std::abs (issue14::cents (ref, hz)) < 40.0 || std::abs (issue14::cents (base, hz) - 700.0) < 40.0;
+            };
             if (! same (master) || ! same (knob) || (noSlide.count (name) == 0 && ! same (slid)))
                 std::printf ("  pitch: %s doesn't follow (key +7 %+.0f; master %+.0f, knob %+.0f, slide %+.0f cents)\n", name.c_str(),
                              issue14::cents (base, ref), issue14::cents (base, master), issue14::cents (base, knob), issue14::cents (base, slid));
