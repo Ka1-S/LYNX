@@ -9,7 +9,7 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
 Windows, macOS and Linux.</p>
 
 <p align="center">
-  <a href="https://github.com/Ka1-S/LYNX-SHARE/releases"><img src="https://img.shields.io/badge/Download-0.1.20%20alpha-d9534f?style=for-the-badge" alt="Download LYNX SHARE"></a>
+  <a href="https://github.com/Ka1-S/LYNX-SHARE/releases"><img src="https://img.shields.io/badge/Download-0.1.21%20alpha-d9534f?style=for-the-badge" alt="Download LYNX SHARE"></a>
   <a href="https://github.com/Ka1-S/LYNX-SHARE/releases"><img src="https://img.shields.io/github/downloads/Ka1-S/LYNX-SHARE/total?style=for-the-badge&label=downloads&color=24292f" alt="Total downloads"></a>
   <a href="https://github.com/Ka1-S/LYNX-SHARE/stargazers"><img src="https://img.shields.io/github/stars/Ka1-S/LYNX-SHARE?style=for-the-badge&color=24292f" alt="GitHub stars"></a>
 </p>
