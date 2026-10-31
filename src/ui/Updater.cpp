@@ -52,7 +52,7 @@ juce::File downloadsFolder()
     {
         wchar_t expanded[MAX_PATH * 2] {};
         if (ExpandEnvironmentStringsW (known.toWideCharPointer(), expanded, (DWORD) std::size (expanded)) > 0)
-            if (const juce::File f (juce::String (expanded)); juce::File::isAbsolutePath (f.getFullPathName()) && f.isDirectory())
+            if (const juce::File f { juce::String (expanded) }; juce::File::isAbsolutePath (f.getFullPathName()) && f.isDirectory())
                 return f;
     }
    #endif
@@ -569,6 +569,9 @@ void installAndRestart (const juce::File& setup)
             return;
         }
         updateFolder().getChildFile ("result.txt").deleteFile();
+        // the version being installed, for the "was updated to" bar on the next start
+        updateFolder().getChildFile ("installing.txt").replaceWithText ("version=" + juce::String (c.release.version.text()) + "\n");
+        updateFolder().getChildFile ("installing-notes.md").replaceWithText (fromUtf8 (c.release.body));
         juce::StringArray args { helper.getFullPathName(), "--apply-update", setup.getFullPathName(), exe.getParentDirectory().getFullPathName(),
                                  juce::String ((juce::int64) currentPid()) };
         if (const auto project = c.host.currentProject ? c.host.currentProject() : juce::File(); project.existsAsFile())
@@ -742,9 +745,12 @@ void setAutomatic (bool on)
 
 void setHost (Host host) { controller().host = std::move (host); }
 
+// set when this start follows an update: no automatic check this session (the "updated" bar stays)
+static bool justUpdated = false;
+
 void startAutomaticCheck()
 {
-    if (! offered() || ! automatic())
+    if (! offered() || ! automatic() || justUpdated)
         return;
     // LYNX_TEST_MODE: no network, unless a test fixture is named
     if (platform::testMode() && overrideUrl().isEmpty())
@@ -788,17 +794,26 @@ void afterStart()
             if (line.startsWith ("version=")) version = line.fromFirstOccurrenceOf ("=", false, false).trim();
         }
         resultFile.deleteFile();
+        const auto installing = folder.getChildFile ("installing.txt");
+        if (version.isEmpty() && installing.existsAsFile())
+            version = installing.loadFileAsString().fromFirstOccurrenceOf ("version=", false, false).trim();
+        log ("after start: update result " + result + (detail.isNotEmpty() ? " (" + detail + ")" : juce::String()));
         if (result == "ok")
         {
+            justUpdated = true;
             auto& c = controller();
             // the release notes come from the cached list when there is one
             const auto list = update::parseReleases (utf8 (cachePath().loadFileAsString()));
             c.release = {};
+            const auto installed = version.isNotEmpty() ? update::parseVersion (utf8 (version)) : runningVersion();
             for (const auto& r : list)
-                if (update::compare (r.version, runningVersion()) == 0 || r.version.text() == utf8 (version))
+                if (update::compare (r.version, installed) == 0)
                     c.release = r;
             if (c.release.tag.empty())
-                c.release.version = runningVersion();
+            {
+                c.release.version = installed;
+                c.release.body = utf8 (folder.getChildFile ("installing-notes.md").loadFileAsString());
+            }
             c.setPhase (Phase::updated);
         }
         else
@@ -806,13 +821,19 @@ void afterStart()
                      tr ("The update could not be installed ({0}). This version of LYNX SHARE is still installed; details in {1}.",
                          { detail, folder.getChildFile ("update.log").getFullPathName() }));
     }
-    // the installer and the helper copy of LYNX.exe go (the helper may still be ending: once more a little later)
-    auto clean = [folder] {
-        for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, "*.exe;*.part;*.tmp"))
-            f.deleteFile();
-    };
-    clean();
-    juce::Timer::callAfterDelay (15000, clean);
+    folder.getChildFile ("installing.txt").deleteFile();
+    folder.getChildFile ("installing-notes.md").deleteFile();
+    // the installer and the helper copy of LYNX.exe go (nothing has been downloaded yet in this session)
+    for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, "*.exe;*.part;*.tmp"))
+        f.deleteFile();
+    // the helper may still be ending: its copy once more a little later, unless an update of this session needs the folder
+    // (a new download is already there by then, and "Install and restart" copies the helper again)
+    juce::Timer::callAfterDelay (15000, [folder] {
+        const auto phase = controller().phase;
+        if (phase == Phase::idle || phase == Phase::checking || phase == Phase::available || phase == Phase::updated
+            || phase == Phase::failed || phase == Phase::saved)
+            folder.getChildFile ("LYNX-updater.exe").deleteFile();
+    });
 }
 
 bool runApplyHelper (const juce::StringArray& args)
@@ -1087,60 +1108,71 @@ void UpdateBar::resized()
 // ================================================================================================================
 namespace
 {
+// The release notes as one laid-out AttributedString (a 45 KB release body inserted run by run into a TextEditor took
+// seconds on Windows: each insert re-lays the whole text out). Laid out again only when the width changes.
+class NotesText final : public juce::Component
+{
+public:
+    explicit NotesText (const std::vector<update::NoteLine>& lines)
+    {
+        using K = update::NoteLine::Kind;
+        text.setWordWrap (juce::AttributedString::byWord);
+        text.setLineSpacing (2.0f);
+        auto add = [this] (const juce::String& s, juce::FontOptions font, juce::Colour colour) { text.append (s, juce::Font (font), colour); };
+        if (lines.empty())
+            add (tr ("This release has no notes."), theme::font (theme::type::body), theme::colour::textSecondary);
+        for (const auto& l : lines)
+        {
+            const auto t = juce::String::fromUTF8 (l.text.c_str());
+            switch (l.kind)
+            {
+                case K::heading:
+                    add (t + "\n", theme::font (l.level <= 1 ? theme::type::title + 3.0f : l.level == 2 ? theme::type::title + 1.0f : theme::type::body + 1.0f, true),
+                         l.level <= 2 ? theme::colour::accent : theme::colour::textPrimary);
+                    break;
+                case K::bullet:
+                    add (juce::String::repeatedString ("      ", l.level) + juce::String::fromUTF8 ("\xE2\x80\xA2  ") + t + "\n", theme::font (theme::type::body),
+                         theme::colour::textPrimary);
+                    break;
+                case K::text: add (t + "\n", theme::font (theme::type::body), theme::colour::textSecondary); break;
+                case K::blank: add ("\n", theme::font (theme::type::small), theme::colour::textSecondary); break;
+            }
+        }
+    }
+
+    // lays the text out for `width` and takes the height it needs
+    void fitWidth (int width)
+    {
+        if (width == laidOutWidth)
+            return;
+        laidOutWidth = width;
+        layout.createLayout (text, (float) juce::jmax (100, width - 2 * margin));
+        setSize (width, (int) std::ceil (layout.getHeight()) + 2 * margin);
+    }
+
+    void paint (juce::Graphics& g) override { layout.draw (g, getLocalBounds().reduced (margin).toFloat()); }
+
+private:
+    static constexpr int margin = 12;
+    juce::AttributedString text;
+    juce::TextLayout layout;
+    int laidOutWidth = -1;
+};
+
 class NotesPanel final : public juce::Component
 {
 public:
-    explicit NotesPanel (const update::Release& r)
+    explicit NotesPanel (const update::Release& r) : notes (update::releaseNotes (r.body))
     {
         title.setText (r.name.empty() ? "LYNX SHARE " + versionText (r) : fromUtf8 (r.name), juce::dontSendNotification);
         title.setFont (theme::font (theme::type::title + 3.0f, true));
         title.setColour (juce::Label::textColourId, theme::colour::textPrimary);
         addAndMakeVisible (title);
 
-        notes.setMultiLine (true, true);
-        notes.setReadOnly (true);
-        notes.setScrollbarsShown (true);
-        notes.setCaretVisible (false);
-        notes.setColour (juce::TextEditor::backgroundColourId, theme::colour::bg1);
-        notes.setColour (juce::TextEditor::outlineColourId, theme::colour::border);
-        notes.setColour (juce::TextEditor::focusedOutlineColourId, theme::colour::border);
-        notes.setBorder (juce::BorderSize<int> (10, 12, 10, 12));
-        const auto lines = update::releaseNotes (r.body);
-        if (lines.empty())
-        {
-            notes.setColour (juce::TextEditor::textColourId, theme::colour::textSecondary);
-            notes.setFont (theme::font (theme::type::body));
-            notes.insertTextAtCaret (tr ("This release has no notes."));
-        }
-        for (const auto& l : lines)
-        {
-            using K = update::NoteLine::Kind;
-            const auto text = fromUtf8 (l.text);
-            switch (l.kind)
-            {
-                case K::heading:
-                    notes.setColour (juce::TextEditor::textColourId, l.level <= 2 ? theme::colour::accent : theme::colour::textPrimary);
-                    notes.setFont (theme::font (l.level <= 1 ? theme::type::title + 3.0f : l.level == 2 ? theme::type::title + 1.0f : theme::type::body + 1.0f, true));
-                    notes.insertTextAtCaret (text + "\n");
-                    break;
-                case K::bullet:
-                    notes.setColour (juce::TextEditor::textColourId, theme::colour::textPrimary);
-                    notes.setFont (theme::font (theme::type::body));
-                    notes.insertTextAtCaret (juce::String::repeatedString ("    ", l.level) + juce::String::fromUTF8 ("\xE2\x80\xA2  ") + text + "\n");
-                    break;
-                case K::text:
-                    notes.setColour (juce::TextEditor::textColourId, theme::colour::textSecondary);
-                    notes.setFont (theme::font (theme::type::body));
-                    notes.insertTextAtCaret (text + "\n");
-                    break;
-                case K::blank:
-                    notes.setFont (theme::font (theme::type::small));
-                    notes.insertTextAtCaret ("\n");
-                    break;
-            }
-        }
-        notes.moveCaretToTop (false);
-        addAndMakeVisible (notes);
+        viewport.setViewedComponent (&notes, false);
+        viewport.setScrollBarsShown (true, false);
+        viewport.setScrollBarThickness (10);
+        addAndMakeVisible (viewport);
 
         page = releasePage (r);
         githubButton.setButtonText (tr ("Open on GitHub"));
@@ -1165,7 +1197,14 @@ public:
         setSize (680, 540);
     }
 
-    void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg2); }
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg2);
+        g.setColour (theme::colour::bg1);
+        g.fillRect (viewport.getBounds());
+        g.setColour (theme::colour::border);
+        g.drawRect (viewport.getBounds().expanded (1));
+    }
 
     void resized() override
     {
@@ -1174,7 +1213,8 @@ public:
         r.removeFromTop (8);
         auto buttons = r.removeFromBottom (30);
         r.removeFromBottom (12);
-        notes.setBounds (r);
+        viewport.setBounds (r.reduced (1));
+        notes.fitWidth (viewport.getMaximumVisibleWidth());
         closeButton.setBounds (buttons.removeFromRight (100));
         buttons.removeFromRight (8);
         if (updateButton.isVisible())
@@ -1187,7 +1227,8 @@ public:
 
 private:
     juce::Label title;
-    juce::TextEditor notes;
+    NotesText notes;
+    juce::Viewport viewport;
     juce::TextButton githubButton, closeButton, updateButton;
     juce::String page;
 };

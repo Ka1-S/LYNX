@@ -7,7 +7,10 @@ the user-approved "In-app update check" section of the 0.1.21 plan.
 - Implemented: core/UpdateCheck (versions, release JSON, flavours, assets, checksums, release notes, settings),
   ui/Updater (check, bar, What's new, Update per flavour, `--apply-update` helper), Settings › General › Updates,
   Help › Check for updates..., PRIVACY.md, docs/STORE.md, NSIS silent-update choices, release.yml note, 15 languages.
-- Next: Windows end-to-end test with a local fixture (see "Verification"), then land.
+- Verified end to end on Windows (installer, portable, skip, manual check, damaged download, offline) and Linux
+  (AppImage) with a local fixture; see "Verification". Landed.
+- Left for later: macOS path (.dmg to Downloads + reveal) is built on the shared code but not run on a Mac; the first real
+  check against GitHub happens with the 0.1.21 release (0.1.20 has no updater, so 0.1.21 → 0.1.22 is the first real update).
 
 ## Design
 
@@ -29,4 +32,22 @@ the user-approved "In-app update check" section of the 0.1.21 plan.
 | AppImage | `scripts/package-linux.sh` | update information was already embedded (`gh-releases-zsync|Ka1-S|LYNX-SHARE|latest-all|LYNX-*-x86_64.AppImage.zsync`; `latest-all` because every LYNX release is a prerelease — `latest` would skip them) and the .zsync is published |
 
 ## Verification
-(filled in below as it is done)
+Fixture: `releases.json` in GitHub's shape (a draft 0.2.0 that must be skipped, 0.1.99-alpha with the real 0.1.20 notes as
+body, older releases), `SHA256SUMS.txt`, a `LYNX-0.1.99-alpha-setup-x64.exe` built by makensis from `LYNX.nsi` with a marker
+file, the portable zip; served by `python3 -m http.server`; `LYNX_UPDATE_URL` points at it, `LYNX_UPDATE_VERSION=0.1.20`
+fakes the old version. Every run: fresh `LYNX_PROFILE_DIR`, `LYNX_TEST_MODE=1`, install folder on E:, registry restored after.
+
+| Case | Result |
+|---|---|
+| Core tests (`Update166bTests.inc`, 7 tests) + a standalone harness of the same file | 129 checks, 0 failures |
+| Snapshot (`--snapshot`): bar and What's new | `-update-bar.png`, `-update-notes.png` look right |
+| Windows: silent install of 0.1.20 (`/S /D=`) | no desktop shortcut, no .flp "Open with" entry (`SilentKeepsChoices`) |
+| Windows installer flavour: bar → What's new → Update | download 0.6 s, checksum OK, helper waits for the pid, `setup /S` in 2 s, DisplayVersion 0.1.99, marker present, relaunched; next start shows "LYNX SHARE was updated to …" (no new check that session), temp files gone |
+| What's new with the real 45 KB notes | opens at once (a `TextEditor` took > 1 min to insert them; replaced by an `AttributedString` view) |
+| ✕ on the bar | `skipped=0.1.99-alpha` in updates.txt, bar gone; Help › Check for updates still offers it |
+| Portable flavour | zip saved to Downloads, bar "saved to … / Show in folder" |
+| Damaged download (bad SHA256SUMS) | "The update failed: the download is damaged…", Try again / Open the release page, file deleted |
+| Running the newest version, Help › Check for updates | "You're up to date: LYNX SHARE 0.1.99-alpha is the newest version." |
+| Offline (nothing listening) | automatic check silent: no bar, no dialog |
+| Linux AppImage (WSLg) | new AppImage downloaded and checked beside the old one, chmod +x, "Restart now" |
+| GitHub alert markers in notes (`> [!IMPORTANT]`) | dropped (seen raw in the first run; fixed + test) |

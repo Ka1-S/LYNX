@@ -702,9 +702,34 @@ namespace
 // inline Markdown to text: ![alt](url) goes, [text](url) keeps the text, <tags> go, ** __ ` go, \* escapes
 std::string inlineText (const std::string& s)
 {
+    // *emphasis* / _emphasis_: the pairs of single marks around words go (a lone '*' or snake_case stays)
+    std::vector<bool> drop (s.size(), false);
+    for (char mark : { '*', '_' })
+        for (std::size_t i = 0; i < s.size(); ++i)
+        {
+            const bool doubled = (i + 1 < s.size() && s[i + 1] == mark) || (i > 0 && s[i - 1] == mark);
+            if (s[i] != mark || doubled || (i > 0 && s[i - 1] == '\\') || i + 1 >= s.size() || std::isspace ((unsigned char) s[i + 1]))
+                continue;
+            if (mark == '_' && i > 0 && std::isalnum ((unsigned char) s[i - 1]))
+                continue;
+            for (std::size_t j = i + 2; j < s.size(); ++j)
+                if (s[j] == mark && ! std::isspace ((unsigned char) s[j - 1]) && s[j - 1] != '\\'
+                    && ! (j + 1 < s.size() && s[j + 1] == mark)
+                    && (mark == '*' || j + 1 >= s.size() || ! std::isalnum ((unsigned char) s[j + 1])))
+                {
+                    drop[i] = drop[j] = true;
+                    i = j;
+                    break;
+                }
+        }
     std::string out;
     for (std::size_t i = 0; i < s.size();)
     {
+        if (drop[i])
+        {
+            ++i;
+            continue;
+        }
         const char c = s[i];
         if (c == '\\' && i + 1 < s.size() && std::ispunct ((unsigned char) s[i + 1]))
         {
@@ -766,6 +791,8 @@ std::vector<NoteLine> releaseNotes (const std::string& markdown)
 {
     std::vector<NoteLine> lines;
     auto push = [&lines] (NoteLine line) {
+        if (line.kind == NoteLine::Kind::text && trim (line.text).empty())
+            line.kind = NoteLine::Kind::blank; // e.g. a line of HTML only (a centred logo)
         if (line.kind == NoteLine::Kind::blank && (lines.empty() || lines.back().kind == NoteLine::Kind::blank))
             return;
         lines.push_back (std::move (line));
@@ -826,7 +853,12 @@ std::vector<NoteLine> releaseNotes (const std::string& markdown)
         }
         auto text = t;
         if (text[0] == '>')
+        {
             text = trim (text.substr (1));
+            // a GitHub alert marker ("> [!IMPORTANT]") is not text; an empty quote line ends the paragraph
+            if (text.empty() || (text.size() > 3 && text.compare (0, 2, "[!") == 0 && text.back() == ']'))
+                continue;
+        }
         if (text.front() == '|' && text.back() == '|') // a table row: cells apart
         {
             std::string row;

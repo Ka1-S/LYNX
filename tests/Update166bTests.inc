@@ -228,5 +228,17 @@ TEST (update166b_release_notes_as_text)
     CHECK (lines.size() > 6 && lines[4].level == 2 && lines[6].level == 1);
     const auto text = releaseNotesText (lines);
     CHECK (text.find ("\xE2\x80\xA2 A bar") != std::string::npos && text.find ("    \xE2\x80\xA2 nested") != std::string::npos);
+    // single-mark emphasis goes, snake_case and a lone star stay
+    const auto em = releaseNotes ("*Update* installs it, _really_; snake_case_name, 2 * 3 = 6, **bold**");
+    CHECK (em.size() == 1 && em[0].text == "Update installs it, really; snake_case_name, 2 * 3 = 6, bold");
+    if (em.size() == 1)
+        std::printf ("  em: [%s]\n", em[0].text.c_str());
     CHECK (releaseNotes ("").empty() && releaseNotes ("\n\n\n").empty());
+    // a GitHub alert marker is dropped; the quoted text stays; a bare ">" is safe
+    const auto alert = releaseNotes ("Intro\n> [!IMPORTANT]\n> Still an alpha.\n>\n> More.");
+    CHECK (alert.size() == 3 && alert[0].text == "Intro" && alert[1].text == "Still an alpha." && alert[2].text == "More.");
+    CHECK (releaseNotes (">").empty() && releaseNotes ("> [!NOTE]").empty());
+    // a line of HTML only (the logo at the top of the release notes) leaves no empty line
+    const auto logo = releaseNotes ("<p align=\"center\"><img src=\"x.png\" width=\"96\"></p>\n\n**LYNX SHARE 0.1.20 alpha**: text");
+    CHECK (logo.size() == 1 && logo[0].text == "LYNX SHARE 0.1.20 alpha: text");
 }
