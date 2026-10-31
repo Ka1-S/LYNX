@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1277" height="1277" viewBox="240 200 680 680">
+  <defs>
+    <radialGradient id="disc" cx="44%" cy="32%" r="72%">
+      <stop offset="0" stop-color="#47474f"/><stop offset="0.55" stop-color="#2a2a30"/><stop offset="1" stop-color="#18181c"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e2502f"/><stop offset="1" stop-color="#9c2a1c"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0.3">
+      <stop offset="0" stop-color="#f4563c"/><stop offset="0.55" stop-color="#e3352a"/><stop offset="1" stop-color="#c42420"/>
+    </linearGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b22120"/><stop offset="1" stop-color="#8c1517"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb39c" stop-opacity="0.95"/><stop offset="1" stop-color="#ff8a6e" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7ad257"/><stop offset="1" stop-color="#3a9a35"/>
+    </linearGradient>
+    <linearGradient id="stem" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4cae3c"/><stop offset="1" stop-color="#2f8530"/>
+    </linearGradient>
+    <clipPath id="clipBody"><path id="bodyPath" d="M505 432 C560 405 660 410 702 448 C728 474 716 560 696 630 C670 720 610 800 540 846 C505 868 462 868 448 836 C432 800 434 720 446 640 C458 560 466 470 505 432 Z"/></clipPath>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="18"/></filter>
+    <filter id="glow" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="6"/></filter>
+  </defs>
+  
+  
+  
+  
+  <!-- cast shadow -->
+  
+  <!-- stem -->
+  <path d="M612 420 C630 340 612 262 552 234 C516 218 484 228 470 248" fill="none" stroke="#1d5a20" stroke-width="50" stroke-linecap="round"/>
+  <path d="M612 420 C630 340 612 262 552 234 C516 218 484 228 470 248" fill="none" stroke="url(#stem)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M596 404 C610 340 598 278 548 252 C522 240 500 244 488 252" fill="none" stroke="#9be07a" stroke-width="10" stroke-linecap="round" opacity="0.8"/>
+  <!-- body -->
+  <path d="M505 432 C560 405 660 410 702 448 C728 474 716 560 696 630 C670 720 610 800 540 846 C505 868 462 868 448 836 C432 800 434 720 446 640 C458 560 466 470 505 432 Z" fill="url(#body)"/>
+  <g clip-path="url(#clipBody)">
+    <path d="M650 420 C720 440 740 520 716 620 C690 730 620 820 520 880 L720 900 L760 420 Z" fill="url(#shade)"/>
+    <path d="M450 860 C470 820 470 760 466 700" fill="none" stroke="#ff7a5c" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+    <path d="M496 500 C506 468 526 452 548 448 C536 500 524 580 506 680 C490 640 486 560 496 500 Z" fill="url(#gloss)"/>
+    <ellipse cx="530" cy="476" rx="11" ry="17" transform="rotate(18 530 476)" fill="#ffe3d8" opacity="0.9"/>
+  </g>
+  <!-- calyx -->
+  <path d="M488 438 C500 404 552 392 586 410 C600 392 640 388 664 404 C690 398 718 414 724 446 C700 452 676 444 656 452 C640 440 616 438 600 450 C580 438 552 438 534 450 C516 444 500 450 488 438 Z" fill="#2c7a2b"/>
+  <path d="M492 432 C504 400 552 390 586 406 C600 388 640 384 664 400 C690 394 716 410 720 440 C698 444 676 436 656 444 C640 432 616 430 600 442 C580 430 552 430 534 442 C516 436 500 442 492 432 Z" fill="url(#leaf)"/>
+  <path d="M520 420 C540 404 566 402 584 412" fill="none" stroke="#b6ec95" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
+</svg>
