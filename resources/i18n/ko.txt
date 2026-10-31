@@ -5901,6 +5901,9 @@ countries: kr
 "Metronome track" = "메트로놈 트랙"
 "Metronome target mixer track" = "메트로놈 대상 믹서 트랙"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "메트로놈이 재생되는 믹서 트랙 (---은 마스터). 클릭 소리는 내보내기에 포함되지 않습니다."
+"Yes" = "예"
+"Make clip unique?" = "클립을 고유하게 만들까요?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "클립 \"{0}\"이(가) 다른 오디오 트랙에서도 사용되고 있습니다.\n\n이 인스턴스를 고유하게 만든 다음 이 오디오 트랙으로 라우팅할까요?"
 # round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
 "THROAT" = "목 길이"
 "Scale steps" = "스케일 단계"

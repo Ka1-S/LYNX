@@ -5,6 +5,7 @@
 // float/double steps. Section references (§) are to REA_rodada37.
 
 #include "core/Ogun.h"
+#include "core/HostSlide.h"
 
 #include <algorithm>
 #include <array>
@@ -1856,6 +1857,7 @@ struct Voice
     bool lynxReleased = false;
     double notePan = 0;
     double fvol = 1, fpan = 0, fcutH = 0, fresH = 0, FP = 0, relvel = 0, note = 0, vel = 0;
+    HostSlide slide; // a slide note moving Final.Pitch (issue #14)
     int keyi = 0, state = 1, cnt = 0;
     bool firstChunk = true;
     double xy[2] {};
@@ -2023,8 +2025,22 @@ public:
     bool quiet() const noexcept { return order.empty() && quietFor >= quietNeeded; }
 
     // one host block (n ≤ maxHostBlock): adds to out
+    // a slide note (issue #14): the held voices glide to `to` (Final.Pitch, cents from C5) over `samples`
+    void slideTo (double to, float samples) noexcept
+    {
+        for (auto* v : order)
+            if (! v->lynxReleased && ! v->dead)
+                v->slide.start ((float) (to - (v->FP - (double) v->slide.cents)), samples);
+    }
+
     void render (float* outL, float* outR, int n) noexcept
     {
+        for (auto* v : order) // a slide note moves Final.Pitch (issue #14)
+            if (v->slide.moving())
+            {
+                const auto was = v->slide.cents;
+                v->FP += (double) (v->slide.advance ((float) n) - was);
+            }
         const auto& p = *pt;
         const int m = n * p.osf;
         std::fill (bufL.begin(), bufL.begin() + m, 0.0f);
@@ -2224,6 +2240,7 @@ private:
         v.dead = false;
         v.fvol = fvol, v.fpan = fpan, v.fcutH = fcut, v.fresH = fres;
         v.FP = f32 (100.0 * key - 6000.0 + pofs);
+        v.slide = {};
         v.relvel = relvel;
         const auto note = std::max (f32 (v.FP * f32 (0.01) + 60.0), 0.0);
         v.note = note;
@@ -3515,6 +3532,13 @@ public:
         engine->noteOn (key, std::clamp ((double) velocity, 0.0, 1.0), channelVol, (double) nextPan + channelPan, pofs, 0.0, 0.0,
                         0.5, 0, key, (double) nextPan);
         nextPan = 0.0f, nextCents = 0.0f;
+    }
+
+    void slideTo (int key, float cents, float samples) noexcept override
+    {
+        take();
+        if (engine != nullptr)
+            engine->slideTo (100.0 * std::clamp (key, 0, 127) - 6000.0 + (double) channelCents.load() + (double) cents, samples);
     }
 
     void noteOff (int key) noexcept override

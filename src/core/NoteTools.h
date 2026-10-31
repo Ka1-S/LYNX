@@ -46,6 +46,12 @@ bool inScale (int key, int root, int scale) noexcept;
 int snapToScale (int key, int root, int scale) noexcept;
 // Moves every note to the nearest in-scale key.
 void snapNotesToScale (Pattern& pattern, const std::vector<int>& indices, int root, int scale);
+// Snap to scale while moving notes (issue #14): every moved note lands on the scale, not only the one under the mouse.
+// `originals` = the notes before the move (same order as `indices`), `deltaKeys` = the semitones the mouse moved;
+// each note goes to the in-scale key nearest to its own key + deltaKeys (0 = the pitch is left alone).
+void moveKeysOnScale (Pattern& pattern, const std::vector<int>& indices, const std::vector<Note>& originals, int deltaKeys, int root, int scale);
+// The keyboard's up / down by one (issue #14): with a scale, a note steps to the next in-scale key in that direction.
+int stepOnScale (int key, int direction, int root, int scale) noexcept;
 
 // --- chords -----------------------------------------------------------------------------------
 // Groups the notes into chords: same channel and same start. Each group is sorted by key (low first);

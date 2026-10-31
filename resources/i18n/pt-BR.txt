@@ -6058,6 +6058,9 @@ countries: br
 "Metronome track" = "Faixa do metrônomo"
 "Metronome target mixer track" = "Faixa do mixer de destino do metrônomo"
 "The mixer track the metronome plays through (--- is the Master). The click is never in an export." = "A faixa do mixer por onde o metrônomo toca (--- é o Master). O clique nunca entra numa exportação."
+"Yes" = "Sim"
+"Make clip unique?" = "Tornar o clipe único?"
+"The clip \"{0}\" is also used on another audio track.\n\nDo you want to make this instance unique and then route it to this audio track?" = "O clipe \"{0}\" também é usado em outra faixa de áudio.\n\nDeseja tornar esta instância única e então roteá-la para esta faixa de áudio?"
 # round 166c (LYNX Tune: throat, transpose in scale, created vibrato)
 "THROAT" = "GARGANTA"
 "Scale steps" = "Graus da escala"

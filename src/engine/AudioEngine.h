@@ -188,6 +188,9 @@ public:
     // The keys held right now on MIDI inputs and the typing piano (as played, before the scale snap), ascending; for
     // the Piano Roll's chord readout (any thread).
     std::vector<int> heldInputKeys() const;
+    // The keys sounding on a channel right now (song / pattern notes, keyboard, MIDI): the Piano roll's keyboard lights
+    // them (issue #14). Any thread.
+    NoteMask soundingKeys (int channel) const noexcept;
 
     // FL's score logger (REA round 165f): every note played on a MIDI input or the typing keyboard, recording or
     // not, for Tools › Dump score log to selected pattern. Any thread (a short spin lock; never the audio thread).
